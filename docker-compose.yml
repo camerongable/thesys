@@ -1,0 +1,105 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-thesys}
+      POSTGRES_USER: ${POSTGRES_USER:-thesys}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-thesys}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-thesys} -d ${POSTGRES_DB:-thesys}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    command: ["--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: sk-local-dev
+      OPENAI_API_KEY: dummy
+      ANTHROPIC_API_KEY: dummy
+      GEMINI_API_KEY: dummy
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./infra/litellm/config.yaml:/app/config.yaml:ro
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: postgresql+psycopg://thesys:thesys@postgres:5432/thesys
+      REDIS_URL: redis://redis:6379/0
+      LITELLM_BASE_URL: http://litellm:4000
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minioadmin}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-thesys-local}
+      CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/api:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      litellm:
+        condition: service_started
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    command: pnpm run dev -- --hostname 0.0.0.0
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/web:/app/apps/web
+      - web_node_modules:/app/apps/web/node_modules
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  minio_data:
+  web_node_modules:
