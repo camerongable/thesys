@@ -1,7 +1,8 @@
 from functools import lru_cache
+from typing import Annotated
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -10,6 +11,12 @@ class Settings(BaseSettings):
     app_name: str = "Thesys API"
     environment: str = Field(default="local", validation_alias="ENVIRONMENT")
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+    auth_mode: str = Field(default="dev", validation_alias="AUTH_MODE")
+    dev_auth_default_email: str = Field(
+        default="dev@thesys.local",
+        validation_alias="DEV_AUTH_DEFAULT_EMAIL",
+    )
+    dev_auth_default_name: str = Field(default="Dev User", validation_alias="DEV_AUTH_DEFAULT_NAME")
 
     database_url: str = Field(
         default="postgresql+psycopg://thesys:thesys@localhost:5432/thesys",
@@ -29,7 +36,7 @@ class Settings(BaseSettings):
     s3_secret_access_key: str = Field(default="minioadmin", validation_alias="S3_SECRET_ACCESS_KEY")
     s3_bucket: str = Field(default="thesys-local", validation_alias="S3_BUCKET")
 
-    cors_origins: list[str] = Field(
+    cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000"],
         validation_alias="CORS_ORIGINS",
     )

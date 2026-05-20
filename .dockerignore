@@ -1,0 +1,11 @@
+.git
+.codex
+.venv
+node_modules
+apps/web/node_modules
+apps/web/.next
+apps/api/.pytest_cache
+apps/api/.ruff_cache
+apps/api/**/*.pyc
+apps/api/**/__pycache__
+*.log

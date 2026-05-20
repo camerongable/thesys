@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Sprint 0: Repository and Local Dev Foundation.
+Sprint 1: Auth, Workspaces, Projects.
 
 ## Sprint 0 Scope
 
@@ -28,14 +28,34 @@ Checks run:
 - [x] `cd apps/web && node -e "JSON.parse(...)"`
 - [x] `pnpm install && pnpm --filter thesys-web typecheck`
 
+## Sprint 1 Scope
+
+- [x] Add dev auth boundary and identity context.
+- [x] Add users, workspaces, workspace members, projects, and project theses.
+- [x] Add Alembic migrations for Sprint 1 tables.
+- [x] Implement workspace-scoped project CRUD API.
+- [x] Build project list UI.
+- [x] Build project creation UI.
+- [x] Build project overview page with empty states.
+
+## Sprint 1 Verification
+
+Checks run:
+
+- [x] `cd apps/api && ruff check apps/api`
+- [x] `cd apps/api && pytest`
+- [x] `cd apps/api && alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+
 ## Next Sprint
 
-Sprint 1: Auth, workspaces, and projects.
+Sprint 2: LiteLLM and AI run infrastructure.
 
-Planned Sprint 1 work:
+Planned Sprint 2 work:
 
-- Add user, workspace, workspace member, project, and thesis models.
-- Add first real Alembic table migration.
-- Implement backend auth verification boundary.
-- Implement project CRUD API.
-- Build project list, project creation, and empty project overview UI.
+- Add LiteLLM client.
+- Add AI run and step tables.
+- Add structured output helper using Pydantic schemas.
+- Add prompt versioning convention.
+- Add token/cost logging fields.
+- Add deterministic test LLM stub.

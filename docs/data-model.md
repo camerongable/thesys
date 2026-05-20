@@ -3,7 +3,7 @@
 Sprint 0 includes shared SQLAlchemy model infrastructure and an initial Alembic
 migration that enables `pgvector`.
 
-Sprint 1 should add:
+Sprint 1 adds:
 
 - users
 - workspaces

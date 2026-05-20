@@ -41,6 +41,13 @@ docs/         Architecture, API, data model, eval, and security notes
    docker compose up --build
    ```
 
+   If Docker build can reach Docker Hub but resets connections to
+   `registry.npmjs.org`, override the package registry for the web image:
+
+   ```bash
+   NPM_REGISTRY=https://registry.npmmirror.com/ docker compose up --build
+   ```
+
 3. Open the services:
 
    - Web: http://localhost:3000
@@ -49,7 +56,20 @@ docs/         Architecture, API, data model, eval, and security notes
    - LiteLLM proxy: http://localhost:4000
 
 The API container runs Alembic migrations on startup. The initial migration
-enables the `pgvector` extension.
+enables the `pgvector` extension, and Sprint 1 adds local dev auth,
+workspaces, projects, and thesis tables.
+
+## Local Auth
+
+Sprint 1 uses `AUTH_MODE=dev`. The backend auto-provisions a local user and
+workspace from these headers:
+
+```text
+X-Dev-User-Email
+X-Dev-User-Name
+```
+
+If those headers are omitted, the defaults from `.env.example` are used.
 
 ## Local Development Without Docker
 
@@ -80,5 +100,14 @@ cd apps/api && pytest
 cd apps/web && pnpm install && pnpm run typecheck
 ```
 
-Sprint 1 should add auth, workspaces, project tables, project CRUD APIs, and the
-first project list/create UI.
+## Sprint 1 Manual Checks
+
+```bash
+curl http://localhost:8000/api/me
+curl http://localhost:8000/api/projects
+curl -X POST http://localhost:8000/api/projects \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Demo project","short_description":"Initial project state"}'
+```
+
+Then open http://localhost:3000/projects and create a project through the UI.
