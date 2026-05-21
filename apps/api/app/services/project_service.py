@@ -14,7 +14,11 @@ def list_projects(db: Session, auth: AuthContext) -> list[Project]:
         db.scalars(
             select(Project)
             .where(Project.workspace_id == auth.workspace_id)
-            .options(selectinload(Project.theses))
+            .options(
+                selectinload(Project.theses),
+                selectinload(Project.customer_segments),
+                selectinload(Project.problems),
+            )
             .order_by(Project.updated_at.desc())
         )
     )
@@ -24,7 +28,11 @@ def get_project(db: Session, auth: AuthContext, project_id: uuid.UUID) -> Projec
     project = db.scalar(
         select(Project)
         .where(Project.id == project_id, Project.workspace_id == auth.workspace_id)
-        .options(selectinload(Project.theses))
+        .options(
+            selectinload(Project.theses),
+            selectinload(Project.customer_segments),
+            selectinload(Project.problems),
+        )
     )
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")

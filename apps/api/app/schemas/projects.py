@@ -6,6 +6,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 ProjectStatus = Literal["active", "paused", "killed", "launched", "archived"]
+BuyerType = Literal["consumer", "prosumer", "smb", "midmarket", "enterprise", "unknown"]
+SegmentPriority = Literal["primary", "secondary", "rejected", "unknown"]
+ProblemSeverity = Literal["low", "medium", "high", "critical", "unknown"]
 
 
 class ProjectThesisRead(BaseModel):
@@ -31,6 +34,35 @@ class ProjectUpdate(BaseModel):
     status: ProjectStatus | None = None
 
 
+class CustomerSegmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    name: str
+    description: str | None
+    buyer_type: BuyerType | None
+    priority: SegmentPriority | None
+    confidence_score: Decimal | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProblemRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    segment_id: uuid.UUID | None
+    description: str
+    severity: ProblemSeverity | None
+    frequency: str | None
+    current_alternatives: str | None
+    confidence_score: Decimal | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class ProjectRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -44,6 +76,8 @@ class ProjectRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     current_thesis: ProjectThesisRead | None = None
+    customer_segments: list[CustomerSegmentRead] = Field(default_factory=list)
+    problems: list[ProblemRead] = Field(default_factory=list)
 
 
 class ProjectListRead(BaseModel):

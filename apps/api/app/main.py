@@ -5,6 +5,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.routers.ai import router as ai_router
 from app.routers.health import router as health_router
+from app.routers.intake import router as intake_router
 from app.routers.me import router as me_router
 from app.routers.projects import router as projects_router
 
@@ -31,6 +32,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(me_router)
     app.include_router(projects_router)
+    app.include_router(intake_router)
     app.include_router(ai_router)
 
     return app

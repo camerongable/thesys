@@ -1,13 +1,16 @@
 from app.db.models.ai import AIRun, AIStep
 from app.db.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.db.models.identity import User, Workspace, WorkspaceMember
-from app.db.models.project import Project, ProjectThesis
+from app.db.models.project import CustomerSegment, Problem, Project, ProjectIntake, ProjectThesis
 
 __all__ = [
     "AIRun",
     "AIStep",
     "Base",
+    "CustomerSegment",
+    "Problem",
     "Project",
+    "ProjectIntake",
     "ProjectThesis",
     "TimestampMixin",
     "UUIDPrimaryKeyMixin",

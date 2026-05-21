@@ -19,6 +19,8 @@ def serialize_project(project: Project) -> ProjectRead:
         {
             **project.__dict__,
             "current_thesis": project_service.current_thesis(project),
+            "customer_segments": project.customer_segments,
+            "problems": project.problems,
         }
     )
 

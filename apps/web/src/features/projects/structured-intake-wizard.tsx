@@ -1,0 +1,237 @@
+"use client";
+
+import { Check, CircleHelp, FileCheck, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+
+import { Button } from "@/components/ui/button";
+import {
+  analyzeProjectIntake,
+  answerProjectIntake,
+  ClarifyingAnswer,
+  finalizeProjectIntake,
+  Project,
+  StructuredProjectIntake,
+} from "@/lib/api";
+
+type StructuredIntakeWizardProps = {
+  project: Project;
+};
+
+export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps) {
+  const queryClient = useQueryClient();
+  const [rawIdea, setRawIdea] = useState(
+    project.short_description ?? project.current_thesis?.thesis_text ?? "",
+  );
+  const [intake, setIntake] = useState<StructuredProjectIntake | null>(null);
+  const [answers, setAnswers] = useState<ClarifyingAnswer[]>([]);
+  const [appliedAnswers, setAppliedAnswers] = useState<ClarifyingAnswer[]>([]);
+  const [finalized, setFinalized] = useState(false);
+  const filledAnswers = answers.filter((answer) => answer.answer.trim().length > 0);
+
+  const analyzeMutation = useMutation({
+    mutationFn: () => analyzeProjectIntake(project.id, { raw_idea: rawIdea }),
+    onSuccess: (result) => {
+      setIntake(result.intake);
+      setAnswers(result.intake.clarifying_questions.map((question) => ({ question, answer: "" })));
+      setAppliedAnswers([]);
+      setFinalized(false);
+    },
+  });
+
+  const answerMutation = useMutation({
+    mutationFn: () =>
+      answerProjectIntake(project.id, {
+        raw_idea: rawIdea,
+        initial_intake: intake ?? undefined,
+        answers: mergeAnswers(appliedAnswers, filledAnswers),
+      }),
+    onSuccess: (result) => {
+      setIntake(result.intake);
+      setAppliedAnswers((current) => mergeAnswers(current, filledAnswers));
+      setAnswers(result.intake.clarifying_questions.map((question) => ({ question, answer: "" })));
+      setFinalized(false);
+    },
+  });
+
+  const finalizeMutation = useMutation({
+    mutationFn: () =>
+      finalizeProjectIntake(project.id, {
+        structured_intake: intake as StructuredProjectIntake,
+        raw_idea: rawIdea,
+        answers: mergeAnswers(appliedAnswers, filledAnswers),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["projects", project.id] });
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      setFinalized(true);
+    },
+  });
+
+  const pending = analyzeMutation.isPending || answerMutation.isPending || finalizeMutation.isPending;
+  const error =
+    analyzeMutation.error ?? answerMutation.error ?? finalizeMutation.error ?? null;
+
+  function updateAnswer(index: number, answer: string) {
+    setAnswers((current) =>
+      current.map((item, itemIndex) => (itemIndex === index ? { ...item, answer } : item)),
+    );
+  }
+
+  return (
+    <section className="mt-6 rounded-lg border border-border bg-white p-5">
+      <div className="flex flex-col gap-4 border-b border-border pb-5 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h2 className="text-base font-semibold">Structured Intake</h2>
+          </div>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+            Rough idea, target segments, problem hypotheses, and unresolved questions.
+          </p>
+        </div>
+        {project.customer_segments.length > 0 || project.problems.length > 0 ? (
+          <span className="inline-flex w-fit items-center gap-2 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+            Structured
+          </span>
+        ) : null}
+      </div>
+
+      <label className="mt-5 block">
+        <span className="text-sm font-medium">Rough Idea</span>
+        <textarea
+          className="mt-2 min-h-32 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+          maxLength={10000}
+          onChange={(event) => setRawIdea(event.target.value)}
+          value={rawIdea}
+        />
+      </label>
+
+      <div className="mt-4 flex flex-wrap gap-3">
+        <Button
+          disabled={pending || rawIdea.trim().length === 0}
+          onClick={() => analyzeMutation.mutate()}
+          type="button"
+        >
+          <Sparkles className="h-4 w-4" aria-hidden="true" />
+          {analyzeMutation.isPending ? "Analyzing..." : "Analyze Idea"}
+        </Button>
+        <Button
+          disabled={pending || !intake || filledAnswers.length === 0}
+          onClick={() => answerMutation.mutate()}
+          type="button"
+          variant="secondary"
+        >
+          <CircleHelp className="h-4 w-4" aria-hidden="true" />
+          {answerMutation.isPending
+            ? "Applying..."
+            : `Apply ${filledAnswers.length === 1 ? "Answer" : "Answers"}`}
+        </Button>
+        <Button
+          disabled={pending || !intake}
+          onClick={() => finalizeMutation.mutate()}
+          type="button"
+          variant="secondary"
+        >
+          <FileCheck className="h-4 w-4" aria-hidden="true" />
+          {finalizeMutation.isPending ? "Finalizing..." : "Finalize Intake"}
+        </Button>
+      </div>
+
+      {error ? (
+        <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          {(error as Error).message}
+        </div>
+      ) : null}
+
+      {appliedAnswers.length > 0 ? (
+        <div className="mt-4 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          Applied {appliedAnswers.length}{" "}
+          {appliedAnswers.length === 1 ? "clarifying answer" : "clarifying answers"}. Finalize
+          will save them with the structured intake.
+        </div>
+      ) : null}
+
+      {intake ? (
+        <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold">{intake.project_name}</h3>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              {intake.one_sentence_summary}
+            </p>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <ListBlock label="Target Users" values={intake.target_users} />
+              <ListBlock label="Problem Hypotheses" values={intake.problem_hypotheses} />
+              <ListBlock label="Suspected Competitors" values={intake.suspected_competitors} />
+              <ListBlock label="Key Uncertainties" values={intake.key_uncertainties} />
+            </div>
+            <div className="mt-4 rounded-md bg-muted px-3 py-2 text-sm">
+              <span className="font-medium">Proposed solution:</span> {intake.proposed_solution}
+            </div>
+          </div>
+
+          <div className="border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+            <h3 className="text-sm font-semibold">Clarifying Questions</h3>
+            <div className="mt-3 space-y-3">
+              {answers.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No open questions.</p>
+              ) : (
+                answers.map((item, index) => (
+                  <label className="block" key={`${item.question}-${index}`}>
+                    <span className="text-sm text-muted-foreground">{item.question}</span>
+                    <textarea
+                      className="mt-2 min-h-20 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                      maxLength={5000}
+                      onChange={(event) => updateAnswer(index, event.target.value)}
+                      value={item.answer}
+                    />
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {finalized ? (
+        <div className="mt-4 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          Structured intake saved to the project.
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function mergeAnswers(existing: ClarifyingAnswer[], incoming: ClarifyingAnswer[]) {
+  const byQuestion = new Map<string, ClarifyingAnswer>();
+
+  for (const answer of [...existing, ...incoming]) {
+    const question = answer.question.trim();
+    const value = answer.answer.trim();
+    if (question.length > 0 && value.length > 0) {
+      byQuestion.set(question.toLowerCase(), { question, answer: value });
+    }
+  }
+
+  return [...byQuestion.values()];
+}
+
+function ListBlock({ label, values }: { label: string; values: string[] }) {
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
+        {label}
+      </h4>
+      {values.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">Unknown</p>
+      ) : (
+        <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+          {values.map((value) => (
+            <li key={value}>{value}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}

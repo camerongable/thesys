@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
 import { getProject } from "@/lib/api";
+import { StructuredIntakeWizard } from "@/features/projects/structured-intake-wizard";
 
 const emptyStates = [
   { label: "Opportunity Brief", detail: "No brief generated yet.", icon: FileText },
@@ -65,6 +66,47 @@ export function ProjectOverview() {
                 {project.current_thesis?.thesis_text ?? "No thesis recorded yet."}
               </p>
             </section>
+
+            {project.customer_segments.length > 0 || project.problems.length > 0 ? (
+              <section className="mt-6 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border border-border bg-white p-5">
+                  <h2 className="text-base font-semibold">Customer Segments</h2>
+                  <div className="mt-3 space-y-3">
+                    {project.customer_segments.map((segment) => (
+                      <div key={segment.id}>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium">{segment.name}</span>
+                          {segment.priority ? (
+                            <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                              {segment.priority}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {segment.description ?? "No segment notes yet."}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border bg-white p-5">
+                  <h2 className="text-base font-semibold">Problem Hypotheses</h2>
+                  <div className="mt-3 space-y-3">
+                    {project.problems.map((problem) => (
+                      <div key={problem.id}>
+                        <div className="text-sm font-medium">{problem.description}</div>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Severity: {problem.severity ?? "unknown"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
+            <StructuredIntakeWizard project={project} />
 
             <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {emptyStates.map((item) => {

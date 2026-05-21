@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Sprint 2 complete. Ready for Sprint 3: Structured Intake Workflow.
+Sprint 3 complete. Ready for Sprint 4: Evidence Ingestion and Retrieval.
 
 ## Sprint 0 Scope
 
@@ -69,14 +69,35 @@ Checks run:
 - [x] `docker compose config`
 - [x] `pnpm --filter thesys-web typecheck`
 
+## Sprint 3 Scope
+
+- [x] Implement structured intake Pydantic schema.
+- [x] Add LangGraph-backed structured intake generation workflow.
+- [x] Add `/intake/analyze`, `/intake/answer`, and `/intake/finalize`.
+- [x] Store structured intake records, first thesis version, customer segments, and problems.
+- [x] Build frontend intake wizard on the project overview page.
+- [x] Keep intake workflow executions visible in `ai_runs` and `ai_steps`.
+
+## Sprint 3 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+
 ## Next Sprint
 
-Sprint 3: Structured Intake Workflow.
+Sprint 4: Evidence Ingestion and Retrieval.
 
-Planned Sprint 3 work:
+Planned Sprint 4 work:
 
-- Implement structured intake Pydantic schema.
-- Implement intake workflow service.
-- Add `/intake/analyze`, `/intake/answer`, and `/intake/finalize`.
-- Store first structured thesis version and project fields.
-- Build frontend intake wizard.
+- Implement evidence source and chunk tables.
+- Add URL, note, PDF, and text ingestion.
+- Add object storage integration.
+- Add parser/chunker and embedding generation.
+- Store embeddings in pgvector.
+- Implement project-scoped semantic, keyword, and hybrid retrieval.
+- Build the Evidence tab.
