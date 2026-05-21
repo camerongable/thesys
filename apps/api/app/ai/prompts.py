@@ -1,0 +1,5 @@
+PROMPT_VERSION_NAMESPACE = "thesys"
+
+STRUCTURED_OUTPUT_SMOKE_TEST_PROMPT_VERSION = (
+    f"{PROMPT_VERSION_NAMESPACE}:structured-output-smoke-test:v1"
+)

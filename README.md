@@ -4,9 +4,9 @@ This repository contains the local development foundation for Thesys: an
 AI-native workspace for turning rough business ideas into
 structured, evidence-backed strategic projects.
 
-The implementation follows `IMPLEMENTATION_BRIEF.md`. Sprint 0 focuses on the
-monorepo, local infrastructure, API/web skeletons, database migration plumbing,
-and healthchecks.
+The implementation follows `IMPLEMENTATION_BRIEF.md`. Sprints 0-2 establish the
+monorepo, local infrastructure, project workspace foundation, and AI gateway
+infrastructure.
 
 ## Repository Layout
 
@@ -56,8 +56,9 @@ docs/         Architecture, API, data model, eval, and security notes
    - LiteLLM proxy: http://localhost:4000
 
 The API container runs Alembic migrations on startup. The initial migration
-enables the `pgvector` extension, and Sprint 1 adds local dev auth,
-workspaces, projects, and thesis tables.
+enables the `pgvector` extension. Sprint 1 adds local dev auth, workspaces,
+projects, and thesis tables. Sprint 2 adds AI run/step observability and a
+LiteLLM-compatible structured-output smoke test.
 
 ## Local Auth
 
@@ -111,3 +112,19 @@ curl -X POST http://localhost:8000/api/projects \
 ```
 
 Then open http://localhost:3000/projects and create a project through the UI.
+
+## Sprint 2 Manual Check
+
+By default, local Docker AI calls use the deterministic dev stub. This keeps
+the app demoable without paid model access and avoids accidentally using
+provider keys exported in your shell.
+
+```bash
+curl -X POST http://localhost:8000/api/ai/test-structured-output \
+  -H "Content-Type: application/json" \
+  -d '{"idea":"AI workspace for independent fitness coaches"}'
+```
+
+Set `LLM_STUB_MODE=never` and provide a real provider key in `.env` to force
+calls through LiteLLM. Docker forwards those keys into both the API and LiteLLM
+containers.

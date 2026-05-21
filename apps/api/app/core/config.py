@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -27,6 +27,16 @@ class Settings(BaseSettings):
         default="http://localhost:4000",
         validation_alias="LITELLM_BASE_URL",
     )
+    litellm_api_key: str = Field(default="sk-local-dev", validation_alias="LITELLM_API_KEY")
+    litellm_model: str = Field(default="dev-gpt-4o-mini", validation_alias="LITELLM_MODEL")
+    litellm_timeout_seconds: float = Field(default=60.0, validation_alias="LITELLM_TIMEOUT_SECONDS")
+    llm_stub_mode: Literal["auto", "always", "never"] = Field(
+        default="auto",
+        validation_alias="LLM_STUB_MODE",
+    )
+    openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
+    anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
+    gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
 
     s3_endpoint_url: str = Field(
         default="http://localhost:9000",
@@ -47,6 +57,15 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @property
+    def should_use_llm_stub(self) -> bool:
+        if self.llm_stub_mode == "always":
+            return True
+        if self.llm_stub_mode == "never":
+            return False
+        provider_keys = [self.openai_api_key, self.anthropic_api_key, self.gemini_api_key]
+        return not any(key for key in provider_keys if key and key.strip())
 
 
 @lru_cache

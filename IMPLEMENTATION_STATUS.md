@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Sprint 1: Auth, Workspaces, Projects.
+Sprint 2 complete. Ready for Sprint 3: Structured Intake Workflow.
 
 ## Sprint 0 Scope
 
@@ -47,15 +47,36 @@ Checks run:
 - [x] `cd apps/api && alembic upgrade head --sql`
 - [x] `pnpm --filter thesys-web typecheck`
 
+## Sprint 2 Scope
+
+- [x] Add LiteLLM client for the OpenAI-compatible proxy endpoint.
+- [x] Add deterministic local LLM stub mode.
+- [x] Add AI run and step SQLAlchemy models.
+- [x] Add Alembic migration for `ai_runs` and `ai_steps`.
+- [x] Add structured-output helper using Pydantic schemas.
+- [x] Add prompt versioning convention.
+- [x] Add token/cost logging fields.
+- [x] Add structured-output smoke-test API endpoint.
+
+## Sprint 2 Verification
+
+Checks run:
+
+- [x] `apps/api/.venv/bin/ruff check apps/api`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `cd apps/api && uv lock`
+- [x] `docker compose config`
+- [x] `pnpm --filter thesys-web typecheck`
+
 ## Next Sprint
 
-Sprint 2: LiteLLM and AI run infrastructure.
+Sprint 3: Structured Intake Workflow.
 
-Planned Sprint 2 work:
+Planned Sprint 3 work:
 
-- Add LiteLLM client.
-- Add AI run and step tables.
-- Add structured output helper using Pydantic schemas.
-- Add prompt versioning convention.
-- Add token/cost logging fields.
-- Add deterministic test LLM stub.
+- Implement structured intake Pydantic schema.
+- Implement intake workflow service.
+- Add `/intake/analyze`, `/intake/answer`, and `/intake/finalize`.
+- Store first structured thesis version and project fields.
+- Build frontend intake wizard.
