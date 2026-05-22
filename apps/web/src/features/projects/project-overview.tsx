@@ -7,6 +7,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { getProject } from "@/lib/api";
+import { BriefTab } from "@/features/projects/brief-tab";
 import { EvidenceTab } from "@/features/projects/evidence-tab";
 import { StructuredIntakeWizard } from "@/features/projects/structured-intake-wizard";
 
@@ -17,7 +18,7 @@ const emptyStates = [
   { label: "Experiments", detail: "No validation plans generated yet.", icon: Beaker },
 ];
 
-const tabs = ["Overview", "Evidence"] as const;
+const tabs = ["Overview", "Brief", "Evidence"] as const;
 type ProjectTab = (typeof tabs)[number];
 
 export function ProjectOverview() {
@@ -147,6 +148,8 @@ export function ProjectOverview() {
                   })}
                 </section>
               </>
+            ) : activeTab === "Brief" ? (
+              <BriefTab projectId={project.id} />
             ) : (
               <EvidenceTab projectId={project.id} />
             )}

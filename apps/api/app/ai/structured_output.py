@@ -64,6 +64,8 @@ def _stub_structured_output(
     subject = _last_user_message(messages)
     if output_schema.__name__ == "StructuredProjectIntake":
         payload = _fake_structured_project_intake(subject)
+    elif output_schema.__name__ == "OpportunityBriefDraft":
+        payload = _fake_opportunity_brief(subject)
     else:
         payload = {
             name: _fake_value(field.annotation, name=name, subject=subject)
@@ -193,6 +195,162 @@ def _fake_structured_project_intake(subject: str) -> dict[str, Any]:
             ],
             answers,
         ),
+    }
+
+
+def _fake_opportunity_brief(subject: str) -> dict[str, Any]:
+    request_payload = _extract_json_payload(subject)
+    project_state = request_payload.get("project_state") or {}
+    evidence_bundles = request_payload.get("evidence_bundles") or []
+    project_name = str(project_state.get("name") or "Founder project")
+    thesis = str(
+        project_state.get("current_thesis")
+        or project_state.get("short_description")
+        or "The project needs a clearer evidence-backed thesis."
+    )
+    target_users = project_state.get("customer_segments") or []
+    target_user_text = (
+        ", ".join(str(user) for user in target_users[:3]) or "the initial target user"
+    )
+    first_evidence = _first_evidence_bundle(evidence_bundles)
+    citations = [_citation_from_bundle(first_evidence)] if first_evidence else []
+
+    supported_claims = []
+    if first_evidence:
+        source_title = str(first_evidence.get("title") or "the strongest available evidence")
+        supported_claims.append(
+            {
+                "text": (
+                    f"{source_title} provides project evidence that should shape the initial "
+                    f"opportunity brief for {project_name}."
+                ),
+                "claim_type": "evidence_summary",
+                "confidence_score": 0.72,
+                "support_level": "supported",
+                "citations": citations,
+            }
+        )
+
+    supported_claims.append(
+        {
+            "text": "The initial wedge still needs direct validation with the buyer segment.",
+            "claim_type": "validation_gap",
+            "confidence_score": 0.55,
+            "support_level": "inference",
+            "citations": [],
+        }
+    )
+
+    return {
+        "executive_summary": (
+            f"{project_name} is currently best treated as a focused validation project. "
+            "The available evidence is useful, but the brief should separate supported "
+            "claims from assumptions that still need customer proof."
+        ),
+        "product_hypothesis": thesis,
+        "target_user": target_user_text,
+        "problem_analysis": (
+            "The project appears to address a workflow where users convert scattered "
+            "inputs into decisions. The strongest next step is to confirm frequency, "
+            "urgency, and willingness to pay with the initial segment."
+        ),
+        "current_alternatives": ["Manual spreadsheets and notes", "Generic AI chats"],
+        "market_context": (
+            "Market context should remain conservative until more external evidence is "
+            "added. Avoid broad TAM claims at this stage."
+        ),
+        "competitor_landscape": (
+            "Competitor understanding is preliminary. User-seeded competitor evidence "
+            "should be added before treating positioning as validated."
+        ),
+        "differentiation_and_wedge": (
+            "The most defensible wedge is a narrow workflow that combines project memory, "
+            "evidence, assumptions, and decisions in one stateful workspace."
+        ),
+        "risks_and_kill_assumptions": (
+            "The main kill-risk assumption is that the target user has recurring enough "
+            "pain to return to the workspace and pay for it."
+        ),
+        "validation_plan": (
+            "Run five customer interviews focused on current workflow, time spent, "
+            "existing alternatives, willingness to pay, and trust requirements."
+        ),
+        "recommendation": (
+            "Proceed with validation only after adding more evidence and testing the "
+            "highest-uncertainty assumptions."
+        ),
+        "confidence_score": 0.45 if citations else 0.25,
+        "claims": supported_claims,
+        "assumptions": [
+            {
+                "text": (
+                    "The target user experiences the problem frequently enough to seek a "
+                    "new tool."
+                ),
+                "category": "problem_urgency",
+                "importance": "critical",
+                "uncertainty": "high",
+                "kill_risk": True,
+                "confidence_score": 0.35,
+                "recommended_test": (
+                    "Interview target users and ask them to reconstruct the last three times "
+                    "they handled this workflow."
+                ),
+            },
+            {
+                "text": "The initial segment is willing to pay for a stateful workflow product.",
+                "category": "willingness_to_pay",
+                "importance": "high",
+                "uncertainty": "high",
+                "kill_risk": True,
+                "confidence_score": 0.3,
+                "recommended_test": (
+                    "Test pricing during discovery calls and collect pre-commitment signals."
+                ),
+            },
+        ],
+        "risks": [
+            {
+                "text": (
+                    "The product could feel like a generic AI report generator if citations "
+                    "and structured state are weak."
+                ),
+                "category": "product_differentiation",
+                "severity": "high",
+                "likelihood": "medium",
+                "mitigation": (
+                    "Keep the workspace, evidence graph, assumptions, and decision log primary."
+                ),
+            }
+        ],
+        "citations": citations,
+        "unsupported_claims": [
+            (
+                "Market size, buying urgency, and competitor gaps remain unvalidated until "
+                "more evidence is added."
+            )
+        ],
+    }
+
+
+def _first_evidence_bundle(evidence_bundles: Any) -> dict[str, Any] | None:
+    if not isinstance(evidence_bundles, list):
+        return None
+    for bundle in evidence_bundles:
+        if isinstance(bundle, dict) and bundle.get("source_id"):
+            return bundle
+    return None
+
+
+def _citation_from_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "source_id": str(bundle.get("source_id")),
+        "chunk_id": str(bundle.get("chunk_id")) if bundle.get("chunk_id") else None,
+        "title": bundle.get("title"),
+        "url": bundle.get("url"),
+        "quote": str(bundle.get("text") or "")[:500],
+        "retrieved_at": bundle.get("retrieved_at"),
+        "relevance_score": bundle.get("score"),
     }
 
 

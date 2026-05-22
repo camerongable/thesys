@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Sprint 4 complete. Ready for Sprint 5: Opportunity Brief Generation.
+Sprint 5 complete. Ready for Sprint 6: Competitor Analysis.
 
 ## Sprint 0 Scope
 
@@ -88,10 +88,6 @@ Checks run:
 - [x] `pnpm --filter thesys-web typecheck`
 - [x] `docker compose config`
 
-## Next Sprint
-
-Sprint 5: Opportunity Brief Generation.
-
 ## Sprint 4 Scope
 
 - [x] Implement evidence source and chunk tables.
@@ -117,7 +113,7 @@ Checks run:
 - [x] `pnpm --filter thesys-web typecheck`
 - [x] `docker compose config`
 
-Planned Sprint 5 work:
+Original Sprint 5 plan:
 
 - Implement opportunity brief workflow.
 - Retrieve relevant evidence before generation.
@@ -126,3 +122,30 @@ Planned Sprint 5 work:
 - Store claims, unsupported assumptions, artifact, and artifact version.
 - Display brief with citations.
 - Extract assumptions and risks from brief.
+
+## Sprint 5 Scope
+
+- [x] Add artifact and artifact version persistence.
+- [x] Add cited claims and claim-to-evidence links.
+- [x] Add assumptions and risks produced by the opportunity brief.
+- [x] Implement project-scoped opportunity brief generation.
+- [x] Retrieve project evidence before generation.
+- [x] Generate structured opportunity brief output and markdown artifact content.
+- [x] Run citation audit before saving supported claims.
+- [x] Save unsupported claims separately in structured artifact content.
+- [x] Add artifact API routes and opportunity brief generation endpoint.
+- [x] Build the Brief tab with generation, cited claims, unsupported claims, and versions.
+
+## Sprint 5 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+
+## Next Sprint
+
+Sprint 6: Competitor Analysis.

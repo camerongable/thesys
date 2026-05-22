@@ -219,6 +219,116 @@ export type EvidenceRetrieveResult = {
   results: EvidenceRetrievalResult[];
 };
 
+export type ArtifactType =
+  | "opportunity_brief"
+  | "competitor_landscape"
+  | "validation_plan"
+  | "decision_memo"
+  | "research_memo"
+  | "customer_discovery_summary"
+  | "other";
+
+export type ClaimEvidenceLink = {
+  id: string;
+  evidence_source_id: string;
+  evidence_chunk_id: string | null;
+  relevance_score: string | null;
+  quote: string | null;
+  created_at: string;
+};
+
+export type Claim = {
+  id: string;
+  project_id: string;
+  artifact_version_id: string | null;
+  text: string;
+  claim_type: string | null;
+  confidence_score: string | null;
+  support_level: "supported" | "partial" | "unsupported" | "inference";
+  created_at: string;
+  evidence_links: ClaimEvidenceLink[];
+};
+
+export type ArtifactVersion = {
+  id: string;
+  artifact_id: string;
+  version: number;
+  markdown_content: string;
+  structured_content: Record<string, unknown>;
+  generated_by_ai_run_id: string | null;
+  created_at: string;
+  claims: Claim[];
+};
+
+export type Artifact = {
+  id: string;
+  project_id: string;
+  artifact_type: ArtifactType;
+  title: string;
+  current_version_id: string | null;
+  created_at: string;
+  updated_at: string;
+  current_version: ArtifactVersion | null;
+  versions: ArtifactVersion[];
+};
+
+export type Assumption = {
+  id: string;
+  project_id: string;
+  text: string;
+  category: string | null;
+  importance: "low" | "medium" | "high" | "critical";
+  uncertainty: "low" | "medium" | "high";
+  kill_risk: boolean;
+  confidence_score: string | null;
+  status: "untested" | "testing" | "validated" | "invalidated" | "inconclusive";
+  recommended_test: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Risk = {
+  id: string;
+  project_id: string;
+  text: string;
+  category: string | null;
+  severity: "low" | "medium" | "high" | "critical";
+  likelihood: "low" | "medium" | "high" | "unknown";
+  mitigation: string | null;
+  status: "open" | "mitigated" | "accepted" | "closed";
+  created_at: string;
+  updated_at: string;
+};
+
+export type Citation = {
+  source_id: string;
+  chunk_id: string | null;
+  title: string | null;
+  url: string | null;
+  quote: string | null;
+  retrieved_at: string | null;
+  relevance_score: number | null;
+};
+
+export type OpportunityBriefGenerateResult = {
+  ai_run_id: string;
+  ai_step_id: string;
+  prompt_version: string;
+  model_provider: string;
+  model_name: string;
+  used_stub: boolean;
+  total_tokens: number | null;
+  total_cost: string | null;
+  retrieval_result_count: number;
+  artifact: Artifact;
+  version: ArtifactVersion;
+  claims: Claim[];
+  assumptions: Assumption[];
+  risks: Risk[];
+  citations: Citation[];
+  unsupported_claims: string[];
+};
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -343,4 +453,21 @@ export function deleteEvidenceSource(projectId: string, sourceId: string) {
   return apiFetch<void>(`/api/projects/${projectId}/evidence/${sourceId}`, {
     method: "DELETE",
   });
+}
+
+export async function listArtifacts(projectId: string, artifactType?: ArtifactType) {
+  const query = artifactType ? `?artifact_type=${artifactType}` : "";
+  const response = await apiFetch<{ artifacts: Artifact[] }>(
+    `/api/projects/${projectId}/artifacts${query}`,
+  );
+  return response.artifacts;
+}
+
+export function generateOpportunityBrief(projectId: string) {
+  return apiFetch<OpportunityBriefGenerateResult>(
+    `/api/projects/${projectId}/artifacts/opportunity-brief/generate`,
+    {
+      method: "POST",
+    },
+  );
 }

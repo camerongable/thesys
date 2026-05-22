@@ -61,15 +61,7 @@ def retrieve_evidence(
     started = perf_counter()
 
     try:
-        query_embedding = embedding_service.embed_text(settings, payload.query)
-        candidates = _load_candidates(db, auth, project_id, payload)
-        results = _score_candidates(
-            query=payload.query,
-            query_embedding=query_embedding,
-            candidates=candidates,
-            mode=payload.mode,
-            top_k=payload.top_k,
-        )
+        results = retrieve_evidence_results(db, auth, settings, project_id, payload)
         latency_ms = int((perf_counter() - started) * 1000)
         step = ai_run_service.complete_step(
             db,
@@ -107,6 +99,25 @@ def retrieve_evidence(
         )
         ai_run_service.fail_run(db, run, error=str(exc))
         raise
+
+
+def retrieve_evidence_results(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    payload: EvidenceRetrieveCreate,
+) -> list[EvidenceRetrievalResultRead]:
+    project_service.get_project(db, auth, project_id)
+    query_embedding = embedding_service.embed_text(settings, payload.query)
+    candidates = _load_candidates(db, auth, project_id, payload)
+    return _score_candidates(
+        query=payload.query,
+        query_embedding=query_embedding,
+        candidates=candidates,
+        mode=payload.mode,
+        top_k=payload.top_k,
+    )
 
 
 def _load_candidates(
