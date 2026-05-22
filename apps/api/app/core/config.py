@@ -45,6 +45,24 @@ class Settings(BaseSettings):
     s3_access_key_id: str = Field(default="minioadmin", validation_alias="S3_ACCESS_KEY_ID")
     s3_secret_access_key: str = Field(default="minioadmin", validation_alias="S3_SECRET_ACCESS_KEY")
     s3_bucket: str = Field(default="thesys-local", validation_alias="S3_BUCKET")
+    object_storage_mode: Literal["local", "s3"] = Field(
+        default="local",
+        validation_alias="OBJECT_STORAGE_MODE",
+    )
+    local_object_storage_path: str = Field(
+        default="/tmp/thesys-object-storage",
+        validation_alias="LOCAL_OBJECT_STORAGE_PATH",
+    )
+    max_upload_mb: int = Field(default=10, validation_alias="MAX_UPLOAD_MB")
+    url_fetch_timeout_seconds: float = Field(
+        default=15.0,
+        validation_alias="URL_FETCH_TIMEOUT_SECONDS",
+    )
+    embedding_model: str = Field(
+        default="deterministic-hash-embedding-1536",
+        validation_alias="EMBEDDING_MODEL",
+    )
+    embedding_dimension: int = Field(default=1536, validation_alias="EMBEDDING_DIMENSION")
 
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000"],

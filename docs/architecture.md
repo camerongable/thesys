@@ -16,3 +16,16 @@ and use markdown artifacts only as display/export views over structured records.
 Sprint 2 adds a local deterministic LLM stub path. The API uses it by default
 when provider keys are absent, while preserving the same structured-output and
 AI-run logging path used by real LiteLLM calls.
+
+Sprint 4 adds the first RAG foundation:
+
+- Evidence sources are ingested through URL, note, and file endpoints.
+- Uploaded files are stored through the object storage boundary. Docker uses
+  MinIO/S3 mode; tests and local non-Docker runs can use local filesystem mode.
+- Parsed text is normalized, summarized, classified, chunked, embedded, and
+  stored in Postgres/pgvector.
+- Retrieval is project/workspace-scoped and supports semantic, keyword, and
+  hybrid scoring.
+- Evidence ingestion and retrieval create `ai_runs` and `ai_steps` traces so
+  generated artifacts in later sprints can expose the retrieval context they
+  used.

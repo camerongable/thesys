@@ -25,4 +25,4 @@ WORKDIR /app/apps/web
 
 EXPOSE 3000
 
-CMD ["pnpm", "run", "dev", "--", "--hostname", "0.0.0.0"]
+CMD ["pnpm", "run", "dev", "--hostname", "0.0.0.0"]

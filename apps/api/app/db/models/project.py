@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     JSON,
@@ -17,6 +18,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+
+if TYPE_CHECKING:
+    from app.db.models.evidence import EvidenceSource
 
 
 class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -60,6 +64,10 @@ class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="project",
         cascade="all, delete-orphan",
         order_by="Problem.created_at",
+    )
+    evidence_sources: Mapped[list["EvidenceSource"]] = relationship(
+        cascade="all, delete-orphan",
+        order_by="EvidenceSource.created_at.desc()",
     )
 
 

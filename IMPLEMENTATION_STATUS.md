@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Sprint 3 complete. Ready for Sprint 4: Evidence Ingestion and Retrieval.
+Sprint 4 complete. Ready for Sprint 5: Opportunity Brief Generation.
 
 ## Sprint 0 Scope
 
@@ -90,14 +90,39 @@ Checks run:
 
 ## Next Sprint
 
-Sprint 4: Evidence Ingestion and Retrieval.
+Sprint 5: Opportunity Brief Generation.
 
-Planned Sprint 4 work:
+## Sprint 4 Scope
 
-- Implement evidence source and chunk tables.
-- Add URL, note, PDF, and text ingestion.
-- Add object storage integration.
-- Add parser/chunker and embedding generation.
-- Store embeddings in pgvector.
-- Implement project-scoped semantic, keyword, and hybrid retrieval.
-- Build the Evidence tab.
+- [x] Implement evidence source and chunk tables.
+- [x] Add URL ingestion.
+- [x] Add manual note ingestion.
+- [x] Add PDF/text/Markdown upload.
+- [x] Add object storage integration with MinIO/S3 mode and local fallback.
+- [x] Add parser/chunker and deterministic dev-safe embedding generation.
+- [x] Store embeddings in pgvector-backed `evidence_chunks`.
+- [x] Implement project-scoped semantic, keyword, and hybrid retrieval.
+- [x] Add metadata filters for source type, freshness, competitor ID, and assumption ID.
+- [x] Return retrieval results with source IDs, chunk IDs, scores, and metadata.
+- [x] Trace ingestion and retrieval through `ai_runs` and `ai_steps`.
+- [x] Build the Evidence tab with URL, note, upload, source list, and retrieval UI.
+
+## Sprint 4 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+
+Planned Sprint 5 work:
+
+- Implement opportunity brief workflow.
+- Retrieve relevant evidence before generation.
+- Generate structured opportunity brief and markdown artifact.
+- Run citation audit.
+- Store claims, unsupported assumptions, artifact, and artifact version.
+- Display brief with citations.
+- Extract assumptions and risks from brief.

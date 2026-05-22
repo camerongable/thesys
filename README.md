@@ -4,9 +4,9 @@ This repository contains the local development foundation for Thesys: an
 AI-native workspace for turning rough business ideas into
 structured, evidence-backed strategic projects.
 
-The implementation follows `IMPLEMENTATION_BRIEF.md`. Sprints 0-2 establish the
-monorepo, local infrastructure, project workspace foundation, and AI gateway
-infrastructure.
+The implementation follows `IMPLEMENTATION_BRIEF.md`. Sprints 0-4 establish the
+monorepo, local infrastructure, project workspace foundation, AI gateway
+infrastructure, structured intake, and the first evidence/RAG slice.
 
 ## Repository Layout
 
@@ -58,7 +58,9 @@ docs/         Architecture, API, data model, eval, and security notes
 The API container runs Alembic migrations on startup. The initial migration
 enables the `pgvector` extension. Sprint 1 adds local dev auth, workspaces,
 projects, and thesis tables. Sprint 2 adds AI run/step observability and a
-LiteLLM-compatible structured-output smoke test.
+LiteLLM-compatible structured-output smoke test. Sprint 3 adds structured
+intake. Sprint 4 adds evidence sources, chunk embeddings, MinIO-backed file
+storage, and project-scoped retrieval.
 
 ## Local Auth
 
@@ -128,3 +130,24 @@ curl -X POST http://localhost:8000/api/ai/test-structured-output \
 Set `LLM_STUB_MODE=never` and provide a real provider key in `.env` to force
 calls through LiteLLM. Docker forwards those keys into both the API and LiteLLM
 containers.
+
+## Sprint 4 Manual Checks
+
+Add a note source:
+
+```bash
+curl -X POST http://localhost:8000/api/projects/<project_id>/evidence/note \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Interview notes","text":"Coaches spend hours reviewing weekly check-ins."}'
+```
+
+Retrieve evidence:
+
+```bash
+curl -X POST http://localhost:8000/api/projects/<project_id>/evidence/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{"query":"weekly coach check-ins","mode":"hybrid","top_k":5}'
+```
+
+The project page now includes an Evidence tab for URL, note, and file ingestion,
+source listing, and hybrid/semantic/keyword retrieval.
