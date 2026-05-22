@@ -1,18 +1,29 @@
 "use client";
 
-import { ArrowLeft, Beaker, FileText, ScrollText, ShieldAlert, Users } from "lucide-react";
+import {
+  Activity,
+  ArrowLeft,
+  Beaker,
+  ClipboardCheck,
+  FileText,
+  ScrollText,
+  ShieldAlert,
+  Users,
+} from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
+  getMvpEval,
   getProject,
   listArtifacts,
   listAssumptions,
   listCompetitors,
   listDecisions,
   listExperiments,
+  listProjectWorkflows,
 } from "@/lib/api";
 import { AssumptionsTab } from "@/features/projects/assumptions-tab";
 import { BriefTab } from "@/features/projects/brief-tab";
@@ -68,6 +79,14 @@ export function ProjectOverview() {
   const decisionsQuery = useQuery({
     queryKey: ["projects", projectId, "decisions"],
     queryFn: () => listDecisions(projectId),
+  });
+  const evalQuery = useQuery({
+    queryKey: ["projects", projectId, "evals", "mvp"],
+    queryFn: () => getMvpEval(projectId),
+  });
+  const workflowsQuery = useQuery({
+    queryKey: ["projects", projectId, "workflows"],
+    queryFn: () => listProjectWorkflows(projectId, 5),
   });
 
   const project = projectQuery.data;
@@ -202,6 +221,91 @@ export function ProjectOverview() {
 
                 <StructuredIntakeWizard project={project} />
 
+                <section className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                  <div className="rounded-lg border border-border bg-white p-5">
+                    <div className="flex items-center gap-2">
+                      <ClipboardCheck className="h-4 w-4 text-primary" aria-hidden="true" />
+                      <h2 className="text-base font-semibold">MVP Readiness</h2>
+                    </div>
+                    {evalQuery.isLoading ? (
+                      <p className="mt-4 text-sm text-muted-foreground">Checking demo flow...</p>
+                    ) : evalQuery.isError ? (
+                      <p className="mt-4 text-sm text-red-700">
+                        {(evalQuery.error as Error).message}
+                      </p>
+                    ) : evalQuery.data ? (
+                      <>
+                        <div className="mt-4 flex items-end gap-2">
+                          <span className="text-3xl font-semibold">
+                            {evalQuery.data.score}/{evalQuery.data.total}
+                          </span>
+                          <span className="pb-1 text-sm text-muted-foreground">
+                            checks passed
+                          </span>
+                        </div>
+                        <div className="mt-4 space-y-2">
+                          {evalQuery.data.checks.slice(0, 6).map((check) => (
+                            <div
+                              className="flex items-start justify-between gap-3 text-sm"
+                              key={check.key}
+                            >
+                              <span className="text-muted-foreground">{check.label}</span>
+                              <span
+                                className={
+                                  check.passed
+                                    ? "text-xs font-medium text-emerald-700"
+                                    : "text-xs font-medium text-red-700"
+                                }
+                              >
+                                {check.passed ? "pass" : "open"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+
+                  <div className="rounded-lg border border-border bg-white p-5">
+                    <div className="flex items-center gap-2">
+                      <Activity className="h-4 w-4 text-primary" aria-hidden="true" />
+                      <h2 className="text-base font-semibold">Recent Workflows</h2>
+                    </div>
+                    {workflowsQuery.isLoading ? (
+                      <p className="mt-4 text-sm text-muted-foreground">Loading workflow runs...</p>
+                    ) : workflowsQuery.isError ? (
+                      <p className="mt-4 text-sm text-red-700">
+                        {(workflowsQuery.error as Error).message}
+                      </p>
+                    ) : workflowsQuery.data && workflowsQuery.data.length > 0 ? (
+                      <div className="mt-4 divide-y divide-border">
+                        {workflowsQuery.data.map((run) => (
+                          <div className="py-3" key={run.id}>
+                            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                              <span className="text-sm font-medium">
+                                {formatLabel(run.workflow_type)}
+                              </span>
+                              <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                                {formatLabel(run.status)}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {run.steps.length} step{run.steps.length === 1 ? "" : "s"}
+                              {run.completed_at
+                                ? ` · ${new Date(run.completed_at).toLocaleString()}`
+                                : ""}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-4 text-sm text-muted-foreground">
+                        No workflow runs recorded yet.
+                      </p>
+                    )}
+                  </div>
+                </section>
+
                 <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {overviewCards.map((item) => {
                     const Icon = item.icon;
@@ -295,4 +399,8 @@ function countOverviewCard(
     return { ...item, detail: `${count} ${noun}${count === 1 ? "" : "s"}` };
   }
   return item;
+}
+
+function formatLabel(value: string) {
+  return value.replaceAll("_", " ");
 }

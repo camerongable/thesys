@@ -13,6 +13,7 @@ import {
   listExperiments,
   logExperimentResult,
 } from "@/lib/api";
+import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 type ExperimentsTabProps = {
   projectId: string;
@@ -36,6 +37,8 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
       queryKey: ["projects", projectId, "artifacts", "validation_plan"],
     });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+    await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "workflows"] });
+    await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "mvp"] });
   };
 
   const generateMutation = useMutation({
@@ -72,6 +75,12 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
           {(error as Error).message}
         </div>
       ) : null}
+
+      <WorkflowTrace
+        pending={generateMutation.isPending}
+        pendingSteps={["generate_validation_plan", "write_artifact_version", "write_experiments"]}
+        runId={generateMutation.data?.ai_run_id ?? null}
+      />
 
       {experimentsQuery.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading experiments...</p>

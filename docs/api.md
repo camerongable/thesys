@@ -106,3 +106,19 @@ creates linked experiment records. Experiment results update the linked
 assumption status/confidence and recalculate project confidence from assumption
 scores. Decisions can link to assumptions, risks, evidence, artifacts,
 competitors, and experiments after workspace-scoped target validation.
+
+Sprint 8 exposes workflow trace, demo seed, and MVP eval APIs:
+
+```http
+GET /api/projects/{project_id}/workflows
+GET /api/workflows/{run_id}
+GET /api/workflows/{run_id}/events
+
+POST /api/demo/seed
+
+GET /api/projects/{project_id}/evals/mvp
+```
+
+The workflow events endpoint streams Server-Sent Events from persisted
+`ai_runs` and `ai_steps`. The demo seed endpoint is available only in local
+dev mode and creates the fitness coach scenario from the implementation brief.

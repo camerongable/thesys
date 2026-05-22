@@ -8,12 +8,15 @@ from app.routers.artifacts import router as artifacts_router
 from app.routers.assumptions import router as assumptions_router
 from app.routers.competitors import router as competitors_router
 from app.routers.decisions import router as decisions_router
+from app.routers.demo import router as demo_router
+from app.routers.evals import router as evals_router
 from app.routers.evidence import router as evidence_router
 from app.routers.experiments import router as experiments_router
 from app.routers.health import router as health_router
 from app.routers.intake import router as intake_router
 from app.routers.me import router as me_router
 from app.routers.projects import router as projects_router
+from app.routers.workflows import router as workflows_router
 
 
 def create_app() -> FastAPI:
@@ -45,6 +48,9 @@ def create_app() -> FastAPI:
     app.include_router(assumptions_router)
     app.include_router(experiments_router)
     app.include_router(decisions_router)
+    app.include_router(workflows_router)
+    app.include_router(evals_router)
+    app.include_router(demo_router)
     app.include_router(ai_router)
 
     return app

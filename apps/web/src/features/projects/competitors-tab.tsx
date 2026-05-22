@@ -23,6 +23,7 @@ import {
   listArtifacts,
   listCompetitors,
 } from "@/lib/api";
+import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 type CompetitorsTabProps = {
   projectId: string;
@@ -58,6 +59,8 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
     await queryClient.invalidateQueries({
       queryKey: ["projects", projectId, "artifacts", "competitor_landscape"],
     });
+    await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "workflows"] });
+    await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "mvp"] });
   };
 
   const createMutation = useMutation({
@@ -181,6 +184,20 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
           {(error as Error).message}
         </div>
       ) : null}
+
+      <WorkflowTrace
+        pending={analyzeMutation.isPending}
+        pendingSteps={[
+          "load_project_state",
+          "load_user_seeded_competitors",
+          "fetch_competitor_sources",
+          "retrieve_competitor_evidence",
+          "extract_competitor_profiles",
+          "citation_audit",
+          "write_competitor_landscape",
+        ]}
+        runId={analyzeMutation.data?.ai_run_id ?? null}
+      />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="rounded-lg border border-border bg-white p-5">

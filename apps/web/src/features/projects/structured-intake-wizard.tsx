@@ -13,6 +13,7 @@ import {
   Project,
   StructuredProjectIntake,
 } from "@/lib/api";
+import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 type StructuredIntakeWizardProps = {
   project: Project;
@@ -64,6 +65,8 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["projects", project.id] });
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", project.id, "workflows"] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", project.id, "evals", "mvp"] });
       setFinalized(true);
     },
   });
@@ -144,6 +147,19 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
           {(error as Error).message}
         </div>
       ) : null}
+
+      <div className="mt-4">
+        <WorkflowTrace
+          pending={pending}
+          pendingSteps={["analyze_idea", "generate_clarifying_questions"]}
+          runId={
+            analyzeMutation.data?.ai_run_id ??
+            answerMutation.data?.ai_run_id ??
+            finalizeMutation.data?.ai_run_id ??
+            null
+          }
+        />
+      </div>
 
       {appliedAnswers.length > 0 ? (
         <div className="mt-4 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">

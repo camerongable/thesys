@@ -86,6 +86,7 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
       setLinkedArtifacts([]);
       setLinkedExperiments([]);
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "decisions"] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "mvp"] });
     },
   });
 

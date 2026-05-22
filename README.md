@@ -4,9 +4,11 @@ This repository contains the local development foundation for Thesys: an
 AI-native workspace for turning rough business ideas into
 structured, evidence-backed strategic projects.
 
-The implementation follows `IMPLEMENTATION_BRIEF.md`. Sprints 0-4 establish the
+The implementation follows `IMPLEMENTATION_BRIEF.md`. Sprints 0-8 establish the
 monorepo, local infrastructure, project workspace foundation, AI gateway
-infrastructure, structured intake, and the first evidence/RAG slice.
+infrastructure, structured intake, evidence/RAG, cited briefs, competitors,
+assumptions, validation plans, decisions, demo seeding, MVP eval checks, and
+workflow trace UI.
 
 ## Repository Layout
 
@@ -55,12 +57,9 @@ docs/         Architecture, API, data model, eval, and security notes
    - MinIO console: http://localhost:9001
    - LiteLLM proxy: http://localhost:4000
 
-The API container runs Alembic migrations on startup. The initial migration
-enables the `pgvector` extension. Sprint 1 adds local dev auth, workspaces,
-projects, and thesis tables. Sprint 2 adds AI run/step observability and a
-LiteLLM-compatible structured-output smoke test. Sprint 3 adds structured
-intake. Sprint 4 adds evidence sources, chunk embeddings, MinIO-backed file
-storage, and project-scoped retrieval.
+The API container runs Alembic migrations on startup. The local stack defaults
+to deterministic LLM stubs so the demo remains runnable without paid model
+access.
 
 ## Local Auth
 
@@ -151,3 +150,44 @@ curl -X POST http://localhost:8000/api/projects/<project_id>/evidence/retrieve \
 
 The project page now includes an Evidence tab for URL, note, and file ingestion,
 source listing, and hybrid/semantic/keyword retrieval.
+
+## Sprint 8 Demo Script
+
+Start the stack:
+
+```bash
+docker compose up --build
+```
+
+Seed the demo project:
+
+```bash
+curl -X POST http://localhost:8000/api/demo/seed
+```
+
+Open http://localhost:3000/projects, or open the `next_url` returned by the
+seed response. The demo project includes:
+
+- structured project thesis, segments, and problems
+- three evidence notes with chunks and embeddings
+- a cited opportunity brief
+- competitor profiles and a competitor landscape artifact
+- assumptions and risks
+- validation plan artifact
+- logged experiment result
+- linked decision record
+- workflow traces and MVP readiness checks
+
+Run the MVP readiness eval:
+
+```bash
+curl http://localhost:8000/api/projects/<project_id>/evals/mvp
+```
+
+Inspect workflow traces:
+
+```bash
+curl http://localhost:8000/api/projects/<project_id>/workflows
+curl http://localhost:8000/api/workflows/<run_id>
+curl -N http://localhost:8000/api/workflows/<run_id>/events
+```

@@ -1,9 +1,29 @@
 # Evals
 
-Evaluation is part of the MVP. Sprint 2 adds AI run/step records and a
-structured-output smoke test, which gives later prompt and workflow evals a
-place to persist execution metadata.
+Evaluation is part of the MVP. AI workflow executions are persisted in
+`ai_runs` and `ai_steps`, and Sprint 8 adds the first local MVP readiness check.
 
-The first eval harness should be added with the evidence ingestion and RAG
-sprints. It should track retrieval relevance, citation coverage, unsupported
-claim count, groundedness, latency, and cost.
+Run the seeded-demo eval:
+
+```bash
+curl -X POST http://localhost:8000/api/demo/seed
+curl http://localhost:8000/api/projects/<project_id>/evals/mvp
+```
+
+The MVP eval currently checks:
+
+- structured project state
+- ready evidence source count
+- current opportunity brief
+- required brief sections
+- claim-to-evidence citation links
+- unsupported/open claims
+- competitor landscape coverage
+- assumptions and risks
+- validation artifact, experiment, and result
+- decision traceability
+- workflow observability
+
+This is intentionally lightweight. Later eval work should add fixture datasets,
+retrieval relevance labels, groundedness scoring, prompt regression tests, and
+cost/latency thresholds.

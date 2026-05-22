@@ -2,10 +2,11 @@
 
 import { Database, FileText, GitBranch, Plus, ShieldCheck } from "lucide-react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { buttonVariants } from "@/components/ui/button";
-import { getMe, listProjects } from "@/lib/api";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { getMe, listProjects, seedDemoProject } from "@/lib/api";
 
 const summaryItems = [
   { label: "Evidence Sources", value: "0", icon: Database },
@@ -14,8 +15,17 @@ const summaryItems = [
 ];
 
 export function ProjectList() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const meQuery = useQuery({ queryKey: ["me"], queryFn: getMe });
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: listProjects });
+  const seedMutation = useMutation({
+    mutationFn: seedDemoProject,
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      router.push(result.next_url);
+    },
+  });
 
   const projects = projectsQuery.data ?? [];
 
@@ -47,6 +57,12 @@ export function ProjectList() {
             </Link>
           </header>
 
+          {seedMutation.error ? (
+            <div className="mt-5 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+              {(seedMutation.error as Error).message}
+            </div>
+          ) : null}
+
           <div className="grid gap-4 py-6 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-lg border border-border bg-white p-4">
               <div className="flex items-center justify-between">
@@ -68,6 +84,27 @@ export function ProjectList() {
               );
             })}
           </div>
+
+          <section className="mb-6 rounded-lg border border-border bg-white p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-base font-semibold">Demo Project</h2>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                  Seed the fitness coach scenario with evidence, cited artifacts, competitors,
+                  assumptions, an experiment result, and a linked decision.
+                </p>
+              </div>
+              <Button
+                disabled={seedMutation.isPending}
+                onClick={() => seedMutation.mutate()}
+                type="button"
+                variant="secondary"
+              >
+                <Database className="h-4 w-4" aria-hidden="true" />
+                {seedMutation.isPending ? "Seeding..." : "Seed Demo"}
+              </Button>
+            </div>
+          </section>
 
           <section className="rounded-lg border border-border bg-white">
             <div className="border-b border-border px-5 py-4">

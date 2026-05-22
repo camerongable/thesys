@@ -527,7 +527,81 @@ export type CompetitorAnalysisResult = {
   unsupported_claims: string[];
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export type WorkflowStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "waiting_for_human";
+
+export type WorkflowStep = {
+  id: string;
+  ai_run_id: string;
+  step_name: string;
+  status: string;
+  output_json: Record<string, unknown> | null;
+  latency_ms: number | null;
+  tokens: number | null;
+  cost: string | null;
+  error: string | null;
+  created_at: string;
+};
+
+export type WorkflowRun = {
+  id: string;
+  project_id: string | null;
+  workflow_type: string;
+  status: WorkflowStatus;
+  model_provider: string | null;
+  model_name: string | null;
+  prompt_version: string | null;
+  input_summary: string | null;
+  output_summary: string | null;
+  total_tokens: number | null;
+  total_cost: string | null;
+  error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  steps: WorkflowStep[];
+};
+
+export type DemoSeedResult = {
+  project: Project;
+  created: boolean;
+  counts: {
+    evidence_sources: number;
+    artifacts: number;
+    competitors: number;
+    assumptions: number;
+    risks: number;
+    experiments: number;
+    experiment_results: number;
+    decisions: number;
+    ai_runs: number;
+  };
+  next_url: string;
+  message: string;
+};
+
+export type MvpEvalCheck = {
+  key: string;
+  label: string;
+  passed: boolean;
+  observed: number | boolean | string | null;
+  expected: string;
+};
+
+export type MvpEval = {
+  project_id: string;
+  passed: boolean;
+  score: number;
+  total: number;
+  checks: MvpEvalCheck[];
+};
+
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
@@ -811,4 +885,25 @@ export function createDecision(projectId: string, input: CreateDecisionInput) {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+export function seedDemoProject() {
+  return apiFetch<DemoSeedResult>("/api/demo/seed", {
+    method: "POST",
+  });
+}
+
+export async function listProjectWorkflows(projectId: string, limit = 10) {
+  const response = await apiFetch<{ runs: WorkflowRun[] }>(
+    `/api/projects/${projectId}/workflows?limit=${limit}`,
+  );
+  return response.runs;
+}
+
+export function getWorkflowEventsUrl(runId: string) {
+  return `${API_BASE_URL}/api/workflows/${runId}/events`;
+}
+
+export function getMvpEval(projectId: string) {
+  return apiFetch<MvpEval>(`/api/projects/${projectId}/evals/mvp`);
 }

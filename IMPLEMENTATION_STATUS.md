@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Sprint 7 complete. Ready for Sprint 8: MVP Polish and Demo.
+Sprint 8 complete. MVP demo flow is ready for local validation.
 
 ## Sprint 0 Scope
 
@@ -214,6 +214,49 @@ Checks run:
 - [x] `pnpm --filter thesys-web typecheck`
 - [x] `docker compose config`
 
+Original Sprint 8 plan:
+
+- Add loading/progress states.
+- Add SSE workflow updates.
+- Add error handling.
+- Add empty states.
+- Add basic eval checks.
+- Add seed/demo project.
+- Add README demo script.
+- Add screenshots or walkthrough GIF later.
+
+## Sprint 8 Scope
+
+- [x] Add workflow trace APIs:
+  - `GET /api/projects/{project_id}/workflows`
+  - `GET /api/workflows/{run_id}`
+  - `GET /api/workflows/{run_id}/events`
+- [x] Add SSE workflow event streaming over persisted `ai_runs` and `ai_steps`.
+- [x] Add local-dev demo seeding endpoint:
+  - `POST /api/demo/seed`
+- [x] Seed the implementation-brief fitness coach scenario with structured project state,
+  evidence, cited artifacts, competitors, assumptions, risks, validation experiment result,
+  decision links, and workflow observability.
+- [x] Add MVP eval endpoint:
+  - `GET /api/projects/{project_id}/evals/mvp`
+- [x] Add frontend workflow trace panels to intake, brief, competitor analysis,
+  assumption extraction, and validation-plan generation.
+- [x] Add project overview MVP readiness and recent workflow panels.
+- [x] Add project-list demo seeding action.
+- [x] Update README demo script and eval docs.
+- [ ] Add screenshots or walkthrough GIF later.
+
+## Sprint 8 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_demo_eval_workflows.py`
+- [x] `pnpm --filter thesys-web typecheck`
+
 ## Next Sprint
 
-Sprint 8: MVP Polish and Demo.
+Sprint 9: Live ML Demo Readiness.
+
+Detailed Sprint 9 tasks, live-demo instructions, and acceptance criteria now live
+in `IMPLEMENTATION_BRIEF.md`.

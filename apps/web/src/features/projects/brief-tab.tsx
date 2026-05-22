@@ -10,6 +10,7 @@ import {
   listArtifacts,
   OpportunityBriefGenerateResult,
 } from "@/lib/api";
+import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 type BriefTabProps = {
   projectId: string;
@@ -29,6 +30,8 @@ export function BriefTab({ projectId }: BriefTabProps) {
         queryKey: ["projects", projectId, "artifacts", "opportunity_brief"],
       });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "workflows"] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "mvp"] });
     },
   });
 
@@ -67,6 +70,18 @@ export function BriefTab({ projectId }: BriefTabProps) {
           {(error as Error).message}
         </div>
       ) : null}
+
+      <WorkflowTrace
+        pending={generateMutation.isPending}
+        pendingSteps={[
+          "load_project_state",
+          "retrieve_existing_evidence",
+          "generate_structured_brief",
+          "citation_audit",
+          "write_artifact_version",
+        ]}
+        runId={generateMutation.data?.ai_run_id ?? null}
+      />
 
       {artifactsQuery.isLoading ? (
         <div className="text-sm text-muted-foreground">Loading brief...</div>

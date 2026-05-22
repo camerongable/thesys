@@ -2751,6 +2751,116 @@ This section is intentionally concrete. Implement in order. Do not skip vertical
 
 ---
 
+## Sprint 9: Live ML Demo Readiness
+
+### Goals
+
+- Run the MVP workflows against real LLM calls instead of deterministic stubs.
+- Make live/stub AI mode visible and debuggable.
+- Verify the product can complete the core demo path with real model outputs.
+- Preserve deterministic stub mode for local development and tests.
+
+### Tasks
+
+1. Add an AI status endpoint:
+   - report `LLM_STUB_MODE`
+   - report configured `LITELLM_MODEL`
+   - report LiteLLM base URL reachability
+   - report whether provider keys are present without exposing secret values
+   - optionally run a small structured-output healthcheck
+2. Add a visible AI mode indicator in the web UI:
+   - show `Stub mode` when deterministic responses are enabled
+   - show `Live LLM` when calls go through LiteLLM
+   - show model name and last healthcheck status
+3. Update `.env.example` with a clearly documented live-demo configuration block:
+   - `LLM_STUB_MODE=never`
+   - `OPENAI_API_KEY=...`
+   - `LITELLM_MODEL=dev-gpt-4o-mini`
+   - `LITELLM_API_KEY=sk-local-dev`
+   - `LITELLM_MASTER_KEY=sk-local-dev`
+4. Add live-demo setup instructions to `README.md`.
+5. Verify LiteLLM with the existing structured-output smoke test:
+   - `POST /api/ai/test-structured-output`
+   - confirm `used_stub=false`
+   - confirm `model_provider=litellm`
+6. Run live LLM workflows end to end:
+   - structured intake
+   - opportunity brief generation
+   - competitor analysis
+   - assumption extraction
+   - validation-plan generation
+7. Improve live-mode error handling:
+   - surface LiteLLM/provider errors in the UI
+   - keep workflow traces readable when an LLM step fails
+   - avoid silent fallback to stub when `LLM_STUB_MODE=never`
+8. Add cost and token visibility to workflow trace where available.
+9. Decide whether Sprint 9 includes real embeddings:
+   - minimum milestone can keep deterministic hash embeddings
+   - stronger milestone should add provider-backed embeddings and model config
+10. Add tests for AI status and live/stub mode configuration behavior.
+
+### Live Demo Instructions
+
+1. Add provider credentials to `.env`:
+
+   ```bash
+   LLM_STUB_MODE=never
+   OPENAI_API_KEY=<real key>
+   LITELLM_MODEL=dev-gpt-4o-mini
+   LITELLM_API_KEY=sk-local-dev
+   LITELLM_MASTER_KEY=sk-local-dev
+   ```
+
+2. Restart LiteLLM and API:
+
+   ```bash
+   docker compose restart litellm api
+   ```
+
+3. Run the structured-output smoke test:
+
+   ```bash
+   curl -X POST http://localhost:8000/api/ai/test-structured-output \
+     -H "Content-Type: application/json" \
+     -d '{"idea":"AI workspace for independent fitness coaches"}'
+   ```
+
+4. Confirm the response includes:
+
+   ```json
+   {
+     "used_stub": false,
+     "model_provider": "litellm"
+   }
+   ```
+
+5. In the web UI, create or open a project and run:
+   - Analyze Idea
+   - Add evidence
+   - Generate Brief
+   - Analyze Competitors
+   - Extract Assumptions
+   - Generate Plans
+
+6. Inspect workflow traces for:
+   - successful step completion
+   - model name
+   - token usage when available
+   - cost when available
+   - readable errors if the provider fails
+
+### Acceptance Criteria
+
+- The app can run with `LLM_STUB_MODE=never`.
+- Structured-output smoke test succeeds through LiteLLM.
+- Web UI clearly indicates whether the app is using stub mode or live LLM mode.
+- Core demo workflows complete with `used_stub=false`.
+- Failed provider calls produce actionable UI and workflow trace errors.
+- Existing deterministic tests still pass with stub mode forced on.
+- README contains a repeatable live-demo setup path.
+
+---
+
 # 19. V1 Implementation Roadmap
 
 ## V1 Sprint 1: Watchlists and Monitoring

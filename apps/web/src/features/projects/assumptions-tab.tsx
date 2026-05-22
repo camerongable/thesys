@@ -12,6 +12,7 @@ import {
   listRisks,
   updateAssumption,
 } from "@/lib/api";
+import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 type AssumptionsTabProps = {
   projectId: string;
@@ -33,6 +34,8 @@ export function AssumptionsTab({ projectId }: AssumptionsTabProps) {
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "risks"] });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "experiments"] });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+    await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "workflows"] });
+    await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "mvp"] });
   };
 
   const extractMutation = useMutation({
@@ -86,6 +89,18 @@ export function AssumptionsTab({ projectId }: AssumptionsTabProps) {
           {(error as Error).message}
         </div>
       ) : null}
+
+      <WorkflowTrace
+        pending={extractMutation.isPending || planMutation.isPending}
+        pendingSteps={
+          extractMutation.isPending
+            ? ["extract_assumptions_risks"]
+            : ["generate_validation_plan", "write_artifact_version", "write_experiments"]
+        }
+        runId={
+          extractMutation.data?.ai_run_id ?? planMutation.data?.ai_run_id ?? null
+        }
+      />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="rounded-lg border border-border bg-white p-5">
