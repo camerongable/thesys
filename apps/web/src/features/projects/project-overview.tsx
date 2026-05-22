@@ -1,14 +1,25 @@
 "use client";
 
-import { ArrowLeft, Beaker, FileText, ShieldAlert, Users } from "lucide-react";
+import { ArrowLeft, Beaker, FileText, ScrollText, ShieldAlert, Users } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { getProject } from "@/lib/api";
+import {
+  getProject,
+  listArtifacts,
+  listAssumptions,
+  listCompetitors,
+  listDecisions,
+  listExperiments,
+} from "@/lib/api";
+import { AssumptionsTab } from "@/features/projects/assumptions-tab";
 import { BriefTab } from "@/features/projects/brief-tab";
+import { CompetitorsTab } from "@/features/projects/competitors-tab";
+import { DecisionsTab } from "@/features/projects/decisions-tab";
 import { EvidenceTab } from "@/features/projects/evidence-tab";
+import { ExperimentsTab } from "@/features/projects/experiments-tab";
 import { StructuredIntakeWizard } from "@/features/projects/structured-intake-wizard";
 
 const emptyStates = [
@@ -16,9 +27,18 @@ const emptyStates = [
   { label: "Competitors", detail: "No competitors analyzed yet.", icon: Users },
   { label: "Assumptions", detail: "No assumptions extracted yet.", icon: ShieldAlert },
   { label: "Experiments", detail: "No validation plans generated yet.", icon: Beaker },
+  { label: "Decisions", detail: "No decisions recorded yet.", icon: ScrollText },
 ];
 
-const tabs = ["Overview", "Brief", "Evidence"] as const;
+const tabs = [
+  "Overview",
+  "Brief",
+  "Evidence",
+  "Competitors",
+  "Assumptions",
+  "Experiments",
+  "Decisions",
+] as const;
 type ProjectTab = (typeof tabs)[number];
 
 export function ProjectOverview() {
@@ -29,8 +49,54 @@ export function ProjectOverview() {
     queryKey: ["projects", projectId],
     queryFn: () => getProject(projectId),
   });
+  const briefArtifactsQuery = useQuery({
+    queryKey: ["projects", projectId, "artifacts", "opportunity_brief"],
+    queryFn: () => listArtifacts(projectId, "opportunity_brief"),
+  });
+  const competitorsQuery = useQuery({
+    queryKey: ["projects", projectId, "competitors"],
+    queryFn: () => listCompetitors(projectId),
+  });
+  const assumptionsQuery = useQuery({
+    queryKey: ["projects", projectId, "assumptions"],
+    queryFn: () => listAssumptions(projectId),
+  });
+  const experimentsQuery = useQuery({
+    queryKey: ["projects", projectId, "experiments"],
+    queryFn: () => listExperiments(projectId),
+  });
+  const decisionsQuery = useQuery({
+    queryKey: ["projects", projectId, "decisions"],
+    queryFn: () => listDecisions(projectId),
+  });
 
   const project = projectQuery.data;
+  const opportunityBriefCount = briefArtifactsQuery.data?.length ?? 0;
+  const competitors = competitorsQuery.data ?? [];
+  const assumptions = assumptionsQuery.data ?? [];
+  const experiments = experimentsQuery.data ?? [];
+  const decisions = decisionsQuery.data ?? [];
+  const analyzedCompetitorCount = competitors.filter(
+    (competitor) => competitor.last_analyzed_at !== null,
+  ).length;
+  const overviewCards = emptyStates.map((item) =>
+    item.label === "Opportunity Brief"
+      ? briefOverviewCard(item, briefArtifactsQuery.isLoading, opportunityBriefCount)
+      : item.label === "Competitors"
+        ? competitorOverviewCard(
+            item,
+            competitorsQuery.isLoading,
+            competitors.length,
+            analyzedCompetitorCount,
+          )
+        : item.label === "Assumptions"
+          ? countOverviewCard(item, assumptionsQuery.isLoading, assumptions.length, "assumption")
+          : item.label === "Experiments"
+            ? countOverviewCard(item, experimentsQuery.isLoading, experiments.length, "experiment")
+            : item.label === "Decisions"
+              ? countOverviewCard(item, decisionsQuery.isLoading, decisions.length, "decision")
+              : item,
+  );
 
   return (
     <main className="min-h-screen px-5 py-6 md:px-8">
@@ -66,7 +132,10 @@ export function ProjectOverview() {
               </div>
             </header>
 
-            <nav className="mt-5 flex gap-2 border-b border-border" aria-label="Project sections">
+            <nav
+              className="mt-5 flex gap-2 overflow-x-auto border-b border-border"
+              aria-label="Project sections"
+            >
               {tabs.map((tab) => (
                 <button
                   className={
@@ -134,7 +203,7 @@ export function ProjectOverview() {
                 <StructuredIntakeWizard project={project} />
 
                 <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {emptyStates.map((item) => {
+                  {overviewCards.map((item) => {
                     const Icon = item.icon;
                     return (
                       <div key={item.label} className="rounded-lg border border-border bg-white p-5">
@@ -150,12 +219,80 @@ export function ProjectOverview() {
               </>
             ) : activeTab === "Brief" ? (
               <BriefTab projectId={project.id} />
-            ) : (
+            ) : activeTab === "Evidence" ? (
               <EvidenceTab projectId={project.id} />
+            ) : activeTab === "Competitors" ? (
+              <CompetitorsTab projectId={project.id} />
+            ) : activeTab === "Assumptions" ? (
+              <AssumptionsTab projectId={project.id} />
+            ) : activeTab === "Experiments" ? (
+              <ExperimentsTab projectId={project.id} />
+            ) : (
+              <DecisionsTab projectId={project.id} />
             )}
           </>
         ) : null}
       </div>
     </main>
   );
+}
+
+function briefOverviewCard(
+  item: (typeof emptyStates)[number],
+  isLoading: boolean,
+  opportunityBriefCount: number,
+) {
+  if (isLoading) {
+    return { ...item, detail: "Checking generated briefs..." };
+  }
+  if (opportunityBriefCount > 0) {
+    return {
+      ...item,
+      detail: `${opportunityBriefCount} generated brief${
+        opportunityBriefCount === 1 ? "" : "s"
+      }`,
+    };
+  }
+  return item;
+}
+
+function competitorOverviewCard(
+  item: (typeof emptyStates)[number],
+  isLoading: boolean,
+  competitorCount: number,
+  analyzedCompetitorCount: number,
+) {
+  if (isLoading) {
+    return { ...item, detail: "Checking competitors..." };
+  }
+  if (analyzedCompetitorCount > 0) {
+    return {
+      ...item,
+      detail: `${analyzedCompetitorCount} analyzed competitor${
+        analyzedCompetitorCount === 1 ? "" : "s"
+      }`,
+    };
+  }
+  if (competitorCount > 0) {
+    return {
+      ...item,
+      detail: `${competitorCount} saved competitor${competitorCount === 1 ? "" : "s"}`,
+    };
+  }
+  return { ...item, detail: "No competitors added yet." };
+}
+
+function countOverviewCard(
+  item: (typeof emptyStates)[number],
+  isLoading: boolean,
+  count: number,
+  noun: string,
+) {
+  if (isLoading) {
+    return { ...item, detail: `Checking ${noun}s...` };
+  }
+  if (count > 0) {
+    return { ...item, detail: `${count} ${noun}${count === 1 ? "" : "s"}` };
+  }
+  return item;
 }
