@@ -300,6 +300,137 @@ export type Risk = {
   updated_at: string;
 };
 
+export type AssumptionExtractionResult = {
+  ai_run_id: string;
+  ai_step_id: string;
+  prompt_version: string;
+  model_provider: string;
+  model_name: string;
+  used_stub: boolean;
+  total_tokens: number | null;
+  total_cost: string | null;
+  assumptions: Assumption[];
+  risks: Risk[];
+};
+
+export type UpdateAssumptionInput = {
+  text?: string;
+  category?: string | null;
+  importance?: Assumption["importance"];
+  uncertainty?: Assumption["uncertainty"];
+  kill_risk?: boolean;
+  confidence_score?: number | null;
+  status?: Assumption["status"];
+  recommended_test?: string | null;
+};
+
+export type ExperimentStatus = "planned" | "running" | "completed" | "cancelled";
+export type ExperimentOutcome = "positive" | "negative" | "mixed" | "inconclusive";
+
+export type ExperimentResult = {
+  id: string;
+  project_id: string;
+  experiment_id: string;
+  result_summary: string;
+  outcome: ExperimentOutcome;
+  confidence_delta: string | null;
+  raw_notes: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+export type Experiment = {
+  id: string;
+  project_id: string;
+  assumption_id: string | null;
+  name: string;
+  method: string | null;
+  plan: string | null;
+  success_criteria: string | null;
+  failure_threshold: string | null;
+  status: ExperimentStatus;
+  created_at: string;
+  updated_at: string;
+  results: ExperimentResult[];
+};
+
+export type GenerateValidationPlanInput = {
+  assumption_ids?: string[];
+  max_plans?: number;
+};
+
+export type ValidationPlanGenerateResult = {
+  ai_run_id: string;
+  ai_step_id: string;
+  prompt_version: string;
+  model_provider: string;
+  model_name: string;
+  used_stub: boolean;
+  total_tokens: number | null;
+  total_cost: string | null;
+  artifact: Artifact;
+  experiments: Experiment[];
+};
+
+export type LogExperimentResultInput = {
+  result_summary: string;
+  outcome: ExperimentOutcome;
+  confidence_delta?: number;
+  raw_notes?: string;
+};
+
+export type LogExperimentResultResult = {
+  result: ExperimentResult;
+  experiment: Experiment;
+  assumption: Assumption | null;
+  project_confidence_score: string | null;
+};
+
+export type DecisionType =
+  | "build"
+  | "pivot"
+  | "pause"
+  | "kill"
+  | "change_icp"
+  | "change_positioning"
+  | "run_experiment"
+  | "other";
+
+export type DecisionLink = {
+  id: string;
+  decision_id: string;
+  linked_type: "evidence" | "assumption" | "risk" | "artifact" | "competitor" | "experiment";
+  linked_id: string;
+  created_at: string;
+};
+
+export type Decision = {
+  id: string;
+  project_id: string;
+  decision_type: DecisionType;
+  title: string;
+  rationale: string | null;
+  expected_outcome: string | null;
+  review_date: string | null;
+  created_by: string | null;
+  created_at: string;
+  links: DecisionLink[];
+};
+
+export type CreateDecisionInput = {
+  decision_type: DecisionType;
+  title: string;
+  rationale?: string;
+  expected_outcome?: string;
+  review_date?: string;
+  linked_assumption_ids?: string[];
+  linked_risk_ids?: string[];
+  linked_evidence_source_ids?: string[];
+  linked_artifact_ids?: string[];
+  linked_competitor_ids?: string[];
+  linked_experiment_ids?: string[];
+};
+
 export type Citation = {
   source_id: string;
   chunk_id: string | null;
@@ -605,5 +736,79 @@ export function analyzeCompetitors(projectId: string, input: AnalyzeCompetitorsI
   return apiFetch<CompetitorAnalysisResult>(`/api/projects/${projectId}/competitors/analyze`, {
     method: "POST",
     body: JSON.stringify({ ...input, seed_competitors: seedCompetitors }),
+  });
+}
+
+export async function listAssumptions(projectId: string) {
+  const response = await apiFetch<{ assumptions: Assumption[] }>(
+    `/api/projects/${projectId}/assumptions`,
+  );
+  return response.assumptions;
+}
+
+export function extractAssumptions(projectId: string) {
+  return apiFetch<AssumptionExtractionResult>(`/api/projects/${projectId}/assumptions/extract`, {
+    method: "POST",
+  });
+}
+
+export function updateAssumption(
+  projectId: string,
+  assumptionId: string,
+  input: UpdateAssumptionInput,
+) {
+  return apiFetch<Assumption>(`/api/projects/${projectId}/assumptions/${assumptionId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function listRisks(projectId: string) {
+  const response = await apiFetch<{ risks: Risk[] }>(`/api/projects/${projectId}/risks`);
+  return response.risks;
+}
+
+export async function listExperiments(projectId: string) {
+  const response = await apiFetch<{ experiments: Experiment[] }>(
+    `/api/projects/${projectId}/experiments`,
+  );
+  return response.experiments;
+}
+
+export function generateValidationPlan(projectId: string, input: GenerateValidationPlanInput = {}) {
+  return apiFetch<ValidationPlanGenerateResult>(
+    `/api/projects/${projectId}/experiments/validation-plan`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function logExperimentResult(
+  projectId: string,
+  experimentId: string,
+  input: LogExperimentResultInput,
+) {
+  return apiFetch<LogExperimentResultResult>(
+    `/api/projects/${projectId}/experiments/${experimentId}/results`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function listDecisions(projectId: string) {
+  const response = await apiFetch<{ decisions: Decision[] }>(
+    `/api/projects/${projectId}/decisions`,
+  );
+  return response.decisions;
+}
+
+export function createDecision(projectId: string, input: CreateDecisionInput) {
+  return apiFetch<Decision>(`/api/projects/${projectId}/decisions`, {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 }

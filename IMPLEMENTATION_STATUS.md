@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Sprint 6 complete. Ready for Sprint 7: Assumptions, Experiments, Decisions.
+Sprint 7 complete. Ready for Sprint 8: MVP Polish and Demo.
 
 ## Sprint 0 Scope
 
@@ -179,6 +179,41 @@ Checks run:
 - [x] `pnpm --filter thesys-web typecheck`
 - [x] `docker compose config`
 
+Original Sprint 7 plan:
+
+- Build Assumptions tab.
+- Build Risks display.
+- Implement validation plan generation.
+- Build Experiments tab.
+- Add manual result logging.
+- Update assumption confidence based on results.
+- Build Decisions tab.
+- Allow decision records linked to assumptions, evidence, artifacts, and experiments.
+
+## Sprint 7 Scope
+
+- [x] Add `experiments`, `experiment_results`, `decisions`, and `decision_links` tables.
+- [x] Add Alembic migration for validation and decision records.
+- [x] Add assumption/risk listing, extraction, and assumption update endpoints.
+- [x] Add validation-plan generation endpoint that creates versioned artifacts and experiments.
+- [x] Add manual experiment result logging.
+- [x] Update assumption status/confidence and project confidence after result logging.
+- [x] Add decision ledger endpoints with validated links to assumptions, risks, evidence,
+  artifacts, competitors, and experiments.
+- [x] Build Assumptions tab with risk display and per-assumption validation-plan action.
+- [x] Build Experiments tab with validation plans and result logging.
+- [x] Build Decisions tab with rationale, expected outcome, review date, and links.
+
+## Sprint 7 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+
 ## Next Sprint
 
-Sprint 7: Assumptions, Experiments, Decisions.
+Sprint 8: MVP Polish and Demo.

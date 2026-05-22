@@ -81,3 +81,28 @@ PATCH /api/projects/{project_id}/competitors/{competitor_id}
 Competitor analysis ingests user-seeded competitor URLs when requested, links
 competitor evidence chunks with `competitor_id` metadata, writes structured
 competitor profiles, and saves a versioned `competitor_landscape` artifact.
+
+Sprint 7 exposes assumption, risk, experiment, and decision APIs:
+
+```http
+GET   /api/projects/{project_id}/assumptions
+POST  /api/projects/{project_id}/assumptions/extract
+PATCH /api/projects/{project_id}/assumptions/{assumption_id}
+
+GET   /api/projects/{project_id}/risks
+POST  /api/projects/{project_id}/risks/extract
+
+GET   /api/projects/{project_id}/experiments
+POST  /api/projects/{project_id}/experiments/validation-plan
+POST  /api/projects/{project_id}/experiments/{experiment_id}/results
+
+GET  /api/projects/{project_id}/decisions
+POST /api/projects/{project_id}/decisions
+GET  /api/projects/{project_id}/decisions/{decision_id}
+```
+
+Validation-plan generation writes a versioned `validation_plan` artifact and
+creates linked experiment records. Experiment results update the linked
+assumption status/confidence and recalculate project confidence from assumption
+scores. Decisions can link to assumptions, risks, evidence, artifacts,
+competitors, and experiments after workspace-scoped target validation.

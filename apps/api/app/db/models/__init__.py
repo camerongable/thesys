@@ -12,6 +12,7 @@ from app.db.models.competitor import Competitor, CompetitorEvidenceLink
 from app.db.models.evidence import EvidenceChunk, EvidenceSource
 from app.db.models.identity import User, Workspace, WorkspaceMember
 from app.db.models.project import CustomerSegment, Problem, Project, ProjectIntake, ProjectThesis
+from app.db.models.validation import Decision, DecisionLink, Experiment, ExperimentResult
 
 __all__ = [
     "AIRun",
@@ -25,8 +26,12 @@ __all__ = [
     "Competitor",
     "CompetitorEvidenceLink",
     "CustomerSegment",
+    "Decision",
+    "DecisionLink",
     "EvidenceChunk",
     "EvidenceSource",
+    "Experiment",
+    "ExperimentResult",
     "Problem",
     "Project",
     "ProjectIntake",

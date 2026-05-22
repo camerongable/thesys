@@ -68,6 +68,10 @@ def _stub_structured_output(
         payload = _fake_opportunity_brief(subject)
     elif output_schema.__name__ == "CompetitorAnalysisDraft":
         payload = _fake_competitor_analysis(subject)
+    elif output_schema.__name__ == "AssumptionExtractionDraft":
+        payload = _fake_assumption_extraction(subject)
+    elif output_schema.__name__ == "ValidationPlanSetDraft":
+        payload = _fake_validation_plan_set(subject)
     else:
         payload = {
             name: _fake_value(field.annotation, name=name, subject=subject)
@@ -487,6 +491,154 @@ def _fake_competitor_analysis(subject: str) -> dict[str, Any]:
                 "source verification before being treated as facts."
             )
         ],
+    }
+
+
+def _fake_assumption_extraction(subject: str) -> dict[str, Any]:
+    request_payload = _extract_json_payload(subject)
+    project_state = request_payload.get("project_state") or {}
+    project_name = str(project_state.get("name") or "the project")
+    problem_hypotheses = project_state.get("problem_hypotheses") or []
+    primary_problem = (
+        str(problem_hypotheses[0])
+        if isinstance(problem_hypotheses, list) and problem_hypotheses
+        else "the target workflow is painful enough to change behavior"
+    )
+    return {
+        "assumptions": [
+            {
+                "text": (
+                    "Target users have a frequent and urgent problem around "
+                    f"{primary_problem}."
+                ),
+                "category": "problem_urgency",
+                "importance": "critical",
+                "uncertainty": "high",
+                "kill_risk": True,
+                "confidence_score": 0.35,
+                "recommended_test": (
+                    "Interview five target users and ask them to describe recent examples, "
+                    "current workarounds, time spent, and consequences."
+                ),
+            },
+            {
+                "text": (
+                    f"The initial buyer segment will pay for {project_name} before the "
+                    "workflow is fully automated."
+                ),
+                "category": "willingness_to_pay",
+                "importance": "high",
+                "uncertainty": "high",
+                "kill_risk": True,
+                "confidence_score": 0.3,
+                "recommended_test": (
+                    "Run pricing conversations and ask for a concrete pilot commitment."
+                ),
+            },
+            {
+                "text": "A narrow workflow can differentiate against generic AI assistants.",
+                "category": "differentiation",
+                "importance": "high",
+                "uncertainty": "medium",
+                "kill_risk": False,
+                "confidence_score": 0.45,
+                "recommended_test": (
+                    "Show a workflow mockup and compare user preference against current tools."
+                ),
+            },
+        ],
+        "risks": [
+            {
+                "text": (
+                    "Users may treat the product as a one-time analysis tool instead of "
+                    "a workspace."
+                ),
+                "category": "retention",
+                "severity": "high",
+                "likelihood": "medium",
+                "mitigation": (
+                    "Tie outputs to experiments, decisions, and recurring evidence updates."
+                ),
+            },
+            {
+                "text": "Weak evidence quality could make recommendations feel generic.",
+                "category": "trust",
+                "severity": "high",
+                "likelihood": "medium",
+                "mitigation": (
+                    "Require citations, show unsupported claims, and ask for better sources."
+                ),
+            },
+        ],
+    }
+
+
+def _fake_validation_plan_set(subject: str) -> dict[str, Any]:
+    request_payload = _extract_json_payload(subject)
+    assumptions = request_payload.get("assumptions") or []
+    plans = []
+    for index, assumption in enumerate(assumptions[:10]):
+        if not isinstance(assumption, dict) or not assumption.get("id"):
+            continue
+        text = str(assumption.get("text") or "The assumption needs validation.")
+        plans.append(
+            {
+                "assumption_id": str(assumption["id"]),
+                "assumption_text": text,
+                "method": "customer_interview",
+                "target_respondent": (
+                    "A target buyer or user who recently experienced the workflow pain."
+                ),
+                "steps": [
+                    "Recruit five target respondents from the suspected initial segment.",
+                    "Ask each respondent to reconstruct their most recent workflow example.",
+                    "Capture current alternatives, time spent, consequences, and buying signals.",
+                    "Score the assumption based on urgency, frequency, and willingness to pay.",
+                ],
+                "interview_questions": [
+                    "When did this problem last happen?",
+                    "What did you do instead?",
+                    "How much time or money did it cost?",
+                    "What would make you switch from the current workaround?",
+                    "Would you commit to a pilot if this solved the problem?",
+                ],
+                "survey_questions": [
+                    "How often does this problem occur?",
+                    "How painful is the current workaround?",
+                    "What budget exists for solving it?",
+                ],
+                "success_criteria": (
+                    "At least three of five respondents describe recent, repeated pain and "
+                    "two provide a concrete willingness-to-pay or pilot signal."
+                ),
+                "failure_threshold": (
+                    "Fewer than two respondents report recent pain, or all describe the "
+                    "current workaround as acceptable."
+                ),
+                "expected_signal_strength": "strong" if index == 0 else "medium",
+            }
+        )
+    if not plans:
+        plans.append(
+            {
+                "assumption_id": "00000000-0000-0000-0000-000000000000",
+                "assumption_text": "The target segment has urgent pain.",
+                "method": "customer_interview",
+                "target_respondent": "Target users in the suspected initial segment.",
+                "steps": ["Recruit respondents.", "Run interviews.", "Score results."],
+                "interview_questions": ["When did this problem last happen?"],
+                "survey_questions": ["How urgent is this problem?"],
+                "success_criteria": "Most respondents report recent pain.",
+                "failure_threshold": "Respondents do not report recent pain.",
+                "expected_signal_strength": "medium",
+            }
+        )
+    return {
+        "summary": (
+            "Run narrow validation experiments against the highest-risk assumptions before "
+            "building deeper product surface area."
+        ),
+        "plans": plans,
     }
 
 
