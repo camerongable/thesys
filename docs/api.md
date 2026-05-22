@@ -58,3 +58,26 @@ DELETE /api/projects/{project_id}/evidence/{source_id}
 Retrieval supports `semantic`, `keyword`, and `hybrid` modes and returns source
 IDs, chunk IDs, scores, source metadata, and trace IDs for the `ai_runs` /
 `ai_steps` records.
+
+Sprint 5 exposes artifact listing and opportunity brief generation:
+
+```http
+GET  /api/projects/{project_id}/artifacts
+POST /api/projects/{project_id}/artifacts/opportunity-brief/generate
+GET  /api/projects/{project_id}/artifacts/{artifact_id}
+GET  /api/projects/{project_id}/artifacts/{artifact_id}/versions
+```
+
+Sprint 6 exposes competitor profile and landscape generation APIs:
+
+```http
+GET   /api/projects/{project_id}/competitors
+POST  /api/projects/{project_id}/competitors
+POST  /api/projects/{project_id}/competitors/analyze
+GET   /api/projects/{project_id}/competitors/{competitor_id}
+PATCH /api/projects/{project_id}/competitors/{competitor_id}
+```
+
+Competitor analysis ingests user-seeded competitor URLs when requested, links
+competitor evidence chunks with `competitor_id` metadata, writes structured
+competitor profiles, and saves a versioned `competitor_landscape` artifact.

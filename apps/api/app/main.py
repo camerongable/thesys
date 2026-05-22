@@ -5,6 +5,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.routers.ai import router as ai_router
 from app.routers.artifacts import router as artifacts_router
+from app.routers.competitors import router as competitors_router
 from app.routers.evidence import router as evidence_router
 from app.routers.health import router as health_router
 from app.routers.intake import router as intake_router
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(intake_router)
     app.include_router(evidence_router)
     app.include_router(artifacts_router)
+    app.include_router(competitors_router)
     app.include_router(ai_router)
 
     return app

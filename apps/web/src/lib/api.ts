@@ -329,6 +329,73 @@ export type OpportunityBriefGenerateResult = {
   unsupported_claims: string[];
 };
 
+export type CompetitorCategory =
+  | "direct"
+  | "adjacent"
+  | "incumbent"
+  | "substitute"
+  | "manual_alternative"
+  | "unknown";
+
+export type CompetitorThreatLevel = "low" | "medium" | "high" | "unknown";
+
+export type CompetitorEvidenceLink = {
+  id: string;
+  evidence_source_id: string;
+  evidence_chunk_id: string | null;
+  created_at: string;
+};
+
+export type Competitor = {
+  id: string;
+  project_id: string;
+  name: string;
+  url: string | null;
+  category: CompetitorCategory;
+  target_user: string | null;
+  positioning: string | null;
+  pricing_summary: string | null;
+  key_features: string[];
+  strengths: string | null;
+  weaknesses: string | null;
+  differentiation_notes: string | null;
+  threat_level: CompetitorThreatLevel;
+  watchlist_status: string;
+  last_analyzed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  evidence_links: CompetitorEvidenceLink[];
+};
+
+export type CreateCompetitorInput = {
+  name: string;
+  url?: string;
+  category?: CompetitorCategory;
+};
+
+export type AnalyzeCompetitorsInput = {
+  seed_competitors?: CreateCompetitorInput[];
+  ingest_urls?: boolean;
+};
+
+export type CompetitorAnalysisResult = {
+  ai_run_id: string;
+  ai_step_id: string;
+  prompt_version: string;
+  model_provider: string;
+  model_name: string;
+  used_stub: boolean;
+  total_tokens: number | null;
+  total_cost: string | null;
+  retrieval_result_count: number;
+  ingested_source_count: number;
+  artifact: Artifact;
+  competitors: Competitor[];
+  claims: Claim[];
+  citations: Citation[];
+  unsupported_claims: string[];
+};
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -344,8 +411,8 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let message = `Request failed with ${response.status}`;
     try {
-      const body = (await response.json()) as { detail?: string };
-      message = body.detail ?? message;
+      const body = (await response.json()) as { detail?: unknown; message?: unknown };
+      message = formatApiError(body, message);
     } catch {
       // Preserve the status-based fallback when the response is not JSON.
     }
@@ -357,6 +424,50 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+function formatApiError(body: { detail?: unknown; message?: unknown }, fallback: string) {
+  return formatApiErrorDetail(body.detail) ?? formatApiErrorDetail(body.message) ?? fallback;
+}
+
+function formatApiErrorDetail(detail: unknown): string | null {
+  if (typeof detail === "string") {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    const messages = detail.map(formatValidationIssue).filter(Boolean);
+    return messages.length > 0 ? messages.join("; ") : null;
+  }
+  if (detail && typeof detail === "object") {
+    return JSON.stringify(detail);
+  }
+  return null;
+}
+
+function formatValidationIssue(issue: unknown) {
+  if (!issue || typeof issue !== "object") {
+    return String(issue);
+  }
+  const record = issue as Record<string, unknown>;
+  const message = typeof record.msg === "string" ? record.msg : JSON.stringify(record);
+  const location = Array.isArray(record.loc)
+    ? record.loc
+        .filter((part) => part !== "body")
+        .map(String)
+        .join(".")
+    : "";
+  return location ? `${location}: ${message}` : message;
+}
+
+function normalizeOptionalUrl(value: string | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (/^[a-z][a-z\d+\-.]*:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
 }
 
 export function getMe() {
@@ -413,7 +524,7 @@ export async function listEvidenceSources(projectId: string) {
 export function addEvidenceUrl(projectId: string, input: AddEvidenceUrlInput) {
   return apiFetch<EvidenceSource>(`/api/projects/${projectId}/evidence/url`, {
     method: "POST",
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, url: normalizeOptionalUrl(input.url) ?? input.url }),
   });
 }
 
@@ -470,4 +581,29 @@ export function generateOpportunityBrief(projectId: string) {
       method: "POST",
     },
   );
+}
+
+export async function listCompetitors(projectId: string) {
+  const response = await apiFetch<{ competitors: Competitor[] }>(
+    `/api/projects/${projectId}/competitors`,
+  );
+  return response.competitors;
+}
+
+export function createCompetitor(projectId: string, input: CreateCompetitorInput) {
+  return apiFetch<Competitor>(`/api/projects/${projectId}/competitors`, {
+    method: "POST",
+    body: JSON.stringify({ ...input, url: normalizeOptionalUrl(input.url) }),
+  });
+}
+
+export function analyzeCompetitors(projectId: string, input: AnalyzeCompetitorsInput = {}) {
+  const seedCompetitors = input.seed_competitors?.map((competitor) => ({
+    ...competitor,
+    url: normalizeOptionalUrl(competitor.url),
+  }));
+  return apiFetch<CompetitorAnalysisResult>(`/api/projects/${projectId}/competitors/analyze`, {
+    method: "POST",
+    body: JSON.stringify({ ...input, seed_competitors: seedCompetitors }),
+  });
 }

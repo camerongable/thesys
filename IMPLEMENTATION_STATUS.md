@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Sprint 5 complete. Ready for Sprint 6: Competitor Analysis.
+Sprint 6 complete. Ready for Sprint 7: Assumptions, Experiments, Decisions.
 
 ## Sprint 0 Scope
 
@@ -146,6 +146,39 @@ Checks run:
 - [x] `pnpm --filter thesys-web typecheck`
 - [x] `docker compose config`
 
+Original Sprint 6 plan:
+
+- Add competitor tables.
+- Add manual competitor URL input.
+- Implement competitor source ingestion.
+- Implement competitor profile extraction.
+- Implement competitor clustering.
+- Generate competitor landscape artifact.
+- Build Competitors tab.
+
+## Sprint 6 Scope
+
+- [x] Add `competitors` and `competitor_evidence_links` tables.
+- [x] Add Alembic migration for competitor analysis records.
+- [x] Add competitor CRUD API endpoints.
+- [x] Add competitor analysis endpoint.
+- [x] Ingest user-seeded competitor URLs through the evidence pipeline.
+- [x] Attach `competitor_id` metadata to linked evidence chunks.
+- [x] Generate structured competitor profiles, clusters, positioning gaps, and wedge notes.
+- [x] Save the competitor landscape as a versioned artifact.
+- [x] Preserve cited claims and unsupported claims.
+- [x] Build the Competitors tab with URL entry, profile list, analysis action, and artifact display.
+
+## Sprint 6 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+
 ## Next Sprint
 
-Sprint 6: Competitor Analysis.
+Sprint 7: Assumptions, Experiments, Decisions.

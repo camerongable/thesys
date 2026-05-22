@@ -8,6 +8,7 @@ from app.db.models.artifact import (
     Risk,
 )
 from app.db.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.db.models.competitor import Competitor, CompetitorEvidenceLink
 from app.db.models.evidence import EvidenceChunk, EvidenceSource
 from app.db.models.identity import User, Workspace, WorkspaceMember
 from app.db.models.project import CustomerSegment, Problem, Project, ProjectIntake, ProjectThesis
@@ -21,6 +22,8 @@ __all__ = [
     "Base",
     "Claim",
     "ClaimEvidenceLink",
+    "Competitor",
+    "CompetitorEvidenceLink",
     "CustomerSegment",
     "EvidenceChunk",
     "EvidenceSource",

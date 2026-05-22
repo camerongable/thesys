@@ -66,6 +66,8 @@ def _stub_structured_output(
         payload = _fake_structured_project_intake(subject)
     elif output_schema.__name__ == "OpportunityBriefDraft":
         payload = _fake_opportunity_brief(subject)
+    elif output_schema.__name__ == "CompetitorAnalysisDraft":
+        payload = _fake_competitor_analysis(subject)
     else:
         payload = {
             name: _fake_value(field.annotation, name=name, subject=subject)
@@ -340,6 +342,152 @@ def _first_evidence_bundle(evidence_bundles: Any) -> dict[str, Any] | None:
         if isinstance(bundle, dict) and bundle.get("source_id"):
             return bundle
     return None
+
+
+def _fake_competitor_analysis(subject: str) -> dict[str, Any]:
+    request_payload = _extract_json_payload(subject)
+    seed_competitors = request_payload.get("seed_competitors") or []
+    evidence_bundles = request_payload.get("evidence_bundles") or []
+    project_state = request_payload.get("project_state") or {}
+    project_name = str(project_state.get("name") or "the project")
+    first_evidence = _first_evidence_bundle(evidence_bundles)
+    citations = [_citation_from_bundle(first_evidence)] if first_evidence else []
+
+    competitors = []
+    for index, seeded in enumerate(seed_competitors[:5]):
+        if not isinstance(seeded, dict):
+            continue
+        name = str(seeded.get("name") or f"Competitor {index + 1}")
+        url = seeded.get("url")
+        seeded_category = seeded.get("category")
+        category = seeded_category if seeded_category and seeded_category != "unknown" else None
+        competitors.append(
+            {
+                "name": name,
+                "url": str(url) if url else None,
+                "category": category or ("direct" if index == 0 else "adjacent"),
+                "target_user": "Founders and operators evaluating a similar workflow.",
+                "positioning": (
+                    f"{name} appears to position around a narrower workflow that should be "
+                    "compared against the project's evidence-backed workspace thesis."
+                ),
+                "pricing_summary": (
+                    "Pricing needs verification from source evidence."
+                    if not citations
+                    else "Pricing should be treated as source-dependent and checked manually."
+                ),
+                "key_features": [
+                    "Workflow capture",
+                    "AI-assisted synthesis",
+                    "Project or client workspace",
+                ],
+                "strengths": [
+                    "Clearer existing category familiarity",
+                    "Focused feature surface",
+                ],
+                "weaknesses": [
+                    "May not preserve a full evidence-to-decision graph",
+                    "Citation coverage needs inspection",
+                ],
+                "differentiation_notes": (
+                    "Avoid competing on generic generation. Emphasize persistent evidence, "
+                    "assumptions, experiments, and decisions."
+                ),
+                "threat_level": "high" if index == 0 else "medium",
+                "citations": citations,
+            }
+        )
+
+    if not competitors:
+        competitors.append(
+            {
+                "name": "Generic AI assistants",
+                "url": None,
+                "category": "substitute",
+                "target_user": "Founders doing one-off research and drafting.",
+                "positioning": (
+                    "Flexible AI chat and drafting rather than structured strategy memory."
+                ),
+                "pricing_summary": "Pricing varies and is not validated by project evidence.",
+                "key_features": ["Chat", "Draft generation", "Summarization"],
+                "strengths": ["Low-friction adoption", "Broad task coverage"],
+                "weaknesses": ["Weak structured memory", "Weak decision traceability"],
+                "differentiation_notes": (
+                    "Compete by making the workspace, citations, assumptions, and decision "
+                    "ledger primary."
+                ),
+                "threat_level": "medium",
+                "citations": citations,
+            }
+        )
+
+    supported_claims = []
+    if citations:
+        supported_claims.append(
+            {
+                "text": (
+                    "The competitor landscape should be grounded in the ingested competitor "
+                    "and project evidence."
+                ),
+                "claim_type": "competitor_evidence",
+                "confidence_score": 0.7,
+                "support_level": "supported",
+                "citations": citations,
+            }
+        )
+    supported_claims.append(
+        {
+            "text": (
+                "Positioning should avoid generic AI generation and focus on structured "
+                "strategic memory."
+            ),
+            "claim_type": "positioning_recommendation",
+            "confidence_score": 0.55,
+            "support_level": "inference",
+            "citations": [],
+        }
+    )
+
+    return {
+        "summary": (
+            f"{project_name} should treat the current competitor set as an initial landscape. "
+            "The useful comparison is whether competitors preserve evidence, assumptions, "
+            "experiments, and decisions as structured state."
+        ),
+        "competitors": competitors,
+        "clusters": [
+            {
+                "name": "AI workflow and research substitutes",
+                "competitors": [competitor["name"] for competitor in competitors],
+                "positioning_summary": (
+                    "Most alternatives are easier to adopt than a new workspace but are "
+                    "weaker as a durable strategy system of record."
+                ),
+            }
+        ],
+        "positioning_gaps": [
+            "Evidence-backed strategy memory",
+            "Assumption-to-experiment workflow",
+            "Decision traceability tied to cited sources",
+        ],
+        "wedge_recommendations": [
+            "Lead with one founder validation workflow rather than broad research automation.",
+            "Make citations and unsupported claims visible in every strategic artifact.",
+        ],
+        "where_not_to_compete": [
+            "Generic brainstorming",
+            "Uncited market-size claims",
+            "Broad autonomous crawling in the MVP",
+        ],
+        "claims": supported_claims,
+        "citations": citations,
+        "unsupported_claims": [
+            (
+                "Competitor pricing, feature completeness, and threat level need direct "
+                "source verification before being treated as facts."
+            )
+        ],
+    }
 
 
 def _citation_from_bundle(bundle: dict[str, Any]) -> dict[str, Any]:

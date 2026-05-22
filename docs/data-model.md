@@ -34,3 +34,27 @@ chunks, token counts, metadata, and 1536-dimensional pgvector embeddings.
 
 Every tenant-scoped table should include `workspace_id` and backend queries must
 enforce workspace membership.
+
+Sprint 5 adds:
+
+- artifacts
+- artifact_versions
+- claims
+- claim_evidence_links
+- assumptions
+- risks
+
+Artifacts store generated strategic outputs with immutable versions. Claims and
+claim evidence links preserve citation provenance separately from markdown
+content, while assumptions and risks remain structured project records.
+
+Sprint 6 adds:
+
+- competitors
+- competitor_evidence_links
+
+Competitor records store profile fields such as category, positioning, pricing,
+features, strengths, weaknesses, differentiation notes, threat level, and
+watchlist status. Competitor evidence links connect profiles to source records
+and chunks; linked chunks also receive `competitor_id` metadata for filtered
+retrieval.
