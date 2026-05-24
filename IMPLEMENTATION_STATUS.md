@@ -2,13 +2,12 @@
 
 ## Current Phase
 
-Sprint 9 complete. MVP demo flow is ready for live LLM validation through
-LiteLLM while deterministic stub mode remains available for local development
-and tests. Structured-output validation stays strict; live mode now repairs
-invalid model JSON before using deterministic fallback according to
-`LLM_FALLBACK_POLICY`. AI-generated markdown is rendered as structured UI
-across briefs, competitor landscapes, validation plans, assumptions, risks,
-decisions, and intake output.
+Sprint 10 complete. The project Overview page is now a guided strategic
+validation command center instead of a developer-oriented dashboard. The API
+computes project stage, current recommendation, next best action, idea
+readiness, strategic snapshot, evidence health, and recent strategic updates
+from existing project graph data. The MVP still avoids V1 monitoring,
+collaboration, and agentic research features.
 
 ## Sprint 0 Scope
 
@@ -300,6 +299,53 @@ Checks run:
 - [x] `docker compose config`
 - [x] Browser-verified Brief, Competitors, Assumptions, Experiments, and
   Decisions tabs show no raw markdown heading/list syntax.
+
+Original Sprint 10 plan:
+
+- Add or compute project lifecycle stage.
+- Replace developer-facing MVP readiness with founder-facing Idea Readiness.
+- Replace Recent Workflows with Recent Strategic Updates.
+- Add Current Recommendation, Next Best Action, Strategic Snapshot, and
+  Evidence Health overview sections.
+- Add guided empty states and outcome-oriented button labels.
+- Add overview, readiness, strategic updates, and next-action API endpoints.
+- Avoid V1 monitoring, collaboration, portfolio, or agentic research work.
+
+## Sprint 10 Scope
+
+- [x] Add computed overview schemas for project stage, recommendation, next
+  action, readiness, strategic snapshot, evidence health, and strategic
+  updates.
+- [x] Add `ProjectOverviewService` using existing structured project,
+  evidence, artifact, claim, assumption, risk, experiment, decision, and
+  workflow data.
+- [x] Add API endpoints:
+  - `GET /api/projects/{project_id}/overview`
+  - `GET /api/projects/{project_id}/readiness`
+  - `GET /api/projects/{project_id}/strategic-updates`
+  - `POST /api/projects/{project_id}/next-action`
+- [x] Redesign the Overview tab around Current Recommendation, Next Best
+  Action, Idea Readiness, Strategic Snapshot, Evidence Health, Recent
+  Strategic Updates, and Key Assumptions/Risks.
+- [x] Keep the AI mode badge visible but secondary to project guidance.
+- [x] Replace implementation-oriented labels such as “Analyze Idea,”
+  “Finalize Intake,” “MVP Readiness,” and “Recent Workflows.”
+- [x] Add guided empty states with clear CTAs for briefs, evidence,
+  competitors, assumptions, experiments, and decisions.
+- [x] Add tests for new-project and seeded-demo overview behavior.
+
+## Sprint 10 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_project_overview.py`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+- [x] `docker compose up -d`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
 
 ## Next Sprint
 

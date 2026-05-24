@@ -61,6 +61,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
     await queryClient.invalidateQueries({
       queryKey: ["projects", projectId, "artifacts", "competitor_landscape"],
     });
+    await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "workflows"] });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "mvp"] });
   };
@@ -181,7 +182,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
               type="button"
             >
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              {analyzeMutation.isPending ? "Analyzing..." : "Analyze"}
+              {analyzeMutation.isPending ? "Analyzing..." : "Analyze Competitors"}
             </Button>
           </div>
           {analyzeMutation.data ? (
@@ -227,7 +228,24 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
           {competitorsQuery.isLoading ? (
             <div className="mt-4 text-sm text-muted-foreground">Loading competitors...</div>
           ) : competitors.length === 0 ? (
-            <div className="mt-4 text-sm text-muted-foreground">No competitors added yet.</div>
+            <div className="mt-4 rounded-md border border-dashed border-border p-4">
+              <h3 className="text-sm font-semibold">No competitors analyzed yet.</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Competitor analysis helps identify substitutes, crowded areas, positioning
+                gaps, and potential wedges.
+              </p>
+              <Button
+                className="mt-3"
+                disabled={analyzeMutation.isPending}
+                onClick={() => analyzeMutation.mutate()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                {analyzeMutation.isPending ? "Analyzing..." : "Analyze Competitors"}
+              </Button>
+            </div>
           ) : (
             <div className="mt-4 grid gap-4">
               {competitors.map((competitor) => (

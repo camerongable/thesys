@@ -2,6 +2,8 @@
 
 Evaluation is part of the MVP. AI workflow executions are persisted in
 `ai_runs` and `ai_steps`, and Sprint 8 adds the first local MVP readiness check.
+Sprint 10 keeps this eval as a developer/demo check but replaces the primary
+user-facing Overview language with computed Idea Readiness.
 
 Run the seeded-demo eval:
 

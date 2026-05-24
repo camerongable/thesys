@@ -29,3 +29,10 @@ Sprint 4 adds the first RAG foundation:
 - Evidence ingestion and retrieval create `ai_runs` and `ai_steps` traces so
   generated artifacts in later sprints can expose the retrieval context they
   used.
+
+Sprint 10 adds a computed project overview layer. `ProjectOverviewService`
+derives founder-facing guidance from existing records instead of adding new
+persistence: project lifecycle stage, recommendation, next best action, idea
+readiness, strategic snapshot, evidence health, and recent strategic updates.
+This keeps the overview aligned with the project graph while leaving workflow
+execution, RAG, and artifact generation unchanged.

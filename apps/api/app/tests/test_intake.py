@@ -245,6 +245,12 @@ def test_structured_intake_finalize_persists_project_state(
     assert len(project["customer_segments"]) == 2
     assert len(project["problems"]) == 2
 
+    overview_response = client.get(f"/api/projects/{project_id}/overview")
+    assert overview_response.status_code == 200
+    overview = overview_response.json()
+    assert overview["strategic_snapshot"]["current_stage"] == "structured_intake"
+    assert overview["next_best_action"]["label"] == "Generate Opportunity Brief"
+
 
 def test_structured_intake_endpoints_are_workspace_scoped(client: TestClient) -> None:
     user_a_headers = {"X-Dev-User-Email": "a@example.com", "X-Dev-User-Name": "User A"}

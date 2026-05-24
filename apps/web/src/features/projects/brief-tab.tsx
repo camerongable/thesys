@@ -32,6 +32,7 @@ export function BriefTab({ projectId }: BriefTabProps) {
         queryKey: ["projects", projectId, "artifacts", "opportunity_brief"],
       });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "workflows"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "mvp"] });
     },
@@ -75,8 +76,8 @@ export function BriefTab({ projectId }: BriefTabProps) {
           {generateMutation.isPending
             ? "Generating..."
             : currentVersion
-              ? "Regenerate"
-              : "Generate Brief"}
+              ? "Regenerate Brief"
+              : "Generate Opportunity Brief"}
         </Button>
       </div>
 
@@ -107,8 +108,21 @@ export function BriefTab({ projectId }: BriefTabProps) {
             <h3 className="text-sm font-semibold">No brief generated yet.</h3>
           </div>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Add evidence first for a stronger cited brief, then generate the first version.
+            The opportunity brief turns project state and evidence into a cited thesis,
+            risks, assumptions, validation plan, and recommendation. Add evidence first for
+            a stronger result, then generate the first version.
           </p>
+          <Button
+            className="mt-4"
+            disabled={generateMutation.isPending}
+            onClick={() => generateMutation.mutate()}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            {generateMutation.isPending ? "Generating..." : "Generate Opportunity Brief"}
+          </Button>
         </div>
       ) : (
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">

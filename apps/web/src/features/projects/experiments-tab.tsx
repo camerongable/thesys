@@ -43,6 +43,7 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
       queryKey: ["projects", projectId, "artifacts", "validation_plan"],
     });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+    await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "workflows"] });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "mvp"] });
   };
@@ -80,7 +81,7 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
           type="button"
         >
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          {generateMutation.isPending ? "Generating..." : "Generate Plans"}
+          {generateMutation.isPending ? "Generating..." : "Create Validation Plan"}
         </Button>
       </div>
 
@@ -105,9 +106,25 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
             <h3 className="text-sm font-semibold">No validation experiments yet.</h3>
           </div>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Extract assumptions first, then generate validation plans from the highest-risk
-            assumptions.
+            Experiments help you reduce uncertainty before building. Start by testing the
+            riskiest assumption with a clear method, success criteria, and failure
+            threshold.
           </p>
+          <Button
+            className="mt-4"
+            disabled={generateMutation.isPending || assumptions.length === 0}
+            onClick={() => generateMutation.mutate()}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            {assumptions.length === 0
+              ? "Review Assumptions First"
+              : generateMutation.isPending
+                ? "Creating..."
+                : "Create Validation Plan"}
+          </Button>
         </div>
       ) : (
         <div

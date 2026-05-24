@@ -46,6 +46,7 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
 
   const invalidateSources = async () => {
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evidence"] });
+    await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
   };
 
   const urlMutation = useMutation({
@@ -124,6 +125,7 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
           <label className="mt-4 block">
             <span className="text-sm font-medium">URL</span>
             <input
+              id="evidence-url"
               className="mt-2 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
               onChange={(event) => setUrl(event.target.value)}
               placeholder="https://example.com"
@@ -134,6 +136,7 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
           <label className="mt-3 block">
             <span className="text-sm font-medium">Title</span>
             <input
+              id="evidence-note-title"
               className="mt-2 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
               onChange={(event) => setUrlTitle(event.target.value)}
               value={urlTitle}
@@ -231,7 +234,24 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
               {(sourcesQuery.error as Error).message}
             </div>
           ) : sources.length === 0 ? (
-            <div className="mt-4 text-sm text-muted-foreground">No evidence sources yet.</div>
+            <div className="mt-4 rounded-md border border-dashed border-border p-4">
+              <h3 className="text-sm font-semibold">No evidence yet.</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Evidence is what keeps this from becoming generic AI advice. Add competitor
+                pages, customer notes, market research, app reviews, forum threads, or
+                interview notes.
+              </p>
+              <Button
+                className="mt-3"
+                onClick={() => document.getElementById("evidence-url")?.focus()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <LinkIcon className="h-4 w-4" aria-hidden="true" />
+                Add Evidence
+              </Button>
+            </div>
           ) : (
             <div className="mt-4 divide-y divide-border">
               {sources.map((source) => (

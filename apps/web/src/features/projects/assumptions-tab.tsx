@@ -35,6 +35,7 @@ export function AssumptionsTab({ projectId }: AssumptionsTabProps) {
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "risks"] });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "experiments"] });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+    await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "workflows"] });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "mvp"] });
   };
@@ -81,7 +82,7 @@ export function AssumptionsTab({ projectId }: AssumptionsTabProps) {
           type="button"
         >
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          {extractMutation.isPending ? "Extracting..." : "Extract"}
+          {extractMutation.isPending ? "Extracting..." : "Extract Assumptions"}
         </Button>
       </div>
 
@@ -116,9 +117,25 @@ export function AssumptionsTab({ projectId }: AssumptionsTabProps) {
           {assumptionsQuery.isLoading ? (
             <p className="mt-4 text-sm text-muted-foreground">Loading assumptions...</p>
           ) : assumptions.length === 0 ? (
-            <p className="mt-4 text-sm text-muted-foreground">
-              No assumptions yet. Generate a brief or extract assumptions directly.
-            </p>
+            <div className="mt-4 rounded-md border border-dashed border-border p-4">
+              <h4 className="text-sm font-semibold">No assumptions identified yet.</h4>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Assumptions are the beliefs that must be true for this idea to work. The
+                system will help rank them by risk and turn them into validation
+                experiments.
+              </p>
+              <Button
+                className="mt-3"
+                disabled={extractMutation.isPending}
+                onClick={() => extractMutation.mutate()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                {extractMutation.isPending ? "Extracting..." : "Extract Assumptions"}
+              </Button>
+            </div>
           ) : (
             <div className="mt-4 space-y-4">
               {assumptions.map((assumption) => (
@@ -181,7 +198,7 @@ export function AssumptionsTab({ projectId }: AssumptionsTabProps) {
                       type="button"
                     >
                       <Beaker className="h-4 w-4" aria-hidden="true" />
-                      {planMutation.isPending ? "Generating..." : "Validation Plan"}
+                      {planMutation.isPending ? "Generating..." : "Create Validation Plan"}
                     </Button>
                   </div>
                 </div>
@@ -199,7 +216,10 @@ export function AssumptionsTab({ projectId }: AssumptionsTabProps) {
             {risksQuery.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading risks...</p>
             ) : risks.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No risks recorded.</p>
+              <p className="text-sm leading-6 text-muted-foreground">
+                No risks recorded yet. Extract assumptions to surface likely failure modes and
+                mitigation paths.
+              </p>
             ) : (
               risks.map((risk) => (
                 <div key={risk.id} className="rounded-md border border-border p-3">

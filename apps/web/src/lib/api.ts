@@ -1,4 +1,17 @@
 export type ProjectStatus = "active" | "paused" | "killed" | "launched" | "archived";
+export type ProjectStage =
+  | "draft_idea"
+  | "structured_intake"
+  | "brief_generated"
+  | "competitors_analyzed"
+  | "assumptions_identified"
+  | "validation_plan_created"
+  | "experiment_running"
+  | "decision_ready"
+  | "paused"
+  | "killed"
+  | "proceeding";
+export type RecommendationConfidence = "low" | "medium" | "high";
 
 export type ProjectThesis = {
   id: string;
@@ -601,6 +614,97 @@ export type MvpEval = {
   checks: MvpEvalCheck[];
 };
 
+export type StrategicRecommendation = {
+  id: string;
+  project_id: string;
+  recommendation: string;
+  rationale: string;
+  confidence: RecommendationConfidence;
+  next_action_type: string;
+  next_action_label: string;
+  source_artifact_ids: string[];
+  source_evidence_ids: string[];
+  created_at: string;
+};
+
+export type NextBestAction = {
+  action_type: string;
+  label: string;
+  description: string;
+  why_it_matters: string;
+  primary: boolean;
+  related_stage: ProjectStage;
+  target_route: string | null;
+};
+
+export type ReadinessItem = {
+  key: string;
+  label: string;
+  status: "complete" | "missing" | "needs_work";
+  related_action: string | null;
+};
+
+export type IdeaReadiness = {
+  project_id: string;
+  score: number;
+  status: "not_ready" | "partially_ready" | "ready_for_validation" | "decision_ready";
+  completed_items: ReadinessItem[];
+  missing_items: ReadinessItem[];
+  weakest_area: string;
+  recommended_next_action: string;
+};
+
+export type StrategicSnapshot = {
+  current_thesis: string | null;
+  target_user: string | null;
+  primary_problem: string | null;
+  proposed_wedge: string | null;
+  main_risk: string | null;
+  current_confidence: RecommendationConfidence;
+  current_stage: ProjectStage;
+};
+
+export type EvidenceHealth = {
+  source_count: number;
+  competitor_count: number;
+  cited_claim_count: number;
+  unsupported_claim_count: number;
+  validated_assumption_count: number;
+  weakest_evidence_area: string;
+  last_evidence_update: string | null;
+};
+
+export type StrategicUpdate = {
+  id: string;
+  project_id: string;
+  title: string;
+  summary: string;
+  why_it_matters: string;
+  related_entity_type:
+    | "artifact"
+    | "evidence"
+    | "competitor"
+    | "assumption"
+    | "experiment"
+    | "decision"
+    | "workflow";
+  related_entity_id: string;
+  created_at: string;
+};
+
+export type ProjectOverview = {
+  project: Project;
+  current_recommendation: StrategicRecommendation;
+  next_best_action: NextBestAction;
+  secondary_actions: NextBestAction[];
+  idea_readiness: IdeaReadiness;
+  strategic_snapshot: StrategicSnapshot;
+  evidence_health: EvidenceHealth;
+  recent_strategic_updates: StrategicUpdate[];
+  key_assumptions: Assumption[];
+  key_risks: Risk[];
+};
+
 export type AIProviderKeyStatus = {
   openai: boolean;
   anthropic: boolean;
@@ -733,6 +837,24 @@ export function createProject(input: CreateProjectInput) {
 
 export function getProject(projectId: string) {
   return apiFetch<Project>(`/api/projects/${projectId}`);
+}
+
+export function getProjectOverview(projectId: string) {
+  return apiFetch<ProjectOverview>(`/api/projects/${projectId}/overview`);
+}
+
+export function getIdeaReadiness(projectId: string) {
+  return apiFetch<IdeaReadiness>(`/api/projects/${projectId}/readiness`);
+}
+
+export function getStrategicUpdates(projectId: string) {
+  return apiFetch<StrategicUpdate[]>(`/api/projects/${projectId}/strategic-updates`);
+}
+
+export function executeNextAction(projectId: string) {
+  return apiFetch<NextBestAction>(`/api/projects/${projectId}/next-action`, {
+    method: "POST",
+  });
 }
 
 export function analyzeProjectIntake(projectId: string, input: AnalyzeIntakeInput) {

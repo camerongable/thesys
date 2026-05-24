@@ -1,29 +1,32 @@
 "use client";
 
 import {
-  Activity,
   ArrowLeft,
   Beaker,
+  CheckCircle2,
+  CircleAlert,
   ClipboardCheck,
-  FileText,
+  Database,
+  Lightbulb,
+  ListChecks,
+  Route,
   ScrollText,
   ShieldAlert,
-  Users,
+  Target,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 
+import { Button } from "@/components/ui/button";
 import {
-  getMvpEval,
-  getProject,
-  listArtifacts,
-  listAssumptions,
-  listCompetitors,
-  listDecisions,
-  listExperiments,
-  listProjectWorkflows,
+  executeNextAction,
+  getProjectOverview,
+  IdeaReadiness,
+  NextBestAction,
+  ProjectStage,
+  StrategicSnapshot,
 } from "@/lib/api";
 import { AiModeIndicator } from "@/features/ai/ai-mode-indicator";
 import { AssumptionsTab } from "@/features/projects/assumptions-tab";
@@ -34,14 +37,6 @@ import { EvidenceTab } from "@/features/projects/evidence-tab";
 import { ExperimentsTab } from "@/features/projects/experiments-tab";
 import { MarkdownContent } from "@/features/projects/markdown-content";
 import { StructuredIntakeWizard } from "@/features/projects/structured-intake-wizard";
-
-const emptyStates = [
-  { label: "Opportunity Brief", detail: "No brief generated yet.", icon: FileText },
-  { label: "Competitors", detail: "No competitors analyzed yet.", icon: Users },
-  { label: "Assumptions", detail: "No assumptions extracted yet.", icon: ShieldAlert },
-  { label: "Experiments", detail: "No validation plans generated yet.", icon: Beaker },
-  { label: "Decisions", detail: "No decisions recorded yet.", icon: ScrollText },
-];
 
 const tabs = [
   "Overview",
@@ -58,66 +53,67 @@ export function ProjectOverview() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
   const [activeTab, setActiveTab] = useState<ProjectTab>("Overview");
-  const projectQuery = useQuery({
-    queryKey: ["projects", projectId],
-    queryFn: () => getProject(projectId),
+  const overviewQuery = useQuery({
+    queryKey: ["projects", projectId, "overview"],
+    queryFn: () => getProjectOverview(projectId),
   });
-  const briefArtifactsQuery = useQuery({
-    queryKey: ["projects", projectId, "artifacts", "opportunity_brief"],
-    queryFn: () => listArtifacts(projectId, "opportunity_brief"),
-  });
-  const competitorsQuery = useQuery({
-    queryKey: ["projects", projectId, "competitors"],
-    queryFn: () => listCompetitors(projectId),
-  });
-  const assumptionsQuery = useQuery({
-    queryKey: ["projects", projectId, "assumptions"],
-    queryFn: () => listAssumptions(projectId),
-  });
-  const experimentsQuery = useQuery({
-    queryKey: ["projects", projectId, "experiments"],
-    queryFn: () => listExperiments(projectId),
-  });
-  const decisionsQuery = useQuery({
-    queryKey: ["projects", projectId, "decisions"],
-    queryFn: () => listDecisions(projectId),
-  });
-  const evalQuery = useQuery({
-    queryKey: ["projects", projectId, "evals", "mvp"],
-    queryFn: () => getMvpEval(projectId),
-  });
-  const workflowsQuery = useQuery({
-    queryKey: ["projects", projectId, "workflows"],
-    queryFn: () => listProjectWorkflows(projectId, 5),
+  const nextActionMutation = useMutation({
+    mutationFn: () => executeNextAction(projectId),
+    onSuccess: activateAction,
   });
 
-  const project = projectQuery.data;
-  const opportunityBriefCount = briefArtifactsQuery.data?.length ?? 0;
-  const competitors = competitorsQuery.data ?? [];
-  const assumptions = assumptionsQuery.data ?? [];
-  const experiments = experimentsQuery.data ?? [];
-  const decisions = decisionsQuery.data ?? [];
-  const analyzedCompetitorCount = competitors.filter(
-    (competitor) => competitor.last_analyzed_at !== null,
-  ).length;
-  const overviewCards = emptyStates.map((item) =>
-    item.label === "Opportunity Brief"
-      ? briefOverviewCard(item, briefArtifactsQuery.isLoading, opportunityBriefCount)
-      : item.label === "Competitors"
-        ? competitorOverviewCard(
-            item,
-            competitorsQuery.isLoading,
-            competitors.length,
-            analyzedCompetitorCount,
-          )
-        : item.label === "Assumptions"
-          ? countOverviewCard(item, assumptionsQuery.isLoading, assumptions.length, "assumption")
-          : item.label === "Experiments"
-            ? countOverviewCard(item, experimentsQuery.isLoading, experiments.length, "experiment")
-            : item.label === "Decisions"
-              ? countOverviewCard(item, decisionsQuery.isLoading, decisions.length, "decision")
-              : item,
-  );
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const tab = tabFromHash(window.location.hash);
+    if (tab) {
+      setActiveTab(tab);
+    }
+  }, []);
+
+  const overview = overviewQuery.data;
+  const project = overview?.project;
+
+  function selectTab(tab: ProjectTab) {
+    setActiveTab(tab);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", `#${tab.toLowerCase()}`);
+    }
+  }
+
+  function runAction(action: NextBestAction) {
+    activateAction(action);
+    if (action.primary) {
+      nextActionMutation.mutate();
+    }
+  }
+
+  function activateAction(action: NextBestAction) {
+    const tab = tabForAction(action);
+    const anchor = anchorForAction(action);
+    setActiveTab(tab);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", `#${anchor ?? tab.toLowerCase()}`);
+    }
+    if (anchor) {
+      window.setTimeout(() => {
+        const target = document.getElementById(anchor);
+        if (target) {
+          window.scrollTo({
+            top: target.getBoundingClientRect().top + window.scrollY - 16,
+            behavior: "auto",
+          });
+        }
+        document.getElementById("structured-intake-raw-idea")?.focus({ preventScroll: true });
+      }, 50);
+    }
+  }
+
+  async function refreshOverviewAfterIntake() {
+    const result = await overviewQuery.refetch();
+    return result.data?.next_best_action.label ?? null;
+  }
 
   return (
     <main className="min-h-screen px-5 py-6 md:px-8">
@@ -130,28 +126,32 @@ export function ProjectOverview() {
           Projects
         </Link>
 
-        {projectQuery.isLoading ? (
+        {overviewQuery.isLoading ? (
           <div className="mt-8 text-sm text-muted-foreground">Loading project...</div>
-        ) : projectQuery.isError ? (
+        ) : overviewQuery.isError ? (
           <div className="mt-8 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-            {(projectQuery.error as Error).message}
+            {(overviewQuery.error as Error).message}
           </div>
-        ) : project ? (
+        ) : overview && project ? (
           <>
             <header className="mt-6 border-b border-border pb-6">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Project Overview</p>
-                  <h1 className="mt-1 text-2xl font-semibold tracking-normal">{project.name}</h1>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+                      {formatStage(overview.strategic_snapshot.current_stage)}
+                    </span>
+                    <span className="rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                      {formatLabel(project.status)}
+                    </span>
+                  </div>
+                  <h1 className="mt-3 text-2xl font-semibold tracking-normal">{project.name}</h1>
                   <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-                    {project.short_description ?? "No description"}
+                    {project.short_description ?? "No description recorded yet."}
                   </p>
                 </div>
-                <div className="flex flex-col gap-2 sm:items-end">
+                <div className="sm:min-w-56">
                   <AiModeIndicator />
-                  <span className="w-fit rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-                    {project.status}
-                  </span>
                 </div>
               </div>
             </header>
@@ -168,7 +168,7 @@ export function ProjectOverview() {
                       : "cursor-pointer px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
                   }
                   key={tab}
-                  onClick={() => setActiveTab(tab)}
+                  onClick={() => selectTab(tab)}
                   type="button"
                 >
                   {tab}
@@ -177,160 +177,12 @@ export function ProjectOverview() {
             </nav>
 
             {activeTab === "Overview" ? (
-              <>
-                <section className="mt-6 rounded-lg border border-border bg-white p-5">
-                  <h2 className="text-base font-semibold">Current Thesis</h2>
-                  <MarkdownContent
-                    className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground"
-                    markdown={project.current_thesis?.thesis_text ?? "No thesis recorded yet."}
-                  />
-                </section>
-
-                {project.customer_segments.length > 0 || project.problems.length > 0 ? (
-                  <section className="mt-6 grid gap-4 lg:grid-cols-2">
-                    <div className="rounded-lg border border-border bg-white p-5">
-                      <h2 className="text-base font-semibold">Customer Segments</h2>
-                      <div className="mt-3 space-y-3">
-                        {project.customer_segments.map((segment) => (
-                          <div key={segment.id}>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-medium">{segment.name}</span>
-                              {segment.priority ? (
-                                <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-                                  {segment.priority}
-                                </span>
-                              ) : null}
-                            </div>
-                            <MarkdownContent
-                              className="mt-1 space-y-2 text-sm leading-6 text-muted-foreground"
-                              markdown={segment.description ?? "No segment notes yet."}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg border border-border bg-white p-5">
-                      <h2 className="text-base font-semibold">Problem Hypotheses</h2>
-                      <div className="mt-3 space-y-3">
-                        {project.problems.map((problem) => (
-                          <div key={problem.id}>
-                            <MarkdownContent
-                              className="space-y-2 text-sm font-medium leading-6 text-foreground"
-                              markdown={problem.description}
-                            />
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              Severity: {problem.severity ?? "unknown"}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </section>
-                ) : null}
-
-                <StructuredIntakeWizard project={project} />
-
-                <section className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-                  <div className="rounded-lg border border-border bg-white p-5">
-                    <div className="flex items-center gap-2">
-                      <ClipboardCheck className="h-4 w-4 text-primary" aria-hidden="true" />
-                      <h2 className="text-base font-semibold">MVP Readiness</h2>
-                    </div>
-                    {evalQuery.isLoading ? (
-                      <p className="mt-4 text-sm text-muted-foreground">Checking demo flow...</p>
-                    ) : evalQuery.isError ? (
-                      <p className="mt-4 text-sm text-red-700">
-                        {(evalQuery.error as Error).message}
-                      </p>
-                    ) : evalQuery.data ? (
-                      <>
-                        <div className="mt-4 flex items-end gap-2">
-                          <span className="text-3xl font-semibold">
-                            {evalQuery.data.score}/{evalQuery.data.total}
-                          </span>
-                          <span className="pb-1 text-sm text-muted-foreground">
-                            checks passed
-                          </span>
-                        </div>
-                        <div className="mt-4 space-y-2">
-                          {evalQuery.data.checks.slice(0, 6).map((check) => (
-                            <div
-                              className="flex items-start justify-between gap-3 text-sm"
-                              key={check.key}
-                            >
-                              <span className="text-muted-foreground">{check.label}</span>
-                              <span
-                                className={
-                                  check.passed
-                                    ? "text-xs font-medium text-emerald-700"
-                                    : "text-xs font-medium text-red-700"
-                                }
-                              >
-                                {check.passed ? "pass" : "open"}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    ) : null}
-                  </div>
-
-                  <div className="rounded-lg border border-border bg-white p-5">
-                    <div className="flex items-center gap-2">
-                      <Activity className="h-4 w-4 text-primary" aria-hidden="true" />
-                      <h2 className="text-base font-semibold">Recent Workflows</h2>
-                    </div>
-                    {workflowsQuery.isLoading ? (
-                      <p className="mt-4 text-sm text-muted-foreground">Loading workflow runs...</p>
-                    ) : workflowsQuery.isError ? (
-                      <p className="mt-4 text-sm text-red-700">
-                        {(workflowsQuery.error as Error).message}
-                      </p>
-                    ) : workflowsQuery.data && workflowsQuery.data.length > 0 ? (
-                      <div className="mt-4 divide-y divide-border">
-                        {workflowsQuery.data.map((run) => (
-                          <div className="py-3" key={run.id}>
-                            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                              <span className="text-sm font-medium">
-                                {formatLabel(run.workflow_type)}
-                              </span>
-                              <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-                                {formatLabel(run.status)}
-                              </span>
-                            </div>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {run.steps.length} step{run.steps.length === 1 ? "" : "s"}
-                              {run.completed_at
-                                ? ` · ${new Date(run.completed_at).toLocaleString()}`
-                                : ""}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="mt-4 text-sm text-muted-foreground">
-                        No workflow runs recorded yet.
-                      </p>
-                    )}
-                  </div>
-                </section>
-
-                <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {overviewCards.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <div key={item.label} className="rounded-lg border border-border bg-white p-5">
-                        <div className="flex items-center justify-between">
-                          <h2 className="text-base font-semibold">{item.label}</h2>
-                          <Icon className="h-4 w-4 text-primary" aria-hidden="true" />
-                        </div>
-                        <p className="mt-3 text-sm text-muted-foreground">{item.detail}</p>
-                      </div>
-                    );
-                  })}
-                </section>
-              </>
+              <GuidedOverview
+                actionPending={nextActionMutation.isPending}
+                onAction={runAction}
+                onIntakeFinalized={refreshOverviewAfterIntake}
+                overview={overview}
+              />
             ) : activeTab === "Brief" ? (
               <BriefTab projectId={project.id} />
             ) : activeTab === "Evidence" ? (
@@ -351,66 +203,445 @@ export function ProjectOverview() {
   );
 }
 
-function briefOverviewCard(
-  item: (typeof emptyStates)[number],
-  isLoading: boolean,
-  opportunityBriefCount: number,
-) {
-  if (isLoading) {
-    return { ...item, detail: "Checking generated briefs..." };
-  }
-  if (opportunityBriefCount > 0) {
-    return {
-      ...item,
-      detail: `${opportunityBriefCount} generated brief${
-        opportunityBriefCount === 1 ? "" : "s"
-      }`,
-    };
-  }
-  return item;
+function GuidedOverview({
+  actionPending,
+  onAction,
+  onIntakeFinalized,
+  overview,
+}: {
+  actionPending: boolean;
+  onAction: (action: NextBestAction) => void;
+  onIntakeFinalized: () => Promise<string | null>;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const { current_recommendation, idea_readiness, next_best_action } = overview;
+  const snapshot = overview.strategic_snapshot;
+  const showIntake =
+    snapshot.current_stage === "draft_idea" ||
+    snapshot.current_stage === "structured_intake" ||
+    !snapshot.current_thesis ||
+    !snapshot.target_user ||
+    !snapshot.primary_problem;
+
+  return (
+    <section className="mt-6 space-y-6">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="rounded-lg border border-border bg-white p-5">
+          <div className="flex items-center gap-2">
+            <Lightbulb className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h2 className="text-base font-semibold">Current Recommendation</h2>
+          </div>
+          <h3 className="mt-4 text-xl font-semibold tracking-normal">
+            {current_recommendation.recommendation}
+          </h3>
+          <MarkdownContent
+            className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground"
+            markdown={current_recommendation.rationale}
+          />
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+              Confidence: {formatLabel(current_recommendation.confidence)}
+            </span>
+            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+              Next: {current_recommendation.next_action_label}
+            </span>
+          </div>
+        </div>
+
+        <div id="next-best-action" className="rounded-lg border border-border bg-white p-5">
+          <div className="flex items-center gap-2">
+            <Route className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h2 className="text-base font-semibold">Next Best Action</h2>
+          </div>
+          <h3 className="mt-4 text-lg font-semibold tracking-normal">
+            {next_best_action.label}
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            {next_best_action.description}
+          </p>
+          <div className="mt-4 rounded-md bg-muted p-3">
+            <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+              Why it matters
+            </h4>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              {next_best_action.why_it_matters}
+            </p>
+          </div>
+          <Button
+            className="mt-4 w-full"
+            disabled={actionPending}
+            onClick={() => onAction(next_best_action)}
+            type="button"
+          >
+            <Target className="h-4 w-4" aria-hidden="true" />
+            {actionPending ? "Opening..." : next_best_action.label}
+          </Button>
+          {overview.secondary_actions.length > 0 ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {overview.secondary_actions.map((action) => (
+                <Button
+                  key={action.action_type}
+                  onClick={() => onAction(action)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  {action.label}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {showIntake ? (
+        <StructuredIntakeWizard
+          onFinalized={onIntakeFinalized}
+          project={overview.project}
+        />
+      ) : null}
+
+      <div className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
+        <IdeaReadinessCard readiness={idea_readiness} />
+        <StrategicSnapshotCard snapshot={overview.strategic_snapshot} />
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
+        <EvidenceHealthCard health={overview.evidence_health} />
+        <RecentUpdatesCard updates={overview.recent_strategic_updates} />
+      </div>
+
+      <KeyAssumptionsAndRisks
+        assumptions={overview.key_assumptions}
+        risks={overview.key_risks}
+      />
+    </section>
+  );
 }
 
-function competitorOverviewCard(
-  item: (typeof emptyStates)[number],
-  isLoading: boolean,
-  competitorCount: number,
-  analyzedCompetitorCount: number,
-) {
-  if (isLoading) {
-    return { ...item, detail: "Checking competitors..." };
-  }
-  if (analyzedCompetitorCount > 0) {
-    return {
-      ...item,
-      detail: `${analyzedCompetitorCount} analyzed competitor${
-        analyzedCompetitorCount === 1 ? "" : "s"
-      }`,
-    };
-  }
-  if (competitorCount > 0) {
-    return {
-      ...item,
-      detail: `${competitorCount} saved competitor${competitorCount === 1 ? "" : "s"}`,
-    };
-  }
-  return { ...item, detail: "No competitors added yet." };
+function IdeaReadinessCard({ readiness }: { readiness: IdeaReadiness }) {
+  return (
+    <div className="rounded-lg border border-border bg-white p-5">
+      <div className="flex items-center gap-2">
+        <ClipboardCheck className="h-4 w-4 text-primary" aria-hidden="true" />
+        <h2 className="text-base font-semibold">Idea Readiness</h2>
+      </div>
+      <div className="mt-4 flex items-end gap-2">
+        <span className="text-3xl font-semibold">{readiness.score}%</span>
+        <span className="pb-1 text-sm text-muted-foreground">
+          {formatLabel(readiness.status)}
+        </span>
+      </div>
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+        <div className="h-full bg-primary" style={{ width: `${readiness.score}%` }} />
+      </div>
+      <p className="mt-4 text-sm leading-6 text-muted-foreground">
+        Weakest area: {readiness.weakest_area}
+      </p>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+        Recommended next action: {readiness.recommended_next_action}
+      </p>
+
+      <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+        <ReadinessList
+          emptyLabel="No completed items yet."
+          items={readiness.completed_items.slice(0, 6)}
+          title="Ready"
+        />
+        <ReadinessList
+          emptyLabel="Nothing missing."
+          items={readiness.missing_items.slice(0, 6)}
+          title="Missing or Needs Work"
+        />
+      </div>
+    </div>
+  );
 }
 
-function countOverviewCard(
-  item: (typeof emptyStates)[number],
-  isLoading: boolean,
-  count: number,
-  noun: string,
-) {
-  if (isLoading) {
-    return { ...item, detail: `Checking ${noun}s...` };
+function ReadinessList({
+  emptyLabel,
+  items,
+  title,
+}: {
+  emptyLabel: string;
+  items: IdeaReadiness["completed_items"];
+  title: string;
+}) {
+  return (
+    <div>
+      <h3 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+        {title}
+      </h3>
+      {items.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">{emptyLabel}</p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {items.map((item) => (
+            <div className="flex items-start gap-2 text-sm" key={item.key}>
+              {item.status === "complete" ? (
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+              ) : (
+                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              )}
+              <span className="text-muted-foreground">{item.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StrategicSnapshotCard({ snapshot }: { snapshot: StrategicSnapshot }) {
+  return (
+    <div className="rounded-lg border border-border bg-white p-5">
+      <div className="flex items-center gap-2">
+        <ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />
+        <h2 className="text-base font-semibold">Strategic Snapshot</h2>
+      </div>
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <SnapshotField label="Current Thesis" value={snapshot.current_thesis} />
+        <SnapshotField label="Target User" value={snapshot.target_user} />
+        <SnapshotField label="Primary Problem" value={snapshot.primary_problem} />
+        <SnapshotField label="Proposed Wedge" value={snapshot.proposed_wedge} />
+        <SnapshotField label="Main Risk" value={snapshot.main_risk} />
+        <SnapshotField label="Current Confidence" value={formatLabel(snapshot.current_confidence)} />
+      </div>
+    </div>
+  );
+}
+
+function SnapshotField({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div>
+      <h3 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+        {label}
+      </h3>
+      {value ? (
+        <MarkdownContent
+          className="mt-1 line-clamp-4 space-y-2 text-sm leading-6 text-foreground"
+          markdown={value}
+        />
+      ) : (
+        <a className="mt-1 block text-sm text-amber-700 hover:underline" href="#structured-intake">
+          Missing - structure idea
+        </a>
+      )}
+    </div>
+  );
+}
+
+function EvidenceHealthCard({
+  health,
+}: {
+  health: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>["evidence_health"];
+}) {
+  const metrics = [
+    ["Sources", health.source_count],
+    ["Competitors", health.competitor_count],
+    ["Cited claims", health.cited_claim_count],
+    ["Unsupported claims", health.unsupported_claim_count],
+    ["Validated assumptions", health.validated_assumption_count],
+  ] as const;
+  return (
+    <div className="rounded-lg border border-border bg-white p-5">
+      <div className="flex items-center gap-2">
+        <Database className="h-4 w-4 text-primary" aria-hidden="true" />
+        <h2 className="text-base font-semibold">Evidence Health</h2>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        {metrics.map(([label, value]) => (
+          <div className="rounded-md bg-muted px-3 py-2" key={label}>
+            <div className="text-xs text-muted-foreground">{label}</div>
+            <div className="mt-1 text-lg font-semibold">{value}</div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 text-sm leading-6 text-muted-foreground">
+        Weakest area: {health.weakest_evidence_area}
+      </p>
+      {health.last_evidence_update ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Last evidence update: {new Date(health.last_evidence_update).toLocaleString()}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function RecentUpdatesCard({
+  updates,
+}: {
+  updates: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>["recent_strategic_updates"];
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-white p-5">
+      <div className="flex items-center gap-2">
+        <ScrollText className="h-4 w-4 text-primary" aria-hidden="true" />
+        <h2 className="text-base font-semibold">Recent Strategic Updates</h2>
+      </div>
+      {updates.length === 0 ? (
+        <p className="mt-4 text-sm leading-6 text-muted-foreground">
+          No strategic updates yet. Structure the idea, add evidence, or generate the first
+          brief to start building the evidence trail.
+        </p>
+      ) : (
+        <div className="mt-4 divide-y divide-border">
+          {updates.slice(0, 6).map((update) => (
+            <div className="py-3" key={update.id}>
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="text-sm font-semibold">{update.title}</h3>
+                <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                  {formatLabel(update.related_entity_type)}
+                </span>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                {truncate(update.summary, 220)}
+              </p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                Why it matters: {truncate(update.why_it_matters, 180)}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KeyAssumptionsAndRisks({
+  assumptions,
+  risks,
+}: {
+  assumptions: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>["key_assumptions"];
+  risks: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>["key_risks"];
+}) {
+  return (
+    <div className="grid gap-5 lg:grid-cols-2">
+      <div className="rounded-lg border border-border bg-white p-5">
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />
+          <h2 className="text-base font-semibold">Key Assumptions</h2>
+        </div>
+        {assumptions.length === 0 ? (
+          <p className="mt-4 text-sm leading-6 text-muted-foreground">
+            No assumptions identified yet. Assumptions are the beliefs that must be true for
+            this idea to work.
+          </p>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {assumptions.slice(0, 4).map((assumption) => (
+              <div key={assumption.id} className="rounded-md border border-border p-3">
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                    {assumption.importance}
+                  </span>
+                  <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                    uncertainty {assumption.uncertainty}
+                  </span>
+                  {assumption.kill_risk ? (
+                    <span className="rounded-md bg-red-50 px-2 py-1 text-red-700">
+                      kill risk
+                    </span>
+                  ) : null}
+                </div>
+                <MarkdownContent
+                  className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
+                  markdown={assumption.text}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-border bg-white p-5">
+        <div className="flex items-center gap-2">
+          <Beaker className="h-4 w-4 text-primary" aria-hidden="true" />
+          <h2 className="text-base font-semibold">Key Risks</h2>
+        </div>
+        {risks.length === 0 ? (
+          <p className="mt-4 text-sm leading-6 text-muted-foreground">
+            No risks recorded yet. Risks show why the idea might fail and what should be
+            tested or mitigated.
+          </p>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {risks.slice(0, 4).map((risk) => (
+              <div key={risk.id} className="rounded-md border border-border p-3">
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                    {risk.severity}
+                  </span>
+                  <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                    likelihood {risk.likelihood}
+                  </span>
+                </div>
+                <MarkdownContent
+                  className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
+                  markdown={risk.text}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function tabForAction(action: NextBestAction): ProjectTab {
+  const hash = action.target_route?.split("#")[1];
+  return tabFromHash(hash ? `#${hash}` : "") ?? tabForActionType(action.action_type);
+}
+
+function anchorForAction(action: NextBestAction): string | null {
+  const hash = action.target_route?.split("#")[1];
+  if (hash && !tabFromHash(`#${hash}`)) {
+    return hash;
   }
-  if (count > 0) {
-    return { ...item, detail: `${count} ${noun}${count === 1 ? "" : "s"}` };
+  if (action.action_type === "structure_idea") {
+    return "structured-intake";
   }
-  return item;
+  return null;
+}
+
+function tabForActionType(actionType: string): ProjectTab {
+  if (actionType.includes("brief")) {
+    return "Brief";
+  }
+  if (actionType.includes("competitor")) {
+    return "Competitors";
+  }
+  if (actionType.includes("assumption")) {
+    return "Assumptions";
+  }
+  if (actionType.includes("experiment") || actionType.includes("result")) {
+    return "Experiments";
+  }
+  if (actionType.includes("decision")) {
+    return "Decisions";
+  }
+  if (actionType.includes("evidence")) {
+    return "Evidence";
+  }
+  return "Overview";
+}
+
+function tabFromHash(hash: string): ProjectTab | null {
+  const normalized = hash.replace("#", "").toLowerCase();
+  const match = tabs.find((tab) => tab.toLowerCase() === normalized);
+  return match ?? null;
+}
+
+function formatStage(stage: ProjectStage) {
+  return formatLabel(stage);
 }
 
 function formatLabel(value: string) {
   return value.replaceAll("_", " ");
+}
+
+function truncate(value: string, maxLength: number) {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength)}...`;
 }

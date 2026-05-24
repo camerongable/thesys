@@ -143,3 +143,19 @@ GET /api/projects/{project_id}/evals/mvp
 The workflow events endpoint streams Server-Sent Events from persisted
 `ai_runs` and `ai_steps`. The demo seed endpoint is available only in local
 dev mode and creates the fitness coach scenario from the implementation brief.
+
+Sprint 10 exposes guided strategic overview APIs:
+
+```http
+GET  /api/projects/{project_id}/overview
+GET  /api/projects/{project_id}/readiness
+GET  /api/projects/{project_id}/strategic-updates
+POST /api/projects/{project_id}/next-action
+```
+
+These endpoints compute founder-facing project state from existing structured
+records. The overview response includes current lifecycle stage, current
+recommendation, one primary next best action, idea readiness, strategic
+snapshot, evidence health, recent strategic updates, key assumptions, and key
+risks. The next-action endpoint returns the current recommended route/action;
+it does not start new V1 monitoring or agentic research work.

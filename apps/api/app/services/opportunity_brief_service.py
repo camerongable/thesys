@@ -48,7 +48,7 @@ class OpportunityBriefWorkflowError(RuntimeError):
 
 BRIEF_RETRIEVAL_TOP_K = 5
 BRIEF_EVIDENCE_TEXT_LIMIT = 700
-BRIEF_MAX_TOKENS = 1000
+BRIEF_MAX_TOKENS = 4000
 
 
 @dataclass(frozen=True)

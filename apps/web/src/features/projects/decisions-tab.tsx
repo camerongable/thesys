@@ -87,6 +87,7 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
       setLinkedArtifacts([]);
       setLinkedExperiments([]);
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "decisions"] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "mvp"] });
     },
   });
@@ -138,6 +139,7 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
           <label className="mt-3 block">
             <span className="text-sm font-medium">Title</span>
             <input
+              id="decision-title"
               className="mt-2 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
               onChange={(event) => setTitle(event.target.value)}
               value={title}
@@ -209,7 +211,7 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
             type="submit"
           >
             <ScrollText className="h-4 w-4" aria-hidden="true" />
-            {createMutation.isPending ? "Recording..." : "Record"}
+            {createMutation.isPending ? "Recording..." : "Record Decision"}
           </Button>
         </form>
 
@@ -231,7 +233,23 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
           {decisionsQuery.isLoading ? (
             <p className="mt-4 text-sm text-muted-foreground">Loading decisions...</p>
           ) : decisions.length === 0 ? (
-            <p className="mt-4 text-sm text-muted-foreground">No decisions recorded yet.</p>
+            <div className="mt-4 rounded-md border border-dashed border-border p-4">
+              <h3 className="text-sm font-semibold">No decisions recorded yet.</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Decisions capture what you chose, why you chose it, what evidence supported
+                it, and when to revisit it.
+              </p>
+              <Button
+                className="mt-3"
+                onClick={() => document.getElementById("decision-title")?.focus()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <ScrollText className="h-4 w-4" aria-hidden="true" />
+                Record Decision
+              </Button>
+            </div>
           ) : (
             <div className="mt-4 space-y-4">
               {decisions.map((decision) => (

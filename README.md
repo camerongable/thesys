@@ -4,11 +4,12 @@ This repository contains the local development foundation for Thesys: an
 AI-native workspace for turning rough business ideas into
 structured, evidence-backed strategic projects.
 
-The implementation follows `IMPLEMENTATION_BRIEF.md`. Sprints 0-9 establish the
+The implementation follows `IMPLEMENTATION_BRIEF.md`. Sprints 0-10 establish the
 monorepo, local infrastructure, project workspace foundation, AI gateway
 infrastructure, structured intake, evidence/RAG, cited briefs, competitors,
 assumptions, validation plans, decisions, demo seeding, MVP eval checks, and
-workflow trace UI, plus live LLM demo readiness.
+workflow trace UI, live LLM demo readiness, and a guided strategic overview
+that makes the next validation step explicit.
 
 ## Repository Layout
 
@@ -209,7 +210,8 @@ cost when LiteLLM returns it. If the provider fails, the API returns an
 actionable error and the failed workflow step stores the provider error.
 
 To test against OpenAI later, set `LITELLM_MODEL=dev-gpt-4o-mini` and provide
-`OPENAI_API_KEY` in `.env`.
+`OPENAI_API_KEY` in `.env`. To test against Gemini through Google AI Studio,
+set `LITELLM_MODEL=dev-gemini-3.5-flash` and provide `GEMINI_API_KEY`.
 
 ## Sprint 4 Manual Checks
 
@@ -258,6 +260,29 @@ seed response. The demo project includes:
 - logged experiment result
 - linked decision record
 - workflow traces and MVP readiness checks
+
+## Sprint 10 Guided Overview
+
+Project pages now open on a founder-facing command center. The Overview tab
+shows:
+
+- current lifecycle stage
+- current recommendation and rationale
+- one primary next best action
+- idea readiness instead of developer-facing MVP checks
+- strategic snapshot
+- evidence health
+- recent strategic updates
+- key assumptions and risks
+
+The supporting API endpoints are:
+
+```bash
+curl http://localhost:8000/api/projects/<project_id>/overview
+curl http://localhost:8000/api/projects/<project_id>/readiness
+curl http://localhost:8000/api/projects/<project_id>/strategic-updates
+curl -X POST http://localhost:8000/api/projects/<project_id>/next-action
+```
 
 Run the MVP readiness eval:
 

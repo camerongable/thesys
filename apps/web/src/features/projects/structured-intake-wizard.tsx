@@ -17,10 +17,11 @@ import { MarkdownContent } from "@/features/projects/markdown-content";
 import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 type StructuredIntakeWizardProps = {
+  onFinalized?: () => Promise<string | null> | string | null;
   project: Project;
 };
 
-export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps) {
+export function StructuredIntakeWizard({ onFinalized, project }: StructuredIntakeWizardProps) {
   const queryClient = useQueryClient();
   const [rawIdea, setRawIdea] = useState(
     project.short_description ?? project.current_thesis?.thesis_text ?? "",
@@ -28,7 +29,7 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
   const [intake, setIntake] = useState<StructuredProjectIntake | null>(null);
   const [answers, setAnswers] = useState<ClarifyingAnswer[]>([]);
   const [appliedAnswers, setAppliedAnswers] = useState<ClarifyingAnswer[]>([]);
-  const [finalized, setFinalized] = useState(false);
+  const [finalizedMessage, setFinalizedMessage] = useState<string | null>(null);
   const filledAnswers = answers.filter((answer) => answer.answer.trim().length > 0);
 
   const analyzeMutation = useMutation({
@@ -37,7 +38,7 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
       setIntake(result.intake);
       setAnswers(result.intake.clarifying_questions.map((question) => ({ question, answer: "" })));
       setAppliedAnswers([]);
-      setFinalized(false);
+      setFinalizedMessage(null);
     },
   });
 
@@ -52,7 +53,7 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
       setIntake(result.intake);
       setAppliedAnswers((current) => mergeAnswers(current, filledAnswers));
       setAnswers(result.intake.clarifying_questions.map((question) => ({ question, answer: "" })));
-      setFinalized(false);
+      setFinalizedMessage(null);
     },
   });
 
@@ -63,12 +64,23 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
         raw_idea: rawIdea,
         answers: mergeAnswers(appliedAnswers, filledAnswers),
       }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["projects", project.id] });
+    onSuccess: async (result) => {
+      queryClient.setQueryData(["projects", project.id], result.project);
+      await queryClient.invalidateQueries({
+        queryKey: ["projects", project.id],
+        refetchType: "active",
+      });
+      await queryClient.invalidateQueries({ queryKey: ["projects", project.id, "overview"] });
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", project.id, "workflows"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", project.id, "evals", "mvp"] });
-      setFinalized(true);
+      const nextActionLabel = (await onFinalized?.()) ?? null;
+      setAppliedAnswers([]);
+      setFinalizedMessage(
+        nextActionLabel
+          ? `Structured thesis saved to the project. Next best action is now ${nextActionLabel}.`
+          : "Structured thesis saved to the project.",
+      );
     },
   });
 
@@ -83,7 +95,7 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
   }
 
   return (
-    <section className="mt-6 rounded-lg border border-border bg-white p-5">
+    <section id="structured-intake" className="mt-6 rounded-lg border border-border bg-white p-5">
       <div className="flex flex-col gap-4 border-b border-border pb-5 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -105,6 +117,7 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
       <label className="mt-5 block">
         <span className="text-sm font-medium">Rough Idea</span>
         <textarea
+          id="structured-intake-raw-idea"
           className="mt-2 min-h-32 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
           maxLength={10000}
           onChange={(event) => setRawIdea(event.target.value)}
@@ -119,7 +132,7 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
           type="button"
         >
           <Sparkles className="h-4 w-4" aria-hidden="true" />
-          {analyzeMutation.isPending ? "Analyzing..." : "Analyze Idea"}
+          {analyzeMutation.isPending ? "Structuring..." : "Structure Idea"}
         </Button>
         <Button
           disabled={pending || !intake || filledAnswers.length === 0}
@@ -129,8 +142,8 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
         >
           <CircleHelp className="h-4 w-4" aria-hidden="true" />
           {answerMutation.isPending
-            ? "Applying..."
-            : `Apply ${filledAnswers.length === 1 ? "Answer" : "Answers"}`}
+            ? "Applying answers..."
+            : `Apply ${filledAnswers.length === 1 ? "Answer" : "Answers"} to Draft`}
         </Button>
         <Button
           disabled={pending || !intake}
@@ -139,7 +152,7 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
           variant="secondary"
         >
           <FileCheck className="h-4 w-4" aria-hidden="true" />
-          {finalizeMutation.isPending ? "Finalizing..." : "Finalize Intake"}
+          {finalizeMutation.isPending ? "Saving..." : "Save Structured Thesis"}
         </Button>
       </div>
 
@@ -165,8 +178,8 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
       {appliedAnswers.length > 0 ? (
         <div className="mt-4 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
           Applied {appliedAnswers.length}{" "}
-          {appliedAnswers.length === 1 ? "clarifying answer" : "clarifying answers"}. Finalize
-          will save them with the structured intake.
+          {appliedAnswers.length === 1 ? "clarifying answer" : "clarifying answers"} to the draft.
+          Save Structured Thesis to update the project and next best action.
         </div>
       ) : null}
 
@@ -216,9 +229,9 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
         </div>
       ) : null}
 
-      {finalized ? (
+      {finalizedMessage ? (
         <div className="mt-4 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          Structured intake saved to the project.
+          {finalizedMessage}
         </div>
       ) : null}
     </section>
