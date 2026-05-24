@@ -7,9 +7,11 @@ import { Button } from "@/components/ui/button";
 import {
   Artifact,
   generateOpportunityBrief,
+  listProjectWorkflows,
   listArtifacts,
   OpportunityBriefGenerateResult,
 } from "@/lib/api";
+import { MarkdownContent } from "@/features/projects/markdown-content";
 import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 type BriefTabProps = {
@@ -34,12 +36,25 @@ export function BriefTab({ projectId }: BriefTabProps) {
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "mvp"] });
     },
   });
+  const activeWorkflowQuery = useQuery({
+    queryKey: ["projects", projectId, "workflows", "opportunity_brief", "active"],
+    queryFn: () => listProjectWorkflows(projectId, 5),
+    enabled: generateMutation.isPending,
+    refetchInterval: generateMutation.isPending ? 1000 : false,
+  });
 
   const artifacts = artifactsQuery.data ?? [];
   const current = generateMutation.data?.artifact ?? artifacts[0] ?? null;
   const currentVersion = generateMutation.data?.version ?? current?.current_version ?? null;
   const claims = generateMutation.data?.claims ?? currentVersion?.claims ?? [];
   const unsupportedClaims = unsupportedFromResult(generateMutation.data, current);
+  const activeBriefRun = generateMutation.isPending
+    ? activeWorkflowQuery.data?.find(
+        (run) =>
+          run.workflow_type === "opportunity_brief" &&
+          (run.status === "queued" || run.status === "running"),
+      )
+    : null;
   const error = artifactsQuery.error ?? generateMutation.error ?? null;
 
   return (
@@ -80,7 +95,7 @@ export function BriefTab({ projectId }: BriefTabProps) {
           "citation_audit",
           "write_artifact_version",
         ]}
-        runId={generateMutation.data?.ai_run_id ?? null}
+        runId={generateMutation.data?.ai_run_id ?? activeBriefRun?.id ?? null}
       />
 
       {artifactsQuery.isLoading ? (
@@ -105,9 +120,7 @@ export function BriefTab({ projectId }: BriefTabProps) {
                 Version {currentVersion.version}
               </span>
             </div>
-            <div className="mt-5 whitespace-pre-wrap text-sm leading-7 text-foreground">
-              {currentVersion.markdown_content}
-            </div>
+            <MarkdownContent markdown={currentVersion.markdown_content} />
           </article>
 
           <aside className="space-y-5">
@@ -133,9 +146,10 @@ export function BriefTab({ projectId }: BriefTabProps) {
                           </span>
                         ) : null}
                       </div>
-                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                        {claim.text}
-                      </p>
+                      <MarkdownContent
+                        className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
+                        markdown={claim.text}
+                      />
                       {claim.evidence_links.length > 0 ? (
                         <div className="mt-3 space-y-2 border-t border-border pt-3">
                           {claim.evidence_links.map((link) => (
@@ -166,9 +180,11 @@ export function BriefTab({ projectId }: BriefTabProps) {
                   <p className="text-sm text-muted-foreground">None recorded.</p>
                 ) : (
                   unsupportedClaims.map((claim) => (
-                    <p key={claim} className="text-sm leading-6 text-muted-foreground">
-                      {claim}
-                    </p>
+                    <MarkdownContent
+                      className="space-y-2 text-sm leading-6 text-muted-foreground"
+                      key={claim}
+                      markdown={claim}
+                    />
                   ))
                 )}
               </div>

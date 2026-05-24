@@ -1,7 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from app.ai.litellm_client import LiteLLMClientError
+from app.ai.structured_output import StructuredOutputError
 from app.core.config import get_settings
+from app.core.errors import public_error_detail
 from app.core.logging import configure_logging
 from app.routers.ai import router as ai_router
 from app.routers.artifacts import router as artifacts_router
@@ -17,6 +21,20 @@ from app.routers.intake import router as intake_router
 from app.routers.me import router as me_router
 from app.routers.projects import router as projects_router
 from app.routers.workflows import router as workflows_router
+
+
+async def _litellm_error_handler(_: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content={"detail": public_error_detail("LiteLLM provider request failed.", exc)},
+    )
+
+
+async def _structured_output_error_handler(_: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content={"detail": public_error_detail("Structured output generation failed.", exc)},
+    )
 
 
 def create_app() -> FastAPI:
@@ -52,6 +70,8 @@ def create_app() -> FastAPI:
     app.include_router(evals_router)
     app.include_router(demo_router)
     app.include_router(ai_router)
+    app.add_exception_handler(LiteLLMClientError, _litellm_error_handler)
+    app.add_exception_handler(StructuredOutputError, _structured_output_error_handler)
 
     return app
 

@@ -7,6 +7,7 @@ import { FormEvent, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { AiModeIndicator } from "@/features/ai/ai-mode-indicator";
 import { createProject } from "@/lib/api";
 
 export function NewProjectForm() {
@@ -44,9 +45,12 @@ export function NewProjectForm() {
           Projects
         </Link>
 
-        <header className="mt-6 border-b border-border pb-6">
-          <p className="text-sm text-muted-foreground">Local workspace</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-normal">New Project</h1>
+        <header className="mt-6 flex flex-col gap-3 border-b border-border pb-6 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm text-muted-foreground">Local workspace</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-normal">New Project</h1>
+          </div>
+          <AiModeIndicator />
         </header>
 
         <form className="mt-6 rounded-lg border border-border bg-white p-5" onSubmit={onSubmit}>

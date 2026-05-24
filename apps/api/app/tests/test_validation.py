@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai.structured_output import StructuredOutputError
+from app.core.config import get_settings
 from app.db.models import (
     AIRun,
     AIStep,
@@ -52,6 +54,63 @@ def test_extract_assumptions_and_risks(client: TestClient, db_session: Session) 
     assert update_response.status_code == 200
     assert update_response.json()["status"] == "testing"
     assert float(update_response.json()["confidence_score"]) == 0.42
+
+
+def test_assumption_extraction_can_force_local_fallback_with_always_policy(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_MODEL", "dev-local-qwen")
+    monkeypatch.setenv("LLM_FALLBACK_POLICY", "always")
+    get_settings.cache_clear()
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("local fallback should not call structured output")
+
+    monkeypatch.setattr(
+        "app.services.validation_service.generate_structured_output",
+        fail_if_called,
+    )
+    create_response = client.post("/api/projects", json={"name": "Local assumption fallback"})
+    project_id = create_response.json()["id"]
+
+    response = client.post(f"/api/projects/{project_id}/assumptions/extract")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model_provider"] == "local-fallback"
+    assert body["used_stub"] is True
+    assert len(body["assumptions"]) >= 3
+    assert len(body["risks"]) >= 1
+
+
+def test_assumption_extraction_uses_emergency_fallback_after_generation_failure(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_MODEL", "dev-local-qwen")
+    monkeypatch.setenv("LLM_FALLBACK_POLICY", "emergency")
+    get_settings.cache_clear()
+
+    def fail_generation(*args, **kwargs):
+        raise StructuredOutputError("forced live generation failure")
+
+    monkeypatch.setattr(
+        "app.services.validation_service.generate_structured_output",
+        fail_generation,
+    )
+    create_response = client.post("/api/projects", json={"name": "Emergency assumptions"})
+    project_id = create_response.json()["id"]
+
+    response = client.post(f"/api/projects/{project_id}/assumptions/extract")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model_provider"] == "local-fallback"
+    assert body["used_stub"] is True
+    assert len(body["assumptions"]) >= 3
 
 
 def test_generate_validation_plan_and_log_result_updates_confidence(
@@ -104,6 +163,75 @@ def test_generate_validation_plan_and_log_result_updates_confidence(
     assert float(result_body["assumption"]["confidence_score"]) > old_confidence
     assert result_body["project_confidence_score"] is not None
     assert db_session.scalar(select(ExperimentResult)) is not None
+
+
+def test_validation_plan_can_force_local_fallback_with_always_policy(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_MODEL", "dev-local-qwen")
+    monkeypatch.setenv("LLM_FALLBACK_POLICY", "always")
+    get_settings.cache_clear()
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("local fallback should not call structured output")
+
+    monkeypatch.setattr(
+        "app.services.validation_service.generate_structured_output",
+        fail_if_called,
+    )
+    create_response = client.post("/api/projects", json={"name": "Local plan fallback"})
+    project_id = create_response.json()["id"]
+    extract_response = client.post(f"/api/projects/{project_id}/assumptions/extract")
+    assumption_id = extract_response.json()["assumptions"][0]["id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/experiments/validation-plan",
+        json={"assumption_ids": [assumption_id], "max_plans": 1},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model_provider"] == "local-fallback"
+    assert body["used_stub"] is True
+    assert len(body["experiments"]) == 1
+    assert body["experiments"][0]["assumption_id"] == assumption_id
+
+
+def test_validation_plan_uses_emergency_fallback_after_generation_failure(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_MODEL", "dev-local-qwen")
+    monkeypatch.setenv("LLM_FALLBACK_POLICY", "always")
+    get_settings.cache_clear()
+
+    def fail_generation(*args, **kwargs):
+        raise StructuredOutputError("forced live generation failure")
+
+    monkeypatch.setattr(
+        "app.services.validation_service.generate_structured_output",
+        fail_generation,
+    )
+    create_response = client.post("/api/projects", json={"name": "Emergency plan fallback"})
+    project_id = create_response.json()["id"]
+    extract_response = client.post(f"/api/projects/{project_id}/assumptions/extract")
+    assumption_id = extract_response.json()["assumptions"][0]["id"]
+
+    monkeypatch.setenv("LLM_FALLBACK_POLICY", "emergency")
+    get_settings.cache_clear()
+    response = client.post(
+        f"/api/projects/{project_id}/experiments/validation-plan",
+        json={"assumption_ids": [assumption_id], "max_plans": 1},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model_provider"] == "local-fallback"
+    assert body["used_stub"] is True
+    assert len(body["experiments"]) == 1
 
 
 def test_create_decision_with_links(client: TestClient, db_session: Session) -> None:

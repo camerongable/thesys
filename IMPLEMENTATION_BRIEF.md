@@ -2859,6 +2859,749 @@ This section is intentionally concrete. Implement in order. Do not skip vertical
 - Existing deterministic tests still pass with stub mode forced on.
 - README contains a repeatable live-demo setup path.
 
+Yep — the issue was the nested code fences. Here’s the corrected version wrapped in a **four-backtick Markdown fence**, so the inner triple-backtick code blocks won’t break it.
+
+````md
+## Sprint 10: Guided Strategic Overview and MVP Activation Flow
+
+### Purpose
+
+The MVP currently has the right underlying product primitives: projects, structured intake, opportunity briefs, evidence, competitors, assumptions, experiments, decisions, RAG, and workflow execution.
+
+However, the user experience must make the value obvious.
+
+This sprint converts the MVP from a technical project dashboard into a guided strategic validation workflow.
+
+The Overview page should answer:
+
+1. What is the current recommendation?
+2. What stage is this idea in?
+3. How ready is this idea for validation?
+4. What is missing?
+5. What should the user do next?
+6. Why does the next step matter?
+7. What changed recently?
+
+The goal is that a founder can open a project and immediately understand the state of the idea and the next action to take.
+
+---
+
+### Core Product Principle
+
+The MVP should help a user go from:
+
+> Rough idea → structured thesis → evidence-backed brief → assumptions → validation plan → decision
+
+The user should never wonder:
+
+> “What am I supposed to do now?”
+
+Every project should expose:
+
+- current stage
+- current recommendation
+- next best action
+- readiness state
+- missing items
+- strategic snapshot
+- evidence health
+- recent strategic updates
+
+---
+
+### MVP User Promise
+
+The MVP should support this promise:
+
+> Go from rough idea to evidence-backed validation plan.
+
+This sprint should prioritize clarity, guidance, and activation over adding new AI workflows.
+
+Do not build V1 features during this sprint. Do not add monitoring, collaboration, multi-project portfolio views, or advanced agentic research sprints yet.
+
+---
+
+## Project Lifecycle State Machine
+
+Add or compute a project lifecycle stage.
+
+### Supported MVP Stages
+
+```ts
+type ProjectStage =
+  | "draft_idea"
+  | "structured_intake"
+  | "brief_generated"
+  | "competitors_analyzed"
+  | "assumptions_identified"
+  | "validation_plan_created"
+  | "experiment_running"
+  | "decision_ready"
+  | "paused"
+  | "killed"
+  | "proceeding";
+```
+
+### Stage Definitions
+
+| Stage | Meaning | Primary CTA |
+|---|---|---|
+| `draft_idea` | User has entered only a rough idea | Structure Idea |
+| `structured_intake` | Idea has been clarified into structured fields | Generate Opportunity Brief |
+| `brief_generated` | Opportunity brief exists | Analyze Competitors |
+| `competitors_analyzed` | Competitor analysis exists | Review Assumptions |
+| `assumptions_identified` | Assumptions and risks exist | Create Validation Plan |
+| `validation_plan_created` | Validation plan exists | Start Experiment |
+| `experiment_running` | User is collecting validation evidence | Add Results |
+| `decision_ready` | There is enough evidence to make a decision | Record Decision |
+| `paused` | User paused the idea | Resume or Archive |
+| `killed` | User killed the idea | View Decision |
+| `proceeding` | User decided to continue | Plan Next Milestone |
+
+### Acceptance Criteria
+
+- Every project has a current stage.
+- The stage can be derived from existing project data when possible.
+- The stage determines the primary CTA.
+- The Overview page clearly displays the current stage.
+- The stage updates when major workflows complete.
+
+---
+
+## Overview Page Redesign
+
+Update the Overview page to show these sections in this order:
+
+1. Current Recommendation
+2. Next Best Action
+3. Idea Readiness
+4. Strategic Snapshot
+5. Evidence Health
+6. Recent Strategic Updates
+7. Key Assumptions / Risks
+
+Existing tabs can remain:
+
+- Overview
+- Brief
+- Evidence
+- Competitors
+- Assumptions
+- Experiments
+- Decisions
+
+But the Overview tab should become the guided command center for the project.
+
+---
+
+## 1. Current Recommendation Card
+
+### Purpose
+
+The user should immediately understand the system’s current opinion about the idea.
+
+This should be more useful than simply showing the current thesis.
+
+### Required Fields
+
+```ts
+type StrategicRecommendation = {
+  id: string;
+  project_id: string;
+  recommendation: string;
+  rationale: string;
+  confidence: "low" | "medium" | "high";
+  next_action_type: string;
+  next_action_label: string;
+  source_artifact_ids: string[];
+  source_evidence_ids: string[];
+  created_at: string;
+};
+```
+
+### Example
+
+```text
+Current Recommendation
+
+Narrow the idea before validating.
+
+This idea is currently too broad as a general plant education platform. The strongest initial wedge appears to be personalized plant-care guidance for beginner houseplant owners.
+
+Confidence: Medium-Low
+
+Next step:
+Choose a primary customer segment.
+```
+
+### Rules
+
+- If there is insufficient evidence, say so directly.
+- Do not overstate confidence.
+- Recommendation should be actionable.
+- Recommendation should update after major workflows complete.
+- Recommendation should be grounded in project state, artifacts, evidence, assumptions, and decisions.
+
+### Acceptance Criteria
+
+- Every project displays a current recommendation.
+- Recommendation is understandable to a non-technical founder.
+- Recommendation includes a rationale.
+- Recommendation includes confidence.
+- Recommendation includes a next step.
+- Recommendation does not read like generic AI advice.
+
+---
+
+## 2. Next Best Action Card
+
+### Purpose
+
+The user should always know the next thing to do.
+
+### Required Fields
+
+```ts
+type NextBestAction = {
+  action_type: string;
+  label: string;
+  description: string;
+  why_it_matters: string;
+  primary: boolean;
+  related_stage: ProjectStage;
+  target_route?: string;
+};
+```
+
+### CTA Mapping
+
+| Stage | Primary CTA | Why |
+|---|---|---|
+| `draft_idea` | Structure Idea | Turn rough idea into usable strategic inputs |
+| `structured_intake` | Generate Opportunity Brief | Create first evidence-backed view of opportunity |
+| `brief_generated` | Analyze Competitors | Understand substitutes and positioning gaps |
+| `competitors_analyzed` | Review Assumptions | Identify what must be true for the idea to work |
+| `assumptions_identified` | Create Validation Plan | Convert risk into concrete tests |
+| `validation_plan_created` | Start Experiment | Begin reducing uncertainty |
+| `experiment_running` | Add Results | Update confidence based on real-world evidence |
+| `decision_ready` | Record Decision | Capture whether to proceed, pivot, pause, or kill |
+
+### Example
+
+```text
+Next Best Action
+
+Choose your first customer segment.
+
+Why:
+Your idea currently mixes plant education, plant care, and social events. These may be different businesses.
+
+Recommended options:
+1. Beginner plant owners
+2. Plant hobbyists
+3. Local nurseries
+4. Apartment renters
+
+[Choose Segment]
+```
+
+### Acceptance Criteria
+
+- User sees exactly one primary recommended action.
+- User may see up to two secondary actions.
+- Button labels are outcome-oriented.
+- Avoid unclear labels like “Apply Answers” or “Finalize Intake.”
+- Every action explains why it matters.
+
+---
+
+## 3. Idea Readiness Card
+
+### Purpose
+
+Replace developer-facing MVP readiness with founder-facing idea readiness.
+
+The user does not need to know how many backend checks passed. The user needs to know whether the idea is ready to validate.
+
+### Required Fields
+
+```ts
+type IdeaReadiness = {
+  project_id: string;
+  score: number;
+  status:
+    | "not_ready"
+    | "partially_ready"
+    | "ready_for_validation"
+    | "decision_ready";
+  completed_items: ReadinessItem[];
+  missing_items: ReadinessItem[];
+  weakest_area: string;
+  recommended_next_action: string;
+};
+
+type ReadinessItem = {
+  key: string;
+  label: string;
+  status: "complete" | "missing" | "needs_work";
+  related_action?: string;
+};
+```
+
+### Readiness Dimensions
+
+Track these readiness dimensions:
+
+1. rough idea exists
+2. thesis exists
+3. target customer is specific
+4. problem hypothesis exists
+5. evidence sources exist
+6. competitors analyzed
+7. assumptions identified
+8. high-risk assumptions ranked
+9. validation plan exists
+10. decision recorded
+
+### Example
+
+```text
+Idea Readiness: 55%
+
+Status:
+Not ready for validation.
+
+Complete:
+✓ Rough idea
+✓ Initial thesis
+✓ Opportunity brief
+
+Missing:
+○ Specific target customer
+○ Competitor comparison
+○ Willingness-to-pay evidence
+○ Validation experiment
+
+Weakest area:
+Willingness to pay
+
+Recommended next action:
+Create a validation experiment.
+```
+
+### Acceptance Criteria
+
+- Rename “MVP Readiness” to “Idea Readiness.”
+- Do not show “checks passed” language.
+- Missing items are tied to actions.
+- Readiness updates as workflows complete.
+- Readiness is useful to a founder, not just a developer.
+
+---
+
+## 4. Strategic Snapshot Card
+
+### Purpose
+
+Give the user a compact view of the current strategic state.
+
+### Required Fields
+
+```ts
+type StrategicSnapshot = {
+  current_thesis?: string;
+  target_user?: string;
+  primary_problem?: string;
+  proposed_wedge?: string;
+  main_risk?: string;
+  current_confidence: "low" | "medium" | "high";
+  current_stage: ProjectStage;
+};
+```
+
+### Example
+
+```text
+Strategic Snapshot
+
+Current Thesis:
+Plant Parenthood helps beginner plant owners keep houseplants alive through personalized care guidance and simple troubleshooting.
+
+Target User:
+Not selected yet.
+
+Primary Problem:
+Plant-care information is fragmented and hard to apply to a specific home environment.
+
+Main Risk:
+Users may not pay because free plant-care content and existing care-reminder apps already exist.
+
+Current Stage:
+Structured Intake
+```
+
+### Acceptance Criteria
+
+- Snapshot is generated from structured project state.
+- Missing fields are explicitly shown as missing.
+- User can click missing fields to resolve them.
+- Snapshot should not be a long generated essay.
+
+---
+
+## 5. Evidence Health Card
+
+### Purpose
+
+Show whether the idea is grounded in evidence or still mostly assumption.
+
+### Required Fields
+
+```ts
+type EvidenceHealth = {
+  source_count: number;
+  competitor_count: number;
+  cited_claim_count: number;
+  unsupported_claim_count: number;
+  validated_assumption_count: number;
+  weakest_evidence_area: string;
+  last_evidence_update?: string;
+};
+```
+
+### Example
+
+```text
+Evidence Health
+
+Sources: 4
+Competitors: 3
+Cited claims: 12
+Unsupported claims: 5
+Validated assumptions: 0
+
+Weakest area:
+Willingness to pay
+```
+
+### Acceptance Criteria
+
+- Evidence health is derived from actual stored evidence, artifact, claim, competitor, and assumption data.
+- Unsupported claims are visible.
+- User can navigate from this card to Evidence or Assumptions.
+- The card should reinforce that the product is evidence-backed, not just AI-generated.
+
+---
+
+## 6. Recent Strategic Updates
+
+### Purpose
+
+Replace technical workflow logs with user-facing strategic updates.
+
+Users should not primarily see:
+
+```text
+evidence ingestion succeeded
+competitor analysis succeeded
+```
+
+They should see what changed and why it matters.
+
+### Required Fields
+
+```ts
+type StrategicUpdate = {
+  id: string;
+  project_id: string;
+  title: string;
+  summary: string;
+  why_it_matters: string;
+  related_entity_type:
+    | "artifact"
+    | "evidence"
+    | "competitor"
+    | "assumption"
+    | "experiment"
+    | "decision"
+    | "workflow";
+  related_entity_id: string;
+  created_at: string;
+};
+```
+
+### Examples
+
+```text
+Competitor analysis completed
+3 direct competitors found. Existing apps mostly focus on reminders and plant identification.
+
+Why it matters:
+This weakens a generic education-only thesis and suggests personalization or local/community learning may be better wedges.
+```
+
+```text
+Evidence added
+2 sources strengthened the beginner-care pain hypothesis.
+
+Why it matters:
+The problem appears real, but willingness to pay remains unvalidated.
+```
+
+```text
+Assumption created
+“Users will pay for personalized plant care” was added as a high-risk assumption.
+
+Why it matters:
+This is likely the most important validation risk before building.
+```
+
+### Acceptance Criteria
+
+- Rename “Recent Workflows” to “Recent Strategic Updates.”
+- Workflow records are translated into human-readable updates.
+- Updates explain why the event matters.
+- Users can click updates to view related artifacts, evidence, assumptions, competitors, experiments, or decisions.
+- Backend workflow status can still exist, but it should not be the primary user-facing language.
+
+---
+
+## 7. Guided Empty States
+
+### Purpose
+
+Every tab should teach the user what the section is for and what to do next.
+
+No tab should feel like an empty database table.
+
+### Evidence Empty State
+
+```text
+No evidence yet.
+
+Evidence is what keeps this from becoming generic AI advice. Add competitor pages, customer notes, market research, app reviews, Reddit threads, or interview notes.
+
+[Add Evidence]
+```
+
+### Assumptions Empty State
+
+```text
+No assumptions identified yet.
+
+Assumptions are the beliefs that must be true for this idea to work. The system will help you rank them by risk and turn them into validation experiments.
+
+[Extract Assumptions]
+```
+
+### Experiments Empty State
+
+```text
+No validation experiments yet.
+
+Experiments help you reduce uncertainty before building. Start by testing the riskiest assumption.
+
+[Create Validation Plan]
+```
+
+### Competitors Empty State
+
+```text
+No competitors analyzed yet.
+
+Competitor analysis helps identify substitutes, crowded areas, positioning gaps, and potential wedges.
+
+[Analyze Competitors]
+```
+
+### Decisions Empty State
+
+```text
+No decisions recorded yet.
+
+Decisions capture what you chose, why you chose it, what evidence supported it, and when to revisit it.
+
+[Record Decision]
+```
+
+### Acceptance Criteria
+
+- Every tab has a guided empty state.
+- Every empty state explains what the section is for.
+- Every empty state explains why it matters.
+- Every empty state has a clear CTA.
+
+---
+
+## API Requirements
+
+Add or update the following endpoints.
+
+### Get Overview
+
+```http
+GET /projects/{project_id}/overview
+```
+
+Returns:
+
+```json
+{
+  "project": {},
+  "current_recommendation": {},
+  "next_best_action": {},
+  "idea_readiness": {},
+  "strategic_snapshot": {},
+  "evidence_health": {},
+  "recent_strategic_updates": [],
+  "key_assumptions": [],
+  "key_risks": []
+}
+```
+
+### Get Readiness
+
+```http
+GET /projects/{project_id}/readiness
+```
+
+Returns user-facing idea readiness.
+
+### Get Strategic Updates
+
+```http
+GET /projects/{project_id}/strategic-updates
+```
+
+Returns recent strategic updates.
+
+### Execute Next Action
+
+```http
+POST /projects/{project_id}/next-action
+```
+
+Starts or routes to the recommended next action.
+
+---
+
+## Frontend Requirements
+
+### Hero Section
+
+The project hero should show:
+
+- project name
+- short description
+- current stage badge
+- optional system health badge, but visually secondary
+
+The LLM health badge should not dominate the user experience.
+
+### Overview Layout
+
+Use this layout:
+
+1. Current Recommendation
+2. Next Best Action
+3. Idea Readiness
+4. Strategic Snapshot
+5. Evidence Health
+6. Recent Strategic Updates
+7. Key Assumptions / Risks
+
+### Button Label Changes
+
+Replace implementation-oriented labels.
+
+| Current Label | Better Label |
+|---|---|
+| Analyze Idea | Structure Idea or Generate Opportunity Brief |
+| Apply Answers | Save Structured Thesis |
+| Finalize Intake | Generate Opportunity Brief |
+| Recent Workflows | Recent Strategic Updates |
+| MVP Readiness | Idea Readiness |
+| Checks Passed | Ready / Missing / Needs Work |
+
+### Acceptance Criteria
+
+- A first-time user can understand what the product does from the Overview page alone.
+- A user always knows the next recommended action.
+- The Overview page explains what is missing before the idea is ready to validate.
+- Backend workflow events are translated into strategic updates.
+- The product feels like a strategic advisor with evidence, not a dashboard of AI workflows.
+
+---
+
+## Backend Implementation Notes
+
+Prefer computed objects first where possible.
+
+Do not overcomplicate this sprint with unnecessary persistence if existing project data can support computed responses.
+
+Recommended approach:
+
+1. Add project `stage` if it does not exist.
+2. Add a backend service that computes:
+   - current recommendation
+   - next best action
+   - idea readiness
+   - strategic snapshot
+   - evidence health
+3. Add strategic updates using workflow outputs and existing entities.
+4. Persist strategic recommendations only if useful for history/versioning.
+5. Keep workflow execution unchanged unless needed for better strategic updates.
+
+### Suggested Service Names
+
+```text
+ProjectOverviewService
+IdeaReadinessService
+NextBestActionService
+StrategicRecommendationService
+StrategicUpdateService
+EvidenceHealthService
+```
+
+---
+
+## Non-Goals
+
+Do not build these in this sprint:
+
+- V1 monitoring engine
+- recurring watchlists
+- multi-user collaboration
+- multi-project portfolio dashboard
+- investor workflows
+- consultant workflows
+- product discovery workflows
+- advanced agentic research sprint
+- mobile app
+- billing
+- team workspaces
+
+This sprint is about MVP clarity and activation.
+
+---
+
+## Final Acceptance Criteria
+
+This sprint is complete when:
+
+- The Overview page no longer feels like a developer dashboard.
+- “MVP Readiness” has been replaced by user-facing “Idea Readiness.”
+- “Recent Workflows” has been replaced by “Recent Strategic Updates.”
+- Every project has a visible current stage.
+- Every project has a current recommendation.
+- Every project has one primary next best action.
+- The user can understand what is missing before validation.
+- The user can understand why the next action matters.
+- Empty states teach the workflow.
+- Button labels are outcome-oriented.
+- The app clearly supports the promise: rough idea → evidence-backed validation plan.
+````
+
 ---
 
 # 19. V1 Implementation Roadmap

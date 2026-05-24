@@ -66,3 +66,43 @@ class StructuredOutputTestRead(BaseModel):
     total_tokens: int | None
     total_cost: Decimal | None
     output: StructuredOutputSmokeResult
+
+
+class AIProviderKeyStatus(BaseModel):
+    openai: bool
+    anthropic: bool
+    gemini: bool
+    any_present: bool
+
+
+class LiteLLMReachabilityStatus(BaseModel):
+    base_url: str
+    endpoint: str
+    reachable: bool
+    status_code: int | None
+    error: str | None
+
+
+class AIStatusStructuredOutputCheck(BaseModel):
+    ok: bool
+    used_stub: bool | None
+    model_provider: str | None
+    model_name: str | None
+    total_tokens: int | None
+    total_cost: Decimal | None
+    error: str | None
+
+
+class AIStatusRead(BaseModel):
+    llm_stub_mode: Literal["auto", "always", "never"]
+    llm_fallback_policy: Literal["disabled", "emergency", "always"]
+    llm_structured_output_repair_attempts: int
+    resolved_mode: Literal["stub", "live"]
+    should_use_stub: bool
+    litellm_model: str
+    litellm_base_url: str
+    litellm_reachability: LiteLLMReachabilityStatus
+    provider_keys: AIProviderKeyStatus
+    embedding_model: str
+    embedding_dimension: int
+    structured_output_healthcheck: AIStatusStructuredOutputCheck | None = None

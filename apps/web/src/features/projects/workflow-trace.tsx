@@ -11,7 +11,10 @@ type WorkflowTraceProps = {
   pendingSteps?: string[];
 };
 
-type TraceStep = Pick<WorkflowStep, "step_name" | "status" | "latency_ms" | "error">;
+type TraceStep = Pick<
+  WorkflowStep,
+  "step_name" | "status" | "latency_ms" | "tokens" | "cost" | "error"
+>;
 const terminalStatuses = new Set(["succeeded", "failed", "cancelled"]);
 
 export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: WorkflowTraceProps) {
@@ -60,6 +63,8 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
       step_name,
       status: "queued",
       latency_ms: null,
+      tokens: null,
+      cost: null,
       error: null,
     }));
 
@@ -71,11 +76,27 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
           <p className="mt-1 text-xs text-muted-foreground">
             {run?.workflow_type ? formatLabel(run.workflow_type) : "Pending workflow"}
           </p>
+          {run ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {run.model_provider ?? "unknown provider"} · {run.model_name ?? "unknown model"}
+            </p>
+          ) : null}
         </div>
         {status ? (
           <span className={statusClass(status)}>{formatLabel(status)}</span>
         ) : null}
       </div>
+
+      {run ? (
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+          <span className="rounded-md bg-muted px-2 py-1">
+            Tokens: {run.total_tokens ?? "unavailable"}
+          </span>
+          <span className="rounded-md bg-muted px-2 py-1">
+            Cost: {formatCost(run.total_cost)}
+          </span>
+        </div>
+      ) : null}
 
       {streamError ? (
         <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -98,7 +119,15 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
                   </span>
                 </div>
                 {step.latency_ms !== null ? (
-                  <p className="mt-1 text-xs text-muted-foreground">{step.latency_ms} ms</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {[
+                      `${step.latency_ms} ms`,
+                      step.tokens !== null ? `${step.tokens} tokens` : null,
+                      step.cost !== null ? formatCost(step.cost) : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
                 ) : null}
                 {step.error ? (
                   <p className="mt-1 text-xs text-red-700">{step.error}</p>
@@ -112,6 +141,12 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
       {run?.output_summary ? (
         <p className="mt-4 border-t border-border pt-3 text-xs leading-5 text-muted-foreground">
           {run.output_summary}
+        </p>
+      ) : null}
+
+      {run?.error ? (
+        <p className="mt-4 border-t border-border pt-3 text-xs leading-5 text-red-700">
+          {run.error}
         </p>
       ) : null}
     </aside>
@@ -147,4 +182,21 @@ function statusClass(status: string) {
 
 function formatLabel(value: string) {
   return value.replaceAll("_", " ");
+}
+
+function formatCost(value: string | null) {
+  if (value === null) {
+    return "unavailable";
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return value;
+  }
+  if (numeric === 0) {
+    return "$0";
+  }
+  if (numeric < 0.01) {
+    return `$${numeric.toFixed(6)}`;
+  }
+  return `$${numeric.toFixed(2)}`;
 }

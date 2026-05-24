@@ -41,8 +41,11 @@ services:
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
     command: ["--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "4000"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      LITELLM_MASTER_KEY: sk-local-dev
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-local-dev}
+      OLLAMA_API_BASE: ${OLLAMA_API_BASE:-http://host.docker.internal:11434}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-dummy}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-dummy}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-dummy}
@@ -57,7 +60,7 @@ services:
       dockerfile: apps/api/Dockerfile
     command: >
       sh -c "alembic upgrade head &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
     environment:
       ENVIRONMENT: local
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -69,8 +72,10 @@ services:
       LITELLM_BASE_URL: http://litellm:4000
       LITELLM_API_KEY: ${LITELLM_API_KEY:-sk-local-dev}
       LITELLM_MODEL: ${LITELLM_MODEL:-dev-gpt-4o-mini}
-      LITELLM_TIMEOUT_SECONDS: ${LITELLM_TIMEOUT_SECONDS:-60}
+      LITELLM_TIMEOUT_SECONDS: ${LITELLM_TIMEOUT_SECONDS:-180}
       LLM_STUB_MODE: ${LLM_STUB_MODE:-always}
+      LLM_STRUCTURED_OUTPUT_REPAIR_ATTEMPTS: ${LLM_STRUCTURED_OUTPUT_REPAIR_ATTEMPTS:-1}
+      LLM_FALLBACK_POLICY: ${LLM_FALLBACK_POLICY:-emergency}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}

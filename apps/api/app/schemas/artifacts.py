@@ -71,7 +71,7 @@ class OpportunityBriefDraft(BaseModel):
     risks_and_kill_assumptions: str
     validation_plan: str
     recommendation: str
-    confidence_score: float = Field(ge=0, le=1)
+    confidence_score: float = Field(default=0.5, ge=0, le=1)
     claims: list[ClaimDraft] = Field(default_factory=list)
     assumptions: list[AssumptionDraft] = Field(default_factory=list)
     risks: list[RiskDraft] = Field(default_factory=list)

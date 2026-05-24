@@ -34,6 +34,16 @@ class Settings(BaseSettings):
         default="auto",
         validation_alias="LLM_STUB_MODE",
     )
+    llm_structured_output_repair_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        validation_alias="LLM_STRUCTURED_OUTPUT_REPAIR_ATTEMPTS",
+    )
+    llm_fallback_policy: Literal["disabled", "emergency", "always"] = Field(
+        default="emergency",
+        validation_alias="LLM_FALLBACK_POLICY",
+    )
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")

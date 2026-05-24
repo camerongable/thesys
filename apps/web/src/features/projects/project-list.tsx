@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, buttonVariants } from "@/components/ui/button";
+import { AiModeIndicator } from "@/features/ai/ai-mode-indicator";
 import { getMe, listProjects, seedDemoProject } from "@/lib/api";
 
 const summaryItems = [
@@ -51,10 +52,13 @@ export function ProjectList() {
               </p>
               <h1 className="mt-1 text-2xl font-semibold tracking-normal">Projects</h1>
             </div>
-            <Link className={buttonVariants()} href="/projects/new">
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              New Project
-            </Link>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <AiModeIndicator />
+              <Link className={buttonVariants()} href="/projects/new">
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                New Project
+              </Link>
+            </div>
           </header>
 
           {seedMutation.error ? (

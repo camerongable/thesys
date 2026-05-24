@@ -10,7 +10,11 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.ai.litellm_client import ChatMessage
+from app.ai.fallback_policy import (
+    should_use_fallback_after_error,
+    should_use_fallback_without_model,
+)
+from app.ai.litellm_client import ChatMessage, LLMCompletion
 from app.ai.prompts import OPPORTUNITY_BRIEF_PROMPT_VERSION
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
 from app.core.auth import AuthContext
@@ -40,6 +44,11 @@ from app.services import ai_run_service, project_service, retrieval_service
 
 class OpportunityBriefWorkflowError(RuntimeError):
     pass
+
+
+BRIEF_RETRIEVAL_TOP_K = 5
+BRIEF_EVIDENCE_TEXT_LIMIT = 700
+BRIEF_MAX_TOKENS = 1000
 
 
 @dataclass(frozen=True)
@@ -124,7 +133,6 @@ def generate_opportunity_brief(
         model_provider="stub" if settings.should_use_llm_stub else "litellm",
         model_name=settings.litellm_model,
     )
-    latest_step: AIStep | None = None
     try:
         project_state = _load_project_state_step(db, run, project)
         retrieval_results = _retrieve_evidence_step(db, auth, settings, run, project, project_state)
@@ -135,17 +143,12 @@ def generate_opportunity_brief(
             project_state,
             retrieval_results,
         )
-        latest_step = generate_step
         audited_draft = _citation_audit_step(db, run, draft, retrieval_results)
         write_result = _write_artifact_step(db, auth, run, project, audited_draft)
     except (StructuredOutputError, RuntimeError, HTTPException) as exc:
-        if latest_step is not None:
-            ai_run_service.fail_step(db, latest_step, error=str(exc))
         ai_run_service.fail_run(db, run, error=str(exc))
         raise
     except Exception as exc:
-        if latest_step is not None:
-            ai_run_service.fail_step(db, latest_step, error=str(exc))
         ai_run_service.fail_run(db, run, error=str(exc))
         raise OpportunityBriefWorkflowError("Opportunity brief generation failed.") from exc
 
@@ -224,7 +227,7 @@ def _retrieve_evidence_step(
     project_state: dict[str, Any],
 ):
     query = _brief_retrieval_query(project_state)
-    payload = EvidenceRetrieveCreate(query=query, mode="hybrid", top_k=12)
+    payload = EvidenceRetrieveCreate(query=query, mode="hybrid", top_k=BRIEF_RETRIEVAL_TOP_K)
     step = ai_run_service.start_step(
         db,
         run,
@@ -272,23 +275,55 @@ def _generate_draft_step(
         },
     )
     started = perf_counter()
-    result = generate_structured_output(
-        settings,
-        OpportunityBriefDraft,
-        messages,
-        model=settings.litellm_model,
-        temperature=0.0,
-    )
-    draft = OpportunityBriefDraft.model_validate(result.parsed)
+    try:
+        if should_use_fallback_without_model(settings):
+            draft = _fallback_opportunity_brief(project_state, retrieval_results)
+            completion = _fallback_completion(
+                settings,
+                messages,
+                draft,
+                "opportunity_brief_policy_always",
+            )
+        else:
+            try:
+                result = generate_structured_output(
+                    settings,
+                    OpportunityBriefDraft,
+                    messages,
+                    model=settings.litellm_model,
+                    temperature=0.0,
+                    max_tokens=BRIEF_MAX_TOKENS,
+                )
+                draft = OpportunityBriefDraft.model_validate(result.parsed)
+                completion = result.completion
+            except (StructuredOutputError, RuntimeError) as exc:
+                if not should_use_fallback_after_error(settings):
+                    raise
+                draft = _fallback_opportunity_brief(project_state, retrieval_results)
+                completion = _fallback_completion(
+                    settings,
+                    messages,
+                    draft,
+                    "opportunity_brief_emergency",
+                    exc,
+                )
+    except Exception as exc:
+        ai_run_service.fail_step(
+            db,
+            step,
+            error=str(exc),
+            latency_ms=int((perf_counter() - started) * 1000),
+        )
+        raise
     completed_step = ai_run_service.complete_step(
         db,
         step,
         output_json=draft.model_dump(mode="json"),
         latency_ms=int((perf_counter() - started) * 1000),
-        tokens=result.completion.total_tokens,
-        cost=result.completion.total_cost,
+        tokens=completion.total_tokens,
+        cost=completion.total_cost,
     )
-    return draft, result.completion, completed_step
+    return draft, completion, completed_step
 
 
 def _citation_audit_step(
@@ -437,7 +472,9 @@ def _brief_messages(
             role="user",
             content=(
                 "Return the opportunity brief as structured JSON only. Include claims, "
-                "assumptions, risks, citations, and unsupported claims.\n\n"
+                "assumptions, risks, citations, and unsupported claims. Keep the brief "
+                "concise for local development: each narrative field must be one sentence, "
+                "with exactly 2 claims, 1 assumption, and 1 risk.\n\n"
                 f"{json.dumps(payload, indent=2, sort_keys=True)}"
             ),
         ),
@@ -469,12 +506,167 @@ def _evidence_bundles(retrieval_results) -> list[dict[str, Any]]:
             "url": result.url,
             "source_type": result.source_type,
             "chunk_index": result.chunk_index,
-            "text": result.text[:1800],
+            "text": result.text[:BRIEF_EVIDENCE_TEXT_LIMIT],
             "score": result.score,
             "retrieved_at": retrieved_at,
         }
         for result in retrieval_results
     ]
+
+
+def _fallback_opportunity_brief(
+    project_state: dict[str, Any],
+    retrieval_results,
+) -> OpportunityBriefDraft:
+    project_name = str(project_state.get("name") or "This project")
+    description = str(project_state.get("short_description") or "the target workflow")
+    thesis = str(project_state.get("current_thesis") or description)
+    citations = _fallback_citations(retrieval_results)
+    claims = [
+        ClaimDraft(
+            text=f"{project_name} is currently framed around: {description}",
+            claim_type="project_state",
+            confidence_score=0.7,
+            support_level="inference",
+            citations=[],
+        )
+    ]
+    if citations:
+        claims.append(
+            ClaimDraft(
+                text=(
+                    "The brief has retrieved evidence available, but source quality still "
+                    "needs review."
+                ),
+                claim_type="evidence_coverage",
+                confidence_score=0.55,
+                support_level="supported",
+                citations=citations[:1],
+            )
+        )
+
+    return OpportunityBriefDraft(
+        executive_summary=(
+            f"{project_name} should be treated as an early opportunity around {description}; "
+            "the next step is validating user urgency with direct evidence."
+        ),
+        product_hypothesis=(
+            f"If target users struggle with {description}, then a focused workflow with clear "
+            "guidance and visible source quality can create a useful first product."
+        ),
+        target_user=(
+            ", ".join(project_state.get("customer_segments") or [])
+            or "Early target users who already feel the problem and are trying current workarounds."
+        ),
+        problem_analysis=(
+            f"The current thesis says: {thesis}. This remains a hypothesis until repeated "
+            "user pain and switching behavior are observed."
+        ),
+        current_alternatives=[
+            "Manual search and generic online content",
+            "Advice from friends, communities, or broad-purpose tools",
+        ],
+        market_context=(
+            "Market context is not yet strongly evidenced in the workspace and should be "
+            "validated before making sizing claims."
+        ),
+        competitor_landscape=(
+            "Competitor understanding is preliminary; compare alternatives on source quality, "
+            "workflow specificity, and repeat usage."
+        ),
+        differentiation_and_wedge=(
+            "The wedge should be a narrow, repeated workflow where the product is clearly more "
+            "trustworthy or easier than current alternatives."
+        ),
+        risks_and_kill_assumptions=(
+            "The main kill risk is that users view the idea as helpful content rather than a "
+            "frequent problem worth changing behavior for."
+        ),
+        validation_plan=(
+            "Interview target users, observe their current workaround, and test whether a "
+            "lightweight prototype earns a follow-up action."
+        ),
+        recommendation=(
+            "Proceed with focused discovery and prototype validation before expanding scope."
+        ),
+        confidence_score=0.35,
+        claims=claims,
+        assumptions=[
+            AssumptionDraft(
+                text="Target users experience the problem frequently enough to change behavior.",
+                category="demand",
+                importance="critical",
+                uncertainty="high",
+                kill_risk=True,
+                confidence_score=0.35,
+                recommended_test="Run five discovery interviews focused on recent behavior.",
+            )
+        ],
+        risks=[
+            RiskDraft(
+                text=(
+                    "The workspace may not yet contain enough direct evidence for confident "
+                    "prioritization."
+                ),
+                category="evidence",
+                severity="high",
+                likelihood="high",
+                mitigation="Add direct user interviews and competitor source notes.",
+            )
+        ],
+        citations=citations,
+        unsupported_claims=[
+            "Market size, willingness to pay, and competitor gaps remain unvalidated."
+        ],
+    )
+
+
+def _fallback_citations(retrieval_results) -> list[Citation]:
+    citations: list[Citation] = []
+    seen: set[tuple[str | None, str | None, str]] = set()
+    for result in retrieval_results:
+        quote = result.text[:260]
+        key = (result.url, result.title, quote)
+        if key in seen:
+            continue
+        seen.add(key)
+        citations.append(
+            Citation(
+                source_id=result.source_id,
+                chunk_id=result.chunk_id,
+                title=result.title,
+                url=result.url,
+                quote=quote,
+                relevance_score=result.score,
+            )
+        )
+    return citations[:3]
+
+
+def _fallback_completion(
+    settings: Settings,
+    messages: list[ChatMessage],
+    draft: OpportunityBriefDraft,
+    fallback_name: str,
+    error: BaseException | None = None,
+) -> LLMCompletion:
+    content = draft.model_dump_json()
+    prompt_tokens = sum(len(message.content.split()) for message in messages)
+    completion_tokens = len(content.split())
+    return LLMCompletion(
+        content=content,
+        model_provider="local-fallback",
+        model_name=settings.litellm_model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        total_cost=Decimal("0"),
+        raw_response={
+            "fallback": fallback_name,
+            "error": str(error)[:500] if error is not None else None,
+        },
+        used_stub=True,
+    )
 
 
 def _audit_citations(

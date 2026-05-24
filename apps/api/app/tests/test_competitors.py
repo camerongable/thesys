@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai.structured_output import StructuredOutputError
+from app.core.config import get_settings
 from app.db.models import (
     AIRun,
     AIStep,
@@ -143,6 +145,133 @@ def test_competitor_analysis_can_create_seeded_competitors(client: TestClient) -
     list_response = client.get(f"/api/projects/{project_id}/competitors")
     assert list_response.status_code == 200
     assert list_response.json()["competitors"][0]["name"] == "ChatGPT"
+
+
+def test_competitor_analysis_can_force_local_fallback_with_always_policy(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_MODEL", "dev-local-qwen")
+    monkeypatch.setenv("LLM_FALLBACK_POLICY", "always")
+    get_settings.cache_clear()
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("local fallback should not call structured output")
+
+    monkeypatch.setattr(
+        "app.services.competitor_service.generate_structured_output",
+        fail_if_called,
+    )
+    create_response = client.post("/api/projects", json={"name": "Local fallback competitors"})
+    project_id = create_response.json()["id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/competitors/analyze",
+        json={
+            "ingest_urls": False,
+            "seed_competitors": [
+                {
+                    "name": "Plant.id",
+                    "url": "https://plant.id",
+                    "category": "direct",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["used_stub"] is True
+    assert body["model_provider"] == "local-fallback"
+    assert body["competitors"][0]["name"] == "Plant.id"
+    assert body["artifact"]["current_version"]["version"] == 1
+
+
+def test_competitor_analysis_uses_emergency_fallback_after_generation_failure(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_MODEL", "dev-local-qwen")
+    monkeypatch.setenv("LLM_FALLBACK_POLICY", "emergency")
+    get_settings.cache_clear()
+
+    def fail_generate(*args, **kwargs):
+        raise StructuredOutputError("forced live generation failure")
+
+    monkeypatch.setattr(
+        "app.services.competitor_service.generate_structured_output",
+        fail_generate,
+    )
+    create_response = client.post("/api/projects", json={"name": "Emergency competitors"})
+    project_id = create_response.json()["id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/competitors/analyze",
+        json={
+            "ingest_urls": False,
+            "seed_competitors": [
+                {
+                    "name": "Plant.id",
+                    "url": "https://plant.id",
+                    "category": "direct",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["used_stub"] is True
+    assert body["model_provider"] == "local-fallback"
+    assert body["competitors"][0]["name"] == "Plant.id"
+
+
+def test_competitor_analysis_generation_failure_marks_step_failed(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    create_response = client.post("/api/projects", json={"name": "Failing competitors"})
+    project_id = create_response.json()["id"]
+
+    def fail_generate(*args, **kwargs):
+        raise StructuredOutputError("forced generation failure")
+
+    monkeypatch.setattr(
+        "app.services.competitor_service.generate_structured_output",
+        fail_generate,
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/competitors/analyze",
+        json={"ingest_urls": False},
+    )
+
+    assert response.status_code == 502
+    assert "forced generation failure" in response.json()["detail"]
+
+    run = db_session.scalar(
+        select(AIRun)
+        .where(
+            AIRun.project_id == uuid.UUID(project_id),
+            AIRun.workflow_type == "competitor_analysis",
+        )
+        .order_by(AIRun.created_at.desc())
+    )
+    assert run is not None
+    assert run.status == "failed"
+    step = db_session.scalar(
+        select(AIStep).where(
+            AIStep.ai_run_id == run.id,
+            AIStep.step_name == "extract_competitor_profiles",
+        )
+    )
+    assert step is not None
+    assert step.status == "failed"
+    assert step.error == "forced generation failure"
+    assert step.latency_ms is not None
 
 
 def test_create_competitor_accepts_bare_domain(client: TestClient) -> None:

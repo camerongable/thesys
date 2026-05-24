@@ -25,12 +25,14 @@ import {
   listExperiments,
   listProjectWorkflows,
 } from "@/lib/api";
+import { AiModeIndicator } from "@/features/ai/ai-mode-indicator";
 import { AssumptionsTab } from "@/features/projects/assumptions-tab";
 import { BriefTab } from "@/features/projects/brief-tab";
 import { CompetitorsTab } from "@/features/projects/competitors-tab";
 import { DecisionsTab } from "@/features/projects/decisions-tab";
 import { EvidenceTab } from "@/features/projects/evidence-tab";
 import { ExperimentsTab } from "@/features/projects/experiments-tab";
+import { MarkdownContent } from "@/features/projects/markdown-content";
 import { StructuredIntakeWizard } from "@/features/projects/structured-intake-wizard";
 
 const emptyStates = [
@@ -145,9 +147,12 @@ export function ProjectOverview() {
                     {project.short_description ?? "No description"}
                   </p>
                 </div>
-                <span className="w-fit rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-                  {project.status}
-                </span>
+                <div className="flex flex-col gap-2 sm:items-end">
+                  <AiModeIndicator />
+                  <span className="w-fit rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                    {project.status}
+                  </span>
+                </div>
               </div>
             </header>
 
@@ -175,9 +180,10 @@ export function ProjectOverview() {
               <>
                 <section className="mt-6 rounded-lg border border-border bg-white p-5">
                   <h2 className="text-base font-semibold">Current Thesis</h2>
-                  <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                    {project.current_thesis?.thesis_text ?? "No thesis recorded yet."}
-                  </p>
+                  <MarkdownContent
+                    className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground"
+                    markdown={project.current_thesis?.thesis_text ?? "No thesis recorded yet."}
+                  />
                 </section>
 
                 {project.customer_segments.length > 0 || project.problems.length > 0 ? (
@@ -195,9 +201,10 @@ export function ProjectOverview() {
                                 </span>
                               ) : null}
                             </div>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              {segment.description ?? "No segment notes yet."}
-                            </p>
+                            <MarkdownContent
+                              className="mt-1 space-y-2 text-sm leading-6 text-muted-foreground"
+                              markdown={segment.description ?? "No segment notes yet."}
+                            />
                           </div>
                         ))}
                       </div>
@@ -208,7 +215,10 @@ export function ProjectOverview() {
                       <div className="mt-3 space-y-3">
                         {project.problems.map((problem) => (
                           <div key={problem.id}>
-                            <div className="text-sm font-medium">{problem.description}</div>
+                            <MarkdownContent
+                              className="space-y-2 text-sm font-medium leading-6 text-foreground"
+                              markdown={problem.description}
+                            />
                             <p className="mt-1 text-sm text-muted-foreground">
                               Severity: {problem.severity ?? "unknown"}
                             </p>

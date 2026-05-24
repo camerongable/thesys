@@ -13,6 +13,7 @@ import {
   Project,
   StructuredProjectIntake,
 } from "@/lib/api";
+import { MarkdownContent } from "@/features/projects/markdown-content";
 import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 type StructuredIntakeWizardProps = {
@@ -173,9 +174,10 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
         <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
           <div className="min-w-0">
             <h3 className="text-sm font-semibold">{intake.project_name}</h3>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              {intake.one_sentence_summary}
-            </p>
+            <MarkdownContent
+              className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
+              markdown={intake.one_sentence_summary}
+            />
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <ListBlock label="Target Users" values={intake.target_users} />
               <ListBlock label="Problem Hypotheses" values={intake.problem_hypotheses} />
@@ -183,7 +185,11 @@ export function StructuredIntakeWizard({ project }: StructuredIntakeWizardProps)
               <ListBlock label="Key Uncertainties" values={intake.key_uncertainties} />
             </div>
             <div className="mt-4 rounded-md bg-muted px-3 py-2 text-sm">
-              <span className="font-medium">Proposed solution:</span> {intake.proposed_solution}
+              <span className="font-medium">Proposed solution:</span>
+              <MarkdownContent
+                className="mt-1 space-y-2 text-sm leading-6 text-muted-foreground"
+                markdown={intake.proposed_solution}
+              />
             </div>
           </div>
 
@@ -242,7 +248,7 @@ function ListBlock({ label, values }: { label: string; values: string[] }) {
       {values.length === 0 ? (
         <p className="mt-2 text-sm text-muted-foreground">Unknown</p>
       ) : (
-        <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
           {values.map((value) => (
             <li key={value}>{value}</li>
           ))}

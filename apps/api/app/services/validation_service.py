@@ -9,7 +9,11 @@ from fastapi import HTTPException, status
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.ai.litellm_client import ChatMessage
+from app.ai.fallback_policy import (
+    should_use_fallback_after_error,
+    should_use_fallback_without_model,
+)
+from app.ai.litellm_client import ChatMessage, LLMCompletion
 from app.ai.prompts import ASSUMPTION_EXTRACTION_PROMPT_VERSION, VALIDATION_PLAN_PROMPT_VERSION
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
 from app.core.auth import AuthContext
@@ -35,6 +39,7 @@ from app.schemas.validation import (
     AssumptionUpdate,
     DecisionCreate,
     ExperimentResultCreate,
+    ValidationPlanDraft,
     ValidationPlanGenerateCreate,
     ValidationPlanSetDraft,
 )
@@ -161,14 +166,37 @@ def extract_assumptions_and_risks(
             input_json={"project_id": str(project.id)},
         )
         started = perf_counter()
-        draft_result = generate_structured_output(
-            settings,
-            AssumptionExtractionDraft,
-            _assumption_messages(project, _project_state(project)),
-            model=settings.litellm_model,
-            temperature=0.0,
-        )
-        draft = AssumptionExtractionDraft.model_validate(draft_result.parsed)
+        messages = _assumption_messages(project, _project_state(project))
+        if should_use_fallback_without_model(settings):
+            draft = _fallback_assumption_extraction(project)
+            completion = _fallback_completion(
+                settings,
+                messages,
+                draft,
+                "assumption_extraction_policy_always",
+            )
+        else:
+            try:
+                draft_result = generate_structured_output(
+                    settings,
+                    AssumptionExtractionDraft,
+                    messages,
+                    model=settings.litellm_model,
+                    temperature=0.0,
+                )
+                draft = AssumptionExtractionDraft.model_validate(draft_result.parsed)
+                completion = draft_result.completion
+            except (StructuredOutputError, RuntimeError) as exc:
+                if not should_use_fallback_after_error(settings):
+                    raise
+                draft = _fallback_assumption_extraction(project)
+                completion = _fallback_completion(
+                    settings,
+                    messages,
+                    draft,
+                    "assumption_extraction_emergency",
+                    exc,
+                )
         assumptions = _upsert_assumptions(db, auth, project, draft.assumptions)
         risks = _upsert_risks(db, auth, project, draft.risks)
         _recalculate_project_confidence(db, auth, project.id)
@@ -181,8 +209,8 @@ def extract_assumptions_and_risks(
                 "risk_ids": [str(item.id) for item in risks],
             },
             latency_ms=int((perf_counter() - started) * 1000),
-            tokens=draft_result.completion.total_tokens,
-            cost=draft_result.completion.total_cost,
+            tokens=completion.total_tokens,
+            cost=completion.total_cost,
         )
     except (StructuredOutputError, RuntimeError, HTTPException) as exc:
         if step is not None:
@@ -199,21 +227,21 @@ def extract_assumptions_and_risks(
         db,
         run,
         output_summary=f"Created or updated {len(assumptions)} assumptions and {len(risks)} risks.",
-        total_tokens=draft_result.completion.total_tokens,
-        total_cost=draft_result.completion.total_cost,
-        model_provider=draft_result.completion.model_provider,
-        model_name=draft_result.completion.model_name,
+        total_tokens=completion.total_tokens,
+        total_cost=completion.total_cost,
+        model_provider=completion.model_provider,
+        model_name=completion.model_name,
     )
     return AssumptionExtractionResult(
         run=run,
         step=completed_step,
         assumptions=_load_assumptions(db, auth, project.id),
         risks=_load_risks(db, auth, project.id),
-        model_provider=draft_result.completion.model_provider,
-        model_name=draft_result.completion.model_name,
-        used_stub=draft_result.completion.used_stub,
-        total_tokens=draft_result.completion.total_tokens,
-        total_cost=draft_result.completion.total_cost,
+        model_provider=completion.model_provider,
+        model_name=completion.model_name,
+        used_stub=completion.used_stub,
+        total_tokens=completion.total_tokens,
+        total_cost=completion.total_cost,
     )
 
 
@@ -288,14 +316,37 @@ def generate_validation_plan(
             },
         )
         started = perf_counter()
-        draft_result = generate_structured_output(
-            settings,
-            ValidationPlanSetDraft,
-            _validation_plan_messages(project, assumptions),
-            model=settings.litellm_model,
-            temperature=0.0,
-        )
-        draft = ValidationPlanSetDraft.model_validate(draft_result.parsed)
+        messages = _validation_plan_messages(project, assumptions)
+        if should_use_fallback_without_model(settings):
+            draft = _fallback_validation_plan(project, assumptions)
+            completion = _fallback_completion(
+                settings,
+                messages,
+                draft,
+                "validation_plan_policy_always",
+            )
+        else:
+            try:
+                draft_result = generate_structured_output(
+                    settings,
+                    ValidationPlanSetDraft,
+                    messages,
+                    model=settings.litellm_model,
+                    temperature=0.0,
+                )
+                draft = ValidationPlanSetDraft.model_validate(draft_result.parsed)
+                completion = draft_result.completion
+            except (StructuredOutputError, RuntimeError) as exc:
+                if not should_use_fallback_after_error(settings):
+                    raise
+                draft = _fallback_validation_plan(project, assumptions)
+                completion = _fallback_completion(
+                    settings,
+                    messages,
+                    draft,
+                    "validation_plan_emergency",
+                    exc,
+                )
         artifact = _write_validation_plan_artifact(db, auth, run, project, draft)
         experiments = _write_experiments(db, auth, project, assumptions, draft)
         db.flush()
@@ -307,8 +358,8 @@ def generate_validation_plan(
                 "experiment_ids": [str(item.id) for item in experiments],
             },
             latency_ms=int((perf_counter() - started) * 1000),
-            tokens=draft_result.completion.total_tokens,
-            cost=draft_result.completion.total_cost,
+            tokens=completion.total_tokens,
+            cost=completion.total_cost,
         )
     except (StructuredOutputError, RuntimeError, HTTPException) as exc:
         if step is not None:
@@ -325,10 +376,10 @@ def generate_validation_plan(
         db,
         run,
         output_summary=draft.summary[:1000],
-        total_tokens=draft_result.completion.total_tokens,
-        total_cost=draft_result.completion.total_cost,
-        model_provider=draft_result.completion.model_provider,
-        model_name=draft_result.completion.model_name,
+        total_tokens=completion.total_tokens,
+        total_cost=completion.total_cost,
+        model_provider=completion.model_provider,
+        model_name=completion.model_name,
     )
     artifact = _get_artifact(db, auth, project.id, artifact.id)
     experiments = [
@@ -339,11 +390,11 @@ def generate_validation_plan(
         step=completed_step,
         artifact=artifact,
         experiments=experiments,
-        model_provider=draft_result.completion.model_provider,
-        model_name=draft_result.completion.model_name,
-        used_stub=draft_result.completion.used_stub,
-        total_tokens=draft_result.completion.total_tokens,
-        total_cost=draft_result.completion.total_cost,
+        model_provider=completion.model_provider,
+        model_name=completion.model_name,
+        used_stub=completion.used_stub,
+        total_tokens=completion.total_tokens,
+        total_cost=completion.total_cost,
     )
 
 
@@ -520,6 +571,156 @@ def _validation_plan_messages(
             content=f"Return validation plans as JSON only.\n\n{json.dumps(payload, indent=2)}",
         ),
     ]
+
+
+def _fallback_assumption_extraction(project: Project) -> AssumptionExtractionDraft:
+    project_label = project.name or "this project"
+    return AssumptionExtractionDraft(
+        assumptions=[
+            AssumptionDraft(
+                text=(
+                    "Target users experience the problem frequently enough to seek a new "
+                    "tool."
+                ),
+                category="demand",
+                importance="critical",
+                uncertainty="high",
+                kill_risk=True,
+                confidence_score=0.35,
+                recommended_test=(
+                    "Interview target users and ask them to reconstruct the last three "
+                    "times they handled this workflow."
+                ),
+            ),
+            AssumptionDraft(
+                text=(
+                    f"Target users understand the value of {project_label} quickly enough "
+                    "to try a lightweight prototype."
+                ),
+                category="activation",
+                importance="high",
+                uncertainty="high",
+                kill_risk=True,
+                confidence_score=0.35,
+                recommended_test=(
+                    "Run a concept test with a clickable prototype and ask users to explain "
+                    "what they would use it for."
+                ),
+            ),
+            AssumptionDraft(
+                text=(
+                    "The product can create a differentiated experience beyond generic "
+                    "search, notes, or one-off AI answers."
+                ),
+                category="differentiation",
+                importance="high",
+                uncertainty="medium",
+                kill_risk=True,
+                confidence_score=0.3,
+                recommended_test=(
+                    "Compare the prototype against current alternatives and ask users which "
+                    "workflow they would repeat weekly."
+                ),
+            ),
+        ],
+        risks=[
+            RiskDraft(
+                text=(
+                    "The current evidence base may be too thin to support confident "
+                    "prioritization."
+                ),
+                category="evidence",
+                severity="high",
+                likelihood="high",
+                mitigation="Add direct user interviews and source-backed competitor evidence.",
+            ),
+            RiskDraft(
+                text="Users may treat the product as nice-to-have educational content.",
+                category="adoption",
+                severity="high",
+                likelihood="unknown",
+                mitigation="Validate a repeated urgent workflow before broadening scope.",
+            ),
+        ],
+    )
+
+
+def _fallback_validation_plan(
+    project: Project,
+    assumptions: list[Assumption],
+) -> ValidationPlanSetDraft:
+    project_label = project.name or "this project"
+    return ValidationPlanSetDraft(
+        summary=(
+            f"Validate {project_label} by testing the highest-risk assumptions with direct "
+            "target-user conversations and lightweight prototype tasks."
+        ),
+        plans=[_fallback_validation_plan_item(assumption) for assumption in assumptions],
+    )
+
+
+def _fallback_validation_plan_item(assumption: Assumption) -> ValidationPlanDraft:
+    return ValidationPlanDraft(
+        assumption_id=assumption.id,
+        assumption_text=assumption.text,
+        method="customer_discovery_interviews",
+        target_respondent=(
+            "People who match the target user profile and recently tried to solve this "
+            "problem."
+        ),
+        steps=[
+            "Recruit five target users with recent experience of the problem.",
+            "Ask each participant to describe the last time the problem occurred.",
+            "Show a low-fidelity workflow or concept and ask what they would do next.",
+            "Capture current alternatives, switching triggers, objections, and willingness to try.",
+        ],
+        interview_questions=[
+            "When did this problem last happen, and what did you do?",
+            "What tools, people, or workarounds did you use?",
+            "What made the current solution frustrating or acceptable?",
+            "What would make this workflow worth trying again next week?",
+        ],
+        survey_questions=[
+            "How often does this problem occur?",
+            "How satisfied are you with your current workaround?",
+            "How likely would you be to try this workflow in the next month?",
+        ],
+        success_criteria=(
+            "At least three of five participants describe a recent painful example and ask "
+            "to try or see the workflow again."
+        ),
+        failure_threshold=(
+            "Fewer than two participants report recent pain, or most prefer their current "
+            "workaround after seeing the concept."
+        ),
+        expected_signal_strength="medium",
+    )
+
+
+def _fallback_completion(
+    settings: Settings,
+    messages: list[ChatMessage],
+    draft: AssumptionExtractionDraft | ValidationPlanSetDraft,
+    fallback_name: str,
+    error: BaseException | None = None,
+) -> LLMCompletion:
+    content = draft.model_dump_json()
+    prompt_tokens = sum(len(message.content.split()) for message in messages)
+    completion_tokens = len(content.split())
+    return LLMCompletion(
+        content=content,
+        model_provider="local-fallback",
+        model_name=settings.litellm_model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        total_cost=Decimal("0"),
+        raw_response={
+            "fallback": fallback_name,
+            "error": str(error)[:500] if error is not None else None,
+        },
+        used_stub=True,
+    )
 
 
 def _selected_assumptions(

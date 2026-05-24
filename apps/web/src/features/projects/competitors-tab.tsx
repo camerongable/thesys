@@ -22,7 +22,9 @@ import {
   createCompetitor,
   listArtifacts,
   listCompetitors,
+  listProjectWorkflows,
 } from "@/lib/api";
+import { MarkdownContent } from "@/features/projects/markdown-content";
 import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 type CompetitorsTabProps = {
@@ -82,6 +84,12 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
     mutationFn: () => analyzeCompetitors(projectId, { ingest_urls: true }),
     onSuccess: invalidateCompetitorData,
   });
+  const activeWorkflowQuery = useQuery({
+    queryKey: ["projects", projectId, "workflows", "competitor_analysis", "active"],
+    queryFn: () => listProjectWorkflows(projectId, 5),
+    enabled: analyzeMutation.isPending,
+    refetchInterval: analyzeMutation.isPending ? 1000 : false,
+  });
 
   const competitors = analyzeMutation.data?.competitors ?? competitorsQuery.data ?? [];
   const artifacts = artifactsQuery.data ?? [];
@@ -89,6 +97,13 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
   const currentVersion = currentArtifact?.current_version ?? null;
   const unsupportedClaims = unsupportedFromResult(analyzeMutation.data, currentArtifact);
   const claims = analyzeMutation.data?.claims ?? currentVersion?.claims ?? [];
+  const activeCompetitorRun = analyzeMutation.isPending
+    ? activeWorkflowQuery.data?.find(
+        (run) =>
+          run.workflow_type === "competitor_analysis" &&
+          (run.status === "queued" || run.status === "running"),
+      )
+    : null;
   const error =
     competitorsQuery.error ??
     artifactsQuery.error ??
@@ -181,7 +196,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
 
       {error ? (
         <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-          {(error as Error).message}
+          {readableErrorMessage(error)}
         </div>
       ) : null}
 
@@ -196,7 +211,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
           "citation_audit",
           "write_competitor_landscape",
         ]}
-        runId={analyzeMutation.data?.ai_run_id ?? null}
+        runId={analyzeMutation.data?.ai_run_id ?? activeCompetitorRun?.id ?? null}
       />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -243,9 +258,10 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
                         {claim.evidence_links.length === 1 ? "" : "s"}
                       </span>
                     </div>
-                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                      {claim.text}
-                    </p>
+                    <MarkdownContent
+                      className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
+                      markdown={claim.text}
+                    />
                   </div>
                 ))
               )}
@@ -262,9 +278,11 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
                 <p className="text-sm text-muted-foreground">None recorded.</p>
               ) : (
                 unsupportedClaims.map((claim) => (
-                  <p key={claim} className="text-sm leading-6 text-muted-foreground">
-                    {claim}
-                  </p>
+                  <MarkdownContent
+                    className="space-y-2 text-sm leading-6 text-muted-foreground"
+                    key={claim}
+                    markdown={claim}
+                  />
                 ))
               )}
             </div>
@@ -273,8 +291,11 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
           {currentVersion ? (
             <div className="rounded-lg border border-border bg-white p-5">
               <h3 className="text-sm font-semibold">Artifact</h3>
-              <div className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs leading-5 text-muted-foreground">
-                {currentVersion.markdown_content}
+              <div className="mt-4 max-h-96 overflow-auto rounded-md bg-muted p-3">
+                <MarkdownContent
+                  className="space-y-3 text-sm leading-6 text-foreground"
+                  markdown={currentVersion.markdown_content}
+                />
               </div>
             </div>
           ) : null}
@@ -337,9 +358,10 @@ function CompetitorProfile({ competitor }: { competitor: Competitor }) {
       ) : null}
 
       {competitor.differentiation_notes ? (
-        <p className="mt-4 text-sm leading-6 text-muted-foreground">
-          {competitor.differentiation_notes}
-        </p>
+        <MarkdownContent
+          className="mt-4 space-y-2 text-sm leading-6 text-muted-foreground"
+          markdown={competitor.differentiation_notes}
+        />
       ) : null}
     </div>
   );
@@ -351,9 +373,10 @@ function ProfileBlock({ title, value }: { title: string; value: string | null })
       <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
         {title}
       </h4>
-      <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-        {value ?? "Unknown"}
-      </p>
+      <MarkdownContent
+        className="mt-1 space-y-2 text-sm leading-6 text-muted-foreground"
+        markdown={value ?? "Unknown"}
+      />
     </div>
   );
 }
@@ -376,6 +399,14 @@ function unsupportedFromResult(
   }
   const unsupported = artifact?.current_version?.structured_content.unsupported_claims;
   return Array.isArray(unsupported) ? unsupported.filter((item) => typeof item === "string") : [];
+}
+
+function readableErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("Structured output generation failed")) {
+    return "Structured output generation failed. The local model returned malformed JSON; retry the analysis, or switch to a stronger model if it repeats.";
+  }
+  return message;
 }
 
 function formatLabel(value: string) {

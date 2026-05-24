@@ -68,7 +68,7 @@ class CompetitorAnalyzeCreate(BaseModel):
 class CompetitorProfileDraft(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     url: str | None = Field(default=None, max_length=2000)
-    category: CompetitorCategory
+    category: CompetitorCategory = "unknown"
     target_user: str | None = Field(default=None, max_length=5000)
     positioning: str | None = Field(default=None, max_length=5000)
     pricing_summary: str | None = Field(default=None, max_length=5000)
@@ -76,18 +76,26 @@ class CompetitorProfileDraft(BaseModel):
     strengths: list[str] = Field(default_factory=list, max_length=20)
     weaknesses: list[str] = Field(default_factory=list, max_length=20)
     differentiation_notes: str | None = Field(default=None, max_length=5000)
-    threat_level: CompetitorThreatLevel
+    threat_level: CompetitorThreatLevel = "unknown"
     citations: list[Citation] = Field(default_factory=list)
 
 
 class CompetitorClusterDraft(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
+    name: str = Field(default="Uncategorized alternatives", min_length=1, max_length=255)
     competitors: list[str] = Field(default_factory=list, max_length=25)
-    positioning_summary: str = Field(min_length=1, max_length=5000)
+    positioning_summary: str = Field(
+        default="No positioning summary generated.",
+        min_length=1,
+        max_length=5000,
+    )
 
 
 class CompetitorAnalysisDraft(BaseModel):
-    summary: str = Field(min_length=1, max_length=5000)
+    summary: str = Field(
+        default="Competitor landscape analysis is preliminary.",
+        min_length=1,
+        max_length=5000,
+    )
     competitors: list[CompetitorProfileDraft] = Field(default_factory=list)
     clusters: list[CompetitorClusterDraft] = Field(default_factory=list)
     positioning_gaps: list[str] = Field(default_factory=list, max_length=20)

@@ -9,6 +9,7 @@ from app.ai.prompts import (
     STRUCTURED_INTAKE_PROMPT_VERSION,
 )
 from app.core.auth import AuthContextDep, SettingsDep
+from app.core.errors import public_error_detail
 from app.db.models import Project
 from app.db.session import get_db
 from app.schemas.intake import (
@@ -50,7 +51,7 @@ def analyze_intake(
     except intake_service.IntakeWorkflowError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Structured intake analysis failed.",
+            detail=public_error_detail("Structured intake analysis failed.", exc),
         ) from exc
 
     return StructuredIntakeRunRead(
@@ -79,7 +80,7 @@ def answer_intake(
     except intake_service.IntakeWorkflowError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Structured intake answer processing failed.",
+            detail=public_error_detail("Structured intake answer processing failed.", exc),
         ) from exc
 
     return StructuredIntakeRunRead(
@@ -107,7 +108,7 @@ def finalize_intake(
     except intake_service.IntakeWorkflowError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Structured intake finalization failed.",
+            detail=public_error_detail("Structured intake finalization failed.", exc),
         ) from exc
 
     return StructuredIntakeFinalizeRead(

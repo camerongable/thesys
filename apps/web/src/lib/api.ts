@@ -601,6 +601,46 @@ export type MvpEval = {
   checks: MvpEvalCheck[];
 };
 
+export type AIProviderKeyStatus = {
+  openai: boolean;
+  anthropic: boolean;
+  gemini: boolean;
+  any_present: boolean;
+};
+
+export type LiteLLMReachabilityStatus = {
+  base_url: string;
+  endpoint: string;
+  reachable: boolean;
+  status_code: number | null;
+  error: string | null;
+};
+
+export type AIStatusStructuredOutputCheck = {
+  ok: boolean;
+  used_stub: boolean | null;
+  model_provider: string | null;
+  model_name: string | null;
+  total_tokens: number | null;
+  total_cost: string | null;
+  error: string | null;
+};
+
+export type AIStatus = {
+  llm_stub_mode: "auto" | "always" | "never";
+  llm_fallback_policy: "disabled" | "emergency" | "always";
+  llm_structured_output_repair_attempts: number;
+  resolved_mode: "stub" | "live";
+  should_use_stub: boolean;
+  litellm_model: string;
+  litellm_base_url: string;
+  litellm_reachability: LiteLLMReachabilityStatus;
+  provider_keys: AIProviderKeyStatus;
+  embedding_model: string;
+  embedding_dimension: number;
+  structured_output_healthcheck: AIStatusStructuredOutputCheck | null;
+};
+
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -906,4 +946,8 @@ export function getWorkflowEventsUrl(runId: string) {
 
 export function getMvpEval(projectId: string) {
   return apiFetch<MvpEval>(`/api/projects/${projectId}/evals/mvp`);
+}
+
+export function getAIStatus() {
+  return apiFetch<AIStatus>("/api/ai/status");
 }

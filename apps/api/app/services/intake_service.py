@@ -10,7 +10,11 @@ from langgraph.graph import END, StateGraph
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.ai.litellm_client import ChatMessage
+from app.ai.fallback_policy import (
+    should_use_fallback_after_error,
+    should_use_fallback_without_model,
+)
+from app.ai.litellm_client import ChatMessage, LLMCompletion
 from app.ai.prompts import (
     STRUCTURED_INTAKE_FINALIZE_PROMPT_VERSION,
     STRUCTURED_INTAKE_PROMPT_VERSION,
@@ -277,25 +281,47 @@ def _run_generation_graph(
         step_holder["step"] = step
 
         started = perf_counter()
-        result = generate_structured_output(
-            settings,
-            StructuredProjectIntake,
-            messages,
-            model=settings.litellm_model,
-            temperature=0.0,
-        )
+        try:
+            if should_use_fallback_without_model(settings):
+                intake = _fallback_intake(state)
+                completion = _fallback_completion(
+                    settings,
+                    messages,
+                    intake,
+                    "structured_intake_policy_always",
+                )
+            else:
+                result = generate_structured_output(
+                    settings,
+                    StructuredProjectIntake,
+                    messages,
+                    model=settings.litellm_model,
+                    temperature=0.0,
+                )
+                intake = StructuredProjectIntake.model_validate(result.parsed)
+                completion = result.completion
+        except (StructuredOutputError, RuntimeError) as exc:
+            if not should_use_fallback_after_error(settings):
+                raise
+            intake = _fallback_intake(state)
+            completion = _fallback_completion(
+                settings,
+                messages,
+                intake,
+                "structured_intake_emergency",
+                exc,
+            )
         latency_ms = int((perf_counter() - started) * 1000)
-        intake = StructuredProjectIntake.model_validate(result.parsed)
         completed_step = ai_run_service.complete_step(
             db,
             step,
             output_json=intake.model_dump(mode="json"),
             latency_ms=latency_ms,
-            tokens=result.completion.total_tokens,
-            cost=result.completion.total_cost,
+            tokens=completion.total_tokens,
+            cost=completion.total_cost,
         )
         step_holder["step"] = completed_step
-        completion_holder["completion"] = result.completion
+        completion_holder["completion"] = completion
         return {"intake": intake}
 
     graph = StateGraph(IntakeGenerationState)
@@ -452,6 +478,109 @@ def _generation_messages(
             ),
         ),
     ]
+
+
+def _fallback_intake(state: IntakeGenerationState) -> StructuredProjectIntake:
+    if state.get("initial_intake"):
+        return _fallback_answer_intake(state)
+
+    raw_idea = state.get("raw_idea") or "the project idea"
+    project_context = state.get("project_context") or {}
+    project_name = _fallback_project_name(project_context, raw_idea)
+    target_market = state.get("target_market_guess")
+    target_users = [target_market] if target_market else ["Initial target users"]
+    return StructuredProjectIntake(
+        project_name=project_name,
+        one_sentence_summary=(
+            f"{project_name} needs validation around whether the target user has an urgent, "
+            "repeated problem."
+        ),
+        target_users=target_users,
+        buyer_type="unknown",
+        problem_hypotheses=[
+            "The target user currently relies on fragmented or manual workarounds.",
+            "The pain may not yet be frequent or expensive enough to motivate switching.",
+        ],
+        proposed_solution=(
+            "A focused workflow that helps the target user make progress faster while "
+            "keeping assumptions and evidence visible."
+        ),
+        market_category=None,
+        business_model_guess=None,
+        suspected_competitors=["Manual workflow", "Generic AI tools"],
+        key_uncertainties=[
+            "Which target user segment has the strongest repeated pain?",
+            "What current workaround is painful enough to replace?",
+            "What evidence would make this opportunity worth pursuing?",
+        ],
+        clarifying_questions=[
+            "Who is the first target user segment?",
+            "What recent workflow pain should be validated first?",
+            "What current alternative does the user rely on today?",
+        ],
+    )
+
+
+def _fallback_answer_intake(state: IntakeGenerationState) -> StructuredProjectIntake:
+    initial = state.get("initial_intake") or {}
+    intake = StructuredProjectIntake.model_validate(initial)
+    answers = state.get("answers", [])
+    answer_text = " ".join(
+        str(answer.get("answer", "")).strip()
+        for answer in answers
+        if isinstance(answer, dict)
+    )
+    target_users = list(intake.target_users)
+    if answer_text and not target_users:
+        target_users.append(_truncate(answer_text, 255))
+    key_uncertainties = list(intake.key_uncertainties)
+    for answer in answers:
+        question = str(answer.get("question", "")).strip() if isinstance(answer, dict) else ""
+        if question and len(key_uncertainties) < 7:
+            key_uncertainties.append(f"Validate answer to: {question}")
+
+    return intake.model_copy(
+        update={
+            "target_users": _clean_list(target_users),
+            "key_uncertainties": _clean_list(key_uncertainties),
+            "clarifying_questions": [],
+        }
+    )
+
+
+def _fallback_completion(
+    settings: Settings,
+    messages: list[ChatMessage],
+    intake: StructuredProjectIntake,
+    fallback_name: str,
+    error: BaseException | None = None,
+) -> LLMCompletion:
+    content = intake.model_dump_json()
+    prompt_tokens = sum(len(message.content.split()) for message in messages)
+    completion_tokens = len(content.split())
+    return LLMCompletion(
+        content=content,
+        model_provider="local-fallback",
+        model_name=settings.litellm_model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        total_cost=Decimal("0"),
+        raw_response={
+            "fallback": fallback_name,
+            "error": str(error)[:500] if error is not None else None,
+        },
+        used_stub=True,
+    )
+
+
+def _fallback_project_name(project_context: dict[str, Any], raw_idea: str) -> str:
+    existing_name = str(project_context.get("name") or "").strip()
+    if existing_name:
+        return _truncate(existing_name, 255)
+    words = [word.strip(".,:;!?()[]{}") for word in raw_idea.split()[:5]]
+    name = " ".join(word.capitalize() for word in words if word)
+    return _truncate(name or "Untitled Opportunity", 255)
 
 
 def _fail_generation(db: Session, run: AIRun, step: AIStep | None, exc: BaseException) -> None:

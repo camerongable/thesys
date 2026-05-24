@@ -1,6 +1,6 @@
 "use client";
 
-import { Beaker, CheckCircle2, RefreshCw } from "lucide-react";
+import { Beaker, CheckCircle2, FileText, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -9,10 +9,12 @@ import {
   Experiment,
   ExperimentOutcome,
   generateValidationPlan,
+  listArtifacts,
   listAssumptions,
   listExperiments,
   logExperimentResult,
 } from "@/lib/api";
+import { MarkdownContent } from "@/features/projects/markdown-content";
 import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 type ExperimentsTabProps = {
@@ -28,6 +30,10 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
   const assumptionsQuery = useQuery({
     queryKey: ["projects", projectId, "assumptions"],
     queryFn: () => listAssumptions(projectId),
+  });
+  const artifactsQuery = useQuery({
+    queryKey: ["projects", projectId, "artifacts", "validation_plan"],
+    queryFn: () => listArtifacts(projectId, "validation_plan"),
   });
 
   const invalidate = async () => {
@@ -48,8 +54,16 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
 
   const experiments = generateMutation.data?.experiments ?? experimentsQuery.data ?? [];
   const assumptions = assumptionsQuery.data ?? [];
+  const validationPlanArtifact =
+    generateMutation.data?.artifact ?? artifactsQuery.data?.[0] ?? null;
+  const validationPlanVersion = validationPlanArtifact?.current_version ?? null;
   const assumptionById = new Map(assumptions.map((assumption) => [assumption.id, assumption]));
-  const error = experimentsQuery.error ?? assumptionsQuery.error ?? generateMutation.error ?? null;
+  const error =
+    experimentsQuery.error ??
+    assumptionsQuery.error ??
+    artifactsQuery.error ??
+    generateMutation.error ??
+    null;
 
   return (
     <section className="mt-6 space-y-6">
@@ -96,20 +110,46 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
           </p>
         </div>
       ) : (
-        <div className="grid gap-5">
-          {experiments.map((experiment) => (
-            <ExperimentCard
-              assumptionText={
-                experiment.assumption_id
-                  ? assumptionById.get(experiment.assumption_id)?.text ?? null
-                  : null
-              }
-              experiment={experiment}
-              key={experiment.id}
-              onSaved={invalidate}
-              projectId={projectId}
-            />
-          ))}
+        <div
+          className={
+            validationPlanVersion
+              ? "grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]"
+              : "grid gap-5"
+          }
+        >
+          <div className="grid gap-5">
+            {experiments.map((experiment) => (
+              <ExperimentCard
+                assumptionText={
+                  experiment.assumption_id
+                    ? assumptionById.get(experiment.assumption_id)?.text ?? null
+                    : null
+                }
+                experiment={experiment}
+                key={experiment.id}
+                onSaved={invalidate}
+                projectId={projectId}
+              />
+            ))}
+          </div>
+
+          {validationPlanVersion ? (
+            <aside className="rounded-lg border border-border bg-white p-5">
+              <div className="flex items-center gap-2 border-b border-border pb-4">
+                <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
+                <h3 className="text-sm font-semibold">
+                  {validationPlanArtifact?.title ?? "Validation Plan"}
+                </h3>
+                <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                  Version {validationPlanVersion.version}
+                </span>
+              </div>
+              <MarkdownContent
+                className="mt-4 space-y-4 text-sm leading-6 text-foreground"
+                markdown={validationPlanVersion.markdown_content}
+              />
+            </aside>
+          ) : null}
         </div>
       )}
     </section>
@@ -280,9 +320,10 @@ function Block({ title, value }: { title: string; value: string | null }) {
       <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
         {title}
       </h4>
-      <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-        {value ?? "Not recorded"}
-      </p>
+      <MarkdownContent
+        className="mt-1 space-y-2 text-sm leading-6 text-muted-foreground"
+        markdown={value ?? "Not recorded"}
+      />
     </div>
   );
 }

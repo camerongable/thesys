@@ -12,6 +12,7 @@ import {
   listRisks,
   updateAssumption,
 } from "@/lib/api";
+import { MarkdownContent } from "@/features/projects/markdown-content";
 import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 type AssumptionsTabProps = {
@@ -137,7 +138,10 @@ export function AssumptionsTab({ projectId }: AssumptionsTabProps) {
                           </span>
                         ) : null}
                       </div>
-                      <p className="mt-3 text-sm leading-6 text-foreground">{assumption.text}</p>
+                      <MarkdownContent
+                        className="mt-3 space-y-2 text-sm leading-6 text-foreground"
+                        markdown={assumption.text}
+                      />
                     </div>
                     <div className="shrink-0 text-sm text-muted-foreground">
                       {formatConfidence(assumption.confidence_score)}
@@ -145,9 +149,10 @@ export function AssumptionsTab({ projectId }: AssumptionsTabProps) {
                   </div>
 
                   {assumption.recommended_test ? (
-                    <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                      {assumption.recommended_test}
-                    </p>
+                    <MarkdownContent
+                      className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground"
+                      markdown={assumption.recommended_test}
+                    />
                   ) : null}
 
                   <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -206,11 +211,17 @@ export function AssumptionsTab({ projectId }: AssumptionsTabProps) {
                       likelihood {risk.likelihood}
                     </span>
                   </div>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{risk.text}</p>
+                  <MarkdownContent
+                    className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
+                    markdown={risk.text}
+                  />
                   {risk.mitigation ? (
-                    <p className="mt-2 border-t border-border pt-2 text-xs leading-5 text-muted-foreground">
-                      {risk.mitigation}
-                    </p>
+                    <div className="mt-2 border-t border-border pt-2">
+                      <MarkdownContent
+                        className="space-y-2 text-xs leading-5 text-muted-foreground"
+                        markdown={risk.mitigation}
+                      />
+                    </div>
                   ) : null}
                 </div>
               ))

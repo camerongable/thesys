@@ -14,6 +14,7 @@ import {
   listEvidenceSources,
   listExperiments,
 } from "@/lib/api";
+import { MarkdownContent } from "@/features/projects/markdown-content";
 
 type DecisionsTabProps = {
   projectId: string;
@@ -254,14 +255,18 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
                     </span>
                   </div>
                   {decision.rationale ? (
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-                      {decision.rationale}
-                    </p>
+                    <MarkdownContent
+                      className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground"
+                      markdown={decision.rationale}
+                    />
                   ) : null}
                   {decision.expected_outcome ? (
-                    <p className="mt-3 border-t border-border pt-3 text-sm leading-6 text-muted-foreground">
-                      {decision.expected_outcome}
-                    </p>
+                    <div className="mt-3 border-t border-border pt-3">
+                      <MarkdownContent
+                        className="space-y-2 text-sm leading-6 text-muted-foreground"
+                        markdown={decision.expected_outcome}
+                      />
+                    </div>
                   ) : null}
                   {decision.links.length > 0 ? (
                     <div className="mt-3 flex flex-wrap gap-2">

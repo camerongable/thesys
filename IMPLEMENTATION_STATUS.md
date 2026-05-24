@@ -2,7 +2,13 @@
 
 ## Current Phase
 
-Sprint 8 complete. MVP demo flow is ready for local validation.
+Sprint 9 complete. MVP demo flow is ready for live LLM validation through
+LiteLLM while deterministic stub mode remains available for local development
+and tests. Structured-output validation stays strict; live mode now repairs
+invalid model JSON before using deterministic fallback according to
+`LLM_FALLBACK_POLICY`. AI-generated markdown is rendered as structured UI
+across briefs, competitor landscapes, validation plans, assumptions, risks,
+decisions, and intake output.
 
 ## Sprint 0 Scope
 
@@ -254,9 +260,47 @@ Checks run:
 - [x] `cd apps/api && .venv/bin/pytest app/tests/test_demo_eval_workflows.py`
 - [x] `pnpm --filter thesys-web typecheck`
 
+Original Sprint 9 plan:
+
+- Add AI status endpoint.
+- Add visible web AI mode indicator.
+- Document live-demo configuration.
+- Verify structured-output smoke test can run with `used_stub=false`.
+- Improve live-mode error handling.
+- Show token and cost metadata in workflow traces.
+- Decide whether to add real embeddings.
+- Add tests for AI status and live/stub mode behavior.
+
+## Sprint 9 Scope
+
+- [x] Add `GET /api/ai/status` with configured stub mode, resolved mode,
+  LiteLLM model/base URL, LiteLLM reachability, provider-key presence booleans,
+  embedding configuration, and optional structured-output healthcheck.
+- [x] Add global API error handling for LiteLLM and structured-output failures
+  so provider issues return actionable 502 responses.
+- [x] Add strict structured-output repair attempts and configurable fallback
+  policy: `disabled`, `emergency`, or `always`.
+- [x] Add web AI mode indicator showing `Stub mode` or `Live LLM`, model name,
+  and LiteLLM reachability.
+- [x] Add provider/model, token, and cost visibility to workflow traces.
+- [x] Render AI-generated markdown output as readable headings, paragraphs,
+  lists, links, inline code, and emphasis across project tabs.
+- [x] Update `.env.example`, `README.md`, and API docs with the live-demo path.
+- [x] Keep deterministic hash embeddings for Sprint 9 and expose the embedding
+  model/dimension through AI status.
+- [x] Add tests for AI status and live/stub structured-output behavior.
+
+## Sprint 9 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+- [x] Browser-verified Brief, Competitors, Assumptions, Experiments, and
+  Decisions tabs show no raw markdown heading/list syntax.
+
 ## Next Sprint
 
-Sprint 9: Live ML Demo Readiness.
-
-Detailed Sprint 9 tasks, live-demo instructions, and acceptance criteria now live
-in `IMPLEMENTATION_BRIEF.md`.
+V1 Sprint 1: Watchlists and Monitoring.

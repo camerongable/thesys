@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai.structured_output import StructuredOutputError
+from app.core.config import get_settings
 from app.db.models import AIRun, AIStep, CustomerSegment, Problem, ProjectIntake, ProjectThesis
 
 
@@ -80,6 +82,90 @@ def test_structured_intake_answer_refines_existing_intake(client: TestClient) ->
     assert body["intake"]["project_name"] == "Fitness Coach Intelligence OS"
     assert initial_intake["clarifying_questions"][0] not in body["intake"]["clarifying_questions"]
     assert body["ai_step_id"]
+
+
+def test_structured_intake_answer_can_force_local_fallback_with_always_policy(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_MODEL", "dev-local-qwen")
+    monkeypatch.setenv("LLM_FALLBACK_POLICY", "always")
+    get_settings.cache_clear()
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("local fallback should not call structured output")
+
+    monkeypatch.setattr(
+        "app.services.intake_service.generate_structured_output",
+        fail_if_called,
+    )
+    create_response = client.post("/api/projects", json={"name": "Local intake answer"})
+    project_id = create_response.json()["id"]
+    initial_intake = {
+        "project_name": "Plant Care Learning",
+        "one_sentence_summary": "New plant owners need clearer care routines.",
+        "target_users": ["New indoor plant owners"],
+        "buyer_type": "consumer",
+        "problem_hypotheses": ["Plant owners do not know which care advice to trust."],
+        "proposed_solution": "A source-backed care workflow for indoor plants.",
+        "market_category": "Plant care education",
+        "business_model_guess": "Subscription",
+        "suspected_competitors": ["Plant.id"],
+        "key_uncertainties": ["Whether users repeat the workflow."],
+        "clarifying_questions": ["Who is the first user segment?"],
+    }
+
+    response = client.post(
+        f"/api/projects/{project_id}/intake/answer",
+        json={
+            "raw_idea": "Plant care learning workflow.",
+            "initial_intake": initial_intake,
+            "answers": [
+                {
+                    "question": "Who is the first user segment?",
+                    "answer": "New indoor plant owners who have killed a plant before.",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model_provider"] == "local-fallback"
+    assert body["used_stub"] is True
+    assert body["intake"]["clarifying_questions"] == []
+
+
+def test_structured_intake_uses_emergency_fallback_after_generation_failure(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_MODEL", "dev-local-qwen")
+    monkeypatch.setenv("LLM_FALLBACK_POLICY", "emergency")
+    get_settings.cache_clear()
+
+    def fail_generation(*args, **kwargs):
+        raise StructuredOutputError("forced live generation failure")
+
+    monkeypatch.setattr(
+        "app.services.intake_service.generate_structured_output",
+        fail_generation,
+    )
+    create_response = client.post("/api/projects", json={"name": "Emergency intake"})
+    project_id = create_response.json()["id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/intake/analyze",
+        json={"raw_idea": "Plant care learning workflow."},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model_provider"] == "local-fallback"
+    assert body["used_stub"] is True
+    assert body["intake"]["project_name"] == "Emergency intake"
 
 
 def test_structured_intake_finalize_persists_project_state(

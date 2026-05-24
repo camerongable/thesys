@@ -30,30 +30,219 @@ def generate_structured_output(
     *,
     model: str | None = None,
     temperature: float = 0.0,
+    max_tokens: int | None = None,
 ) -> StructuredOutputResult:
     if settings.should_use_llm_stub:
         return _stub_structured_output(output_schema, messages, model or settings.litellm_model)
 
-    schema_instruction = ChatMessage(
-        role="system",
-        content=(
-            "Return only valid JSON. The JSON must validate against this JSON Schema: "
-            f"{json.dumps(output_schema.model_json_schema(), separators=(',', ':'))}"
-        ),
-    )
-    completion = LiteLLMClient(settings).complete(
+    schema_instruction = _schema_instruction(output_schema)
+    client = LiteLLMClient(settings)
+    completions: list[LLMCompletion] = []
+    completion = client.complete(
         [schema_instruction, *messages],
         model=model,
         temperature=temperature,
         response_format_json=True,
+        max_tokens=max_tokens,
     )
+    completions.append(completion)
 
     try:
-        parsed = output_schema.model_validate_json(completion.content)
+        parsed = _validate_structured_content(output_schema, completion.content)
     except ValidationError as exc:
-        raise StructuredOutputError("LLM output failed Pydantic validation.") from exc
+        last_error = exc
+        for repair_attempt in range(settings.llm_structured_output_repair_attempts):
+            completion = client.complete(
+                _repair_messages(
+                    output_schema,
+                    schema_instruction,
+                    messages,
+                    completion.content,
+                    last_error,
+                    repair_attempt + 1,
+                ),
+                model=model,
+                temperature=temperature,
+                response_format_json=True,
+                max_tokens=max_tokens,
+            )
+            completions.append(completion)
+            try:
+                parsed = _validate_structured_content(output_schema, completion.content)
+                return StructuredOutputResult(
+                    parsed=parsed,
+                    completion=_merge_completion_attempts(completions),
+                )
+            except ValidationError as repair_error:
+                last_error = repair_error
+
+        raise StructuredOutputError(
+            "LLM output failed Pydantic validation for "
+            f"{output_schema.__name__} after {len(completions)} attempt(s)."
+        ) from last_error
 
     return StructuredOutputResult(parsed=parsed, completion=completion)
+
+
+def _schema_instruction(output_schema: type[BaseModel]) -> ChatMessage:
+    return ChatMessage(
+        role="system",
+        content=(
+            "Return only valid JSON. The JSON must match the required fields exactly and "
+            "validate against this JSON Schema: "
+            f"{json.dumps(output_schema.model_json_schema(), separators=(',', ':'))}"
+        ),
+    )
+
+
+def _repair_messages(
+    output_schema: type[BaseModel],
+    schema_instruction: ChatMessage,
+    original_messages: Sequence[ChatMessage],
+    invalid_content: str,
+    error: ValidationError,
+    repair_attempt: int,
+) -> list[ChatMessage]:
+    return [
+        schema_instruction,
+        *original_messages,
+        ChatMessage(role="assistant", content=_truncate_for_repair(invalid_content, 8000)),
+        ChatMessage(
+            role="user",
+            content=(
+                f"Repair attempt {repair_attempt}: the previous JSON did not validate as "
+                f"{output_schema.__name__}. Return corrected JSON only. Do not explain the "
+                "fix. Preserve useful content when possible, but every required field must "
+                "be present with the correct type.\n\n"
+                f"Validation errors:\n{_truncate_for_repair(str(error), 4000)}"
+            ),
+        ),
+    ]
+
+
+def _merge_completion_attempts(completions: list[LLMCompletion]) -> LLMCompletion:
+    if len(completions) == 1:
+        return completions[0]
+    final = completions[-1]
+    return LLMCompletion(
+        content=final.content,
+        model_provider=final.model_provider,
+        model_name=final.model_name,
+        prompt_tokens=_sum_optional_int(item.prompt_tokens for item in completions),
+        completion_tokens=_sum_optional_int(item.completion_tokens for item in completions),
+        total_tokens=_sum_optional_int(item.total_tokens for item in completions),
+        total_cost=_sum_optional_decimal(item.total_cost for item in completions),
+        raw_response={
+            "attempt_count": len(completions),
+            "repaired": True,
+            "final_response": final.raw_response,
+        },
+        used_stub=final.used_stub,
+    )
+
+
+def _sum_optional_int(values) -> int | None:
+    items = [value for value in values if value is not None]
+    if not items:
+        return None
+    return sum(items)
+
+
+def _sum_optional_decimal(values) -> Decimal | None:
+    items = [value for value in values if value is not None]
+    if not items:
+        return None
+    return sum(items, Decimal("0"))
+
+
+def _truncate_for_repair(value: str, max_length: int) -> str:
+    return value if len(value) <= max_length else value[:max_length]
+
+
+def _validate_structured_content(
+    output_schema: type[StructuredModel],
+    content: str,
+) -> StructuredModel:
+    try:
+        return output_schema.model_validate_json(content)
+    except ValidationError as original_error:
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            raise original_error from None
+
+        for candidate in _wrapped_payload_candidates(output_schema, payload):
+            try:
+                return output_schema.model_validate(candidate)
+            except ValidationError:
+                continue
+        raise original_error from None
+
+
+def _wrapped_payload_candidates(
+    output_schema: type[BaseModel],
+    payload: Any,
+) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+
+    raw_candidates: list[dict[str, Any]] = [payload]
+    expected_keys = {
+        _normalized_schema_key(output_schema.__name__),
+        _normalized_schema_key(_lower_camel_case(output_schema.__name__)),
+    }
+    for key, value in payload.items():
+        if _normalized_schema_key(str(key)) in expected_keys and isinstance(value, dict):
+            raw_candidates.append(value)
+
+    if len(payload) == 1:
+        value = next(iter(payload.values()))
+        if isinstance(value, dict):
+            raw_candidates.append(value)
+
+    candidates: list[dict[str, Any]] = []
+    for candidate in raw_candidates:
+        if candidate not in candidates:
+            candidates.append(candidate)
+        normalized = _normalize_payload_keys(candidate)
+        if normalized not in candidates:
+            candidates.append(normalized)
+    return candidates
+
+
+def _lower_camel_case(value: str) -> str:
+    return value[:1].lower() + value[1:]
+
+
+def _normalized_schema_key(value: str) -> str:
+    return "".join(character for character in value.casefold() if character.isalnum())
+
+
+def _normalize_payload_keys(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_normalize_payload_keys(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _to_snake_case(str(key)): _normalize_payload_keys(item)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _to_snake_case(value: str) -> str:
+    result: list[str] = []
+    previous_was_underscore = False
+    for index, character in enumerate(value.strip()):
+        if character in {" ", "-", "."}:
+            if result and not previous_was_underscore:
+                result.append("_")
+                previous_was_underscore = True
+            continue
+        if character.isupper() and index > 0 and result and not previous_was_underscore:
+            result.append("_")
+        result.append(character.lower())
+        previous_was_underscore = character == "_"
+    return "".join(result).strip("_")
 
 
 def _stub_structured_output(

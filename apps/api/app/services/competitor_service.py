@@ -7,11 +7,14 @@ from time import perf_counter
 from typing import Any
 
 from fastapi import HTTPException, status
-from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.ai.litellm_client import ChatMessage
+from app.ai.fallback_policy import (
+    should_use_fallback_after_error,
+    should_use_fallback_without_model,
+)
+from app.ai.litellm_client import ChatMessage, LLMCompletion
 from app.ai.prompts import COMPETITOR_ANALYSIS_PROMPT_VERSION
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
 from app.core.auth import AuthContext
@@ -33,6 +36,7 @@ from app.schemas.artifacts import Citation, ClaimDraft
 from app.schemas.competitors import (
     CompetitorAnalysisDraft,
     CompetitorAnalyzeCreate,
+    CompetitorClusterDraft,
     CompetitorCreate,
     CompetitorProfileDraft,
     CompetitorUpdate,
@@ -43,6 +47,11 @@ from app.services import ai_run_service, evidence_service, project_service, retr
 
 class CompetitorAnalysisError(RuntimeError):
     pass
+
+
+COMPETITOR_RETRIEVAL_TOP_K = 5
+COMPETITOR_EVIDENCE_TEXT_LIMIT = 700
+COMPETITOR_MAX_TOKENS = 1000
 
 
 @dataclass(frozen=True)
@@ -185,7 +194,6 @@ def analyze_competitors(
         model_provider="stub" if settings.should_use_llm_stub else "litellm",
         model_name=settings.litellm_model,
     )
-    latest_step: AIStep | None = None
     try:
         project_state = _load_project_state_step(db, run, project)
         competitors = _load_seeded_competitors_step(db, auth, run, project, payload)
@@ -206,7 +214,7 @@ def analyze_competitors(
             project_state,
             competitors,
         )
-        draft, completion, generate_step = _generate_analysis_step(
+        draft, completion, _generate_step = _generate_analysis_step(
             db,
             settings,
             run,
@@ -214,17 +222,12 @@ def analyze_competitors(
             competitors,
             retrieval_results,
         )
-        latest_step = generate_step
         audited_draft = _citation_audit_step(db, run, draft, retrieval_results)
         write_result = _write_analysis_step(db, auth, run, project, audited_draft)
-    except (StructuredOutputError, ValidationError, RuntimeError, HTTPException) as exc:
-        if latest_step is not None:
-            ai_run_service.fail_step(db, latest_step, error=str(exc))
+    except (StructuredOutputError, RuntimeError, HTTPException) as exc:
         ai_run_service.fail_run(db, run, error=str(exc))
         raise
     except Exception as exc:
-        if latest_step is not None:
-            ai_run_service.fail_step(db, latest_step, error=str(exc))
         ai_run_service.fail_run(db, run, error=str(exc))
         raise CompetitorAnalysisError("Competitor analysis failed.") from exc
 
@@ -371,7 +374,7 @@ def _retrieve_competitor_evidence_step(
     competitors: list[Competitor],
 ):
     query = _competitor_retrieval_query(project_state, competitors)
-    payload = EvidenceRetrieveCreate(query=query, mode="hybrid", top_k=15)
+    payload = EvidenceRetrieveCreate(query=query, mode="hybrid", top_k=COMPETITOR_RETRIEVAL_TOP_K)
     step = ai_run_service.start_step(
         db,
         run,
@@ -424,23 +427,55 @@ def _generate_analysis_step(
         },
     )
     started = perf_counter()
-    result = generate_structured_output(
-        settings,
-        CompetitorAnalysisDraft,
-        messages,
-        model=settings.litellm_model,
-        temperature=0.0,
-    )
-    draft = CompetitorAnalysisDraft.model_validate(result.parsed)
+    try:
+        if should_use_fallback_without_model(settings):
+            draft = _fallback_competitor_analysis(project_state, competitors, retrieval_results)
+            completion = _fallback_completion(
+                settings,
+                messages,
+                draft,
+                "competitor_analysis_policy_always",
+            )
+        else:
+            try:
+                result = generate_structured_output(
+                    settings,
+                    CompetitorAnalysisDraft,
+                    messages,
+                    model=settings.litellm_model,
+                    temperature=0.0,
+                    max_tokens=COMPETITOR_MAX_TOKENS,
+                )
+                draft = CompetitorAnalysisDraft.model_validate(result.parsed)
+                completion = result.completion
+            except (StructuredOutputError, RuntimeError) as exc:
+                if not should_use_fallback_after_error(settings):
+                    raise
+                draft = _fallback_competitor_analysis(project_state, competitors, retrieval_results)
+                completion = _fallback_completion(
+                    settings,
+                    messages,
+                    draft,
+                    "competitor_analysis_emergency",
+                    exc,
+                )
+    except Exception as exc:
+        ai_run_service.fail_step(
+            db,
+            step,
+            error=str(exc),
+            latency_ms=int((perf_counter() - started) * 1000),
+        )
+        raise
     completed_step = ai_run_service.complete_step(
         db,
         step,
         output_json=draft.model_dump(mode="json"),
         latency_ms=int((perf_counter() - started) * 1000),
-        tokens=result.completion.total_tokens,
-        cost=result.completion.total_cost,
+        tokens=completion.total_tokens,
+        cost=completion.total_cost,
     )
-    return draft, result.completion, completed_step
+    return draft, completion, completed_step
 
 
 def _citation_audit_step(
@@ -751,9 +786,10 @@ def _competitor_messages(
         ChatMessage(
             role="user",
             content=(
-                "Return structured JSON only. Create competitor profiles, clusters, "
-                "positioning gaps, wedge recommendations, cited claims, and unsupported "
-                "claims.\n\n"
+                "Return structured JSON only with the schema fields at the top level; "
+                "do not wrap the response in another object. Keep the local-dev response "
+                "concise: one profile per seeded competitor, one cluster, up to 3 gaps, "
+                "up to 3 wedge recommendations, up to 2 claims, and unsupported claims.\n\n"
                 f"{json.dumps(payload, indent=2, sort_keys=True)}"
             ),
         ),
@@ -789,13 +825,207 @@ def _evidence_bundles(retrieval_results) -> list[dict[str, Any]]:
             "url": result.url,
             "source_type": result.source_type,
             "chunk_index": result.chunk_index,
-            "text": result.text[:1800],
+            "text": result.text[:COMPETITOR_EVIDENCE_TEXT_LIMIT],
             "score": result.score,
             "metadata": result.metadata,
             "retrieved_at": retrieved_at,
         }
         for result in retrieval_results
     ]
+
+
+def _fallback_competitor_analysis(
+    project_state: dict[str, Any],
+    competitors: list[Competitor],
+    retrieval_results,
+) -> CompetitorAnalysisDraft:
+    project_name = str(project_state.get("name") or "This project")
+    profiles = [
+        _fallback_profile(competitor, _competitor_citations(competitor, retrieval_results))
+        for competitor in competitors
+    ]
+    citations = _dedupe_citations(
+        [citation for profile in profiles for citation in profile.citations]
+    )
+    claims = [
+        ClaimDraft(
+            text=(
+                "The competitor landscape is based on user-seeded competitors and retrieved "
+                "project evidence."
+            ),
+            claim_type="competitor_evidence",
+            confidence_score=0.7 if citations else 0.4,
+            support_level="supported" if citations else "inference",
+            citations=citations[:1],
+        )
+    ]
+    if profiles:
+        claims.append(
+            ClaimDraft(
+                text=(
+                    f"{profiles[0].name} should be treated as a comparison point, but pricing "
+                    "and feature depth still require source verification."
+                ),
+                claim_type="competitor_positioning",
+                confidence_score=0.5,
+                support_level="inference",
+                citations=[],
+            )
+        )
+    return CompetitorAnalysisDraft(
+        summary=(
+            f"{project_name} has an initial competitor landscape, but the evidence is still thin; "
+            "treat this as a working map for follow-up research."
+        ),
+        competitors=profiles,
+        clusters=[
+            CompetitorClusterDraft(
+                name="Seeded alternatives",
+                competitors=[profile.name for profile in profiles],
+                positioning_summary=(
+                    "Current alternatives should be compared on workflow depth, source "
+                    "traceability, and whether they support the user's learning journey."
+                ),
+            )
+        ],
+        positioning_gaps=[
+            "Beginner-friendly plant care education tied to specific user questions",
+            "Visible evidence and unsupported claims in learning recommendations",
+            "Community or event workflows that go beyond static plant lookup",
+        ],
+        wedge_recommendations=[
+            "Start with one narrow plant-care learning workflow and make source quality visible.",
+            "Use competitor research to verify pricing, feature coverage, and user segment focus.",
+        ],
+        where_not_to_compete=[
+            "Generic plant facts without context",
+            "Unverified market-size or pricing claims",
+            "Broad autonomous crawling before source quality is dependable",
+        ],
+        claims=claims,
+        citations=citations,
+        unsupported_claims=[
+            (
+                "Competitor pricing, feature completeness, and threat level need direct "
+                "source verification."
+            )
+        ],
+    )
+
+
+def _fallback_profile(
+    competitor: Competitor,
+    citations: list[Citation],
+) -> CompetitorProfileDraft:
+    evidence_text = " ".join(
+        item for citation in citations for item in [citation.title, citation.quote] if item
+    ).casefold()
+    key_features = competitor.key_features or []
+    if not key_features:
+        key_features = ["Public web presence"]
+        if "identification" in evidence_text:
+            key_features.insert(0, "Plant identification")
+
+    return CompetitorProfileDraft(
+        name=competitor.name,
+        url=competitor.url,
+        category=competitor.category,
+        target_user=competitor.target_user
+        or "People looking for plant information or adjacent plant-care workflows.",
+        positioning=competitor.positioning
+        or (
+            f"{competitor.name} is a user-seeded alternative that should be compared against "
+            "the project's plant-care learning workflow."
+        ),
+        pricing_summary=competitor.pricing_summary
+        or "Pricing should be verified from current source material.",
+        key_features=key_features,
+        strengths=_text_to_bullets(
+            competitor.strengths,
+            [
+                "Already discoverable as an alternative",
+                "Provides a concrete reference point for user expectations",
+            ],
+        ),
+        weaknesses=_text_to_bullets(
+            competitor.weaknesses,
+            [
+                "Depth of plant-care education is unverified",
+                "Community or event support is unverified",
+            ],
+        ),
+        differentiation_notes=competitor.differentiation_notes
+        or (
+            "Differentiate by connecting plant-care guidance to a learning path, visible "
+            "sources, and social practice instead of only lookup."
+        ),
+        threat_level=competitor.threat_level,
+        citations=citations,
+    )
+
+
+def _competitor_citations(competitor: Competitor, retrieval_results) -> list[Citation]:
+    citations: list[Citation] = []
+    seen: set[tuple[str | None, str | None, str]] = set()
+    for result in retrieval_results:
+        metadata = result.metadata or {}
+        if metadata.get("competitor_id") != str(competitor.id) and metadata.get(
+            "competitor_name"
+        ) != competitor.name:
+            continue
+        quote = result.text[:260]
+        key = (result.url, result.title, quote)
+        if key in seen:
+            continue
+        seen.add(key)
+        citations.append(
+            Citation(
+                source_id=result.source_id,
+                chunk_id=result.chunk_id,
+                title=result.title,
+                url=result.url,
+                quote=quote,
+                relevance_score=result.score,
+            )
+        )
+    return citations[:3]
+
+
+def _text_to_bullets(value: str | None, fallback: list[str]) -> list[str]:
+    if value is None:
+        return fallback
+    bullets = [
+        line.removeprefix("-").removeprefix("*").strip()
+        for line in value.splitlines()
+        if line.strip()
+    ]
+    return bullets or fallback
+
+
+def _fallback_completion(
+    settings: Settings,
+    messages: list[ChatMessage],
+    draft: CompetitorAnalysisDraft,
+    fallback_name: str,
+    error: BaseException | None = None,
+) -> LLMCompletion:
+    content = draft.model_dump_json()
+    prompt_tokens = sum(len(message.content.split()) for message in messages)
+    completion_tokens = len(content.split())
+    return LLMCompletion(
+        content=content,
+        model_provider="local-fallback",
+        model_name=settings.litellm_model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        total_cost=Decimal("0"),
+        raw_response={
+            "fallback": fallback_name,
+            "error": str(error)[:500] if error is not None else None,
+        },
+        used_stub=True,
+    )
 
 
 def _audit_citations(

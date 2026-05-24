@@ -4,11 +4,11 @@ This repository contains the local development foundation for Thesys: an
 AI-native workspace for turning rough business ideas into
 structured, evidence-backed strategic projects.
 
-The implementation follows `IMPLEMENTATION_BRIEF.md`. Sprints 0-8 establish the
+The implementation follows `IMPLEMENTATION_BRIEF.md`. Sprints 0-9 establish the
 monorepo, local infrastructure, project workspace foundation, AI gateway
 infrastructure, structured intake, evidence/RAG, cited briefs, competitors,
 assumptions, validation plans, decisions, demo seeding, MVP eval checks, and
-workflow trace UI.
+workflow trace UI, plus live LLM demo readiness.
 
 ## Repository Layout
 
@@ -129,6 +129,87 @@ curl -X POST http://localhost:8000/api/ai/test-structured-output \
 Set `LLM_STUB_MODE=never` and provide a real provider key in `.env` to force
 calls through LiteLLM. Docker forwards those keys into both the API and LiteLLM
 containers.
+
+## Sprint 9 Local Open-Weight Demo
+
+Sprint 9 keeps deterministic hash embeddings for retrieval, but allows the MVP
+generation workflows to run against a live local model through LiteLLM and
+Ollama. This avoids per-token OpenAI API billing during development.
+
+1. Install Ollama and pull the recommended dev model:
+
+   ```bash
+   ollama pull qwen2.5:3b
+   ```
+
+   Larger variants such as `qwen2.5:7b` and `qwen2.5:14b` are more capable, but
+   `qwen2.5:3b` is the better default for responsive local development.
+
+2. Set local open-weight values in `.env`:
+
+   ```bash
+   LLM_STUB_MODE=never
+   LITELLM_MODEL=dev-local-qwen
+   LITELLM_TIMEOUT_SECONDS=180
+   LITELLM_API_KEY=sk-local-dev
+   LITELLM_MASTER_KEY=sk-local-dev
+   LLM_STRUCTURED_OUTPUT_REPAIR_ATTEMPTS=1
+   LLM_FALLBACK_POLICY=emergency
+   OLLAMA_API_BASE=http://host.docker.internal:11434
+   ```
+
+   Structured-output validation remains strict. `LLM_STRUCTURED_OUTPUT_REPAIR_ATTEMPTS`
+   controls how many times the configured model can repair invalid JSON before
+   the workflow fails or falls back. `LLM_FALLBACK_POLICY` accepts `disabled`,
+   `emergency`, or `always`; use `emergency` for live demos so LiteLLM is tried
+   first and deterministic fallback is only used after model/validation failure.
+
+3. Restart LiteLLM and the API:
+
+   ```bash
+   docker compose restart litellm api
+   ```
+
+4. Check the configured AI mode:
+
+   ```bash
+   curl http://localhost:8000/api/ai/status
+   ```
+
+   The web UI also shows an AI mode badge on project pages. It reports
+   `Stub mode` or `Live LLM`, the configured model, and LiteLLM reachability.
+
+5. Run the structured-output smoke test:
+
+   ```bash
+   curl -X POST http://localhost:8000/api/ai/test-structured-output \
+     -H "Content-Type: application/json" \
+     -d '{"idea":"AI workspace for independent fitness coaches"}'
+   ```
+
+   In live mode, confirm:
+
+   ```json
+   {
+     "used_stub": false,
+     "model_provider": "litellm"
+   }
+   ```
+
+6. In the web UI, create or open a project and run the MVP AI actions:
+
+   - Analyze Idea
+   - Generate Brief
+   - Analyze Competitors
+   - Extract Assumptions
+   - Generate Plans
+
+Workflow traces show provider/model metadata, step status, token counts, and
+cost when LiteLLM returns it. If the provider fails, the API returns an
+actionable error and the failed workflow step stores the provider error.
+
+To test against OpenAI later, set `LITELLM_MODEL=dev-gpt-4o-mini` and provide
+`OPENAI_API_KEY` in `.env`.
 
 ## Sprint 4 Manual Checks
 

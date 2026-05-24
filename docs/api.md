@@ -34,6 +34,27 @@ The endpoint creates `ai_runs` and `ai_steps` rows, returns typed JSON, and uses
 the deterministic dev stub when `LLM_STUB_MODE=always` or when
 `LLM_STUB_MODE=auto` and no provider API key is configured.
 
+Sprint 9 adds AI mode and LiteLLM health visibility:
+
+```http
+GET /api/ai/status
+```
+
+The status response reports `LLM_STUB_MODE`, the resolved mode (`stub` or
+`live`), `LLM_FALLBACK_POLICY`, `LLM_STRUCTURED_OUTPUT_REPAIR_ATTEMPTS`,
+configured model, LiteLLM reachability, provider-key presence as booleans only,
+and the active embedding configuration. Add
+`?include_structured_output_check=true` to run a small structured-output
+healthcheck. The endpoint uses the same auth dependency as other `/api/*`
+routes.
+
+Structured-output validation is always strict. In live mode, invalid model JSON
+is repaired up to `LLM_STRUCTURED_OUTPUT_REPAIR_ATTEMPTS` times. Workflow-level
+deterministic fallback is controlled by `LLM_FALLBACK_POLICY`:
+`disabled` fails after repair, `emergency` falls back only after model or
+validation failure, and `always` skips model generation for deterministic local
+development.
+
 Sprint 3 exposes structured intake:
 
 ```http

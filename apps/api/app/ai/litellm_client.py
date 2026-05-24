@@ -44,6 +44,7 @@ class LiteLLMClient:
         model: str | None = None,
         temperature: float = 0.0,
         response_format_json: bool = False,
+        max_tokens: int | None = None,
     ) -> LLMCompletion:
         payload: dict[str, Any] = {
             "model": model or self.settings.litellm_model,
@@ -52,6 +53,8 @@ class LiteLLMClient:
         }
         if response_format_json:
             payload["response_format"] = {"type": "json_object"}
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
 
         url = f"{self.settings.litellm_base_url.rstrip('/')}/v1/chat/completions"
         headers = {
