@@ -2,18 +2,22 @@
 
 import {
   ArrowLeft,
+  AlertTriangle,
   Beaker,
   Building2,
   CheckCircle2,
   CircleAlert,
   ClipboardCheck,
   Database,
+  ExternalLink,
   FileSearch,
+  FileText,
   Globe2,
   Lightbulb,
   ListChecks,
   Route,
   ScrollText,
+  ShieldCheck,
   ShieldAlert,
   Target,
 } from "lucide-react";
@@ -24,9 +28,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import {
+  approveAgenticResearchMemo,
   approveCompetitorCandidate,
   approveDiscoveredSource,
   approveResearchSprint,
+  Artifact,
+  ArtifactVersion,
+  Citation,
   CompetitorCandidate,
   CompetitorCandidateUpdateInput,
   discoverCompetitorCandidates,
@@ -35,6 +43,7 @@ import {
   executeNextAction,
   getProjectOverview,
   IdeaReadiness,
+  listArtifacts,
   listCompetitorCandidates,
   listDiscoveredSources,
   listResearchSprints,
@@ -46,6 +55,7 @@ import {
   ResearchPlan,
   ResearchPlanUpdateInput,
   ResearchSprint,
+  runAgenticResearch,
   StrategicSnapshot,
   startResearchSprintPlan,
   updateCompetitorCandidate,
@@ -519,6 +529,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
       {canReviewDiscovery && latestSprint ? (
         <ResearchDiscoveryPanel
           onRunTrace={setLastRunId}
+          onSprintUpdated={() => sprintsQuery.refetch()}
           projectId={projectId}
           sprint={latestSprint}
         />
@@ -665,13 +676,16 @@ function PlanTextArea({
 
 function ResearchDiscoveryPanel({
   onRunTrace,
+  onSprintUpdated,
   projectId,
   sprint,
 }: {
   onRunTrace: (runId: string) => void;
+  onSprintUpdated: () => Promise<unknown>;
   projectId: string;
   sprint: ResearchSprint;
 }) {
+  const [memoReviewOpen, setMemoReviewOpen] = useState(false);
   const sourcesQuery = useQuery({
     queryKey: ["projects", projectId, "research-sprints", sprint.id, "sources"],
     queryFn: () => listDiscoveredSources(projectId, sprint.id),
@@ -679,6 +693,10 @@ function ResearchDiscoveryPanel({
   const candidatesQuery = useQuery({
     queryKey: ["projects", projectId, "research-sprints", sprint.id, "competitor-candidates"],
     queryFn: () => listCompetitorCandidates(projectId, sprint.id),
+  });
+  const researchMemosQuery = useQuery({
+    queryKey: ["projects", projectId, "artifacts", "research_memo"],
+    queryFn: () => listArtifacts(projectId, "research_memo"),
   });
 
   const discoverSourcesMutation = useMutation({
@@ -693,6 +711,24 @@ function ResearchDiscoveryPanel({
     onSuccess: async (result) => {
       onRunTrace(result.ai_run_id);
       await candidatesQuery.refetch();
+    },
+  });
+  const agenticResearchMutation = useMutation({
+    mutationFn: () => runAgenticResearch(projectId, sprint.id),
+    onSuccess: async (result) => {
+      onRunTrace(result.ai_run_id);
+      setMemoReviewOpen(true);
+      await researchMemosQuery.refetch();
+      await onSprintUpdated();
+    },
+  });
+  const approveMemoMutation = useMutation({
+    mutationFn: () => approveAgenticResearchMemo(projectId, sprint.id),
+    onSuccess: async (result) => {
+      onRunTrace(result.ai_run_id);
+      setMemoReviewOpen(true);
+      await researchMemosQuery.refetch();
+      await onSprintUpdated();
     },
   });
   const approveSourceMutation = useMutation({
@@ -734,19 +770,42 @@ function ResearchDiscoveryPanel({
 
   const sources = sourcesQuery.data ?? [];
   const candidates = candidatesQuery.data ?? [];
+  const memoArtifact =
+    approveMemoMutation.data?.artifact ??
+    agenticResearchMutation.data?.artifact ??
+    researchMemoForSprint(researchMemosQuery.data ?? [], sprint.id);
+  const memoVersion =
+    approveMemoMutation.data?.version ??
+    agenticResearchMutation.data?.version ??
+    memoArtifact?.current_version ??
+    null;
+  const unsupportedClaims =
+    agenticResearchMutation.data?.unsupported_claims ?? unsupportedClaimsFromArtifact(memoArtifact);
+  const citations = agenticResearchMutation.data?.citations ?? citationsFromArtifact(memoArtifact);
+  const retrievalToolCallCount =
+    agenticResearchMutation.data?.retrieval_tool_call_count ??
+    retrievalToolCallCountFromArtifact(memoArtifact);
+  const evidenceGapCount =
+    agenticResearchMutation.data?.evidence_gap_count ?? evidenceGapsFromArtifact(memoArtifact).length;
+  const memoryUpdateStatus = memoryUpdateStatusFromArtifact(memoArtifact);
   const error =
     discoverSourcesMutation.error ??
     discoverCompetitorsMutation.error ??
+    agenticResearchMutation.error ??
+    approveMemoMutation.error ??
     approveSourceMutation.error ??
     rejectSourceMutation.error ??
     updateCandidateMutation.error ??
     approveCandidateMutation.error ??
     rejectCandidateMutation.error ??
+    (researchMemosQuery.error as Error | null) ??
     (sourcesQuery.error as Error | null) ??
     (candidatesQuery.error as Error | null);
   const busy =
     discoverSourcesMutation.isPending ||
     discoverCompetitorsMutation.isPending ||
+    agenticResearchMutation.isPending ||
+    approveMemoMutation.isPending ||
     approveSourceMutation.isPending ||
     rejectSourceMutation.isPending ||
     updateCandidateMutation.isPending ||
@@ -760,7 +819,8 @@ function ResearchDiscoveryPanel({
           <h3 className="text-sm font-semibold">Discovery Review</h3>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
             Generate candidate sources and competitors from the approved plan. Review items before
-            they are ingested as evidence or merged into the project competitor set.
+            they are ingested as evidence or merged into the project competitor set, then synthesize
+            a cited research memo from the project evidence graph.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -785,6 +845,15 @@ function ResearchDiscoveryPanel({
             {discoverCompetitorsMutation.isPending
               ? "Discovering..."
               : "Discover Competitors"}
+          </Button>
+          <Button
+            disabled={busy || sprint.status === "completed"}
+            onClick={() => agenticResearchMutation.mutate()}
+            size="sm"
+            type="button"
+          >
+            <FileSearch className="h-4 w-4" aria-hidden="true" />
+            {agenticResearchMutation.isPending ? "Synthesizing..." : "Run Agentic RAG"}
           </Button>
         </div>
       </div>
@@ -811,6 +880,226 @@ function ResearchDiscoveryPanel({
             updateCandidateMutation.mutate({ candidateId, input })
           }
         />
+      </div>
+
+      {memoArtifact && memoVersion ? (
+        <div className="mt-5 rounded-md border border-border bg-muted p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h4 className="text-sm font-semibold">Research memo ready for review</h4>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                The workflow used {retrievalToolCallCount} retrieval calls, found{" "}
+                {evidenceGapCount} evidence gaps, and paused before major memory updates.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="w-fit rounded-md bg-white px-2 py-1 text-xs text-muted-foreground">
+                {formatLabel(memoArtifact.artifact_type)}
+              </span>
+              <Button
+                onClick={() => setMemoReviewOpen((open) => !open)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <ScrollText className="h-4 w-4" aria-hidden="true" />
+                {memoReviewOpen ? "Hide Memo" : "Review Memo"}
+              </Button>
+            </div>
+          </div>
+          {memoryUpdateStatus ? (
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">
+              Memory update status: {formatLabel(memoryUpdateStatus)}.
+            </p>
+          ) : null}
+          {unsupportedClaims.length > 0 ? (
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">
+              Open questions: {unsupportedClaims.slice(0, 2).join("; ")}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {memoReviewOpen && memoArtifact && memoVersion ? (
+        <ResearchMemoReview
+          artifact={memoArtifact}
+          approvalPending={approveMemoMutation.isPending}
+          citations={citations}
+          memoryUpdateStatus={memoryUpdateStatus}
+          onApprove={() => approveMemoMutation.mutate()}
+          unsupportedClaims={unsupportedClaims}
+          version={memoVersion}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ResearchMemoReview({
+  artifact,
+  approvalPending,
+  citations,
+  memoryUpdateStatus,
+  onApprove,
+  unsupportedClaims,
+  version,
+}: {
+  artifact: Artifact;
+  approvalPending: boolean;
+  citations: Citation[];
+  memoryUpdateStatus: string | null;
+  onApprove: () => void;
+  unsupportedClaims: string[];
+  version: ArtifactVersion;
+}) {
+  const supportedClaims = version.claims.filter((claim) => claim.support_level !== "unsupported");
+  const unsupportedClaimRecords = version.claims.filter(
+    (claim) => claim.support_level === "unsupported",
+  );
+  const displayUnsupported = unsupportedClaims.length > 0
+    ? unsupportedClaims
+    : unsupportedClaimRecords.map((claim) => claim.text);
+  const approved = memoryUpdateStatus === "approved";
+
+  return (
+    <div id="research-memo-review" className="mt-5 border-t border-border pt-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h3 className="text-base font-semibold">{artifact.title}</h3>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <span className="rounded-md bg-muted px-2 py-1">Version {version.version}</span>
+            <span className="rounded-md bg-muted px-2 py-1">
+              {formatDateTime(version.created_at)}
+            </span>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={
+              approved
+                ? "w-fit rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700"
+                : "w-fit rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700"
+            }
+          >
+            {approved ? "Approved" : "Human review pending"}
+          </span>
+          <Button
+            disabled={approved || approvalPending}
+            onClick={onApprove}
+            size="sm"
+            type="button"
+          >
+            <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+            {approved ? "Approved" : approvalPending ? "Approving..." : "Approve Memo"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <article className="min-w-0">
+          <MarkdownContent markdown={version.markdown_content} />
+        </article>
+
+        <aside className="space-y-5">
+          <section className="border-b border-border pb-5">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
+              <h4 className="text-sm font-semibold">Cited Claims</h4>
+            </div>
+            <div className="mt-4 space-y-3">
+              {supportedClaims.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No cited claims recorded.</p>
+              ) : (
+                supportedClaims.map((claim) => (
+                  <div key={claim.id} className="border-b border-border pb-3 last:border-b-0">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                        {formatLabel(claim.support_level)}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {claim.evidence_links.length} citation
+                        {claim.evidence_links.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <MarkdownContent
+                      className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
+                      markdown={claim.text}
+                    />
+                    {claim.evidence_links.length > 0 ? (
+                      <div className="mt-2 space-y-1">
+                        {claim.evidence_links.slice(0, 2).map((link) => (
+                          <p className="text-xs leading-5 text-muted-foreground" key={link.id}>
+                            {link.quote
+                              ? truncate(link.quote, 180)
+                              : `Source ${link.evidence_source_id}`}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="border-b border-border pb-5">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-primary" aria-hidden="true" />
+              <h4 className="text-sm font-semibold">Unsupported Claims</h4>
+            </div>
+            <div className="mt-4 space-y-2">
+              {displayUnsupported.length === 0 ? (
+                <p className="text-sm text-muted-foreground">None recorded.</p>
+              ) : (
+                displayUnsupported.map((claim) => (
+                  <MarkdownContent
+                    className="space-y-2 text-sm leading-6 text-muted-foreground"
+                    key={claim}
+                    markdown={claim}
+                  />
+                ))
+              )}
+            </div>
+          </section>
+
+          <section>
+            <div className="flex items-center gap-2">
+              <Globe2 className="h-4 w-4 text-primary" aria-hidden="true" />
+              <h4 className="text-sm font-semibold">Evidence Sources</h4>
+            </div>
+            <div className="mt-4 space-y-3">
+              {citations.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No citations recorded.</p>
+              ) : (
+                citations.map((citation) => (
+                  <div key={`${citation.source_id}-${citation.chunk_id ?? "source"}`}>
+                    {citation.url ? (
+                      <a
+                        className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+                        href={citation.url}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {citation.title ?? citation.url}
+                        <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                      </a>
+                    ) : (
+                      <p className="text-sm font-medium">{citation.title ?? citation.source_id}</p>
+                    )}
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {citation.quote
+                        ? truncate(citation.quote, 180)
+                        : `Source ${citation.source_id}`}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
   );
@@ -1497,6 +1786,86 @@ function draftToUpdate(draft: ResearchPlanDraftState): ResearchPlanUpdateInput {
     assumptions_to_test: listFromLines(draft.assumptions_to_test),
     expected_outputs: listFromLines(draft.expected_outputs),
   };
+}
+
+function researchMemoForSprint(artifacts: Artifact[], sprintId: string) {
+  return (
+    artifacts.find((artifact) => {
+      const content = artifact.current_version?.structured_content;
+      return content?.research_sprint_id === sprintId;
+    }) ??
+    artifacts[0] ??
+    null
+  );
+}
+
+function unsupportedClaimsFromArtifact(artifact: Artifact | null) {
+  const content = artifact?.current_version?.structured_content;
+  const memo = asRecord(content?.memo);
+  return stringsFromUnknown(content?.unsupported_claims ?? memo?.unsupported_claims);
+}
+
+function citationsFromArtifact(artifact: Artifact | null): Citation[] {
+  const content = artifact?.current_version?.structured_content;
+  const memo = asRecord(content?.memo);
+  return valuesFromUnknown(content?.citations ?? memo?.citations)
+    .map(normalizeCitation)
+    .filter((citation): citation is Citation => citation !== null);
+}
+
+function evidenceGapsFromArtifact(artifact: Artifact | null) {
+  const content = artifact?.current_version?.structured_content;
+  const memo = asRecord(content?.memo);
+  return stringsFromUnknown(content?.evidence_gaps ?? memo?.evidence_gaps);
+}
+
+function retrievalToolCallCountFromArtifact(artifact: Artifact | null) {
+  const content = artifact?.current_version?.structured_content;
+  return valuesFromUnknown(content?.tool_calls).filter((value) => {
+    const toolCall = asRecord(value);
+    const tool = toolCall?.tool;
+    return tool === "semantic_search" || tool === "keyword_search" || tool === "source_reader";
+  }).length;
+}
+
+function memoryUpdateStatusFromArtifact(artifact: Artifact | null) {
+  const status = artifact?.current_version?.structured_content.memory_update_status;
+  return typeof status === "string" ? status : null;
+}
+
+function stringsFromUnknown(value: unknown) {
+  return valuesFromUnknown(value).filter((item): item is string => typeof item === "string");
+}
+
+function valuesFromUnknown(value: unknown) {
+  return Array.isArray(value) ? value : [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function normalizeCitation(value: unknown): Citation | null {
+  const citation = asRecord(value);
+  if (!citation || typeof citation.source_id !== "string") {
+    return null;
+  }
+  return {
+    source_id: citation.source_id,
+    chunk_id: nullableString(citation.chunk_id),
+    title: nullableString(citation.title),
+    url: nullableString(citation.url),
+    quote: nullableString(citation.quote),
+    retrieved_at: nullableString(citation.retrieved_at),
+    relevance_score:
+      typeof citation.relevance_score === "number" ? citation.relevance_score : null,
+  };
+}
+
+function nullableString(value: unknown) {
+  return typeof value === "string" ? value : null;
 }
 
 function linesFromList(values: string[]) {

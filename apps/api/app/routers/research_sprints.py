@@ -4,12 +4,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.ai.prompts import RESEARCH_SPRINT_PLANNING_PROMPT_VERSION
+from app.ai.prompts import AGENTIC_RESEARCH_PROMPT_VERSION, RESEARCH_SPRINT_PLANNING_PROMPT_VERSION
 from app.core.auth import AuthContextDep, SettingsDep
 from app.core.errors import public_error_detail
-from app.db.models import ResearchPlan, ResearchSprint
+from app.db.models import Artifact, ArtifactVersion, ResearchPlan, ResearchSprint
 from app.db.session import get_db
+from app.schemas.artifacts import ArtifactRead, ArtifactVersionRead
 from app.schemas.research import (
+    AgenticResearchApprovalRead,
+    AgenticResearchRunRead,
     CompetitorCandidateActionRead,
     CompetitorCandidateListRead,
     CompetitorCandidateRead,
@@ -28,7 +31,9 @@ from app.schemas.research import (
     SourceDiscoveryRunRead,
 )
 from app.services import (
+    agentic_research_service,
     competitor_discovery_service,
+    opportunity_brief_service,
     research_sprint_service,
     source_discovery_service,
 )
@@ -51,6 +56,21 @@ def serialize_source(source) -> DiscoveredSourceRead:
 
 def serialize_candidate(candidate) -> CompetitorCandidateRead:
     return CompetitorCandidateRead.model_validate(candidate)
+
+
+def serialize_artifact(artifact: Artifact) -> ArtifactRead:
+    current = opportunity_brief_service.current_version(artifact)
+    return ArtifactRead.model_validate(
+        {
+            **artifact.__dict__,
+            "current_version": current,
+            "versions": list(artifact.versions),
+        }
+    )
+
+
+def serialize_version(version: ArtifactVersion) -> ArtifactVersionRead:
+    return ArtifactVersionRead.model_validate(version)
 
 
 @router.get("/research-sprints", response_model=ResearchSprintListRead)
@@ -331,3 +351,72 @@ def reject_competitor_candidate(
         candidate_id,
     )
     return CompetitorCandidateActionRead(candidate=serialize_candidate(candidate))
+
+
+@router.post(
+    "/research-sprints/{sprint_id}/agentic-rag/run",
+    response_model=AgenticResearchRunRead,
+)
+def run_agentic_research(
+    project_id: uuid.UUID,
+    sprint_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> AgenticResearchRunRead:
+    try:
+        result = agentic_research_service.run_agentic_research(
+            db,
+            auth,
+            settings,
+            project_id,
+            sprint_id,
+        )
+    except agentic_research_service.AgenticResearchWorkflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=public_error_detail("Agentic research failed.", exc),
+        ) from exc
+    return AgenticResearchRunRead(
+        ai_run_id=result.run.id,
+        ai_step_id=result.step.id,
+        prompt_version=AGENTIC_RESEARCH_PROMPT_VERSION,
+        model_provider=result.model_provider,
+        model_name=result.model_name,
+        used_stub=result.used_stub,
+        total_tokens=result.total_tokens,
+        total_cost=result.total_cost,
+        retrieval_tool_call_count=result.retrieval_tool_call_count,
+        additional_retrieval_passes=result.additional_retrieval_passes,
+        evidence_gap_count=result.evidence_gap_count,
+        artifact=serialize_artifact(result.artifact),
+        version=serialize_version(result.version),
+        claims=result.claims,
+        citations=result.citations,
+        unsupported_claims=result.unsupported_claims,
+    )
+
+
+@router.post(
+    "/research-sprints/{sprint_id}/agentic-rag/approve",
+    response_model=AgenticResearchApprovalRead,
+)
+def approve_agentic_research_memo(
+    project_id: uuid.UUID,
+    sprint_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> AgenticResearchApprovalRead:
+    result = agentic_research_service.approve_research_memo(
+        db,
+        auth,
+        project_id,
+        sprint_id,
+    )
+    return AgenticResearchApprovalRead(
+        ai_run_id=result.run.id,
+        ai_step_id=result.step.id,
+        sprint=serialize_sprint(result.sprint),
+        artifact=serialize_artifact(result.artifact),
+        version=serialize_version(result.version),
+    )

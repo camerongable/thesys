@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.artifacts import ArtifactRead, ArtifactVersionRead, Citation, ClaimDraft, ClaimRead
+
 ResearchPlanStatus = Literal["draft", "approved", "rejected", "completed"]
 ResearchSprintStatus = Literal[
     "planned",
@@ -251,3 +253,49 @@ class CompetitorDiscoveryRunRead(BaseModel):
 
 class CompetitorCandidateActionRead(BaseModel):
     candidate: CompetitorCandidateRead
+
+
+class ResearchFindingDraft(BaseModel):
+    subquestion: str = Field(min_length=1, max_length=1000)
+    finding: str = Field(min_length=1, max_length=2000)
+    evidence_strength: Literal["weak", "medium", "strong"]
+    citations: list[Citation] = Field(default_factory=list, max_length=5)
+
+
+class AgenticResearchMemoDraft(BaseModel):
+    executive_verdict: str = Field(min_length=1, max_length=2000)
+    best_wedge: str = Field(min_length=1, max_length=2000)
+    findings: list[ResearchFindingDraft] = Field(default_factory=list, max_length=10)
+    evidence_gaps: list[str] = Field(default_factory=list, max_length=10)
+    recommended_validation_actions: list[str] = Field(default_factory=list, max_length=8)
+    decision_recommendation: str = Field(min_length=1, max_length=2000)
+    claims: list[ClaimDraft] = Field(default_factory=list, max_length=12)
+    citations: list[Citation] = Field(default_factory=list, max_length=20)
+    unsupported_claims: list[str] = Field(default_factory=list, max_length=12)
+
+
+class AgenticResearchRunRead(BaseModel):
+    ai_run_id: uuid.UUID
+    ai_step_id: uuid.UUID
+    prompt_version: str
+    model_provider: str
+    model_name: str
+    used_stub: bool
+    total_tokens: int | None
+    total_cost: Decimal | None
+    retrieval_tool_call_count: int
+    additional_retrieval_passes: int
+    evidence_gap_count: int
+    artifact: ArtifactRead
+    version: ArtifactVersionRead
+    claims: list[ClaimRead]
+    citations: list[Citation]
+    unsupported_claims: list[str]
+
+
+class AgenticResearchApprovalRead(BaseModel):
+    ai_run_id: uuid.UUID
+    ai_step_id: uuid.UUID
+    sprint: ResearchSprintRead
+    artifact: ArtifactRead
+    version: ArtifactVersionRead

@@ -756,6 +756,33 @@ export type CompetitorDiscoveryRun = {
   candidates: CompetitorCandidate[];
 };
 
+export type AgenticResearchRun = {
+  ai_run_id: string;
+  ai_step_id: string;
+  prompt_version: string;
+  model_provider: string;
+  model_name: string;
+  used_stub: boolean;
+  total_tokens: number | null;
+  total_cost: string | null;
+  retrieval_tool_call_count: number;
+  additional_retrieval_passes: number;
+  evidence_gap_count: number;
+  artifact: Artifact;
+  version: ArtifactVersion;
+  claims: Claim[];
+  citations: Citation[];
+  unsupported_claims: string[];
+};
+
+export type AgenticResearchApproval = {
+  ai_run_id: string;
+  ai_step_id: string;
+  sprint: ResearchSprint;
+  artifact: Artifact;
+  version: ArtifactVersion;
+};
+
 export type DemoSeedResult = {
   project: Project;
   created: boolean;
@@ -1387,6 +1414,24 @@ export async function rejectCompetitorCandidate(
     },
   );
   return response.candidate;
+}
+
+export function runAgenticResearch(projectId: string, sprintId: string) {
+  return apiFetch<AgenticResearchRun>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/agentic-rag/run`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function approveAgenticResearchMemo(projectId: string, sprintId: string) {
+  return apiFetch<AgenticResearchApproval>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/agentic-rag/approve`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export function getWorkflowEventsUrl(runId: string) {

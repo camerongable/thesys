@@ -2,12 +2,13 @@
 
 ## Current Phase
 
-V1 Sprints 2 and 3 complete. Approved research sprints can now generate ranked
-source candidates and competitor candidates from the research plan. Users can
-review source candidates before they are ingested into evidence, and can
-review/edit/approve competitor candidates before they become first-class
-project competitors. Watchlists, monitoring, collaboration, portfolio
-dashboards, integrations, and multi-segment workflow packs remain V2 scope.
+V1 Sprint 5 complete. Approved research sprints can now run a traced agentic
+RAG workflow that plans subquestions, selects retrieval tools, executes
+project-scoped retrieval, detects evidence gaps, performs follow-up retrieval,
+synthesizes a cited research memo, critiques weak claims, writes a reviewable
+`research_memo` artifact, and pauses before major project-memory updates.
+Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
+multi-segment workflow packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -500,6 +501,64 @@ Checks run:
 - [x] `curl -fsS http://localhost:8000/health`
 - [x] `curl -I -fsS http://localhost:3000/projects`
 
+Original V1 Sprint 5 plan:
+
+- Implement the core agentic RAG workflow.
+- Break the research objective into subquestions.
+- Choose semantic search, keyword search, source reading, competitor lookup,
+  project-memory lookup, artifact lookup, and assumption lookup tools.
+- Execute multiple retrieval/tool calls.
+- Detect evidence gaps.
+- Perform at least one additional retrieval pass when evidence is weak.
+- Synthesize cited findings.
+- Critique weak claims and unsupported conclusions.
+- Produce a final research memo.
+- Pause for human approval before major project-memory updates.
+
+## V1 Sprint 5 Scope
+
+- [x] Add `AGENTIC_RESEARCH_PROMPT_VERSION`.
+- [x] Add structured schemas for agentic research findings, memo output, and API response.
+- [x] Add `AgenticResearchService` with LangGraph nodes:
+  - `load_research_context`
+  - `research_planner`
+  - `retrieval_strategy_selector`
+  - `tool_executor`
+  - `evidence_selector`
+  - `gap_detector`
+  - `follow_up_retriever`
+  - `synthesizer`
+  - `critic`
+  - `final_memo_writer`
+  - `human_approval_interrupt`
+- [x] Implement project-scoped tool interfaces for semantic search, keyword
+  search, source reading, competitor lookup, project-memory lookup, artifact
+  lookup, and assumption lookup.
+- [x] Write cited `research_memo` artifact versions with structured content
+  linking back to the research sprint, plan, tool calls, selected evidence,
+  evidence gaps, and critic output.
+- [x] Store supported claims and claim-to-evidence links from the memo.
+- [x] Mark unsupported or weak claims and keep memory updates pending human approval.
+- [x] Add endpoint:
+  - `POST /api/projects/{project_id}/research-sprints/{sprint_id}/agentic-rag/run`
+- [x] Add Overview page action to run agentic RAG from the research discovery panel.
+- [x] Show the resulting trace and review status in the research sprint UI.
+- [x] Add inline research memo review UI with rendered memo content, cited
+  claims, unsupported claims, citations, version metadata, and pending human
+  review state.
+- [x] Add a research memo approval endpoint and UI action that completes the
+  human review gate, marks the memo approved, and completes the research sprint.
+
+## V1 Sprint 5 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_agentic_research.py`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_agentic_research.py app/tests/test_research_discovery.py app/tests/test_research_sprints.py -q`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] In-app browser verification for memo review and approval UI.
+
 ## Next Sprint
 
-V1 Sprint 5: Agentic RAG Research Workflow.
+V1 Sprint 6: Research Memo and Opportunity Brief Upgrade.
