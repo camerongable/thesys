@@ -261,6 +261,8 @@ def _stub_structured_output(
         payload = _fake_assumption_extraction(subject)
     elif output_schema.__name__ == "ValidationPlanSetDraft":
         payload = _fake_validation_plan_set(subject)
+    elif output_schema.__name__ == "ResearchPlanDraft":
+        payload = _fake_research_plan(subject)
     else:
         payload = {
             name: _fake_value(field.annotation, name=name, subject=subject)
@@ -828,6 +830,84 @@ def _fake_validation_plan_set(subject: str) -> dict[str, Any]:
             "building deeper product surface area."
         ),
         "plans": plans,
+    }
+
+
+def _fake_research_plan(subject: str) -> dict[str, Any]:
+    request_payload = _extract_json_payload(subject)
+    objective = str(request_payload.get("objective") or "").strip()
+    project_context = request_payload.get("project_context")
+    if not isinstance(project_context, dict):
+        project_context = {}
+    project_name = str(project_context.get("name") or "the opportunity").strip()
+    thesis = str(
+        project_context.get("current_thesis")
+        or project_context.get("short_description")
+        or "the current idea"
+    ).strip()
+    target_users = [
+        str(user).strip()
+        for user in project_context.get("target_users", [])
+        if str(user).strip()
+    ]
+    primary_user = target_users[0] if target_users else "the first target customer segment"
+
+    if not objective:
+        objective = (
+            f"Investigate whether {project_name} has a specific, evidence-backed wedge "
+            f"for {primary_user}."
+        )
+
+    return {
+        "objective": objective,
+        "target_customer_hypotheses": _dedupe(
+            [
+                primary_user,
+                "Adjacent users who currently rely on manual workflows or generic AI tools",
+            ]
+        ),
+        "research_questions": [
+            f"What urgent pain does {primary_user} have today?",
+            "Which current alternatives or workflows solve part of the problem?",
+            "What evidence would strengthen or weaken the current thesis?",
+            "What willingness-to-pay or adoption signals are visible?",
+        ],
+        "competitor_queries": [
+            f"{project_name} competitors",
+            f"{primary_user} software alternatives",
+            f"{thesis[:80]} competitors",
+        ],
+        "market_queries": [
+            f"{primary_user} market pain points",
+            f"{primary_user} workflow software trends",
+            f"{project_name} market landscape",
+        ],
+        "substitute_queries": [
+            f"how {primary_user} solves this manually",
+            f"{primary_user} spreadsheet workflow alternatives",
+            f"{primary_user} using ChatGPT for this workflow",
+        ],
+        "source_types": [
+            "company websites",
+            "pricing pages",
+            "product pages",
+            "reviews",
+            "forums",
+            "blog posts",
+            "directories",
+        ],
+        "assumptions_to_test": [
+            f"{primary_user} has a frequent enough problem to seek a new tool.",
+            f"{primary_user} trusts AI-assisted recommendations for this workflow.",
+            "Existing competitors leave a narrow wedge open.",
+            "There is a reachable validation audience for interviews or surveys.",
+        ],
+        "expected_outputs": [
+            "cited research memo",
+            "competitor candidate list",
+            "ranked assumptions and risks",
+            "recommended validation actions",
+        ],
     }
 
 

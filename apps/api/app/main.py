@@ -20,6 +20,7 @@ from app.routers.health import router as health_router
 from app.routers.intake import router as intake_router
 from app.routers.me import router as me_router
 from app.routers.projects import router as projects_router
+from app.routers.research_sprints import router as research_sprints_router
 from app.routers.workflows import router as workflows_router
 
 
@@ -59,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(me_router)
     app.include_router(projects_router)
+    app.include_router(research_sprints_router)
     app.include_router(intake_router)
     app.include_router(evidence_router)
     app.include_router(artifacts_router)

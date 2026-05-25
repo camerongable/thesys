@@ -15,7 +15,7 @@ type TraceStep = Pick<
   WorkflowStep,
   "step_name" | "status" | "latency_ms" | "tokens" | "cost" | "error"
 >;
-const terminalStatuses = new Set(["succeeded", "failed", "cancelled"]);
+const terminalStatuses = new Set(["succeeded", "failed", "cancelled", "waiting_for_human"]);
 
 export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: WorkflowTraceProps) {
   const [run, setRun] = useState<WorkflowRun | null>(null);
