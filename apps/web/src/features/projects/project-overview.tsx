@@ -7,6 +7,7 @@ import {
   CircleAlert,
   ClipboardCheck,
   Database,
+  FileSearch,
   Lightbulb,
   ListChecks,
   Route,
@@ -21,12 +22,19 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import {
+  approveResearchSprint,
   executeNextAction,
   getProjectOverview,
   IdeaReadiness,
+  listResearchSprints,
   NextBestAction,
   ProjectStage,
+  rejectResearchSprint,
+  ResearchPlan,
+  ResearchPlanUpdateInput,
   StrategicSnapshot,
+  startResearchSprintPlan,
+  updateResearchPlan,
 } from "@/lib/api";
 import { AiModeIndicator } from "@/features/ai/ai-mode-indicator";
 import { AssumptionsTab } from "@/features/projects/assumptions-tab";
@@ -37,6 +45,7 @@ import { EvidenceTab } from "@/features/projects/evidence-tab";
 import { ExperimentsTab } from "@/features/projects/experiments-tab";
 import { MarkdownContent } from "@/features/projects/markdown-content";
 import { StructuredIntakeWizard } from "@/features/projects/structured-intake-wizard";
+import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 const tabs = [
   "Overview",
@@ -301,6 +310,8 @@ function GuidedOverview({
         />
       ) : null}
 
+      <ResearchSprintCard projectId={overview.project.id} />
+
       <div className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
         <IdeaReadinessCard readiness={idea_readiness} />
         <StrategicSnapshotCard snapshot={overview.strategic_snapshot} />
@@ -316,6 +327,312 @@ function GuidedOverview({
         risks={overview.key_risks}
       />
     </section>
+  );
+}
+
+type ResearchPlanDraftState = {
+  objective: string;
+  target_customer_hypotheses: string;
+  research_questions: string;
+  competitor_queries: string;
+  market_queries: string;
+  substitute_queries: string;
+  source_types: string;
+  assumptions_to_test: string;
+  expected_outputs: string;
+};
+
+function ResearchSprintCard({ projectId }: { projectId: string }) {
+  const [objective, setObjective] = useState("");
+  const [draft, setDraft] = useState<ResearchPlanDraftState | null>(null);
+  const [lastRunId, setLastRunId] = useState<string | null>(null);
+  const sprintsQuery = useQuery({
+    queryKey: ["projects", projectId, "research-sprints"],
+    queryFn: () => listResearchSprints(projectId),
+  });
+  const latestSprint = sprintsQuery.data?.[0] ?? null;
+
+  useEffect(() => {
+    if (!latestSprint || latestSprint.status !== "planned") {
+      return;
+    }
+    setDraft(planToDraftState(latestSprint.plan));
+    setLastRunId(latestSprint.ai_run_id);
+  }, [latestSprint?.id, latestSprint?.status]);
+
+  const startMutation = useMutation({
+    mutationFn: () =>
+      startResearchSprintPlan(projectId, {
+        objective: objective.trim() || undefined,
+      }),
+    onSuccess: async (result) => {
+      setObjective("");
+      setDraft(planToDraftState(result.sprint.plan));
+      setLastRunId(result.ai_run_id);
+      await sprintsQuery.refetch();
+    },
+  });
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      if (!latestSprint || !draft) {
+        throw new Error("No draft research plan to save.");
+      }
+      return updateResearchPlan(projectId, latestSprint.plan.id, draftToUpdate(draft));
+    },
+    onSuccess: async (plan) => {
+      setDraft(planToDraftState(plan));
+      await sprintsQuery.refetch();
+    },
+  });
+  const approveMutation = useMutation({
+    mutationFn: () => {
+      if (!latestSprint) {
+        throw new Error("No research sprint to approve.");
+      }
+      return approveResearchSprint(
+        projectId,
+        latestSprint.id,
+        draft ? draftToUpdate(draft) : {},
+      );
+    },
+    onSuccess: async (result) => {
+      setDraft(planToDraftState(result.sprint.plan));
+      setLastRunId(result.ai_run_id);
+      await sprintsQuery.refetch();
+    },
+  });
+  const rejectMutation = useMutation({
+    mutationFn: () => {
+      if (!latestSprint) {
+        throw new Error("No research sprint to reject.");
+      }
+      return rejectResearchSprint(projectId, latestSprint.id);
+    },
+    onSuccess: async (result) => {
+      setLastRunId(result.ai_run_id);
+      await sprintsQuery.refetch();
+    },
+  });
+
+  const busy =
+    startMutation.isPending ||
+    saveMutation.isPending ||
+    approveMutation.isPending ||
+    rejectMutation.isPending;
+  const error =
+    startMutation.error ??
+    saveMutation.error ??
+    approveMutation.error ??
+    rejectMutation.error ??
+    (sprintsQuery.error as Error | null);
+  const activePlan = latestSprint?.status === "planned" && draft ? draft : null;
+  const traceRunId = lastRunId ?? latestSprint?.ai_run_id ?? null;
+  const traceKey = [
+    traceRunId,
+    latestSprint?.status,
+    latestSprint?.updated_at,
+    approveMutation.submittedAt,
+    rejectMutation.submittedAt,
+  ].join(":");
+
+  return (
+    <div id="research-sprint" className="rounded-lg border border-border bg-white p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="max-w-2xl">
+          <div className="flex items-center gap-2">
+            <FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h2 className="text-base font-semibold">Research Sprint</h2>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            Ask the system to plan an autonomous investigation before it discovers sources or
+            competitors. No browsing or ingestion starts until you approve the plan.
+          </p>
+        </div>
+        {latestSprint ? (
+          <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+            Latest: {formatLabel(latestSprint.status)}
+          </span>
+        ) : null}
+      </div>
+
+      {!activePlan ? (
+        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <label className="block">
+            <span className="text-sm font-medium">Research objective</span>
+            <textarea
+              className="mt-2 min-h-24 w-full resize-y rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+              onChange={(event) => setObjective(event.target.value)}
+              placeholder="Investigate whether this idea has a strong wedge, which competitors matter, and what to validate next."
+              value={objective}
+            />
+          </label>
+          <div className="flex flex-col justify-end gap-3">
+            <Button
+              disabled={busy}
+              onClick={() => startMutation.mutate()}
+              type="button"
+            >
+              <FileSearch className="h-4 w-4" aria-hidden="true" />
+              {startMutation.isPending ? "Planning..." : "Run Research Sprint"}
+            </Button>
+            {latestSprint?.status === "approved" ? (
+              <p className="text-xs leading-5 text-muted-foreground">
+                The latest plan is approved. Source discovery and execution begin in V1 Sprint 2.
+              </p>
+            ) : latestSprint?.status === "rejected" ? (
+              <p className="text-xs leading-5 text-muted-foreground">
+                The latest plan was rejected. Generate a new plan when the objective changes.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <ResearchPlanEditor
+          busy={busy}
+          draft={activePlan}
+          onApprove={() => approveMutation.mutate()}
+          onChange={setDraft}
+          onReject={() => rejectMutation.mutate()}
+          onSave={() => saveMutation.mutate()}
+        />
+      )}
+
+      {error ? (
+        <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error.message}
+        </div>
+      ) : null}
+
+      <div className="mt-5">
+        <WorkflowTrace
+          key={traceKey}
+          pending={startMutation.isPending}
+          pendingSteps={["load_project_context", "generate_research_plan", "persist_research_plan"]}
+          runId={traceRunId}
+        />
+      </div>
+
+      {sprintsQuery.data && sprintsQuery.data.length > 1 ? (
+        <div className="mt-5 border-t border-border pt-4">
+          <h3 className="text-sm font-semibold">Recent Research Plans</h3>
+          <div className="mt-3 space-y-2">
+            {sprintsQuery.data.slice(1, 4).map((sprint) => (
+              <div
+                className="flex flex-col gap-1 rounded-md bg-muted px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
+                key={sprint.id}
+              >
+                <span className="line-clamp-1">{sprint.plan.objective}</span>
+                <span className="text-xs text-muted-foreground">{formatLabel(sprint.status)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ResearchPlanEditor({
+  busy,
+  draft,
+  onApprove,
+  onChange,
+  onReject,
+  onSave,
+}: {
+  busy: boolean;
+  draft: ResearchPlanDraftState;
+  onApprove: () => void;
+  onChange: (draft: ResearchPlanDraftState) => void;
+  onReject: () => void;
+  onSave: () => void;
+}) {
+  function updateField(field: keyof ResearchPlanDraftState, value: string) {
+    onChange({ ...draft, [field]: value });
+  }
+
+  return (
+    <div className="mt-5 space-y-4">
+      <PlanTextArea
+        label="Objective"
+        onChange={(value) => updateField("objective", value)}
+        value={draft.objective}
+      />
+      <div className="grid gap-4 md:grid-cols-2">
+        <PlanTextArea
+          label="Target customer hypotheses"
+          onChange={(value) => updateField("target_customer_hypotheses", value)}
+          value={draft.target_customer_hypotheses}
+        />
+        <PlanTextArea
+          label="Research questions"
+          onChange={(value) => updateField("research_questions", value)}
+          value={draft.research_questions}
+        />
+        <PlanTextArea
+          label="Competitor discovery queries"
+          onChange={(value) => updateField("competitor_queries", value)}
+          value={draft.competitor_queries}
+        />
+        <PlanTextArea
+          label="Market research queries"
+          onChange={(value) => updateField("market_queries", value)}
+          value={draft.market_queries}
+        />
+        <PlanTextArea
+          label="Substitute behavior queries"
+          onChange={(value) => updateField("substitute_queries", value)}
+          value={draft.substitute_queries}
+        />
+        <PlanTextArea
+          label="Source types to inspect"
+          onChange={(value) => updateField("source_types", value)}
+          value={draft.source_types}
+        />
+        <PlanTextArea
+          label="Assumptions likely to be tested"
+          onChange={(value) => updateField("assumptions_to_test", value)}
+          value={draft.assumptions_to_test}
+        />
+        <PlanTextArea
+          label="Expected output artifacts"
+          onChange={(value) => updateField("expected_outputs", value)}
+          value={draft.expected_outputs}
+        />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={busy} onClick={onApprove} type="button">
+          Approve Plan
+        </Button>
+        <Button disabled={busy} onClick={onSave} type="button" variant="secondary">
+          Save Draft
+        </Button>
+        <Button disabled={busy} onClick={onReject} type="button" variant="secondary">
+          Reject
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PlanTextArea({
+  label,
+  onChange,
+  value,
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  return (
+    <label className="block">
+      <span className="text-sm font-medium">{label}</span>
+      <textarea
+        className="mt-2 min-h-24 w-full resize-y rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      />
+    </label>
   );
 }
 
@@ -636,6 +953,45 @@ function tabFromHash(hash: string): ProjectTab | null {
 
 function formatStage(stage: ProjectStage) {
   return formatLabel(stage);
+}
+
+function planToDraftState(plan: ResearchPlan): ResearchPlanDraftState {
+  return {
+    objective: plan.objective,
+    target_customer_hypotheses: linesFromList(plan.target_customer_hypotheses),
+    research_questions: linesFromList(plan.research_questions),
+    competitor_queries: linesFromList(plan.competitor_queries),
+    market_queries: linesFromList(plan.market_queries),
+    substitute_queries: linesFromList(plan.substitute_queries),
+    source_types: linesFromList(plan.source_types),
+    assumptions_to_test: linesFromList(plan.assumptions_to_test),
+    expected_outputs: linesFromList(plan.expected_outputs),
+  };
+}
+
+function draftToUpdate(draft: ResearchPlanDraftState): ResearchPlanUpdateInput {
+  return {
+    objective: draft.objective,
+    target_customer_hypotheses: listFromLines(draft.target_customer_hypotheses),
+    research_questions: listFromLines(draft.research_questions),
+    competitor_queries: listFromLines(draft.competitor_queries),
+    market_queries: listFromLines(draft.market_queries),
+    substitute_queries: listFromLines(draft.substitute_queries),
+    source_types: listFromLines(draft.source_types),
+    assumptions_to_test: listFromLines(draft.assumptions_to_test),
+    expected_outputs: listFromLines(draft.expected_outputs),
+  };
+}
+
+function linesFromList(values: string[]) {
+  return values.join("\n");
+}
+
+function listFromLines(value: string) {
+  return value
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function formatLabel(value: string) {

@@ -297,3 +297,22 @@ curl http://localhost:8000/api/projects/<project_id>/workflows
 curl http://localhost:8000/api/workflows/<run_id>
 curl -N http://localhost:8000/api/workflows/<run_id>/events
 ```
+
+## V1 Sprint 1 Research Planning
+
+The Overview page includes a Research Sprint card. It generates an
+approval-ready research plan, lets the user edit/save/approve/reject it, and
+keeps the workflow trace visible. Approval is required before any autonomous
+source discovery, competitor discovery, browsing, or ingestion.
+
+```bash
+curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/plan \
+  -H "Content-Type: application/json" \
+  -d '{"objective":"Investigate the market, competitors, and validation risks."}'
+
+curl http://localhost:8000/api/projects/<project_id>/research-sprints
+
+curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/approve \
+  -H "Content-Type: application/json" \
+  -d '{"research_questions":["Which segment has the most urgent pain?"]}'
+```

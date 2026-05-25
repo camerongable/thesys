@@ -3604,114 +3604,1425 @@ This sprint is complete when:
 
 ---
 
-# 19. V1 Implementation Roadmap
+# Updated V1 and V2 Roadmap
 
-## V1 Sprint 1: Watchlists and Monitoring
+## Strategic Shift
 
-Tasks:
+The product direction has been refined.
 
-- implement watchlist UI
-- allow user to watch competitors and URLs
-- scheduled Celery beat job checks sources
-- compute content hash/diff
-- classify changes with LLM
-- create alerts
-- link alerts to assumptions/competitors
-- display Monitor tab
+The original V1 plan was too broad. It included research workflows, monitoring, collaboration, exports, persistent memory, and platform features all at once.
 
-Acceptance:
+The updated V1 should focus on the first major product “wow” moment:
 
-- user can watch a competitor pricing page
-- system detects change
-- system explains strategic implication
-- user can dismiss or act on alert
+> A user gives the app a rough idea, and the system investigates the market, discovers competitors, gathers evidence, synthesizes a cited research memo, identifies assumptions, and recommends what to validate next.
 
-## V1 Sprint 2: Agentic RAG Research Sprints
+V1 is no longer primarily about making the workspace more complete.
 
-### Goals
+V1 is about making the app feel alive.
 
-- Build the first agentic RAG workflow using LangGraph.
-- Support multi-step strategic research with retrieval planning, tool use, critique, and human approval.
+---
 
-Tasks:
+# Phase Definitions
 
-- implement research sprint workflow
-- add human approval of research plan
-- add workflow progress UI
-- generate final memo
-- write decisions/experiments from memo
-- implement Research Planner node
-- implement Retrieval Strategy Selector node
-- implement semantic search tool
-- implement keyword search tool
-- implement source reader tool
-- implement project memory lookup tool
-- implement Gap Detector node
-- implement Critic node
-- implement Human Approval node
-- implement Memory Writer node
-- add Langfuse tracing for each node and tool call
-- add eval cases for agentic research workflows
+## MVP: Guided Strategic Workspace
 
-Acceptance:
+The MVP helps the user manually move through the idea validation process.
 
-- user can ask strategic question
-- system proposes plan
-- user approves
-- system creates source-grounded memo
-- user can ask a complex strategic question
-- system decomposes the question into subquestions
-- system performs multiple retrieval/tool calls when needed
-- system identifies missing evidence
-- system generates a cited recommendation
-- system requires user approval before updating thesis, assumptions, risks, or decisions
-- full workflow execution is traceable
+Core flow:
 
-## V1 Sprint 3: Customer Discovery Ingestion
+```text
+rough idea
+→ structured thesis
+→ evidence-backed opportunity brief
+→ competitors
+→ assumptions
+→ validation plan
+→ decision
+```
 
-Tasks:
+Primary value:
 
-- support transcript/note uploads
-- extract themes, objections, buying triggers
-- map to assumptions
-- update confidence
-- generate customer discovery summary
+> “I understand what to validate next.”
 
-Acceptance:
+The MVP proves the product’s core object model:
 
-- user uploads interviews
-- system extracts themes
-- assumptions update
-- messaging recommendations appear
+- projects
+- structured intake
+- opportunity briefs
+- evidence
+- competitors
+- assumptions
+- experiments
+- decisions
+- guided overview
+- RAG-grounded outputs
 
-## V1 Sprint 4: Collaboration
+---
 
-Tasks:
+## V1: Autonomous Research and Validation Copilot
 
-- workspace roles
-- comments
-- mentions
-- artifact approval states
-- decision review workflow
+V1 helps the user start with only a rough idea and have the system investigate the opportunity.
 
-Acceptance:
+Core flow:
 
-- two users can collaborate on project
-- decision memo can be reviewed and approved
+```text
+rough idea
+→ research plan
+→ source discovery
+→ competitor discovery
+→ evidence ingestion
+→ agentic RAG synthesis
+→ cited research memo
+→ assumptions and risks
+→ validation assets
+→ next recommended action
+```
 
-## V1 Sprint 5: Multi-Project Portfolio Dashboard
+Primary value:
 
-Tasks:
+> “The app researched this opportunity for me and told me what to test.”
 
-- scoring model
-- compare projects
-- portfolio view
-- kill/pause/proceed workflow
+V1 should make the app feel like an autonomous strategic researcher, not just a structured workspace.
 
-Acceptance:
+---
 
-- user can compare several ideas
-- system recommends prioritization with evidence
+## V2: Living Strategic Intelligence Platform
+
+V2 turns the V1 research engine into a persistent, collaborative, recurring, multi-workflow platform.
+
+Core flow:
+
+```text
+ongoing monitoring
+→ strategic alerts
+→ team decisions
+→ portfolio comparison
+→ exports and integrations
+→ multi-segment workflow packs
+```
+
+Primary value:
+
+> “This is my strategic operating system.”
+
+V2 is where the product becomes sticky, collaborative, recurring, and expandable beyond founders.
+
+---
+
+# What Moves Out of Old V1
+
+The following capabilities were previously part of V1, but should now move to V2.
+
+| Capability | New Home | Reason |
+|---|---|---|
+| Full collaboration/comments/mentions | V2 | Important for teams, but not needed for the first “wow” moment |
+| Multi-project portfolio dashboard | V2 | Useful after the single-project research loop works well |
+| Advanced monitoring/watchlists | V2 | Recurring value, but should come after autonomous research works |
+| Polished PDF/docs/slides exports | V2 | Helpful, but not central to the V1 research loop |
+| Workspace roles/team permissions | V2 | Needed for team use, not solo-founder V1 |
+| Consultant/PM/investor workflow variants | V2 | Avoid diluting the founder wedge too early |
+| Advanced eval dashboard | V2 | Keep basic evals in V1, dashboard later |
+| Slack/Notion/Linear/Drive integrations | V2 | Useful later, but not necessary for V1 |
+| Mobile app/capture | V2 | Later expansion |
+| Billing/team admin | V2 | Later commercial layer |
+
+Important exception:
+
+Human approval checkpoints should stay in V1, but only for:
+
+- research plan approval
+- source/competitor approval when appropriate
+- memory updates
+- major recommendation updates
+
+---
+
+# V1 Roadmap: Autonomous Research and Validation Copilot
+
+## V1 Goal
+
+V1 should answer one question:
+
+> Can the app investigate an idea on behalf of the user and tell them what to validate next?
+
+V1 should not try to become a full strategic intelligence platform yet.
+
+The V1 experience should feel like this:
+
+```text
+User enters a rough idea.
+System proposes a research plan.
+User approves the plan.
+System discovers sources and competitors.
+System ingests evidence.
+System synthesizes a cited strategic memo.
+System identifies assumptions and risks.
+System recommends validation experiments.
+User approves memory updates.
+System updates the project overview.
+```
+
+---
+
+## V1 Sprint 1: Research Sprint Entry Point and Planning
+
+### Goal
+
+Add the core V1 entry point:
+
+> Run Research Sprint
+
+The user should be able to start with a rough idea and ask the system to investigate it.
+
+### User Flow
+
+```text
+User opens project
+→ clicks Run Research Sprint
+→ system creates research plan
+→ user approves or edits plan
+→ system begins research workflow
+```
+
+### Features
+
+- Add `Run Research Sprint` CTA to the Overview page.
+- Generate a research plan from the current idea/thesis.
+- Let the user approve, edit, or reject the research plan.
+- Store approved research plans.
+- Show research workflow progress.
+
+### Research Plan Should Include
+
+- research objective
+- target customer hypotheses
+- competitor discovery queries
+- market research queries
+- substitute behavior queries
+- source types to inspect
+- assumptions likely to be tested
+- expected output artifacts
+
+### Data Models
+
+Add or extend:
+
+```ts
+type ResearchPlan = {
+  id: string;
+  project_id: string;
+  objective: string;
+  research_questions: string[];
+  competitor_queries: string[];
+  market_queries: string[];
+  substitute_queries: string[];
+  source_types: string[];
+  expected_outputs: string[];
+  status: "draft" | "approved" | "rejected" | "completed";
+  created_at: string;
+  updated_at: string;
+};
+
+type ResearchSprint = {
+  id: string;
+  project_id: string;
+  research_plan_id: string;
+  status:
+    | "planned"
+    | "approved"
+    | "running"
+    | "needs_review"
+    | "completed"
+    | "failed";
+  started_at?: string;
+  completed_at?: string;
+};
+```
+
+### Technical Work
+
+- Add `ResearchPlan` model.
+- Add `ResearchSprint` model.
+- Add `ResearchSprintService`.
+- Add LangGraph workflow skeleton.
+- Add human approval step before execution.
+- Add workflow state persistence.
+- Add progress events for UI display.
+
+### Acceptance Criteria
+
+- User can start a research sprint from the Overview page.
+- System generates a useful research plan.
+- User can approve or edit the plan before execution.
+- Research plan is saved to the project.
+- No autonomous browsing/research occurs before user approval.
+- Research sprint progress is visible in the UI.
+
+---
+
+## V1 Sprint 2: Autonomous Source Discovery
+
+### Goal
+
+The app should no longer depend only on manually added evidence.
+
+It should discover useful public sources from the idea and research plan.
+
+### User Flow
+
+```text
+Approved research plan
+→ system generates search queries
+→ system finds relevant sources
+→ system ranks sources
+→ user can review discovered sources
+```
+
+### Features
+
+- Generate search queries from project thesis and research plan.
+- Discover sources for:
+  - market landscape
+  - customer pain
+  - competitor pages
+  - pricing pages
+  - reviews
+  - forums/discussions
+  - alternatives/substitutes
+  - trend signals
+- Score and rank source relevance.
+- Let user approve/reject sources for ingestion.
+- Deduplicate discovered sources.
+
+### Source Types
+
+Start with simple public web sources.
+
+Prioritize:
+
+- company websites
+- product pages
+- pricing pages
+- app review pages if feasible
+- Reddit/forum threads if available
+- blog posts
+- market reports
+- directories/listicles
+- changelogs/docs pages
+
+### Data Model
+
+```ts
+type DiscoveredSource = {
+  id: string;
+  project_id: string;
+  research_sprint_id: string;
+  url: string;
+  title?: string;
+  snippet?: string;
+  source_type:
+    | "company_site"
+    | "pricing_page"
+    | "product_page"
+    | "review"
+    | "forum"
+    | "blog"
+    | "market_report"
+    | "directory"
+    | "docs"
+    | "unknown";
+  relevance_score: number;
+  reason_selected: string;
+  associated_research_question?: string;
+  status: "candidate" | "approved" | "rejected" | "ingested" | "failed";
+  created_at: string;
+};
+```
+
+### Technical Work
+
+- Add `SourceDiscoveryService`.
+- Add source ranking.
+- Add source approval UI.
+- Add deduplication.
+- Add metadata extraction.
+- Add source discovery trace logging.
+
+### Acceptance Criteria
+
+- Given a project idea, the system can discover relevant public sources.
+- Sources are ranked with reasons.
+- User can approve/reject sources before ingestion.
+- Approved sources flow into the evidence ingestion pipeline.
+- Duplicate sources are filtered.
+- Discovered sources are linked to the research sprint.
+
+---
+
+## V1 Sprint 3: Competitor Discovery and Classification
+
+### Goal
+
+The app should automatically identify competitors and substitutes.
+
+This is one of the biggest V1 value unlocks.
+
+### User Flow
+
+```text
+Research sprint runs
+→ system discovers competitors
+→ system classifies them
+→ user reviews competitor set
+→ approved competitors are saved
+```
+
+### Features
+
+- Discover direct competitors.
+- Discover indirect competitors.
+- Discover substitute behaviors.
+- Discover incumbent platforms.
+- Classify competitors into categories.
+- Extract basic competitor metadata.
+- Let user approve/edit competitor list.
+
+### Competitor Categories
+
+```text
+direct_competitor
+indirect_competitor
+substitute_behavior
+incumbent_platform
+adjacent_solution
+irrelevant
+```
+
+### Competitor Fields
+
+- name
+- URL
+- category
+- target user
+- positioning
+- pricing signal
+- core features
+- why it matters
+- threat level
+- relevance score
+- source references
+
+### Data Model
+
+```ts
+type CompetitorCandidate = {
+  id: string;
+  project_id: string;
+  research_sprint_id: string;
+  name: string;
+  url?: string;
+  category:
+    | "direct_competitor"
+    | "indirect_competitor"
+    | "substitute_behavior"
+    | "incumbent_platform"
+    | "adjacent_solution"
+    | "irrelevant";
+  target_user?: string;
+  positioning?: string;
+  pricing_signal?: string;
+  core_features?: string[];
+  why_it_matters: string;
+  threat_level: "low" | "medium" | "high";
+  relevance_score: number;
+  source_ids: string[];
+  status: "candidate" | "approved" | "rejected" | "merged";
+  created_at: string;
+};
+```
+
+### Technical Work
+
+- Add `CompetitorDiscoveryService`.
+- Add competitor classification prompt/schema.
+- Add competitor approval workflow.
+- Add competitor deduplication.
+- Add competitor-to-evidence links.
+- Add competitor status transitions.
+
+### Acceptance Criteria
+
+- System can produce a candidate competitor set from a rough idea.
+- Competitors are categorized.
+- User can approve, reject, or edit competitors.
+- Approved competitors become first-class project entities.
+- Competitor analysis no longer requires manual URL input.
+- Each competitor includes a reason explaining why it matters.
+
+---
+
+## V1 Sprint 4: Auto-Ingestion and Evidence Graph Update
+
+### Goal
+
+Approved discovered sources and competitors should be ingested automatically into the project evidence graph.
+
+### User Flow
+
+```text
+User approves sources/competitors
+→ system fetches source content
+→ extracts text
+→ chunks and embeds
+→ stores evidence
+→ links evidence to project entities
+```
+
+### Features
+
+- Fetch approved source content.
+- Extract useful text.
+- Chunk content.
+- Generate embeddings.
+- Store embeddings in pgvector.
+- Store source metadata in Postgres.
+- Link evidence to:
+  - project
+  - competitors
+  - assumptions
+  - research questions
+  - artifacts
+
+### Technical Work
+
+- Extend existing ingestion pipeline.
+- Add source fetcher.
+- Add content extraction.
+- Add chunk metadata.
+- Add ingestion status.
+- Add failed ingestion handling.
+- Add source freshness timestamp.
+- Add evidence linking logic.
+
+### Acceptance Criteria
+
+- Approved sources are automatically ingested.
+- Evidence chunks are searchable.
+- Source metadata is preserved.
+- Ingestion failures are visible and recoverable.
+- Evidence is linked to relevant project entities.
+- RAG retrieval can use auto-discovered evidence.
+
+---
+
+## V1 Sprint 5: Agentic RAG Research Workflow
+
+### Goal
+
+Implement the core agentic RAG workflow.
+
+This is the technical centerpiece of V1.
+
+### User Flow
+
+```text
+Research sprint starts
+→ agent plans subquestions
+→ chooses retrieval tools
+→ retrieves evidence
+→ detects gaps
+→ retrieves again if needed
+→ synthesizes findings
+→ critiques output
+→ generates cited research memo
+```
+
+### Agentic RAG Workflow Nodes
+
+1. **Research Planner**
+   - Breaks the research objective into subquestions.
+
+2. **Retrieval Strategy Selector**
+   - Chooses semantic search, keyword search, competitor lookup, source reading, or project-memory lookup.
+
+3. **Tool Executor**
+   - Executes retrieval/search/source-reading tools.
+
+4. **Evidence Selector**
+   - Ranks and filters retrieved evidence.
+
+5. **Gap Detector**
+   - Identifies missing or weak evidence.
+
+6. **Follow-Up Retriever**
+   - Performs additional retrieval when needed.
+
+7. **Synthesizer**
+   - Generates cited findings.
+
+8. **Critic**
+   - Challenges weak claims and unsupported conclusions.
+
+9. **Final Memo Writer**
+   - Produces the final research memo.
+
+10. **Human Approval**
+   - User approves before memory updates.
+
+11. **Memory Writer**
+   - Writes approved findings into project state.
+
+### Required Tools
+
+Implement tool interfaces for:
+
+- semantic search
+- keyword search
+- source reader
+- competitor lookup
+- project memory lookup
+- artifact lookup
+- assumption lookup
+
+### Technical Work
+
+- Implement LangGraph workflow.
+- Add tool interfaces.
+- Add trace logging.
+- Add retry/failure handling.
+- Add citation enforcement.
+- Add workflow checkpointing.
+- Add approval interrupt before memory writes.
+
+### Acceptance Criteria
+
+- System can answer a complex strategic question using multiple retrieval/tool calls.
+- System can identify missing evidence.
+- System can perform at least one additional retrieval pass.
+- Final output includes citations.
+- Unsupported claims are marked as assumptions.
+- User approves before major project memory updates.
+- Full workflow is traceable.
+
+---
+
+## V1 Sprint 6: Research Memo and Opportunity Brief Upgrade
+
+### Goal
+
+Upgrade generated outputs so they feel like sharp strategic analysis, not generic AI summaries.
+
+### Features
+
+Generate a V1 research memo with these sections:
+
+- Executive Verdict
+- Best Wedge
+- Market Landscape
+- Customer Pain Signals
+- Competitor Landscape
+- Substitute Behaviors
+- Pricing / Business Model Signals
+- Key Risks
+- Riskiest Assumptions
+- Evidence Summary
+- What We Still Do Not Know
+- Recommended Validation Actions
+- Decision Recommendation
+
+### Output Rules
+
+- Be opinionated.
+- Do not overstate confidence.
+- Cite factual claims.
+- Mark unsupported claims as assumptions.
+- Explicitly call out weak evidence.
+- Recommend a next action.
+- Avoid generic business-plan language.
+
+### Technical Work
+
+- Update artifact schema if needed.
+- Add cited claim extraction.
+- Add unsupported assumption extraction.
+- Add artifact versioning if not already present.
+- Add ability to compare MVP brief vs V1 research memo.
+- Add artifact-to-research-sprint links.
+
+### Acceptance Criteria
+
+- Research memo is meaningfully better than a generic ChatGPT answer.
+- Memo includes citations.
+- Memo includes a clear verdict.
+- Memo identifies weakest evidence areas.
+- Memo recommends the next validation step.
+- Memo updates project readiness/recommendation after approval.
+- Memo can be traced back to research sprint, sources, evidence, and claims.
+
+---
+
+## V1 Sprint 7: Assumption and Risk Update from Research
+
+### Goal
+
+The system should convert research findings into operational validation priorities.
+
+### User Flow
+
+```text
+Research memo generated
+→ system extracts assumptions/risks
+→ ranks by importance and uncertainty
+→ user approves updates
+→ assumptions become validation targets
+```
+
+### Features
+
+- Extract new assumptions from research.
+- Update existing assumptions.
+- Rank assumptions by:
+  - importance
+  - uncertainty
+  - evidence strength
+  - kill-risk
+- Link assumptions to evidence.
+- Recommend first assumption to validate.
+- Update Idea Readiness.
+- Update current recommendation.
+
+### Technical Work
+
+- Add assumption merge/update logic.
+- Add assumption scoring.
+- Add evidence-to-assumption links.
+- Add approval step before overwriting existing assumptions.
+- Add strategic update generation.
+- Add recommendation refresh after assumption changes.
+
+### Acceptance Criteria
+
+- Research output creates or updates assumptions.
+- Assumptions are ranked.
+- Each high-risk assumption has evidence links or is marked unsupported.
+- User approves changes.
+- Overview updates with new recommendation and next best action.
+- Riskiest assumption is clearly visible.
+
+---
+
+## V1 Sprint 8: Validation Action Assistant
+
+### Goal
+
+The app should help the user take action after research.
+
+This is not full automation yet. The system should generate high-quality validation assets, but the user still approves or executes them manually.
+
+### User Flow
+
+```text
+User selects riskiest assumption
+→ system recommends validation method
+→ system generates assets
+→ user runs experiment manually
+→ user logs results
+```
+
+### Validation Asset Types
+
+- customer interview script
+- screener questions
+- survey questions
+- landing page copy
+- outreach message
+- success criteria
+- experiment plan
+- note-taking template
+- result interpretation rubric
+
+### Example Use Case
+
+For willingness to pay, the system should generate:
+
+- target respondent profile
+- interview questions
+- pricing sensitivity questions
+- success threshold
+- failure threshold
+- what results mean proceed/pivot/kill
+
+### Technical Work
+
+- Add validation method recommendation.
+- Add asset generation templates.
+- Add experiment creation from assumption.
+- Add result logging.
+- Add confidence update after results.
+- Add experiment-to-assumption links.
+
+### Acceptance Criteria
+
+- User can generate validation assets from a high-risk assumption.
+- Generated experiment has success criteria.
+- User can log experiment results.
+- Results update assumption confidence.
+- Results can trigger a project recommendation update.
+- User remains in control of external action execution.
+
+---
+
+## V1 Sprint 9: Strategic Update Feed and Research History
+
+### Goal
+
+Make V1 research activity understandable over time.
+
+### Features
+
+- Show research sprint history.
+- Show what changed after each sprint.
+- Show evidence added.
+- Show assumptions created/updated.
+- Show recommendation changes.
+- Show memory updates approved/rejected.
+- Show research memo versions.
+
+### Technical Work
+
+- Extend Strategic Updates.
+- Add research sprint timeline.
+- Add artifact/research version links.
+- Add recommendation change history.
+- Add approved/rejected memory update records.
+
+### Acceptance Criteria
+
+- User can see what each research sprint changed.
+- Strategic updates are human-readable.
+- User can trace recommendation changes back to research outputs.
+- User can inspect approved/rejected memory updates.
+- Project memory feels alive, not opaque.
+
+---
+
+## V1 Sprint 10: V1 Quality, Evals, and Demo Hardening
+
+### Goal
+
+Harden V1 into a credible AI engineering portfolio demo and useful alpha product.
+
+### Features
+
+- Add eval cases for autonomous research quality.
+- Add retrieval quality checks.
+- Add groundedness checks.
+- Add latency/cost tracking.
+- Add trace inspection.
+- Create polished demo projects.
+
+### Eval Areas
+
+- source relevance
+- competitor discovery quality
+- citation coverage
+- unsupported claim rate
+- assumption quality
+- next-action usefulness
+- research memo usefulness
+- hallucination rate
+- cost per research sprint
+- time to research memo
+
+### Minimum Eval Dataset
+
+Create at least 10 research sprint eval cases covering different idea types:
+
+1. consumer app
+2. B2B SaaS
+3. developer tool
+4. marketplace
+5. health/fitness product
+6. local services product
+7. AI workflow product
+8. creator economy product
+9. productivity tool
+10. ecommerce or affiliate idea
+
+### Acceptance Criteria
+
+- At least 10 research sprint eval cases exist.
+- At least 5 demo ideas run successfully end-to-end.
+- Research memos are cited.
+- Competitor discovery works on multiple idea categories.
+- Agentic RAG workflow is traceable.
+- Cost and latency are visible.
+- The product demo clearly shows:
+  - rough idea
+  - autonomous research
+  - competitor discovery
+  - evidence ingestion
+  - cited memo
+  - assumption ranking
+  - validation plan
+
+---
+
+# V1 Non-Goals
+
+Do not include these in V1 unless they are trivial side effects of existing work:
+
+- full collaboration
+- comments/mentions
+- team workspaces
+- recurring market monitoring
+- full watchlist automation
+- investor workflows
+- consultant workflows
+- product discovery workflows
+- polished slide/PDF export system
+- Slack/Notion/Linear integrations
+- mobile app
+- billing
+- advanced admin
+- multi-project portfolio scoring
+
+V1 should stay focused.
+
+The V1 question is:
+
+> Can the app investigate an idea on behalf of the user and tell them what to validate next?
+
+If yes, V1 succeeds.
+
+---
+
+# V2 Roadmap: Living Strategic Intelligence Platform
+
+## V2 Goal
+
+V2 takes the V1 research engine and turns it into a persistent, collaborative, recurring, multi-workflow platform.
+
+V2 should make the product sticky.
+
+The user should feel:
+
+> This system remembers my strategic thinking, monitors the world for changes, helps my team make decisions, and manages a portfolio of opportunities over time.
+
+---
+
+## V2 Sprint 1: Recurring Watchlists and Market Monitoring
+
+### Goal
+
+Turn one-time research into recurring intelligence.
+
+### Features
+
+- Create watchlists from approved competitors and sources.
+- Monitor competitor pages.
+- Monitor pricing pages.
+- Monitor product pages.
+- Monitor changelogs/docs.
+- Monitor selected keywords.
+- Detect meaningful changes.
+- Summarize strategic impact.
+
+### Watchlist Entity Types
+
+- competitor
+- source
+- keyword
+- market category
+- pricing page
+- product page
+- review source
+- changelog/docs page
+
+### Technical Work
+
+- Add `Watchlist` model.
+- Add scheduled fetch jobs.
+- Add page/content diffing.
+- Add change classification.
+- Add alert creation.
+- Add source freshness tracking.
+
+### Acceptance Criteria
+
+- User can create a watchlist from a project.
+- System can detect changes in monitored sources.
+- Alerts explain what changed and why it matters.
+- Alerts link back to assumptions, competitors, evidence, and decisions.
+
+---
+
+## V2 Sprint 2: Strategic Alerts and Recommendation Updates
+
+### Goal
+
+Monitoring should update strategy, not just notify.
+
+### Features
+
+- Classify alerts by importance.
+- Link alerts to assumptions/risks.
+- Suggest thesis updates.
+- Suggest competitor updates.
+- Suggest new validation actions.
+- Let user approve memory updates.
+
+### Alert Severity Levels
+
+```text
+low
+medium
+high
+critical
+```
+
+### Technical Work
+
+- Add alert classification.
+- Add strategic impact synthesis.
+- Add alert-to-assumption linking.
+- Add alert-to-recommendation update suggestions.
+- Add human approval for memory updates.
+
+### Acceptance Criteria
+
+- Alerts are not raw diffs.
+- Alerts include strategic interpretation.
+- User can approve/reject suggested updates.
+- Recommendation history tracks changes caused by alerts.
+- Alerts can change next best action when appropriate.
+
+---
+
+## V2 Sprint 3: Multi-Project Portfolio Dashboard
+
+### Goal
+
+Support founders, indie hackers, venture studios, and strategy teams evaluating multiple ideas.
+
+### Features
+
+- Portfolio view across projects.
+- Compare ideas by:
+  - readiness
+  - evidence strength
+  - market attractiveness
+  - competitor intensity
+  - validation progress
+  - confidence
+  - next action
+- Recommend which idea to focus on.
+- Mark ideas as active, paused, killed, or proceeding.
+
+### Technical Work
+
+- Add portfolio dashboard.
+- Add project scoring rollups.
+- Add cross-project comparison.
+- Add portfolio recommendation logic.
+- Add project lifecycle filters.
+
+### Acceptance Criteria
+
+- User can compare multiple ideas.
+- Dashboard highlights strongest and weakest opportunities.
+- System can recommend focus areas.
+- Project status rolls up cleanly.
+- User can see why one idea is recommended over another.
+
+---
+
+## V2 Sprint 4: Collaboration and Team Decision Workflows
+
+### Goal
+
+Support small teams, venture studios, consultants, and product groups.
+
+### Features
+
+- Team workspaces.
+- User roles.
+- Comments.
+- Mentions.
+- Decision review.
+- Approval workflows.
+- Shared artifacts.
+- Team activity feed.
+
+### Roles
+
+```text
+owner
+admin
+editor
+viewer
+commenter
+```
+
+### Technical Work
+
+- Add workspace/team model.
+- Add role-based access control.
+- Add comments.
+- Add mentions.
+- Add decision review workflow.
+- Add team activity feed.
+- Add audit trail for important changes.
+
+### Acceptance Criteria
+
+- Multiple users can collaborate on one project.
+- Users can comment on assumptions, evidence, competitors, artifacts, and decisions.
+- Strategic decisions can be reviewed and approved.
+- Team activity is auditable.
+- Access control works by workspace/project.
+
+---
+
+## V2 Sprint 5: Advanced Artifact Exports
+
+### Goal
+
+Make outputs easy to share outside the product.
+
+### Features
+
+- Export to Markdown.
+- Export to PDF.
+- Export to Google Docs or Notion.
+- Generate investor memo.
+- Generate product memo.
+- Generate research brief.
+- Generate competitor teardown.
+- Generate validation report.
+- Later: slide outline or deck export.
+
+### Artifact Templates
+
+- Founder opportunity brief
+- Market research memo
+- Competitor teardown
+- Validation report
+- Investor update
+- Product opportunity brief
+- Consultant client memo
+- Diligence memo
+
+### Technical Work
+
+- Add export service.
+- Add artifact template registry.
+- Add citation-preserving export.
+- Add version history.
+- Add export audit records.
+
+### Acceptance Criteria
+
+- User can export a cited artifact.
+- Export preserves sources/citations.
+- Artifact templates are useful for real external sharing.
+- Exported artifacts look polished enough for investors, teammates, or clients.
+
+---
+
+## V2 Sprint 6: Integrations and MCP Tool Layer
+
+### Goal
+
+Connect the platform to external systems.
+
+### Candidate Integrations
+
+- Notion
+- Google Drive
+- Slack
+- Linear
+- Jira
+- Airtable
+- Google Docs
+- Typeform
+- Google Forms
+- HubSpot
+- email drafts
+
+### MCP / Tooling Goals
+
+- Tool registry.
+- Permissioned tool access.
+- Scoped project tools.
+- Human approval for write actions.
+- Audit logs.
+- Read-only tools by default.
+- Explicit approval for external writes.
+
+### Technical Work
+
+- Add tool registry.
+- Add MCP/tool abstraction.
+- Add tool permission model.
+- Add audit logs for tool calls.
+- Add first integration end-to-end.
+- Add human approval gate for write actions.
+
+### Acceptance Criteria
+
+- At least one external integration works end-to-end.
+- Tool calls are permissioned.
+- Write actions require approval.
+- Tool usage is traceable.
+- Tools are scoped to tenant/workspace/project.
+
+---
+
+## V2 Sprint 7: Validation Execution Automation
+
+### Goal
+
+Move from generating validation assets to helping execute validation.
+
+### Features
+
+- Create survey drafts.
+- Create landing page copy.
+- Draft outreach emails.
+- Draft social posts.
+- Generate interview scheduling plan.
+- Optionally integrate with forms/email tools.
+- Track experiment status.
+- Summarize experiment results.
+
+### Execution Levels
+
+Use explicit autonomy levels:
+
+```text
+draft_only
+requires_approval
+approved_to_send
+external_execution_disabled
+```
+
+### Technical Work
+
+- Add validation campaign model.
+- Add experiment execution states.
+- Add draft generation.
+- Add approval gates.
+- Add optional external tool integration.
+- Add result import/logging.
+
+### Acceptance Criteria
+
+- User can turn an assumption into a ready-to-run validation campaign.
+- External publishing/sending requires approval.
+- Results can be imported or logged.
+- Experiment results update project confidence.
+- System never takes irreversible external actions without approval.
+
+---
+
+## V2 Sprint 8: Segment Workflow Packs
+
+### Goal
+
+Expand beyond founders without rebuilding the core platform.
+
+### Workflow Packs
+
+1. Founder Strategic Intelligence
+2. Product Discovery Intelligence
+3. Consultant Research OS
+4. Competitive Intelligence / GTM OS
+5. Investor Diligence Copilot
+
+### Shared Primitives
+
+- project workspace
+- evidence graph
+- assumptions
+- competitors
+- decisions
+- artifacts
+- research sprints
+- monitoring
+- recommendations
+
+### Segment-Specific Differences
+
+| Segment | Main Artifact | Main Decision |
+|---|---|---|
+| Founder | Opportunity brief | Build / pivot / kill |
+| Product Manager | Opportunity brief / PRD | Prioritize / deprioritize |
+| Consultant | Client research memo | Recommend strategy |
+| GTM / PMM | Battlecard | Update positioning |
+| Investor | Diligence memo | Invest / pass |
+
+### Technical Work
+
+- Add workflow pack registry.
+- Add segment-specific templates.
+- Add segment-specific labels.
+- Add segment-specific scoring.
+- Add segment-specific artifact generation.
+- Add support for switching or creating projects by workflow pack.
+
+### Acceptance Criteria
+
+- Core platform supports at least one non-founder workflow pack.
+- Workflow pack changes labels, templates, artifacts, and scoring.
+- Underlying architecture remains shared.
+- Founder workflow remains clean and undiluted.
+
+---
+
+## V2 Sprint 9: Enterprise and Workspace Readiness
+
+### Goal
+
+Prepare for serious team/business use.
+
+### Features
+
+- billing
+- team admin
+- SSO later
+- audit logs
+- data retention controls
+- model provider controls
+- workspace-level budgets
+- rate limits
+- export controls
+- private project settings
+
+### Technical Work
+
+- Add billing model.
+- Add workspace admin.
+- Add usage tracking.
+- Add quota enforcement.
+- Add audit log views.
+- Add provider/model settings.
+- Add data retention settings.
+
+### Acceptance Criteria
+
+- Workspaces have roles and permissions.
+- AI/model usage can be tracked by workspace.
+- Sensitive project data is access-controlled.
+- Admins can manage users and billing.
+- Workspace-level quotas and budgets can be enforced.
+
+---
+
+## V2 Sprint 10: Advanced Evaluation Dashboard
+
+### Goal
+
+Make AI quality measurable and visible.
+
+### Features
+
+- eval dashboard
+- retrieval quality metrics
+- citation coverage
+- unsupported claim rate
+- hallucination checks
+- source freshness
+- cost per workflow
+- latency per workflow
+- user correction rate
+- alert precision
+- agent trace viewer
+
+### Metrics
+
+Track:
+
+- retrieval precision@k
+- citation coverage
+- groundedness score
+- unsupported claim count
+- source freshness
+- source diversity
+- duplicate source rate
+- user correction rate
+- accepted recommendation rate
+- cost per research sprint
+- latency per research sprint
+- alert precision
+- failed workflow rate
+
+### Technical Work
+
+- Add eval dashboard.
+- Add workflow metric collection.
+- Add trace viewer.
+- Add regression test runner.
+- Add prompt/version comparison.
+- Add eval dataset management.
+
+### Acceptance Criteria
+
+- Admin/developer can inspect AI workflow quality.
+- Research sprint quality is measurable over time.
+- Regression tests catch degraded prompts/retrieval.
+- Evals support portfolio/interview storytelling.
+- Agentic RAG traces are inspectable.
+
+---
+
+# Updated MVP vs V1 vs V2 Summary
+
+| Capability | MVP | V1 | V2 |
+|---|---|---|---|
+| Guided Overview | Yes | Improved | Team-aware |
+| Structured Intake | Yes | Yes | Workflow-pack specific |
+| Manual Evidence | Yes | Yes | Yes |
+| Autonomous Source Discovery | No | Yes | Better |
+| Competitor Discovery | Basic/manual | Autonomous | Monitored |
+| RAG | Yes | Yes | Yes |
+| Agentic RAG | No/basic | Yes | Advanced |
+| Research Sprints | No/basic | Core | Recurring/collaborative |
+| Validation Plan | Yes | Stronger/action assets | Execution automation |
+| Monitoring | No | Seed only | Core |
+| Strategic Alerts | No | No/light | Core |
+| Collaboration | No | No/light | Core |
+| Portfolio Dashboard | No | No | Core |
+| Exports | Basic | Basic | Advanced |
+| Integrations | No | No/light | Core |
+| Multi-Segment Support | No | No | Core |
+| Eval Dashboard | Basic evals | Basic evals/traces | Advanced dashboard |
+| Billing/Admin | No | No | V2 |
+| Team Workspaces | No | No/light | V2 |
+
+---
+
+# Final Product Direction
+
+## V1 should make the app feel alive.
+
+V1 promise:
+
+> Give me a rough idea, and I’ll investigate the market, identify competitors, gather evidence, and tell you what to validate next.
+
+## V2 should make the app feel indispensable.
+
+V2 promise:
+
+> I continuously track strategic evidence, monitor changes, help my team make decisions, and manage a portfolio of opportunities over time.
+
+Do not dilute V1 with collaboration, dashboards, integrations, or multi-segment expansion.
+
+Those are V2.
+
+V1 is about autonomous investigation.
+
+V2 is about persistent strategic intelligence.
 
 ---
 

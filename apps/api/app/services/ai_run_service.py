@@ -109,6 +109,38 @@ def complete_run(
     return run
 
 
+def wait_for_human(
+    db: Session,
+    run: AIRun,
+    *,
+    output_summary: str,
+    total_tokens: int | None,
+    total_cost: Decimal | None,
+    model_provider: str,
+    model_name: str,
+) -> AIRun:
+    run.status = "waiting_for_human"
+    run.output_summary = output_summary
+    run.total_tokens = total_tokens
+    run.total_cost = total_cost
+    run.model_provider = model_provider
+    run.model_name = model_name
+    run.error = None
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def cancel_run(db: Session, run: AIRun, *, output_summary: str) -> AIRun:
+    run.status = "cancelled"
+    run.output_summary = output_summary
+    run.error = None
+    run.completed_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(run)
+    return run
+
+
 def fail_run(db: Session, run: AIRun, *, error: str) -> AIRun:
     run.status = "failed"
     run.error = error

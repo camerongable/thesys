@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api", tags=["workflows"])
 DbDep = Annotated[Session, Depends(get_db)]
 LimitQuery = Annotated[int, Query(ge=1, le=25)]
 
-TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
+TERMINAL_STATUSES = {"succeeded", "failed", "cancelled", "waiting_for_human"}
 
 
 @router.get("/projects/{project_id}/workflows", response_model=WorkflowRunListRead)

@@ -2,12 +2,14 @@
 
 ## Current Phase
 
-Sprint 10 complete. The project Overview page is now a guided strategic
-validation command center instead of a developer-oriented dashboard. The API
-computes project stage, current recommendation, next best action, idea
-readiness, strategic snapshot, evidence health, and recent strategic updates
-from existing project graph data. The MVP still avoids V1 monitoring,
-collaboration, and agentic research features.
+V1 Sprint 1 complete. The app now has a research sprint entry point and
+approval-gated planning flow. Users can generate an approval-ready research
+plan from the project Overview page, edit it, approve it, or reject it. The
+planning workflow persists `ResearchPlan` and `ResearchSprint` records, logs
+workflow traces, and stops at human approval before any autonomous source
+discovery, browsing, or ingestion. Watchlists, monitoring, collaboration,
+portfolio dashboards, integrations, and multi-segment workflow packs remain V2
+scope.
 
 ## Sprint 0 Scope
 
@@ -347,6 +349,47 @@ Checks run:
 - [x] `curl -fsS http://localhost:8000/health`
 - [x] `curl -I -fsS http://localhost:3000/projects`
 
+Original V1 Sprint 1 plan:
+
+- Add `Run Research Sprint` CTA to the Overview page.
+- Generate a research plan from the current idea/thesis.
+- Let the user approve, edit, or reject the research plan.
+- Store approved research plans.
+- Show research workflow progress.
+- Do not perform autonomous browsing/research before user approval.
+
+## V1 Sprint 1 Scope
+
+- [x] Add `research_plans` and `research_sprints` tables.
+- [x] Add Alembic migration for research sprint planning records.
+- [x] Add `ResearchPlanDraft` structured output schema.
+- [x] Add research sprint planning prompt version.
+- [x] Add LangGraph-backed planning workflow with project-context loading,
+  structured plan generation, persistence, and AI run/step logging.
+- [x] Put generated planning runs into `waiting_for_human` status.
+- [x] Add research sprint endpoints:
+  - `GET /api/projects/{project_id}/research-sprints`
+  - `POST /api/projects/{project_id}/research-sprints/plan`
+  - `PATCH /api/projects/{project_id}/research-plans/{plan_id}`
+  - `POST /api/projects/{project_id}/research-sprints/{sprint_id}/approve`
+  - `POST /api/projects/{project_id}/research-sprints/{sprint_id}/reject`
+- [x] Add Overview page Research Sprint card with objective input, plan editing,
+  save draft, approve, reject, recent plans, and workflow trace.
+- [x] Keep autonomous source discovery, competitor discovery, and ingestion out
+  of V1 Sprint 1.
+
+## V1 Sprint 1 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_research_sprints.py`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_research_sprints.py app/tests/test_project_overview.py`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `docker compose config`
+
 ## Next Sprint
 
-V1 Sprint 1: Watchlists and Monitoring.
+V1 Sprint 2: Autonomous Source Discovery.

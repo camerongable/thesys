@@ -580,6 +580,85 @@ export type WorkflowRun = {
   steps: WorkflowStep[];
 };
 
+export type ResearchPlanStatus = "draft" | "approved" | "rejected" | "completed";
+export type ResearchSprintStatus =
+  | "planned"
+  | "approved"
+  | "running"
+  | "needs_review"
+  | "completed"
+  | "failed"
+  | "rejected";
+
+export type ResearchPlan = {
+  id: string;
+  project_id: string;
+  ai_run_id: string | null;
+  objective: string;
+  target_customer_hypotheses: string[];
+  research_questions: string[];
+  competitor_queries: string[];
+  market_queries: string[];
+  substitute_queries: string[];
+  source_types: string[];
+  assumptions_to_test: string[];
+  expected_outputs: string[];
+  status: ResearchPlanStatus;
+  approved_at: string | null;
+  rejected_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ResearchSprint = {
+  id: string;
+  project_id: string;
+  research_plan_id: string;
+  ai_run_id: string | null;
+  status: ResearchSprintStatus;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  plan: ResearchPlan;
+};
+
+export type ResearchSprintPlanInput = {
+  objective?: string;
+};
+
+export type ResearchPlanUpdateInput = Partial<
+  Pick<
+    ResearchPlan,
+    | "objective"
+    | "target_customer_hypotheses"
+    | "research_questions"
+    | "competitor_queries"
+    | "market_queries"
+    | "substitute_queries"
+    | "source_types"
+    | "assumptions_to_test"
+    | "expected_outputs"
+  >
+>;
+
+export type ResearchSprintPlanRun = {
+  ai_run_id: string;
+  ai_step_id: string;
+  prompt_version: string;
+  model_provider: string;
+  model_name: string;
+  used_stub: boolean;
+  total_tokens: number | null;
+  total_cost: string | null;
+  sprint: ResearchSprint;
+};
+
+export type ResearchSprintApproval = {
+  ai_run_id: string | null;
+  sprint: ResearchSprint;
+};
+
 export type DemoSeedResult = {
   project: Project;
   created: boolean;
@@ -1060,6 +1139,54 @@ export async function listProjectWorkflows(projectId: string, limit = 10) {
     `/api/projects/${projectId}/workflows?limit=${limit}`,
   );
   return response.runs;
+}
+
+export async function listResearchSprints(projectId: string) {
+  const response = await apiFetch<{ sprints: ResearchSprint[] }>(
+    `/api/projects/${projectId}/research-sprints`,
+  );
+  return response.sprints;
+}
+
+export function startResearchSprintPlan(projectId: string, input: ResearchSprintPlanInput = {}) {
+  return apiFetch<ResearchSprintPlanRun>(`/api/projects/${projectId}/research-sprints/plan`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateResearchPlan(
+  projectId: string,
+  planId: string,
+  input: ResearchPlanUpdateInput,
+) {
+  return apiFetch<ResearchPlan>(`/api/projects/${projectId}/research-plans/${planId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function approveResearchSprint(
+  projectId: string,
+  sprintId: string,
+  input: ResearchPlanUpdateInput = {},
+) {
+  return apiFetch<ResearchSprintApproval>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function rejectResearchSprint(projectId: string, sprintId: string) {
+  return apiFetch<ResearchSprintApproval>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/reject`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export function getWorkflowEventsUrl(runId: string) {
