@@ -18,6 +18,7 @@ DbDep = Annotated[Session, Depends(get_db)]
 LimitQuery = Annotated[int, Query(ge=1, le=25)]
 
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled", "waiting_for_human"}
+STREAM_HEARTBEAT_SECONDS = 10.0
 
 
 @router.get("/projects/{project_id}/workflows", response_model=WorkflowRunListRead)
@@ -55,19 +56,21 @@ def stream_workflow_events(
 
 def _event_stream(db: Session, auth: AuthContext, run_id: uuid.UUID):
     last_payload: str | None = None
-    deadline = time.monotonic() + 30
+    last_emit_at = time.monotonic()
     while True:
         db.expire_all()
         run = workflow_service.get_run(db, auth, run_id)
         payload = _serialize_run(run).model_dump(mode="json")
         encoded = json.dumps(payload, separators=(",", ":"))
+        now = time.monotonic()
         if encoded != last_payload:
             yield f"data: {encoded}\n\n"
             last_payload = encoded
+            last_emit_at = now
+        elif now - last_emit_at >= STREAM_HEARTBEAT_SECONDS:
+            yield ": workflow heartbeat\n\n"
+            last_emit_at = now
         if run.status in TERMINAL_STATUSES:
-            break
-        if time.monotonic() > deadline:
-            yield ": workflow stream timeout\n\n"
             break
         time.sleep(0.75)
 

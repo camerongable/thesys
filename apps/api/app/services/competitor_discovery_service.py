@@ -24,13 +24,18 @@ from app.db.models import (
     CompetitorCandidate,
     CompetitorEvidenceLink,
     DiscoveredSource,
-    EvidenceChunk,
     EvidenceSource,
     ResearchSprint,
 )
 from app.schemas.competitors import CompetitorCreate, CompetitorUpdate
 from app.schemas.research import CompetitorCandidateUpdate, CompetitorDiscoveryDraft
-from app.services import ai_run_service, competitor_service, project_service
+from app.services import (
+    ai_run_service,
+    competitor_service,
+    evidence_service,
+    project_service,
+    source_discovery_service,
+)
 
 
 @dataclass(frozen=True)
@@ -209,6 +214,7 @@ def update_competitor_candidate(
 def approve_competitor_candidate(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
     candidate_id: uuid.UUID,
@@ -244,6 +250,8 @@ def approve_competitor_candidate(
             threat_level=candidate.threat_level,
         ),
     )
+    _ingest_candidate_evidence(db, auth, settings, candidate, competitor.id)
+    candidate = _get_candidate(db, auth, project_id, sprint_id, candidate_id)
     _link_candidate_sources(db, auth, candidate, competitor.id)
     candidate = _get_candidate(db, auth, project_id, sprint_id, candidate_id)
     candidate.competitor_id = competitor.id
@@ -826,25 +834,182 @@ def _link_candidate_sources(
         )
         if evidence_source is None:
             continue
-        first_chunk = evidence_source.chunks[0] if evidence_source.chunks else None
-        existing = db.scalar(
-            select(CompetitorEvidenceLink).where(
-                CompetitorEvidenceLink.competitor_id == competitor_id,
-                CompetitorEvidenceLink.evidence_source_id == evidence_source.id,
-            )
-        )
-        if existing is not None:
+        _link_evidence_source_to_competitor(db, candidate, competitor_id, evidence_source)
+    db.commit()
+
+
+def _ingest_candidate_evidence(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    candidate: CompetitorCandidate,
+    competitor_id: uuid.UUID,
+) -> None:
+    for source_id in candidate.source_ids:
+        try:
+            discovered_source_id = uuid.UUID(str(source_id))
+        except ValueError:
             continue
+        try:
+            source_discovery_service.ingest_source_candidate(
+                db,
+                auth,
+                settings,
+                candidate.project_id,
+                candidate.research_sprint_id,
+                discovered_source_id,
+            )
+        except HTTPException:
+            continue
+
+    if not candidate.url or candidate.evidence_source_id is not None:
+        return
+
+    try:
+        evidence_source = evidence_service.add_discovered_url_source(
+            db,
+            auth,
+            settings,
+            candidate.project_id,
+            url=candidate.url,
+            title=f"{candidate.name} website",
+            fallback_text=_candidate_snapshot_text(candidate),
+            metadata=_candidate_evidence_metadata(db, auth, candidate, competitor_id),
+        )
+    except evidence_service.EvidenceIngestionError as exc:
+        candidate = _get_candidate(
+            db,
+            auth,
+            candidate.project_id,
+            candidate.research_sprint_id,
+            candidate.id,
+        )
+        candidate.ingestion_error = str(exc)[:2000]
+        db.commit()
+        return
+
+    candidate = _get_candidate(
+        db,
+        auth,
+        candidate.project_id,
+        candidate.research_sprint_id,
+        candidate.id,
+    )
+    candidate.evidence_source_id = evidence_source.id
+    candidate.ingested_at = evidence_source.ingested_at or datetime.now(UTC)
+    candidate.ingestion_error = None
+    _link_evidence_source_to_competitor(db, candidate, competitor_id, evidence_source)
+    db.commit()
+
+
+def _candidate_evidence_metadata(
+    db: Session,
+    auth: AuthContext,
+    candidate: CompetitorCandidate,
+    competitor_id: uuid.UUID,
+) -> dict[str, object]:
+    sprint = _get_sprint(db, auth, candidate.project_id, candidate.research_sprint_id)
+    return {
+        "origin": "competitor_discovery",
+        "research_sprint_id": str(candidate.research_sprint_id),
+        "research_sprint_ids": [str(candidate.research_sprint_id)],
+        "research_plan_id": str(sprint.plan.id),
+        "competitor_id": str(competitor_id),
+        "competitor_ids": [str(competitor_id)],
+        "competitor_name": candidate.name,
+        "competitor_candidate_id": str(candidate.id),
+        "competitor_candidate_ids": [str(candidate.id)],
+        "competitor_candidate_category": candidate.category,
+        "competitor_threat_level": candidate.threat_level,
+        "competitor_relevance_score": str(candidate.relevance_score),
+        "source_fetched_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def _candidate_snapshot_text(candidate: CompetitorCandidate) -> str:
+    return "\n\n".join(
+        part
+        for part in [
+            candidate.name,
+            f"URL: {candidate.url}" if candidate.url else None,
+            f"Category: {candidate.category}",
+            f"Target user: {candidate.target_user}" if candidate.target_user else None,
+            f"Positioning: {candidate.positioning}" if candidate.positioning else None,
+            f"Pricing signal: {candidate.pricing_signal}" if candidate.pricing_signal else None,
+            (
+                f"Core features: {', '.join(candidate.core_features)}"
+                if candidate.core_features
+                else None
+            ),
+            f"Why it matters: {candidate.why_it_matters}",
+            f"Threat level: {candidate.threat_level}",
+        ]
+        if part
+    )
+
+
+def _link_evidence_source_to_competitor(
+    db: Session,
+    candidate: CompetitorCandidate,
+    competitor_id: uuid.UUID,
+    evidence_source: EvidenceSource,
+) -> None:
+    if not evidence_source.chunks:
+        _add_competitor_evidence_link(db, competitor_id, evidence_source.id, None)
+        return
+
+    for chunk in evidence_source.chunks:
+        metadata = dict(chunk.chunk_metadata or {})
+        metadata["competitor_id"] = str(competitor_id)
+        metadata["competitor_ids"] = _append_unique(
+            metadata.get("competitor_ids"),
+            str(competitor_id),
+        )
+        metadata["competitor_name"] = candidate.name
+        metadata["competitor_candidate_id"] = str(candidate.id)
+        metadata["competitor_candidate_ids"] = _append_unique(
+            metadata.get("competitor_candidate_ids"),
+            str(candidate.id),
+        )
+        metadata["competitor_candidate_category"] = candidate.category
+        metadata["competitor_threat_level"] = candidate.threat_level
+        chunk.chunk_metadata = metadata
+        _add_competitor_evidence_link(db, competitor_id, evidence_source.id, chunk.id)
+
+
+def _add_competitor_evidence_link(
+    db: Session,
+    competitor_id: uuid.UUID,
+    evidence_source_id: uuid.UUID,
+    evidence_chunk_id: uuid.UUID | None,
+) -> None:
+    existing = db.scalar(
+        select(CompetitorEvidenceLink).where(
+            CompetitorEvidenceLink.competitor_id == competitor_id,
+            CompetitorEvidenceLink.evidence_source_id == evidence_source_id,
+            CompetitorEvidenceLink.evidence_chunk_id == evidence_chunk_id,
+        )
+    )
+    if existing is None:
         db.add(
             CompetitorEvidenceLink(
                 competitor_id=competitor_id,
-                evidence_source_id=evidence_source.id,
-                evidence_chunk_id=(
-                    first_chunk.id if isinstance(first_chunk, EvidenceChunk) else None
-                ),
+                evidence_source_id=evidence_source_id,
+                evidence_chunk_id=evidence_chunk_id,
             )
         )
-    db.commit()
+
+
+def _append_unique(existing: object, value: str) -> list[str]:
+    values = existing if isinstance(existing, list) else []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in [*values, value]:
+        marker = str(item)
+        if marker not in seen:
+            result.append(marker)
+            seen.add(marker)
+    return result
 
 
 def _clean_url(value: object | None) -> str | None:

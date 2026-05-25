@@ -901,6 +901,11 @@ function SourceCandidateList({
               {source.ingestion_error ? (
                 <p className="mt-2 text-xs text-red-700">{source.ingestion_error}</p>
               ) : null}
+              {source.ingested_at ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Ingested {formatDateTime(source.ingested_at)}
+                </p>
+              ) : null}
             </div>
           ))}
         </div>
@@ -1043,6 +1048,14 @@ function CompetitorCandidateItem({
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           Features: {candidate.core_features.join(", ")}
         </p>
+      ) : null}
+      {candidate.evidence_source_id ? (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          Evidence ingested{candidate.ingested_at ? ` ${formatDateTime(candidate.ingested_at)}` : ""}.
+        </p>
+      ) : null}
+      {candidate.ingestion_error ? (
+        <p className="mt-2 text-xs text-red-700">{candidate.ingestion_error}</p>
       ) : null}
 
       {canEdit ? (
@@ -1507,6 +1520,13 @@ function formatScore(value: string) {
     return value;
   }
   return parsed.toFixed(2);
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 function truncate(value: string, maxLength: number) {

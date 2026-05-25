@@ -145,6 +145,76 @@ def add_url_source(
     )
 
 
+def add_discovered_url_source(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    *,
+    url: str,
+    title: str | None,
+    fallback_text: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> EvidenceSource:
+    """Fetch and ingest an approved discovery URL into the project evidence graph."""
+    project_service.get_project(db, auth, project_id)
+    existing = _find_ready_url_source(db, auth, project_id, url)
+    if existing is not None:
+        if metadata:
+            _merge_source_chunk_metadata(db, existing, metadata)
+            db.commit()
+        return get_source(db, auth, project_id, existing.id)
+
+    source = EvidenceSource(
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        source_type="url",
+        title=title.strip() if title else None,
+        url=url,
+        source_date=datetime.now(UTC),
+        ingestion_status="processing",
+        created_by=auth.user_id,
+    )
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+
+    try:
+        parsed = _fetch_url(settings, url)
+    except Exception as exc:
+        if fallback_text and _normalize_text(fallback_text):
+            fallback_metadata = _merge_metadata(
+                metadata or {},
+                {
+                    "remote_fetch_error": str(exc),
+                    "used_discovery_snapshot": True,
+                },
+            )
+            return _process_source_text(
+                db,
+                auth,
+                settings,
+                source,
+                text=fallback_text,
+                title=source.title or title or url,
+                content_type="text/plain",
+                metadata=fallback_metadata,
+            )
+        _mark_source_failed(db, source, str(exc))
+        raise EvidenceIngestionError(f"URL evidence ingestion failed: {exc}") from exc
+
+    return _process_source_text(
+        db,
+        auth,
+        settings,
+        source,
+        text=parsed.text,
+        title=source.title or parsed.title or url,
+        content_type=parsed.content_type,
+        metadata=metadata,
+    )
+
+
 def add_discovered_url_snapshot(
     db: Session,
     auth: AuthContext,
@@ -310,6 +380,7 @@ def _process_source_text(
     text: str,
     title: str | None,
     content_type: str | None,
+    metadata: dict[str, Any] | None = None,
 ) -> EvidenceSource:
     run = ai_run_service.start_run(
         db,
@@ -354,6 +425,16 @@ def _process_source_text(
 
         content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
         for index, chunk_text in enumerate(chunks):
+            chunk_metadata = _merge_metadata(
+                {
+                    "source_title": source.title,
+                    "source_type": source.source_type,
+                    "url": source.url,
+                    "content_hash": content_hash,
+                    "embedding_model": settings.embedding_model,
+                },
+                metadata,
+            )
             chunk = EvidenceChunk(
                 workspace_id=source.workspace_id,
                 project_id=source.project_id,
@@ -362,13 +443,7 @@ def _process_source_text(
                 text=chunk_text,
                 token_count=len(_tokens(chunk_text)),
                 embedding=embedding_service.embed_text(settings, chunk_text),
-                chunk_metadata={
-                    "source_title": source.title,
-                    "source_type": source.source_type,
-                    "url": source.url,
-                    "content_hash": content_hash,
-                    "embedding_model": settings.embedding_model,
-                },
+                chunk_metadata=chunk_metadata,
             )
             db.add(chunk)
 
@@ -418,6 +493,71 @@ def _mark_source_failed(db: Session, source: EvidenceSource, error: str) -> None
     source.ingestion_status = "failed"
     source.ingestion_error = error[:2000]
     db.commit()
+
+
+def _find_ready_url_source(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    url: str,
+) -> EvidenceSource | None:
+    return db.scalar(
+        select(EvidenceSource)
+        .where(
+            EvidenceSource.workspace_id == auth.workspace_id,
+            EvidenceSource.project_id == project_id,
+            EvidenceSource.url == url,
+            EvidenceSource.ingestion_status == "ready",
+        )
+        .options(selectinload(EvidenceSource.chunks))
+    )
+
+
+def _merge_source_chunk_metadata(
+    db: Session,
+    source: EvidenceSource,
+    metadata: dict[str, Any],
+) -> None:
+    for chunk in source.chunks:
+        chunk.chunk_metadata = _merge_metadata(chunk.chunk_metadata or {}, metadata)
+
+
+def _merge_metadata(
+    base: dict[str, Any],
+    extra: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not extra:
+        return base
+
+    merged = dict(base)
+    for key, value in extra.items():
+        if value is None:
+            continue
+        if key.endswith("_ids") or key in {
+            "research_questions",
+            "assumptions_to_test",
+            "source_candidate_types",
+            "discovered_source_ids",
+            "competitor_candidate_ids",
+            "competitor_ids",
+        }:
+            existing_values = merged.get(key, [])
+            if not isinstance(existing_values, list):
+                existing_values = [existing_values]
+            new_values = value if isinstance(value, list) else [value]
+            ordered: list[Any] = []
+            seen: set[str] = set()
+            for item in [*existing_values, *new_values]:
+                if item is None:
+                    continue
+                marker = str(item)
+                if marker not in seen:
+                    ordered.append(item)
+                    seen.add(marker)
+            merged[key] = ordered
+        else:
+            merged[key] = value
+    return merged
 
 
 def _fetch_url(settings: Settings, url: str) -> ParsedSource:

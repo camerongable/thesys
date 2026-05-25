@@ -142,6 +142,7 @@ class DiscoveredSourceRead(BaseModel):
     associated_research_question: str | None
     status: DiscoveredSourceStatus
     ingestion_error: str | None
+    ingested_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -196,6 +197,7 @@ class CompetitorCandidateRead(BaseModel):
     project_id: uuid.UUID
     research_sprint_id: uuid.UUID
     competitor_id: uuid.UUID | None
+    evidence_source_id: uuid.UUID | None
     name: str
     url: str | None
     category: CompetitorCandidateCategory
@@ -208,6 +210,8 @@ class CompetitorCandidateRead(BaseModel):
     relevance_score: Decimal
     source_ids: list[str]
     status: CompetitorCandidateStatus
+    ingestion_error: str | None
+    ingested_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

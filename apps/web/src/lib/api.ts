@@ -694,6 +694,7 @@ export type DiscoveredSource = {
   associated_research_question: string | null;
   status: DiscoveredSourceStatus;
   ingestion_error: string | null;
+  ingested_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -711,6 +712,7 @@ export type CompetitorCandidate = {
   project_id: string;
   research_sprint_id: string;
   competitor_id: string | null;
+  evidence_source_id: string | null;
   name: string;
   url: string | null;
   category: CompetitorCandidateCategory;
@@ -723,6 +725,8 @@ export type CompetitorCandidate = {
   relevance_score: string;
   source_ids: string[];
   status: CompetitorCandidateStatus;
+  ingestion_error: string | null;
+  ingested_at: string | null;
   created_at: string;
   updated_at: string;
 };

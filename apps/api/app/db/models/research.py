@@ -188,6 +188,7 @@ class DiscoveredSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     associated_research_question: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="candidate", index=True)
     ingestion_error: Mapped[str | None] = mapped_column(Text)
+    ingested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
 
     research_sprint: Mapped[ResearchSprint] = relationship(back_populates="discovered_sources")
@@ -236,6 +237,11 @@ class CompetitorCandidate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("competitors.id", ondelete="SET NULL"),
         index=True,
     )
+    evidence_source_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("evidence_sources.id", ondelete="SET NULL"),
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     url: Mapped[str | None] = mapped_column(Text)
     category: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -256,6 +262,8 @@ class CompetitorCandidate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=list,
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="candidate", index=True)
+    ingestion_error: Mapped[str | None] = mapped_column(Text)
+    ingested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
 
     research_sprint: Mapped[ResearchSprint] = relationship(back_populates="competitor_candidates")

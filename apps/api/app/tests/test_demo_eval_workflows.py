@@ -1,4 +1,11 @@
+import uuid
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
+
+from app.db.models import AIRun
+from app.routers import workflows
 
 
 def test_seed_demo_project_runs_mvp_eval_and_exposes_workflow_events(
@@ -41,6 +48,55 @@ def test_seed_demo_project_runs_mvp_eval_and_exposes_workflow_events(
         body = "".join(event_response.iter_text())
     assert "demo_seed" in body
     assert "write_demo_workspace" in body
+
+
+def test_workflow_event_stream_heartbeats_until_terminal(monkeypatch) -> None:
+    run_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    created_at = datetime.now(UTC)
+    statuses = iter(["running", "running", "succeeded"])
+    times = iter([0.0, 0.0, 11.0, 12.0])
+
+    def fake_get_run(_db, _auth, _run_id):
+        run = AIRun(
+            id=run_id,
+            workspace_id=workspace_id,
+            project_id=project_id,
+            workflow_type="competitor_analysis",
+            status=next(statuses),
+            model_provider="litellm",
+            model_name="test-model",
+            prompt_version="test",
+            input_summary="test",
+            output_summary=None,
+            total_tokens=None,
+            total_cost=None,
+            error=None,
+            started_at=created_at,
+            completed_at=None,
+            created_at=created_at,
+        )
+        run.steps = []
+        return run
+
+    monkeypatch.setattr(workflows.workflow_service, "get_run", fake_get_run)
+    monkeypatch.setattr(workflows.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(workflows.time, "monotonic", lambda: next(times))
+
+    stream = workflows._event_stream(
+        SimpleNamespace(expire_all=lambda: None),
+        SimpleNamespace(),
+        run_id,
+    )
+
+    first_event = next(stream)
+    heartbeat = next(stream)
+    terminal_event = next(stream)
+
+    assert '"status":"running"' in first_event
+    assert heartbeat == ": workflow heartbeat\n\n"
+    assert '"status":"succeeded"' in terminal_event
 
 
 def test_seed_demo_project_is_workspace_scoped_and_idempotent(client: TestClient) -> None:

@@ -170,24 +170,39 @@ def approve_source_candidate(
     sprint_id: uuid.UUID,
     source_id: uuid.UUID,
 ) -> DiscoveredSource:
+    return ingest_source_candidate(db, auth, settings, project_id, sprint_id, source_id)
+
+
+def ingest_source_candidate(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    sprint_id: uuid.UUID,
+    source_id: uuid.UUID,
+) -> DiscoveredSource:
+    sprint = _get_sprint(db, auth, project_id, sprint_id)
     source = _get_source(db, auth, project_id, sprint_id, source_id)
-    if source.status not in {"candidate", "failed"}:
+    if source.status == "ingested":
+        return source
+    if source.status not in {"candidate", "approved", "failed"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Only candidate or failed sources can be approved.",
+            detail="Only candidate, approved, or failed sources can be ingested.",
         )
     source.status = "approved"
     source.ingestion_error = None
     db.commit()
     try:
-        evidence = evidence_service.add_discovered_url_snapshot(
+        evidence = evidence_service.add_discovered_url_source(
             db,
             auth,
             settings,
             project_id,
             url=source.url,
             title=source.title,
-            text=_snapshot_text(source),
+            fallback_text=_snapshot_text(source),
+            metadata=_source_evidence_metadata(source, sprint),
         )
     except evidence_service.EvidenceIngestionError as exc:
         source = _get_source(db, auth, project_id, sprint_id, source_id)
@@ -200,6 +215,7 @@ def approve_source_candidate(
     source = _get_source(db, auth, project_id, sprint_id, source_id)
     source.evidence_source_id = evidence.id
     source.status = "ingested"
+    source.ingested_at = evidence.ingested_at or datetime.now(UTC)
     source.ingestion_error = None
     db.commit()
     db.refresh(source)
@@ -541,3 +557,27 @@ def _snapshot_text(source: DiscoveredSource) -> str:
         ]
         if part
     )
+
+
+def _source_evidence_metadata(
+    source: DiscoveredSource,
+    sprint: ResearchSprint,
+) -> dict[str, object]:
+    return {
+        "origin": "source_discovery",
+        "research_sprint_id": str(sprint.id),
+        "research_sprint_ids": [str(sprint.id)],
+        "research_plan_id": str(sprint.plan.id),
+        "discovered_source_id": str(source.id),
+        "discovered_source_ids": [str(source.id)],
+        "source_candidate_type": source.source_type,
+        "source_candidate_types": [source.source_type],
+        "source_relevance_score": str(source.relevance_score),
+        "reason_selected": source.reason_selected,
+        "associated_research_question": source.associated_research_question,
+        "research_questions": (
+            [source.associated_research_question] if source.associated_research_question else []
+        ),
+        "assumptions_to_test": sprint.plan.assumptions_to_test,
+        "source_fetched_at": datetime.now(UTC).isoformat(),
+    }

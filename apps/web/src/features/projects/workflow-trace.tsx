@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, Circle, Loader2, XCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { getWorkflowEventsUrl, WorkflowRun, WorkflowStep } from "@/lib/api";
 
@@ -20,18 +20,22 @@ const terminalStatuses = new Set(["succeeded", "failed", "cancelled", "waiting_f
 export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: WorkflowTraceProps) {
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const latestStatusRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!runId) {
       setRun(null);
       setStreamError(null);
+      latestStatusRef.current = null;
       return;
     }
 
+    latestStatusRef.current = null;
     let closedCleanly = false;
     const source = new EventSource(getWorkflowEventsUrl(runId));
     source.onmessage = (event) => {
       const nextRun = JSON.parse(event.data) as WorkflowRun;
+      latestStatusRef.current = nextRun.status;
       setRun(nextRun);
       setStreamError(null);
       if (terminalStatuses.has(nextRun.status)) {
@@ -40,6 +44,9 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
       }
     };
     source.onerror = () => {
+      if (closedCleanly || !terminalStatuses.has(latestStatusRef.current ?? "")) {
+        return;
+      }
       if (!closedCleanly) {
         setStreamError("Workflow event stream disconnected.");
       }

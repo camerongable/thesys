@@ -12,7 +12,9 @@ from app.db.models import (
     AIRun,
     Competitor,
     CompetitorCandidate,
+    CompetitorEvidenceLink,
     DiscoveredSource,
+    EvidenceChunk,
     EvidenceSource,
 )
 from app.schemas.research import (
@@ -21,6 +23,7 @@ from app.schemas.research import (
     SourceDiscoveryCandidateDraft,
     SourceDiscoveryDraft,
 )
+from app.services.evidence_service import EvidenceIngestionError, ParsedSource
 
 
 def _approved_research_sprint(client: TestClient) -> tuple[str, str]:
@@ -56,8 +59,21 @@ def _approved_research_sprint(client: TestClient) -> tuple[str, str]:
 def test_source_discovery_generates_dedupes_and_ingests_approved_candidates(
     client: TestClient,
     db_session: Session,
+    monkeypatch,
 ) -> None:
     project_id, sprint_id = _approved_research_sprint(client)
+    fetched_text = (
+        "Independent fitness coaches compare training software, pricing pages, reviews, "
+        "and client check-in workflows before switching tools."
+    )
+    monkeypatch.setattr(
+        "app.services.evidence_service._fetch_url",
+        lambda settings, url: ParsedSource(
+            title="Fetched public source",
+            text=fetched_text,
+            content_type="text/html",
+        ),
+    )
 
     response = client.post(
         f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
@@ -90,6 +106,7 @@ def test_source_discovery_generates_dedupes_and_ingests_approved_candidates(
     approved = approve_response.json()["source"]
     assert approved["status"] == "ingested"
     assert approved["evidence_source_id"] is not None
+    assert approved["ingested_at"] is not None
 
     evidence = db_session.scalar(
         select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(approved["evidence_source_id"]))
@@ -97,6 +114,15 @@ def test_source_discovery_generates_dedupes_and_ingests_approved_candidates(
     assert evidence is not None
     assert evidence.ingestion_status == "ready"
     assert evidence.url == approved["url"]
+    assert fetched_text in (evidence.raw_text or "")
+    chunk = db_session.scalar(
+        select(EvidenceChunk).where(EvidenceChunk.source_id == evidence.id)
+    )
+    assert chunk is not None
+    assert chunk.chunk_metadata["origin"] == "source_discovery"
+    assert chunk.chunk_metadata["research_sprint_id"] == sprint_id
+    assert chunk.chunk_metadata["discovered_source_id"] == source_id
+    assert chunk.chunk_metadata["associated_research_question"]
 
     rejected_source_id = body["sources"][1]["id"]
     reject_response = client.post(
@@ -188,8 +214,20 @@ def test_source_discovery_uses_structured_output_in_live_mode(
 def test_competitor_discovery_classifies_candidates_and_merges_approved_competitors(
     client: TestClient,
     db_session: Session,
+    monkeypatch,
 ) -> None:
     project_id, sprint_id = _approved_research_sprint(client)
+    monkeypatch.setattr(
+        "app.services.evidence_service._fetch_url",
+        lambda settings, url: ParsedSource(
+            title="Fetched competitor evidence",
+            text=(
+                "Competitor product pages describe training plans, pricing, messaging, "
+                "client management, and coach workflow features."
+            ),
+            content_type="text/html",
+        ),
+    )
     source_response = client.post(
         f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
     )
@@ -226,6 +264,8 @@ def test_competitor_discovery_classifies_candidates_and_merges_approved_competit
     approved = approve_response.json()["candidate"]
     assert approved["status"] == "merged"
     assert approved["competitor_id"] is not None
+    assert approved["evidence_source_id"] is not None
+    assert approved["ingested_at"] is not None
 
     competitor = db_session.scalar(
         select(Competitor).where(Competitor.id == uuid.UUID(approved["competitor_id"]))
@@ -233,6 +273,16 @@ def test_competitor_discovery_classifies_candidates_and_merges_approved_competit
     assert competitor is not None
     assert competitor.name == "Edited competitor"
     assert competitor.threat_level == "low"
+    evidence = db_session.scalar(
+        select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(approved["evidence_source_id"]))
+    )
+    assert evidence is not None
+    chunk = db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == evidence.id))
+    assert chunk is not None
+    assert chunk.chunk_metadata["origin"] == "competitor_discovery"
+    assert chunk.chunk_metadata["competitor_id"] == approved["competitor_id"]
+    assert chunk.chunk_metadata["competitor_candidate_id"] == approved["id"]
+    assert db_session.scalar(select(CompetitorEvidenceLink)) is not None
 
     reject_target = next(
         candidate for candidate in body["candidates"] if candidate["id"] != first_candidate["id"]
@@ -244,6 +294,49 @@ def test_competitor_discovery_classifies_candidates_and_merges_approved_competit
     assert reject_response.json()["candidate"]["status"] == "rejected"
 
     assert db_session.scalar(select(CompetitorCandidate)) is not None
+
+
+def test_blocked_source_fetch_ingests_discovery_snapshot(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint(client)
+    response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+    )
+    source_id = response.json()["sources"][0]["id"]
+
+    def fail_fetch(settings, url):
+        raise EvidenceIngestionError("temporary fetch failure")
+
+    monkeypatch.setattr("app.services.evidence_service._fetch_url", fail_fetch)
+    failed_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/{source_id}/approve"
+    )
+    assert failed_response.status_code == 200
+    ingested = failed_response.json()["source"]
+    assert ingested["status"] == "ingested"
+    assert ingested["ingestion_error"] is None
+    assert ingested["evidence_source_id"] is not None
+
+    evidence = db_session.scalar(
+        select(EvidenceSource).where(
+            EvidenceSource.id == uuid.UUID(ingested["evidence_source_id"])
+        )
+    )
+    assert evidence is not None
+    assert "Reason selected:" in (evidence.raw_text or "")
+    chunk = db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == evidence.id))
+    assert chunk is not None
+    assert chunk.chunk_metadata["used_discovery_snapshot"] is True
+    assert "temporary fetch failure" in chunk.chunk_metadata["remote_fetch_error"]
+
+    retry_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/{source_id}/approve"
+    )
+    assert retry_response.status_code == 200
+    assert retry_response.json()["source"]["status"] == "ingested"
 
 
 def test_competitor_discovery_uses_structured_output_in_live_mode(

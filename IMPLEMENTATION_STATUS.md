@@ -452,6 +452,54 @@ Checks run:
 - [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
 - [x] `pnpm --filter thesys-web typecheck`
 
+Original V1 Sprint 4 plan:
+
+- Approved discovered sources and competitors should be ingested automatically
+  into the project evidence graph.
+- Fetch approved source content.
+- Extract useful text.
+- Chunk and embed content.
+- Store source metadata and freshness timestamps.
+- Link evidence to the project, competitors, assumptions, research questions,
+  and artifacts where applicable.
+- Make ingestion failures visible and recoverable.
+
+## V1 Sprint 4 Scope
+
+- [x] Add research ingestion metadata fields for discovered source ingestion
+  timestamps and competitor candidate evidence ingestion status.
+- [x] Upgrade discovered source approval from snapshot-only ingestion to real
+  URL fetch, text extraction, chunking, embedding, and evidence-source linking.
+- [x] Fall back to ingesting the reviewed discovery snapshot when a public URL
+  blocks automated fetch, while preserving the remote fetch error in chunk
+  metadata.
+- [x] Stamp evidence chunk metadata with research sprint, research plan,
+  discovered source, source type, research question, and assumptions-to-test
+  provenance.
+- [x] Upgrade competitor candidate approval to ingest the candidate URL when
+  present, fall back to candidate snapshot ingestion when blocked, and link
+  ingested chunks to the merged project competitor.
+- [x] Link approved discovered-source evidence referenced by competitor
+  candidates to the merged competitor.
+- [x] Extend retrieval metadata filtering to support both singular and list
+  metadata IDs for competitor-scoped retrieval.
+- [x] Show source and competitor evidence ingestion status in the Overview
+  research discovery review UI.
+
+## V1 Sprint 4 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_research_discovery.py`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+
 ## Next Sprint
 
-V1 Sprint 4: Auto-Ingestion and Evidence Graph Update.
+V1 Sprint 5: Agentic RAG Research Workflow.

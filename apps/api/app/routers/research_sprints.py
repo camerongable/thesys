@@ -299,10 +299,12 @@ def approve_competitor_candidate(
     candidate_id: uuid.UUID,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> CompetitorCandidateActionRead:
     candidate = competitor_discovery_service.approve_competitor_candidate(
         db,
         auth,
+        settings,
         project_id,
         sprint_id,
         candidate_id,

@@ -185,5 +185,10 @@ Discovery remains approval-gated. In live mode, source and competitor discovery
 call the LiteLLM structured-output path and log model, token, and cost metadata
 on `ai_runs` / `ai_steps`; stub mode uses deterministic fallback candidates.
 Source candidates are ranked and deduped before review; approved sources enter
-the evidence pipeline. Competitor candidates can be edited before approval;
-approved candidates become project competitors.
+the evidence pipeline by fetching the reviewed URL, extracting readable text,
+chunking, embedding, and recording research-sprint provenance on the chunks.
+If a reviewed URL blocks automated fetch, the API ingests the reviewed
+candidate snapshot instead and records the remote fetch error in chunk metadata.
+Competitor candidates can be edited before approval; approved candidates become
+project competitors, ingest their URL or candidate snapshot when available, and
+link ingested evidence chunks to the competitor for scoped retrieval.

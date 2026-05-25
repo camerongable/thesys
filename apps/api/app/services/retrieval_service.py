@@ -159,15 +159,27 @@ def _matches_metadata_filters(
     payload: EvidenceRetrieveCreate,
 ) -> bool:
     metadata = candidate.chunk.chunk_metadata or {}
-    if payload.competitor_id is not None and metadata.get("competitor_id") != str(
-        payload.competitor_id
+    if payload.competitor_id is not None and not _metadata_contains_id(
+        metadata,
+        "competitor",
+        payload.competitor_id,
     ):
         return False
-    if payload.assumption_id is not None and metadata.get("assumption_id") != str(
-        payload.assumption_id
+    if payload.assumption_id is not None and not _metadata_contains_id(
+        metadata,
+        "assumption",
+        payload.assumption_id,
     ):
         return False
     return True
+
+
+def _metadata_contains_id(metadata: dict[str, object], prefix: str, item_id: uuid.UUID) -> bool:
+    expected = str(item_id)
+    if metadata.get(f"{prefix}_id") == expected:
+        return True
+    values = metadata.get(f"{prefix}_ids")
+    return isinstance(values, list) and expected in {str(value) for value in values}
 
 
 def _matches_freshness(source: EvidenceSource, freshness_days: int | None) -> bool:
