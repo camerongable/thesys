@@ -15,6 +15,29 @@ ResearchSprintStatus = Literal[
     "failed",
     "rejected",
 ]
+DiscoveredSourceType = Literal[
+    "company_site",
+    "pricing_page",
+    "product_page",
+    "review",
+    "forum",
+    "blog",
+    "market_report",
+    "directory",
+    "docs",
+    "unknown",
+]
+DiscoveredSourceStatus = Literal["candidate", "approved", "rejected", "ingested", "failed"]
+CompetitorCandidateCategory = Literal[
+    "direct_competitor",
+    "indirect_competitor",
+    "substitute_behavior",
+    "incumbent_platform",
+    "adjacent_solution",
+    "irrelevant",
+]
+CompetitorCandidateStatus = Literal["candidate", "approved", "rejected", "merged"]
+CompetitorCandidateThreatLevel = Literal["low", "medium", "high"]
 
 
 class ResearchPlanDraft(BaseModel):
@@ -101,3 +124,126 @@ class ResearchSprintPlanRunRead(BaseModel):
 class ResearchSprintApprovalRead(BaseModel):
     ai_run_id: uuid.UUID | None
     sprint: ResearchSprintRead
+
+
+class DiscoveredSourceRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    research_sprint_id: uuid.UUID
+    evidence_source_id: uuid.UUID | None
+    url: str
+    title: str | None
+    snippet: str | None
+    source_type: DiscoveredSourceType
+    relevance_score: Decimal
+    reason_selected: str
+    associated_research_question: str | None
+    status: DiscoveredSourceStatus
+    ingestion_error: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class DiscoveredSourceListRead(BaseModel):
+    sources: list[DiscoveredSourceRead]
+
+
+class SourceDiscoveryCandidateDraft(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
+    title: str | None = Field(default=None, max_length=500)
+    snippet: str | None = Field(default=None, max_length=2000)
+    source_type: DiscoveredSourceType = "unknown"
+    relevance_score: Decimal = Field(ge=0, le=1)
+    reason_selected: str = Field(min_length=1, max_length=5000)
+    associated_research_question: str | None = Field(default=None, max_length=2000)
+
+
+class SourceDiscoveryDraft(BaseModel):
+    sources: list[SourceDiscoveryCandidateDraft] = Field(default_factory=list, max_length=12)
+
+
+class SourceDiscoveryRunRead(BaseModel):
+    ai_run_id: uuid.UUID
+    ai_step_id: uuid.UUID
+    generated_count: int
+    candidate_count: int
+    sources: list[DiscoveredSourceRead]
+
+
+class DiscoveredSourceActionRead(BaseModel):
+    source: DiscoveredSourceRead
+
+
+class CompetitorCandidateUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    url: str | None = Field(default=None, max_length=2000)
+    category: CompetitorCandidateCategory | None = None
+    target_user: str | None = Field(default=None, max_length=5000)
+    positioning: str | None = Field(default=None, max_length=5000)
+    pricing_signal: str | None = Field(default=None, max_length=5000)
+    core_features: list[str] | None = Field(default=None, max_length=25)
+    why_it_matters: str | None = Field(default=None, min_length=1, max_length=5000)
+    threat_level: CompetitorCandidateThreatLevel | None = None
+    relevance_score: Decimal | None = Field(default=None, ge=0, le=1)
+
+
+class CompetitorCandidateRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    research_sprint_id: uuid.UUID
+    competitor_id: uuid.UUID | None
+    name: str
+    url: str | None
+    category: CompetitorCandidateCategory
+    target_user: str | None
+    positioning: str | None
+    pricing_signal: str | None
+    core_features: list[str]
+    why_it_matters: str
+    threat_level: CompetitorCandidateThreatLevel
+    relevance_score: Decimal
+    source_ids: list[str]
+    status: CompetitorCandidateStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class CompetitorCandidateListRead(BaseModel):
+    candidates: list[CompetitorCandidateRead]
+
+
+class CompetitorDiscoveryCandidateDraft(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    url: str | None = Field(default=None, max_length=2000)
+    category: CompetitorCandidateCategory
+    target_user: str | None = Field(default=None, max_length=5000)
+    positioning: str | None = Field(default=None, max_length=5000)
+    pricing_signal: str | None = Field(default=None, max_length=5000)
+    core_features: list[str] = Field(default_factory=list, max_length=25)
+    why_it_matters: str = Field(min_length=1, max_length=5000)
+    threat_level: CompetitorCandidateThreatLevel
+    relevance_score: Decimal = Field(ge=0, le=1)
+    source_ids: list[str] = Field(default_factory=list, max_length=12)
+
+
+class CompetitorDiscoveryDraft(BaseModel):
+    candidates: list[CompetitorDiscoveryCandidateDraft] = Field(
+        default_factory=list,
+        max_length=12,
+    )
+
+
+class CompetitorDiscoveryRunRead(BaseModel):
+    ai_run_id: uuid.UUID
+    ai_step_id: uuid.UUID
+    generated_count: int
+    candidate_count: int
+    candidates: list[CompetitorCandidateRead]
+
+
+class CompetitorCandidateActionRead(BaseModel):
+    candidate: CompetitorCandidateRead

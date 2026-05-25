@@ -3,11 +3,13 @@
 import {
   ArrowLeft,
   Beaker,
+  Building2,
   CheckCircle2,
   CircleAlert,
   ClipboardCheck,
   Database,
   FileSearch,
+  Globe2,
   Lightbulb,
   ListChecks,
   Route,
@@ -22,18 +24,31 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import {
+  approveCompetitorCandidate,
+  approveDiscoveredSource,
   approveResearchSprint,
+  CompetitorCandidate,
+  CompetitorCandidateUpdateInput,
+  discoverCompetitorCandidates,
+  discoverSources,
+  DiscoveredSource,
   executeNextAction,
   getProjectOverview,
   IdeaReadiness,
+  listCompetitorCandidates,
+  listDiscoveredSources,
   listResearchSprints,
   NextBestAction,
   ProjectStage,
+  rejectCompetitorCandidate,
+  rejectDiscoveredSource,
   rejectResearchSprint,
   ResearchPlan,
   ResearchPlanUpdateInput,
+  ResearchSprint,
   StrategicSnapshot,
   startResearchSprintPlan,
+  updateCompetitorCandidate,
   updateResearchPlan,
 } from "@/lib/api";
 import { AiModeIndicator } from "@/features/ai/ai-mode-indicator";
@@ -434,6 +449,9 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
     approveMutation.submittedAt,
     rejectMutation.submittedAt,
   ].join(":");
+  const canReviewDiscovery =
+    latestSprint !== null &&
+    ["approved", "running", "needs_review", "completed"].includes(latestSprint.status);
 
   return (
     <div id="research-sprint" className="rounded-lg border border-border bg-white p-5">
@@ -477,7 +495,8 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
             </Button>
             {latestSprint?.status === "approved" ? (
               <p className="text-xs leading-5 text-muted-foreground">
-                The latest plan is approved. Source discovery and execution begin in V1 Sprint 2.
+                The latest plan is approved. Discover sources and competitors before generating
+                the research memo.
               </p>
             ) : latestSprint?.status === "rejected" ? (
               <p className="text-xs leading-5 text-muted-foreground">
@@ -496,6 +515,14 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
           onSave={() => saveMutation.mutate()}
         />
       )}
+
+      {canReviewDiscovery && latestSprint ? (
+        <ResearchDiscoveryPanel
+          onRunTrace={setLastRunId}
+          projectId={projectId}
+          sprint={latestSprint}
+        />
+      ) : null}
 
       {error ? (
         <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -633,6 +660,482 @@ function PlanTextArea({
         value={value}
       />
     </label>
+  );
+}
+
+function ResearchDiscoveryPanel({
+  onRunTrace,
+  projectId,
+  sprint,
+}: {
+  onRunTrace: (runId: string) => void;
+  projectId: string;
+  sprint: ResearchSprint;
+}) {
+  const sourcesQuery = useQuery({
+    queryKey: ["projects", projectId, "research-sprints", sprint.id, "sources"],
+    queryFn: () => listDiscoveredSources(projectId, sprint.id),
+  });
+  const candidatesQuery = useQuery({
+    queryKey: ["projects", projectId, "research-sprints", sprint.id, "competitor-candidates"],
+    queryFn: () => listCompetitorCandidates(projectId, sprint.id),
+  });
+
+  const discoverSourcesMutation = useMutation({
+    mutationFn: () => discoverSources(projectId, sprint.id),
+    onSuccess: async (result) => {
+      onRunTrace(result.ai_run_id);
+      await sourcesQuery.refetch();
+    },
+  });
+  const discoverCompetitorsMutation = useMutation({
+    mutationFn: () => discoverCompetitorCandidates(projectId, sprint.id),
+    onSuccess: async (result) => {
+      onRunTrace(result.ai_run_id);
+      await candidatesQuery.refetch();
+    },
+  });
+  const approveSourceMutation = useMutation({
+    mutationFn: (sourceId: string) => approveDiscoveredSource(projectId, sprint.id, sourceId),
+    onSuccess: async () => {
+      await sourcesQuery.refetch();
+    },
+  });
+  const rejectSourceMutation = useMutation({
+    mutationFn: (sourceId: string) => rejectDiscoveredSource(projectId, sprint.id, sourceId),
+    onSuccess: async () => {
+      await sourcesQuery.refetch();
+    },
+  });
+  const updateCandidateMutation = useMutation({
+    mutationFn: ({
+      candidateId,
+      input,
+    }: {
+      candidateId: string;
+      input: CompetitorCandidateUpdateInput;
+    }) => updateCompetitorCandidate(projectId, sprint.id, candidateId, input),
+    onSuccess: async () => {
+      await candidatesQuery.refetch();
+    },
+  });
+  const approveCandidateMutation = useMutation({
+    mutationFn: (candidateId: string) => approveCompetitorCandidate(projectId, sprint.id, candidateId),
+    onSuccess: async () => {
+      await candidatesQuery.refetch();
+    },
+  });
+  const rejectCandidateMutation = useMutation({
+    mutationFn: (candidateId: string) => rejectCompetitorCandidate(projectId, sprint.id, candidateId),
+    onSuccess: async () => {
+      await candidatesQuery.refetch();
+    },
+  });
+
+  const sources = sourcesQuery.data ?? [];
+  const candidates = candidatesQuery.data ?? [];
+  const error =
+    discoverSourcesMutation.error ??
+    discoverCompetitorsMutation.error ??
+    approveSourceMutation.error ??
+    rejectSourceMutation.error ??
+    updateCandidateMutation.error ??
+    approveCandidateMutation.error ??
+    rejectCandidateMutation.error ??
+    (sourcesQuery.error as Error | null) ??
+    (candidatesQuery.error as Error | null);
+  const busy =
+    discoverSourcesMutation.isPending ||
+    discoverCompetitorsMutation.isPending ||
+    approveSourceMutation.isPending ||
+    rejectSourceMutation.isPending ||
+    updateCandidateMutation.isPending ||
+    approveCandidateMutation.isPending ||
+    rejectCandidateMutation.isPending;
+
+  return (
+    <div className="mt-6 border-t border-border pt-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold">Discovery Review</h3>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+            Generate candidate sources and competitors from the approved plan. Review items before
+            they are ingested as evidence or merged into the project competitor set.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            disabled={busy}
+            onClick={() => discoverSourcesMutation.mutate()}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            <Globe2 className="h-4 w-4" aria-hidden="true" />
+            {discoverSourcesMutation.isPending ? "Discovering..." : "Discover Sources"}
+          </Button>
+          <Button
+            disabled={busy}
+            onClick={() => discoverCompetitorsMutation.mutate()}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            <Building2 className="h-4 w-4" aria-hidden="true" />
+            {discoverCompetitorsMutation.isPending
+              ? "Discovering..."
+              : "Discover Competitors"}
+          </Button>
+        </div>
+      </div>
+
+      {error ? (
+        <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error.message}
+        </div>
+      ) : null}
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-2">
+        <SourceCandidateList
+          busy={busy}
+          onApprove={(sourceId) => approveSourceMutation.mutate(sourceId)}
+          onReject={(sourceId) => rejectSourceMutation.mutate(sourceId)}
+          sources={sources}
+        />
+        <CompetitorCandidateList
+          busy={busy}
+          candidates={candidates}
+          onApprove={(candidateId) => approveCandidateMutation.mutate(candidateId)}
+          onReject={(candidateId) => rejectCandidateMutation.mutate(candidateId)}
+          onSave={(candidateId, input) =>
+            updateCandidateMutation.mutate({ candidateId, input })
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+function SourceCandidateList({
+  busy,
+  onApprove,
+  onReject,
+  sources,
+}: {
+  busy: boolean;
+  onApprove: (sourceId: string) => void;
+  onReject: (sourceId: string) => void;
+  sources: DiscoveredSource[];
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="text-sm font-semibold">Source Candidates</h4>
+        <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+          {sources.length}
+        </span>
+      </div>
+      {sources.length === 0 ? (
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          No candidate sources yet. Run source discovery after approving the research plan.
+        </p>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {sources.map((source) => (
+            <div className="rounded-md border border-border p-3" key={source.id}>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                      {formatLabel(source.source_type)}
+                    </span>
+                    <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                      {formatLabel(source.status)}
+                    </span>
+                    <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                      score {formatScore(source.relevance_score)}
+                    </span>
+                  </div>
+                  <h5 className="mt-2 text-sm font-semibold">
+                    {source.title ?? "Untitled source"}
+                  </h5>
+                </div>
+                {source.status === "candidate" || source.status === "failed" ? (
+                  <div className="flex gap-2">
+                    <Button
+                      disabled={busy}
+                      onClick={() => onApprove(source.id)}
+                      size="sm"
+                      type="button"
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      disabled={busy}
+                      onClick={() => onReject(source.id)}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+              <a
+                className="mt-2 block break-all text-xs text-primary hover:underline"
+                href={source.url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {source.url}
+              </a>
+              {source.snippet ? (
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  {source.snippet}
+                </p>
+              ) : null}
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                Why: {source.reason_selected}
+              </p>
+              {source.ingestion_error ? (
+                <p className="mt-2 text-xs text-red-700">{source.ingestion_error}</p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompetitorCandidateList({
+  busy,
+  candidates,
+  onApprove,
+  onReject,
+  onSave,
+}: {
+  busy: boolean;
+  candidates: CompetitorCandidate[];
+  onApprove: (candidateId: string) => void;
+  onReject: (candidateId: string) => void;
+  onSave: (candidateId: string, input: CompetitorCandidateUpdateInput) => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="text-sm font-semibold">Competitor Candidates</h4>
+        <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+          {candidates.length}
+        </span>
+      </div>
+      {candidates.length === 0 ? (
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          No competitor candidates yet. Run competitor discovery to review direct competitors,
+          substitutes, and incumbents.
+        </p>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {candidates.map((candidate) => (
+            <CompetitorCandidateItem
+              busy={busy}
+              candidate={candidate}
+              key={candidate.id}
+              onApprove={onApprove}
+              onReject={onReject}
+              onSave={onSave}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompetitorCandidateItem({
+  busy,
+  candidate,
+  onApprove,
+  onReject,
+  onSave,
+}: {
+  busy: boolean;
+  candidate: CompetitorCandidate;
+  onApprove: (candidateId: string) => void;
+  onReject: (candidateId: string) => void;
+  onSave: (candidateId: string, input: CompetitorCandidateUpdateInput) => void;
+}) {
+  const [name, setName] = useState(candidate.name);
+  const [url, setUrl] = useState(candidate.url ?? "");
+  const [category, setCategory] = useState(candidate.category);
+  const [threatLevel, setThreatLevel] = useState(candidate.threat_level);
+  const [whyItMatters, setWhyItMatters] = useState(candidate.why_it_matters);
+
+  useEffect(() => {
+    setName(candidate.name);
+    setUrl(candidate.url ?? "");
+    setCategory(candidate.category);
+    setThreatLevel(candidate.threat_level);
+    setWhyItMatters(candidate.why_it_matters);
+  }, [candidate.id, candidate.updated_at]);
+
+  const canEdit = candidate.status === "candidate";
+  return (
+    <div className="rounded-md border border-border p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+              {formatLabel(candidate.category)}
+            </span>
+            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+              {formatLabel(candidate.status)}
+            </span>
+            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+              threat {candidate.threat_level}
+            </span>
+            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+              score {formatScore(candidate.relevance_score)}
+            </span>
+          </div>
+          <h5 className="mt-2 text-sm font-semibold">{candidate.name}</h5>
+        </div>
+        {candidate.status === "candidate" ? (
+          <div className="flex gap-2">
+            <Button
+              disabled={busy}
+              onClick={() => onApprove(candidate.id)}
+              size="sm"
+              type="button"
+            >
+              Approve
+            </Button>
+            <Button
+              disabled={busy}
+              onClick={() => onReject(candidate.id)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Reject
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      {candidate.url ? (
+        <a
+          className="mt-2 block break-all text-xs text-primary hover:underline"
+          href={candidate.url}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {candidate.url}
+        </a>
+      ) : null}
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        {candidate.positioning ?? "No positioning note yet."}
+      </p>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+        Why: {candidate.why_it_matters}
+      </p>
+      {candidate.core_features.length > 0 ? (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          Features: {candidate.core_features.join(", ")}
+        </p>
+      ) : null}
+
+      {canEdit ? (
+        <details className="mt-3 rounded-md bg-muted p-3">
+          <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+            Edit candidate
+          </summary>
+          <div className="mt-3 grid gap-3">
+            <label className="block">
+              <span className="text-xs font-medium text-muted-foreground">Name</span>
+              <input
+                className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm"
+                onChange={(event) => setName(event.target.value)}
+                value={name}
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-muted-foreground">URL</span>
+              <input
+                className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm"
+                onChange={(event) => setUrl(event.target.value)}
+                value={url}
+              />
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-xs font-medium text-muted-foreground">Category</span>
+                <select
+                  className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm"
+                  onChange={(event) =>
+                    setCategory(event.target.value as CompetitorCandidate["category"])
+                  }
+                  value={category}
+                >
+                  {[
+                    "direct_competitor",
+                    "indirect_competitor",
+                    "substitute_behavior",
+                    "incumbent_platform",
+                    "adjacent_solution",
+                    "irrelevant",
+                  ].map((value) => (
+                    <option key={value} value={value}>
+                      {formatLabel(value)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-muted-foreground">Threat</span>
+                <select
+                  className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm"
+                  onChange={(event) =>
+                    setThreatLevel(event.target.value as CompetitorCandidate["threat_level"])
+                  }
+                  value={threatLevel}
+                >
+                  {["low", "medium", "high"].map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label className="block">
+              <span className="text-xs font-medium text-muted-foreground">Why it matters</span>
+              <textarea
+                className="mt-1 min-h-20 w-full rounded-md border border-border px-3 py-2 text-sm"
+                onChange={(event) => setWhyItMatters(event.target.value)}
+                value={whyItMatters}
+              />
+            </label>
+            <Button
+              disabled={busy}
+              onClick={() =>
+                onSave(candidate.id, {
+                  category,
+                  name,
+                  threat_level: threatLevel,
+                  url,
+                  why_it_matters: whyItMatters,
+                })
+              }
+              size="sm"
+              type="button"
+            >
+              Save Candidate
+            </Button>
+          </div>
+        </details>
+      ) : null}
+    </div>
   );
 }
 
@@ -996,6 +1499,14 @@ function listFromLines(value: string) {
 
 function formatLabel(value: string) {
   return value.replaceAll("_", " ");
+}
+
+function formatScore(value: string) {
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) {
+    return value;
+  }
+  return parsed.toFixed(2);
 }
 
 function truncate(value: string, maxLength: number) {

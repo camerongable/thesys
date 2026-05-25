@@ -316,3 +316,23 @@ curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<s
   -H "Content-Type: application/json" \
   -d '{"research_questions":["Which segment has the most urgent pain?"]}'
 ```
+
+## V1 Sprints 2-3 Discovery Review
+
+After approving a research sprint, use the Overview page Discovery Review
+section to generate candidate sources and competitors. In live mode, discovery
+uses LiteLLM structured output and records token/cost metadata in the workflow
+trace; local stub mode uses deterministic fallback candidates. Sources stay in
+a candidate state until approved; approval ingests a reviewed URL snapshot into
+the existing evidence pipeline. Competitor candidates can be edited before
+approval; approval creates or updates first-class project competitor records.
+
+```bash
+curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/sources/discover
+curl http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/sources
+curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/sources/<source_id>/approve
+
+curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/competitor-candidates/discover
+curl http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/competitor-candidates
+curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/competitor-candidates/<candidate_id>/approve
+```

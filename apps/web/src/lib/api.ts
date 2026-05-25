@@ -589,6 +589,27 @@ export type ResearchSprintStatus =
   | "completed"
   | "failed"
   | "rejected";
+export type DiscoveredSourceType =
+  | "company_site"
+  | "pricing_page"
+  | "product_page"
+  | "review"
+  | "forum"
+  | "blog"
+  | "market_report"
+  | "directory"
+  | "docs"
+  | "unknown";
+export type DiscoveredSourceStatus = "candidate" | "approved" | "rejected" | "ingested" | "failed";
+export type CompetitorCandidateCategory =
+  | "direct_competitor"
+  | "indirect_competitor"
+  | "substitute_behavior"
+  | "incumbent_platform"
+  | "adjacent_solution"
+  | "irrelevant";
+export type CompetitorCandidateStatus = "candidate" | "approved" | "rejected" | "merged";
+export type CompetitorCandidateThreatLevel = "low" | "medium" | "high";
 
 export type ResearchPlan = {
   id: string;
@@ -657,6 +678,78 @@ export type ResearchSprintPlanRun = {
 export type ResearchSprintApproval = {
   ai_run_id: string | null;
   sprint: ResearchSprint;
+};
+
+export type DiscoveredSource = {
+  id: string;
+  project_id: string;
+  research_sprint_id: string;
+  evidence_source_id: string | null;
+  url: string;
+  title: string | null;
+  snippet: string | null;
+  source_type: DiscoveredSourceType;
+  relevance_score: string;
+  reason_selected: string;
+  associated_research_question: string | null;
+  status: DiscoveredSourceStatus;
+  ingestion_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SourceDiscoveryRun = {
+  ai_run_id: string;
+  ai_step_id: string;
+  generated_count: number;
+  candidate_count: number;
+  sources: DiscoveredSource[];
+};
+
+export type CompetitorCandidate = {
+  id: string;
+  project_id: string;
+  research_sprint_id: string;
+  competitor_id: string | null;
+  name: string;
+  url: string | null;
+  category: CompetitorCandidateCategory;
+  target_user: string | null;
+  positioning: string | null;
+  pricing_signal: string | null;
+  core_features: string[];
+  why_it_matters: string;
+  threat_level: CompetitorCandidateThreatLevel;
+  relevance_score: string;
+  source_ids: string[];
+  status: CompetitorCandidateStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CompetitorCandidateUpdateInput = Partial<
+  Pick<
+    CompetitorCandidate,
+    | "name"
+    | "url"
+    | "category"
+    | "target_user"
+    | "positioning"
+    | "pricing_signal"
+    | "core_features"
+    | "why_it_matters"
+    | "threat_level"
+  >
+> & {
+  relevance_score?: number;
+};
+
+export type CompetitorDiscoveryRun = {
+  ai_run_id: string;
+  ai_step_id: string;
+  generated_count: number;
+  candidate_count: number;
+  candidates: CompetitorCandidate[];
 };
 
 export type DemoSeedResult = {
@@ -1187,6 +1280,109 @@ export function rejectResearchSprint(projectId: string, sprintId: string) {
       method: "POST",
     },
   );
+}
+
+export async function listDiscoveredSources(projectId: string, sprintId: string) {
+  const response = await apiFetch<{ sources: DiscoveredSource[] }>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/sources`,
+  );
+  return response.sources;
+}
+
+export function discoverSources(projectId: string, sprintId: string) {
+  return apiFetch<SourceDiscoveryRun>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/sources/discover`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function approveDiscoveredSource(
+  projectId: string,
+  sprintId: string,
+  sourceId: string,
+) {
+  const response = await apiFetch<{ source: DiscoveredSource }>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/sources/${sourceId}/approve`,
+    {
+      method: "POST",
+    },
+  );
+  return response.source;
+}
+
+export async function rejectDiscoveredSource(
+  projectId: string,
+  sprintId: string,
+  sourceId: string,
+) {
+  const response = await apiFetch<{ source: DiscoveredSource }>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/sources/${sourceId}/reject`,
+    {
+      method: "POST",
+    },
+  );
+  return response.source;
+}
+
+export async function listCompetitorCandidates(projectId: string, sprintId: string) {
+  const response = await apiFetch<{ candidates: CompetitorCandidate[] }>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/competitor-candidates`,
+  );
+  return response.candidates;
+}
+
+export function discoverCompetitorCandidates(projectId: string, sprintId: string) {
+  return apiFetch<CompetitorDiscoveryRun>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/competitor-candidates/discover`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function updateCompetitorCandidate(
+  projectId: string,
+  sprintId: string,
+  candidateId: string,
+  input: CompetitorCandidateUpdateInput,
+) {
+  return apiFetch<CompetitorCandidate>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/competitor-candidates/${candidateId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ ...input, url: normalizeOptionalUrl(input.url ?? undefined) }),
+    },
+  );
+}
+
+export async function approveCompetitorCandidate(
+  projectId: string,
+  sprintId: string,
+  candidateId: string,
+) {
+  const response = await apiFetch<{ candidate: CompetitorCandidate }>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/competitor-candidates/${candidateId}/approve`,
+    {
+      method: "POST",
+    },
+  );
+  return response.candidate;
+}
+
+export async function rejectCompetitorCandidate(
+  projectId: string,
+  sprintId: string,
+  candidateId: string,
+) {
+  const response = await apiFetch<{ candidate: CompetitorCandidate }>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/competitor-candidates/${candidateId}/reject`,
+    {
+      method: "POST",
+    },
+  );
+  return response.candidate;
 }
 
 export function getWorkflowEventsUrl(runId: string) {

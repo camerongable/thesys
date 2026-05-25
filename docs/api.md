@@ -159,3 +159,31 @@ recommendation, one primary next best action, idea readiness, strategic
 snapshot, evidence health, recent strategic updates, key assumptions, and key
 risks. The next-action endpoint returns the current recommended route/action;
 it does not start new V1 monitoring or agentic research work.
+
+V1 research sprint discovery APIs:
+
+```http
+GET   /api/projects/{project_id}/research-sprints
+POST  /api/projects/{project_id}/research-sprints/plan
+PATCH /api/projects/{project_id}/research-plans/{plan_id}
+POST  /api/projects/{project_id}/research-sprints/{sprint_id}/approve
+POST  /api/projects/{project_id}/research-sprints/{sprint_id}/reject
+
+GET  /api/projects/{project_id}/research-sprints/{sprint_id}/sources
+POST /api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover
+POST /api/projects/{project_id}/research-sprints/{sprint_id}/sources/{source_id}/approve
+POST /api/projects/{project_id}/research-sprints/{sprint_id}/sources/{source_id}/reject
+
+GET   /api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates
+POST  /api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates/discover
+PATCH /api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates/{candidate_id}
+POST  /api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates/{candidate_id}/approve
+POST  /api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates/{candidate_id}/reject
+```
+
+Discovery remains approval-gated. In live mode, source and competitor discovery
+call the LiteLLM structured-output path and log model, token, and cost metadata
+on `ai_runs` / `ai_steps`; stub mode uses deterministic fallback candidates.
+Source candidates are ranked and deduped before review; approved sources enter
+the evidence pipeline. Competitor candidates can be edited before approval;
+approved candidates become project competitors.

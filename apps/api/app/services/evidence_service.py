@@ -145,6 +145,42 @@ def add_url_source(
     )
 
 
+def add_discovered_url_snapshot(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    *,
+    url: str,
+    title: str | None,
+    text: str,
+) -> EvidenceSource:
+    """Ingest a reviewed discovery candidate without fetching the remote page yet."""
+    project_service.get_project(db, auth, project_id)
+    source = EvidenceSource(
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        source_type="url",
+        title=title.strip() if title else None,
+        url=url,
+        raw_text=_normalize_text(text),
+        ingestion_status="processing",
+        created_by=auth.user_id,
+    )
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    return _process_source_text(
+        db,
+        auth,
+        settings,
+        source,
+        text=source.raw_text or text,
+        title=source.title or url,
+        content_type="text/plain",
+    )
+
+
 def add_file_source(
     db: Session,
     auth: AuthContext,

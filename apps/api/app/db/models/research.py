@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, Uuid
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String, Text, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
@@ -128,3 +128,134 @@ class ResearchSprint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
 
     plan: Mapped[ResearchPlan] = relationship(back_populates="sprints")
+    discovered_sources: Mapped[list["DiscoveredSource"]] = relationship(
+        back_populates="research_sprint",
+        cascade="all, delete-orphan",
+        order_by="DiscoveredSource.relevance_score.desc()",
+    )
+    competitor_candidates: Mapped[list["CompetitorCandidate"]] = relationship(
+        back_populates="research_sprint",
+        cascade="all, delete-orphan",
+        order_by="CompetitorCandidate.relevance_score.desc()",
+    )
+
+
+class DiscoveredSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "discovered_sources"
+    __table_args__ = (
+        CheckConstraint(
+            "source_type in ("
+            "'company_site','pricing_page','product_page','review','forum','blog',"
+            "'market_report','directory','docs','unknown'"
+            ")",
+            name="ck_discovered_sources_source_type",
+        ),
+        CheckConstraint(
+            "status in ('candidate','approved','rejected','ingested','failed')",
+            name="ck_discovered_sources_status",
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    research_sprint_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("research_sprints.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    evidence_source_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("evidence_sources.id", ondelete="SET NULL"),
+        index=True,
+    )
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(500))
+    snippet: Mapped[str | None] = mapped_column(Text)
+    source_type: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
+    relevance_score: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    reason_selected: Mapped[str] = mapped_column(Text, nullable=False)
+    associated_research_question: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="candidate", index=True)
+    ingestion_error: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
+
+    research_sprint: Mapped[ResearchSprint] = relationship(back_populates="discovered_sources")
+
+
+class CompetitorCandidate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "competitor_candidates"
+    __table_args__ = (
+        CheckConstraint(
+            "category in ("
+            "'direct_competitor','indirect_competitor','substitute_behavior',"
+            "'incumbent_platform','adjacent_solution','irrelevant'"
+            ")",
+            name="ck_competitor_candidates_category",
+        ),
+        CheckConstraint(
+            "threat_level in ('low','medium','high')",
+            name="ck_competitor_candidates_threat_level",
+        ),
+        CheckConstraint(
+            "status in ('candidate','approved','rejected','merged')",
+            name="ck_competitor_candidates_status",
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    research_sprint_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("research_sprints.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    competitor_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("competitors.id", ondelete="SET NULL"),
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    url: Mapped[str | None] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_user: Mapped[str | None] = mapped_column(Text)
+    positioning: Mapped[str | None] = mapped_column(Text)
+    pricing_signal: Mapped[str | None] = mapped_column(Text)
+    core_features: Mapped[list[str]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"),
+        nullable=False,
+        default=list,
+    )
+    why_it_matters: Mapped[str] = mapped_column(Text, nullable=False)
+    threat_level: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
+    relevance_score: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    source_ids: Mapped[list[str]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"),
+        nullable=False,
+        default=list,
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="candidate", index=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
+
+    research_sprint: Mapped[ResearchSprint] = relationship(back_populates="competitor_candidates")

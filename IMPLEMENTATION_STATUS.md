@@ -2,14 +2,12 @@
 
 ## Current Phase
 
-V1 Sprint 1 complete. The app now has a research sprint entry point and
-approval-gated planning flow. Users can generate an approval-ready research
-plan from the project Overview page, edit it, approve it, or reject it. The
-planning workflow persists `ResearchPlan` and `ResearchSprint` records, logs
-workflow traces, and stops at human approval before any autonomous source
-discovery, browsing, or ingestion. Watchlists, monitoring, collaboration,
-portfolio dashboards, integrations, and multi-segment workflow packs remain V2
-scope.
+V1 Sprints 2 and 3 complete. Approved research sprints can now generate ranked
+source candidates and competitor candidates from the research plan. Users can
+review source candidates before they are ingested into evidence, and can
+review/edit/approve competitor candidates before they become first-class
+project competitors. Watchlists, monitoring, collaboration, portfolio
+dashboards, integrations, and multi-segment workflow packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -390,6 +388,70 @@ Checks run:
 - [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
 - [x] `docker compose config`
 
+Original V1 Sprint 2 plan:
+
+- Generate source discovery queries from approved research plans.
+- Discover useful public source candidates.
+- Rank and dedupe source candidates.
+- Let users approve/reject sources before ingestion.
+- Link discovered sources to research sprints.
+
+## V1 Sprint 2 Scope
+
+- [x] Add `discovered_sources` table with candidate, approved, rejected,
+  ingested, and failed statuses.
+- [x] Add `SourceDiscoveryService` that uses LiteLLM structured output in live
+  mode and deterministic fallback in stub mode to create ranked public source
+  candidates from research plan queries.
+- [x] Add source discovery workflow tracing through `ai_runs` and `ai_steps`.
+- [x] Add source candidate review endpoints:
+  - `GET /api/projects/{project_id}/research-sprints/{sprint_id}/sources`
+  - `POST /api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover`
+  - `POST /api/projects/{project_id}/research-sprints/{sprint_id}/sources/{source_id}/approve`
+  - `POST /api/projects/{project_id}/research-sprints/{sprint_id}/sources/{source_id}/reject`
+- [x] Approving a source candidate ingests a reviewed URL snapshot through the
+  existing evidence chunking and embedding pipeline.
+- [x] Add Overview page source candidate review UI.
+
+Original V1 Sprint 3 plan:
+
+- Discover direct competitors, indirect competitors, substitutes, and
+  incumbents.
+- Classify competitors.
+- Let users approve, reject, or edit competitor candidates.
+- Approved competitors become project competitor records.
+- Each candidate explains why it matters.
+
+## V1 Sprint 3 Scope
+
+- [x] Add `competitor_candidates` table with candidate, approved, rejected, and
+  merged statuses.
+- [x] Add `CompetitorDiscoveryService` that uses LiteLLM structured output in
+  live mode and deterministic fallback in stub mode to produce classified
+  competitor and substitute candidates from the approved research plan.
+- [x] Add competitor discovery workflow tracing through `ai_runs` and
+  `ai_steps`.
+- [x] Add competitor candidate review endpoints:
+  - `GET /api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates`
+  - `POST /api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates/discover`
+  - `PATCH /api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates/{candidate_id}`
+  - `POST /api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates/{candidate_id}/approve`
+  - `POST /api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates/{candidate_id}/reject`
+- [x] Approving a competitor candidate creates or updates a first-class
+  project competitor and links approved discovered evidence when available.
+- [x] Add Overview page competitor candidate review and edit UI.
+
+## V1 Sprints 2-3 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_research_discovery.py app/tests/test_research_sprints.py`
+- [x] Discovery tests assert that live mode calls the structured-output layer
+  instead of bypassing LiteLLM.
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+
 ## Next Sprint
 
-V1 Sprint 2: Autonomous Source Discovery.
+V1 Sprint 4: Auto-Ingestion and Evidence Graph Update.
