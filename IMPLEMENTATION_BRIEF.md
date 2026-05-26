@@ -5103,6 +5103,458 @@ This UI/UX refactor is complete when:
 
 ---
 
+## V1 Sprint 12: Product Alignment UX Benchmark Pass
+
+# UI/UX Refactor Prompt: Align App with Best-in-Class Workflow UX Patterns
+
+## Context
+
+Sprint 11 cleaned up the app into a guided workflow. Sprint 12 is a distinct
+product-alignment pass. It should evaluate and refine the V1 UX against
+best-in-class workflow-product patterns from the market.
+
+The app now has V1 functionality:
+
+- project workspace
+- guided overview
+- structured intake
+- opportunity/research briefs
+- autonomous research sprints
+- source discovery
+- competitor discovery
+- evidence ingestion
+- RAG / agentic RAG synthesis
+- cited memos
+- assumptions and risks
+- validation assets
+- decisions
+- strategic updates
+
+The goal is not to add functionality. The goal is to make the existing
+functionality feel polished, guided, intuitive, and comparable to serious
+workflow products.
+
+Do not copy other products visually. Adapt their interaction patterns to this
+product.
+
+## Product UX North Star
+
+The app should feel like:
+
+> A strategic advisor with receipts.
+
+Not:
+
+> A pile of AI-generated tabs and workflow outputs.
+
+The user should always understand:
+
+- Where am I in the idea validation process?
+- What did the system learn?
+- What is the recommendation?
+- What evidence supports it?
+- What is still uncertain?
+- What should I do next?
+
+## UX Inspiration and How to Apply It
+
+### 1. Linear-Inspired Command Center
+
+Use Linear as the model for focus, hierarchy, and speed.
+
+Apply this to:
+
+- Overview page
+- project header
+- navigation
+- page layout
+- primary action patterns
+
+Borrow these principles:
+
+- one obvious primary action
+- clean visual hierarchy
+- minimal clutter
+- fast navigation
+- strong status indicators
+- restrained use of cards
+- dense but readable layouts
+- no unnecessary chrome
+
+On the Overview page, prioritize:
+
+1. Current Recommendation
+2. Next Best Action
+3. Lifecycle Stage
+4. Strategic Snapshot
+5. Key Risks
+6. Evidence Health
+7. Recent Strategic Updates
+
+Technical status, workflow internals, raw source counts, and debug-like
+information should be visually secondary.
+
+### 2. Jira Product Discovery-Inspired Opportunity Workflow
+
+Use Jira Product Discovery as the model for turning ideas into structured
+opportunities with prioritization.
+
+Apply this to:
+
+- assumptions page
+- idea readiness
+- risk/confidence scoring
+- opportunity comparisons
+- validation prioritization
+
+Borrow these principles:
+
+- structured idea fields
+- confidence/risk/impact/status badges
+- prioritization tables
+- evidence linked to strategic objects
+- clear "what should we focus on?" views
+
+The Assumptions page should be operational, not just informational. It should
+show the riskiest assumption first, then a ranked assumptions table with risk
+level, confidence, evidence strength, validation method, status, and action CTA.
+
+### 3. Dovetail-Inspired Evidence and Research UX
+
+Use Dovetail as the model for research repository and evidence-backed insights.
+
+Apply this to:
+
+- Evidence page
+- Research page
+- source detail views
+- findings
+- cited claims
+- insight clustering
+
+Borrow these principles:
+
+- findings first, raw evidence second
+- evidence/source detail drawers
+- tags and categories
+- source-linked insights
+- compact evidence cards
+- traceability from insight to source
+
+The Evidence page should not show raw chunks by default. It should show Evidence
+Health Summary, Source List, Source Filters, Cited Claims, Unsupported Claims,
+and a Source Detail Drawer.
+
+### 4. NotebookLM-Inspired Source-Grounded AI
+
+Use NotebookLM as the model for source-grounded AI outputs.
+
+Apply this to:
+
+- research memo reading
+- opportunity brief reading
+- citations
+- source panels
+- weak/unsupported claims
+
+Borrow these principles:
+
+- generated output grounded in sources
+- citations close to claims
+- sources accessible beside or near generated content
+- "what sources were used?" always answerable
+- clear distinction between supported claims and assumptions
+
+For research memos and opportunity briefs:
+
+- show an executive summary first
+- show citations near claims
+- make citations clickable
+- open source details in a side drawer
+- clearly mark unsupported claims as assumptions
+- include a "Sources Used" section
+- include "What We Still Do Not Know"
+
+Do not render a memo as one giant wall of text. Use this section hierarchy:
+
+1. Executive Verdict
+2. Best Wedge
+3. Key Findings
+4. Evidence Summary
+5. Risks / Assumptions
+6. What We Still Do Not Know
+7. Recommended Next Action
+8. Full Details
+
+### 5. Clay-Inspired Agentic Workflow UX
+
+Use Clay as the model for agentic workflows over external data.
+
+Apply this to:
+
+- research sprint runner
+- source discovery
+- competitor discovery
+- agent workflow progress
+- approval/reject flows
+
+Borrow these principles:
+
+- visible workflow steps
+- inspectable actions
+- generated/enriched data shown in structured rows/cards
+- approval before committing
+- clear status per item
+- confidence/relevance scores
+
+The Research Sprint experience should show a clear plain-English workflow
+timeline:
+
+1. Planning research
+2. Discovering sources
+3. Discovering competitors
+4. Ingesting evidence
+5. Synthesizing memo
+6. Extracting assumptions
+7. Recommending validation actions
+8. Awaiting approval
+9. Updating project strategy
+
+Do not expose raw agent/tool internals as the primary UI. Debug/tool call
+details can live in a secondary developer drawer.
+
+## Required Information Architecture
+
+Project-level navigation should remain:
+
+- Overview
+- Research
+- Evidence
+- Competitors
+- Assumptions
+- Validation
+- Decisions
+
+Each tab must have one clear job.
+
+### Overview
+
+Purpose:
+
+> What is the current state of this idea and what should I do next?
+
+Must include:
+
+1. Current Recommendation
+2. Next Best Action
+3. Lifecycle Progress
+4. Strategic Snapshot
+5. Key Risks
+6. Evidence Health
+7. Recent Strategic Updates
+
+Do not include full memos, raw evidence, raw workflow logs, or dense generated
+content here.
+
+### Research
+
+Purpose:
+
+> What did the agent investigate and what did it conclude?
+
+Must include:
+
+1. Latest Research Sprint Summary
+2. Research Plan
+3. Research Timeline
+4. Key Findings
+5. Research Memo
+6. Sources Used
+7. Approved / Rejected Strategy Updates
+8. Research History
+
+Long memos should use collapsible sections.
+
+### Evidence
+
+Purpose:
+
+> What sources support the analysis?
+
+Must include:
+
+1. Evidence Health Summary
+2. Source List
+3. Filters
+4. Cited Claims
+5. Unsupported Claims
+6. Source Detail Drawer
+
+Raw source chunks should be hidden by default.
+
+### Competitors
+
+Purpose:
+
+> Who are the competitors, substitutes, and adjacent alternatives?
+
+Must include:
+
+1. Competitor Landscape Summary
+2. Grouped Competitor Sections
+3. Competitor Cards or Table
+4. Positioning / Differentiation Summary
+5. Threat Levels
+6. Evidence Links
+
+Group competitors by:
+
+- Direct Competitors
+- Indirect Competitors
+- Substitute Behaviors
+- Incumbent Platforms
+- Adjacent Solutions
+
+### Assumptions
+
+Purpose:
+
+> What must be true for this idea to work?
+
+Must include:
+
+1. Riskiest Assumption
+2. Ranked Assumptions Table
+3. Risk Level
+4. Confidence
+5. Evidence Strength
+6. Recommended Validation Method
+7. Status
+8. Action CTA
+
+This page should feel like a validation prioritization tool.
+
+### Validation
+
+Purpose:
+
+> What should I test next and how?
+
+Must include:
+
+1. Recommended Validation Plan
+2. Selected Assumption
+3. Test Type
+4. Success Criteria
+5. Failure Criteria
+6. Generated Assets
+7. Results Logging
+8. Result Interpretation
+
+Generated assets should be grouped and copyable:
+
+- Interview Script
+- Screener Questions
+- Survey Questions
+- Landing Page Copy
+- Outreach Message
+- Results Rubric
+
+### Decisions
+
+Purpose:
+
+> What did we decide, why, and based on what evidence?
+
+Must include:
+
+1. Current Decision Recommendation
+2. Decision Log
+3. Rationale
+4. Supporting Evidence
+5. Revisit Trigger / Review Date
+
+Decision options:
+
+- Proceed
+- Pivot
+- Pause
+- Kill
+- Continue Research
+
+## Implementation Order
+
+Refactor in this order:
+
+1. Audit all current project pages against the benchmark patterns above.
+2. Identify cluttered sections and unclear CTAs.
+3. Refactor the Overview page first.
+4. Refactor the Research page second.
+5. Refactor Assumptions and Validation pages third.
+6. Refactor Evidence and Competitors pages fourth.
+7. Refactor Decisions page fifth.
+8. Add empty states.
+9. Replace technical labels.
+10. Add progressive disclosure.
+11. Add loading/skeleton states.
+12. Validate the full user journey with one seeded demo project.
+
+## Do Not Do
+
+Do not add major new backend functionality.
+
+Do not add:
+
+- billing
+- team collaboration
+- V2 monitoring
+- multi-segment workflow packs
+- external integrations
+- mobile app
+- new AI workflows
+- complex admin settings
+
+This is a UI/UX product-alignment refactor of the existing V1 app. Use existing
+APIs and data wherever possible. Only add small computed view models if
+necessary to make the UI cleaner.
+
+## Demo Journey to Optimize For
+
+Optimize the UI around this demo journey:
+
+1. User opens a project from a rough idea.
+2. Overview clearly shows current stage and next best action.
+3. User runs or reviews a research sprint.
+4. Research page shows findings, sources, competitors, and memo clearly.
+5. Competitors page shows grouped competitors.
+6. Assumptions page shows the riskiest assumptions.
+7. Validation page turns the top assumption into a concrete test.
+8. Decisions page captures whether to proceed, pivot, pause, or kill.
+
+The app should feel coherent across this full journey.
+
+## Acceptance Criteria
+
+This refactor is complete when:
+
+- A new user can understand the product from the Overview page without explanation.
+- The project lifecycle is visible and understandable.
+- Every page has one clear primary purpose.
+- Every page has one obvious primary next action.
+- Generated content is summarized before details are shown.
+- Long content is readable and not overwhelming.
+- Evidence is accessible but not noisy.
+- Competitors are grouped and scannable.
+- Assumptions are ranked and operational.
+- Validation assets are easy to use and copy.
+- Technical workflow language is removed from primary UI.
+- Empty states teach the user what to do.
+- Research sprint progress is visible but not overly technical.
+- The app feels like a guided strategic advisor, not a developer dashboard.
+- The V1 "wow" moment is clear: the app can investigate an idea and recommend what to validate next.
+
+---
+
 # V1 Non-Goals
 
 Do not include these in V1 unless they are trivial side effects of existing work:

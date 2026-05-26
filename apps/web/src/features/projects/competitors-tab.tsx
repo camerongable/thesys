@@ -45,6 +45,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [category, setCategory] = useState<CompetitorCategory>("unknown");
+  const [selectedCompetitorId, setSelectedCompetitorId] = useState<string | null>(null);
 
   const competitorsQuery = useQuery({
     queryKey: ["projects", projectId, "competitors"],
@@ -98,6 +99,20 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
   const currentVersion = currentArtifact?.current_version ?? null;
   const unsupportedClaims = unsupportedFromResult(analyzeMutation.data, currentArtifact);
   const claims = analyzeMutation.data?.claims ?? currentVersion?.claims ?? [];
+  const selectedCompetitor =
+    competitors.find((competitor) => competitor.id === selectedCompetitorId) ??
+    competitors[0] ??
+    null;
+  const selectCompetitor = (competitorId: string) => {
+    setSelectedCompetitorId(competitorId);
+    if (window.innerWidth < 1024) {
+      window.requestAnimationFrame(() => {
+        document
+          .getElementById("competitor-detail-panel")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  };
   const activeCompetitorRun = analyzeMutation.isPending
     ? activeWorkflowQuery.data?.find(
         (run) =>
@@ -144,6 +159,18 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
           <Metric label="Cited claims" value={claims.length} />
           <Metric label="Unsupported" value={unsupportedClaims.length} />
         </div>
+        {currentVersion ? (
+          <div className="mt-5 rounded-md border border-border bg-muted/50 p-4">
+            <div className="flex items-center gap-2">
+              <Map className="h-4 w-4 text-primary" aria-hidden="true" />
+              <h3 className="text-sm font-semibold">Competitor Landscape Summary</h3>
+            </div>
+            <MarkdownContent
+              className="mt-2 line-clamp-4 space-y-2 text-sm leading-6 text-muted-foreground"
+              markdown={firstMeaningfulParagraph(currentVersion.markdown_content)}
+            />
+          </div>
+        ) : null}
       </div>
 
       <details className="rounded-lg border border-border bg-white p-5">
@@ -217,7 +244,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
         runId={analyzeMutation.data?.ai_run_id ?? activeCompetitorRun?.id ?? null}
       />
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="rounded-lg border border-border bg-white p-5">
           <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
@@ -249,11 +276,17 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
               </Button>
             </div>
           ) : (
-            <CompetitorGroups competitors={competitors} />
+            <CompetitorGroups
+              competitors={competitors}
+              onSelect={selectCompetitor}
+              selectedCompetitorId={selectedCompetitor?.id ?? null}
+            />
           )}
         </div>
 
-        <aside className="space-y-5">
+        <aside className="self-start space-y-5 lg:sticky lg:top-4">
+          <CompetitorDetailPanel competitor={selectedCompetitor} />
+
           <details className="rounded-lg border border-border bg-white p-5">
             <summary className="cursor-pointer list-none">
               <div className="flex items-center justify-between gap-3">
@@ -336,12 +369,21 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
   );
 }
 
-function CompetitorGroups({ competitors }: { competitors: Competitor[] }) {
+function CompetitorGroups({
+  competitors,
+  onSelect,
+  selectedCompetitorId,
+}: {
+  competitors: Competitor[];
+  onSelect: (competitorId: string) => void;
+  selectedCompetitorId: string | null;
+}) {
   const groups: Array<[string, Competitor[]]> = [
     ["Direct Competitors", competitors.filter((item) => item.category === "direct")],
-    ["Indirect / Adjacent Competitors", competitors.filter((item) => item.category === "adjacent")],
-    ["Substitute Behaviors", competitors.filter((item) => item.category === "substitute" || item.category === "manual_alternative")],
+    ["Indirect Competitors", competitors.filter((item) => item.category === "manual_alternative")],
+    ["Substitute Behaviors", competitors.filter((item) => item.category === "substitute")],
     ["Incumbent Platforms", competitors.filter((item) => item.category === "incumbent")],
+    ["Adjacent Solutions", competitors.filter((item) => item.category === "adjacent")],
     ["Unknown / Needs Review", competitors.filter((item) => item.category === "unknown")],
   ];
   return (
@@ -358,7 +400,12 @@ function CompetitorGroups({ competitors }: { competitors: Competitor[] }) {
             </div>
             <div className="mt-3 grid gap-3">
               {items.map((competitor) => (
-                <CompetitorProfile key={competitor.id} competitor={competitor} />
+                <CompetitorProfile
+                  competitor={competitor}
+                  key={competitor.id}
+                  onSelect={() => onSelect(competitor.id)}
+                  selected={selectedCompetitorId === competitor.id}
+                />
               ))}
             </div>
           </section>
@@ -367,10 +414,24 @@ function CompetitorGroups({ competitors }: { competitors: Competitor[] }) {
   );
 }
 
-function CompetitorProfile({ competitor }: { competitor: Competitor }) {
+function CompetitorProfile({
+  competitor,
+  onSelect,
+  selected,
+}: {
+  competitor: Competitor;
+  onSelect: () => void;
+  selected: boolean;
+}) {
   return (
-    <details className="rounded-md border border-border p-4">
-      <summary className="cursor-pointer list-none">
+    <details
+      className={
+        selected
+          ? "rounded-md border border-action bg-action/10 p-4"
+          : "rounded-md border border-border p-4"
+      }
+    >
+      <summary className="cursor-pointer list-none" onClick={onSelect}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -378,7 +439,7 @@ function CompetitorProfile({ competitor }: { competitor: Competitor }) {
               <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
                 {formatLabel(competitor.category)}
               </span>
-              <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+              <span className={threatBadgeClass(competitor.threat_level)}>
                 threat {competitor.threat_level}
               </span>
             </div>
@@ -388,7 +449,18 @@ function CompetitorProfile({ competitor }: { competitor: Competitor }) {
               {competitor.evidence_links.length} source
               {competitor.evidence_links.length === 1 ? "" : "s"}
             </span>
-            <span className="text-xs font-medium text-primary">Show profile</span>
+            <button
+              className="text-xs font-medium text-primary hover:underline"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onSelect();
+              }}
+              type="button"
+            >
+              View detail
+            </button>
+            <span className="text-xs font-medium text-muted-foreground">Expand profile</span>
           </div>
         </div>
       </summary>
@@ -437,6 +509,75 @@ function CompetitorProfile({ competitor }: { competitor: Competitor }) {
   );
 }
 
+function CompetitorDetailPanel({ competitor }: { competitor: Competitor | null }) {
+  if (!competitor) {
+    return (
+      <div
+        className="rounded-lg border border-dashed border-border bg-white p-5"
+        id="competitor-detail-panel"
+      >
+        <h3 className="text-sm font-semibold">Competitor detail</h3>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          Select a competitor to review positioning, target user, threat level, and evidence.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-white p-5" id="competitor-detail-panel">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+            Competitor detail
+          </p>
+          <h3 className="mt-2 text-base font-semibold">{competitor.name}</h3>
+        </div>
+        <span className={threatBadgeClass(competitor.threat_level)}>
+          {competitor.threat_level} threat
+        </span>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <DetailMetric label="Category" value={formatLabel(competitor.category)} />
+        <DetailMetric label="Sources" value={String(competitor.evidence_links.length)} />
+        <DetailMetric label="Watchlist" value={formatLabel(competitor.watchlist_status)} />
+        <DetailMetric
+          label="Analyzed"
+          value={competitor.last_analyzed_at ? new Date(competitor.last_analyzed_at).toLocaleDateString() : "Unknown"}
+        />
+      </div>
+
+      {competitor.url ? (
+        <a
+          className="mt-4 inline-flex max-w-full items-center gap-1 truncate text-sm text-primary hover:underline"
+          href={competitor.url}
+          rel="noreferrer"
+          target="_blank"
+        >
+          <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="truncate">{competitor.url}</span>
+        </a>
+      ) : null}
+
+      <div className="mt-4 space-y-4 border-t border-border pt-4">
+        <ProfileBlock title="Target User" value={competitor.target_user} />
+        <ProfileBlock title="Positioning" value={competitor.positioning} />
+        <ProfileBlock title="Why it matters" value={competitor.differentiation_notes} />
+      </div>
+    </div>
+  );
+}
+
+function DetailMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md bg-muted px-3 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-sm font-semibold">{value}</div>
+    </div>
+  );
+}
+
 function ProfileBlock({ title, value }: { title: string; value: string | null }) {
   return (
     <div>
@@ -458,6 +599,24 @@ function Metric({ label, value }: { label: string; value: number }) {
       <div className="mt-1 text-lg font-semibold">{value}</div>
     </div>
   );
+}
+
+function threatBadgeClass(value: string) {
+  if (value === "high") {
+    return "rounded-md bg-red-50 px-2 py-1 text-xs text-red-700";
+  }
+  if (value === "medium") {
+    return "rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-700";
+  }
+  return "rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-700";
+}
+
+function firstMeaningfulParagraph(markdown: string) {
+  const paragraph = markdown
+    .split(/\n\s*\n/)
+    .map((part) => part.replace(/^#{1,3}\s+/gm, "").trim())
+    .find((part) => part.length > 40);
+  return paragraph ?? markdown;
 }
 
 function unsupportedFromResult(

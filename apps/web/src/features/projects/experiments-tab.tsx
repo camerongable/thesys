@@ -70,24 +70,27 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
     <section className="mt-6 space-y-6">
       <div className="rounded-lg border border-border bg-white p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+          <div>
             <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
               Validation
             </p>
-          <h2 className="mt-2 text-xl font-semibold tracking-normal">What should I test next?</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-            Turn the riskiest assumption into a concrete test with success criteria,
-            failure criteria, assets, result logging, and interpretation.
-          </p>
-        </div>
-        <Button
-          disabled={generateMutation.isPending || assumptions.length === 0}
-          onClick={() => generateMutation.mutate()}
-          type="button"
-        >
-          <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          {generateMutation.isPending ? "Generating..." : "Create Validation Plan"}
-        </Button>
+            <h2 className="mt-2 text-xl font-semibold tracking-normal">
+              What should I test next?
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Turn the riskiest assumption into a concrete test with success criteria,
+              failure criteria, assets, result logging, and interpretation.
+            </p>
+          </div>
+          <Button
+            className="w-full justify-center whitespace-nowrap sm:w-60"
+            disabled={generateMutation.isPending || assumptions.length === 0}
+            onClick={() => generateMutation.mutate()}
+            type="button"
+          >
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            {generateMutation.isPending ? "Generating..." : "Create Validation Plan"}
+          </Button>
         </div>
       </div>
 
@@ -117,7 +120,7 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
             threshold.
           </p>
           <Button
-            className="mt-4"
+            className="mt-4 whitespace-nowrap"
             disabled={generateMutation.isPending || assumptions.length === 0}
             onClick={() => generateMutation.mutate()}
             size="sm"
@@ -221,6 +224,64 @@ function RecommendedValidationPlan({
         <Block title="Test Type" value={recommended.method ?? "Manual validation"} />
         <Block title="Success Criteria" value={recommended.success_criteria} />
         <Block title="Failure Criteria" value={recommended.failure_threshold} />
+      </div>
+      <ValidationAssetGrid experiment={recommended} />
+    </div>
+  );
+}
+
+function ValidationAssetGrid({ experiment }: { experiment: Experiment }) {
+  const assets = [
+    {
+      title: "Interview Script",
+      value: experiment.plan,
+    },
+    {
+      title: "Screener Questions",
+      value: experiment.plan
+        ? `Use the target respondent profile from the plan.\n\n${experiment.plan}`
+        : null,
+    },
+    {
+      title: "Survey Questions",
+      value: experiment.success_criteria
+        ? `Questions should test the same success signal:\n\n${experiment.success_criteria}`
+        : null,
+    },
+    {
+      title: "Outreach Message",
+      value: experiment.plan
+        ? `I'm researching ${experiment.name.toLowerCase()} and looking for quick feedback from people who match this workflow. Would you be open to a short conversation?`
+        : null,
+    },
+    {
+      title: "Results Rubric",
+      value: [
+        experiment.success_criteria ? `Success: ${experiment.success_criteria}` : null,
+        experiment.failure_threshold ? `Failure: ${experiment.failure_threshold}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    },
+  ];
+
+  return (
+    <div className="mt-5 border-t border-border pt-5">
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="text-sm font-semibold">Generated Assets</h4>
+        <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+          Copyable
+        </span>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        {assets.map((asset) => (
+          <details className="rounded-md border border-border p-3" key={asset.title}>
+            <summary className="cursor-pointer text-sm font-medium">{asset.title}</summary>
+            <div className="mt-3 border-t border-border pt-3">
+              <Block title={asset.title} value={asset.value || "Not generated yet"} />
+            </div>
+          </details>
+        ))}
       </div>
     </div>
   );

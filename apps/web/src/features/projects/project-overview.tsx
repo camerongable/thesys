@@ -27,6 +27,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   approveAgenticResearchMemo,
   approveCompetitorCandidate,
@@ -60,11 +61,11 @@ import {
   ResearchSprint,
   runAgenticResearch,
   StrategicSnapshot,
+  StrategicRecommendation,
   startResearchSprintPlan,
   updateCompetitorCandidate,
   updateResearchPlan,
 } from "@/lib/api";
-import { AiModeIndicator } from "@/features/ai/ai-mode-indicator";
 import { AssumptionsTab } from "@/features/projects/assumptions-tab";
 import { BriefTab } from "@/features/projects/brief-tab";
 import { CompetitorsTab } from "@/features/projects/competitors-tab";
@@ -155,13 +156,16 @@ export function ProjectOverview() {
   return (
     <main className="min-h-screen px-5 py-6 md:px-8">
       <div className="mx-auto max-w-6xl">
-        <Link
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-          href="/projects"
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Projects
-        </Link>
+        <div className="flex items-center justify-between gap-3">
+          <Link
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+            href="/projects"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            Projects
+          </Link>
+          <ThemeToggle />
+        </div>
 
         {overviewQuery.isLoading ? (
           <div className="mt-8 text-sm text-muted-foreground">Loading project...</div>
@@ -175,10 +179,10 @@ export function ProjectOverview() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+                    <span className="rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
                       {formatStage(overview.strategic_snapshot.current_stage)}
                     </span>
-                    <span className="rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                    <span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
                       {formatLabel(project.status)}
                     </span>
                   </div>
@@ -189,10 +193,11 @@ export function ProjectOverview() {
                   <p className="mt-2 text-xs text-muted-foreground">
                     Last updated {formatDateTime(project.updated_at)}
                   </p>
+                  <div className="mt-4 max-w-3xl">
+                    <LifecycleMiniRail currentStage={overview.strategic_snapshot.current_stage} />
+                  </div>
                 </div>
-                <div className="sm:min-w-56">
-                  <AiModeIndicator />
-                </div>
+                <ProjectHeaderStatus overview={overview} />
               </div>
             </header>
 
@@ -257,7 +262,7 @@ function GuidedOverview({
   onIntakeFinalized: () => Promise<string | null>;
   overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
-  const { current_recommendation, idea_readiness, next_best_action } = overview;
+  const { current_recommendation, next_best_action } = overview;
   const snapshot = overview.strategic_snapshot;
   const showIntake =
     snapshot.current_stage === "draft_idea" ||
@@ -268,57 +273,153 @@ function GuidedOverview({
 
   return (
     <section className="mt-6 space-y-6">
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="rounded-lg border border-border bg-white p-5">
-          <div className="flex items-center gap-2">
-            <Lightbulb className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Current Recommendation</h2>
+      <OverviewStatusPanel
+        actionPending={actionPending}
+        currentRecommendation={current_recommendation}
+        nextBestAction={next_best_action}
+        onAction={onAction}
+        overview={overview}
+      />
+
+      {showIntake ? (
+        <StructuredIntakeWizard
+          onFinalized={onIntakeFinalized}
+          project={overview.project}
+        />
+      ) : null}
+
+      <LifecycleProgressCard overview={overview} />
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <StrategicSnapshotCard snapshot={overview.strategic_snapshot} />
+        <EvidenceHealthCard health={overview.evidence_health} />
+      </div>
+
+      <TopRisksCard risks={overview.key_risks} />
+
+      <RecentUpdatesCard updates={overview.recent_strategic_updates} />
+    </section>
+  );
+}
+
+function ProjectHeaderStatus({
+  overview,
+}: {
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const health = projectHealth(overview);
+  return (
+    <div className="rounded-lg border border-border bg-white p-3 sm:w-80">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+          Project health
+        </span>
+        <HealthBadge health={health} />
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+        <HeaderStatusMetric label="Stage" value={formatStage(overview.strategic_snapshot.current_stage)} />
+        <HeaderStatusMetric label="Readiness" value={`${overview.idea_readiness.score}%`} />
+        <HeaderStatusMetric label="Evidence" value={`${overview.evidence_health.source_count} sources`} />
+        <HeaderStatusMetric label="Focus" value={overview.next_best_action.label} />
+      </div>
+    </div>
+  );
+}
+
+function HeaderStatusMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[0.68rem] uppercase tracking-normal text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-0.5 truncate text-xs font-medium text-foreground" title={value}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function OverviewStatusPanel({
+  actionPending,
+  currentRecommendation,
+  nextBestAction,
+  onAction,
+  overview,
+}: {
+  actionPending: boolean;
+  currentRecommendation: StrategicRecommendation;
+  nextBestAction: NextBestAction;
+  onAction: (action: NextBestAction) => void;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const health = projectHealth(overview);
+  const metrics = [
+    ["Stage", formatStage(overview.strategic_snapshot.current_stage)],
+    ["Confidence", formatLabel(currentRecommendation.confidence)],
+    ["Evidence", `${overview.evidence_health.source_count} sources`],
+    ["Readiness", `${overview.idea_readiness.score}%`],
+  ] as const;
+
+  return (
+    <div className="rounded-lg border border-border bg-white">
+      <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2">
+              <Lightbulb className="h-4 w-4 text-primary" aria-hidden="true" />
+              <h2 className="text-base font-semibold">Current State</h2>
+            </div>
+            <HealthBadge health={health} />
           </div>
           <h3 className="mt-4 text-xl font-semibold tracking-normal">
-            {current_recommendation.recommendation}
+            {currentRecommendation.recommendation}
           </h3>
           <MarkdownContent
-            className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground"
-            markdown={current_recommendation.rationale}
+            className="mt-3 max-w-3xl space-y-2 text-sm leading-6 text-muted-foreground"
+            markdown={currentRecommendation.rationale}
           />
-          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-              Confidence: {formatLabel(current_recommendation.confidence)}
-            </span>
-            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-              Evidence: {overview.evidence_health.source_count} sources,{" "}
-              {overview.evidence_health.competitor_count} competitors
-            </span>
+          <div className="mt-5 overflow-hidden rounded-md border border-border">
+            <div className="grid divide-y divide-border text-sm sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+              {metrics.map(([label, value]) => (
+                <div className="px-3 py-2" key={label}>
+                  <div className="text-xs text-muted-foreground">{label}</div>
+                  <div className="mt-1 break-words font-medium leading-5 text-foreground">
+                    {value}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
+          <p className="mt-3 text-xs leading-5 text-muted-foreground">
+            {health.detail}
+          </p>
         </div>
 
-        <div id="next-best-action" className="rounded-lg border border-border bg-white p-5">
+        <aside
+          className="border-t border-border p-5 lg:border-l lg:border-t-0"
+          id="next-best-action"
+        >
           <div className="flex items-center gap-2">
             <Route className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Next Best Action</h2>
+            <h2 className="text-sm font-semibold">Next Best Action</h2>
           </div>
           <h3 className="mt-4 text-lg font-semibold tracking-normal">
-            {next_best_action.label}
+            {nextBestAction.label}
           </h3>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            {next_best_action.description}
+            {nextBestAction.description}
           </p>
-          <div className="mt-4 rounded-md bg-muted p-3">
-            <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-              Why it matters
-            </h4>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              {next_best_action.why_it_matters}
-            </p>
-          </div>
+          <p className="mt-3 border-l-2 border-primary/50 pl-3 text-sm leading-6 text-muted-foreground">
+            {nextBestAction.why_it_matters}
+          </p>
           <Button
             className="mt-4 w-full"
             disabled={actionPending}
-            onClick={() => onAction(next_best_action)}
+            onClick={() => onAction(nextBestAction)}
             type="button"
           >
             <Target className="h-4 w-4" aria-hidden="true" />
-            {actionPending ? "Opening..." : next_best_action.label}
+            {actionPending ? "Opening..." : nextBestAction.label}
           </Button>
           {overview.secondary_actions.length > 0 ? (
             <div className="mt-4 flex flex-wrap gap-2">
@@ -335,30 +436,9 @@ function GuidedOverview({
               ))}
             </div>
           ) : null}
-        </div>
+        </aside>
       </div>
-
-      {showIntake ? (
-        <StructuredIntakeWizard
-          onFinalized={onIntakeFinalized}
-          project={overview.project}
-        />
-      ) : null}
-
-      <LifecycleProgressCard overview={overview} />
-
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <StrategicSnapshotCard snapshot={overview.strategic_snapshot} />
-        <IdeaReadinessCard readiness={idea_readiness} />
-      </div>
-
-      <TopRisksCard risks={overview.key_risks} />
-
-      <div className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
-        <EvidenceHealthCard health={overview.evidence_health} />
-        <RecentUpdatesCard updates={overview.recent_strategic_updates} />
-      </div>
-    </section>
+    </div>
   );
 }
 
@@ -420,6 +500,154 @@ function PageIntro({
   );
 }
 
+function LifecycleMiniRail({ currentStage }: { currentStage: ProjectStage }) {
+  const currentIndex = lifecycleStepIndex(currentStage);
+  const steps = ["Idea", "Research", "Evidence", "Assumptions", "Validation", "Decision"];
+
+  return (
+    <div className="grid grid-cols-6 gap-1" aria-label="Idea validation lifecycle">
+      {steps.map((step, index) => {
+        const done = index < currentIndex;
+        const current = index === currentIndex;
+        return (
+          <div key={step}>
+            <div
+              className={
+                done
+                  ? "h-1.5 rounded-full bg-emerald-600"
+                  : current
+                    ? "h-1.5 rounded-full bg-amber-500"
+                    : "h-1.5 rounded-full bg-muted"
+              }
+            />
+            <div
+              className={
+                current
+                  ? "mt-1 truncate text-[0.68rem] font-medium text-foreground"
+                  : "mt-1 truncate text-[0.68rem] text-muted-foreground"
+              }
+            >
+              {step}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ResearchWorkflowTimeline({
+  history,
+  sprint,
+}: {
+  history: NonNullable<Awaited<ReturnType<typeof getProjectResearchHistory>>>["sprints"][number] | null;
+  sprint: ResearchSprint;
+}) {
+  const steps = [
+    {
+      label: "Planned research",
+      complete: true,
+      detail: `${sprint.plan.research_questions.length} research question${
+        sprint.plan.research_questions.length === 1 ? "" : "s"
+      }`,
+    },
+    {
+      label: "Discovered sources",
+      complete: (history?.source_candidate_count ?? 0) > 0,
+      detail: `${history?.source_candidate_count ?? 0} candidate${
+        (history?.source_candidate_count ?? 0) === 1 ? "" : "s"
+      }`,
+    },
+    {
+      label: "Found competitors",
+      complete: (history?.competitor_candidate_count ?? 0) > 0,
+      detail: `${history?.competitor_candidate_count ?? 0} candidate${
+        (history?.competitor_candidate_count ?? 0) === 1 ? "" : "s"
+      }`,
+    },
+    {
+      label: "Added evidence",
+      complete: (history?.ingested_source_count ?? 0) > 0,
+      detail: `${history?.ingested_source_count ?? 0} source${
+        (history?.ingested_source_count ?? 0) === 1 ? "" : "s"
+      } added`,
+    },
+    {
+      label: "Generated memo",
+      complete: Boolean(history?.memo_artifact_id),
+      detail: history?.memo_artifact_id ? "Memo ready" : "Not generated",
+    },
+    {
+      label: "Updated strategy",
+      complete: history?.memory_update_status === "approved",
+      detail: history?.memory_update_status
+        ? formatLabel(history.memory_update_status)
+        : "Awaiting approval",
+    },
+  ];
+  return (
+    <div className="mt-5 rounded-md border border-border p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h4 className="text-sm font-semibold">Research workflow</h4>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Inspect the run as plain-language steps before accepting strategy updates.
+          </p>
+        </div>
+        <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+          Clay-style execution view
+        </span>
+      </div>
+      <div className="mt-4 overflow-x-auto rounded-md border border-border">
+        <table className="w-full min-w-[680px] border-collapse text-left text-sm">
+          <thead>
+            <tr className="border-b border-border text-xs uppercase tracking-normal text-muted-foreground">
+              <th className="px-3 py-2 font-medium">Step</th>
+              <th className="px-3 py-2 font-medium">Health</th>
+              <th className="px-3 py-2 font-medium">Output</th>
+              <th className="px-3 py-2 font-medium">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {steps.map((step, index) => (
+              <tr key={step.label}>
+                <td className="px-3 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground">
+                      {index + 1}
+                    </span>
+                    <span className="font-medium">{step.label}</span>
+                  </div>
+                </td>
+                <td className="px-3 py-3">
+                  <span
+                    className={
+                      step.complete
+                        ? "inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-700"
+                        : "inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
+                    }
+                  >
+                    {step.complete ? (
+                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    ) : (
+                      <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    {step.complete ? "Complete" : "Needs work"}
+                  </span>
+                </td>
+                <td className="px-3 py-3 text-muted-foreground">{step.detail}</td>
+                <td className="px-3 py-3 text-muted-foreground">
+                  {step.complete ? "Review" : "Run sprint"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function ResearchSprintSummary({ projectId }: { projectId: string }) {
   const sprintsQuery = useQuery({
     queryKey: ["projects", projectId, "research-sprints", "summary"],
@@ -470,13 +698,19 @@ function ResearchSprintSummary({ projectId }: { projectId: string }) {
           {formatDateTime(latestSprint.updated_at)}
         </span>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {metrics.map(([label, value]) => (
-          <div className="rounded-md bg-muted px-3 py-2" key={label}>
-            <div className="text-xs text-muted-foreground">{label}</div>
-            <div className="mt-1 text-sm font-semibold">{value}</div>
-          </div>
-        ))}
+      <div className="mt-4 overflow-x-auto rounded-md border border-border">
+        <table className="w-full min-w-[620px] border-collapse text-left text-sm">
+          <tbody className="divide-y divide-border">
+            {metrics.map(([label, value]) => (
+              <tr key={label}>
+                <th className="w-48 px-3 py-2 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                  {label}
+                </th>
+                <td className="px-3 py-2 font-semibold">{value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
       {latestHistory?.recommendation_change ? (
         <div className="mt-4 rounded-md border border-border p-3">
@@ -488,6 +722,7 @@ function ResearchSprintSummary({ projectId }: { projectId: string }) {
           </p>
         </div>
       ) : null}
+      <ResearchWorkflowTimeline sprint={latestSprint} history={latestHistory} />
     </div>
   );
 }
@@ -1363,12 +1598,11 @@ function ResearchMemoReview({
         </div>
       </div>
 
-      <details className="mt-4 rounded-md bg-white p-3">
-        <summary className="cursor-pointer text-sm font-medium">Show memo text</summary>
-        <article className="mt-3 max-h-[28rem] min-w-0 overflow-auto border-t border-border pt-3">
-          <MarkdownContent markdown={version.markdown_content} />
-        </article>
-      </details>
+      <SourceGroundedMemo
+        citations={citations}
+        markdown={version.markdown_content}
+        unsupportedClaims={displayUnsupported}
+      />
 
       <details className="mt-3 rounded-md bg-white p-3">
         <summary className="cursor-pointer text-sm font-medium">
@@ -1471,6 +1705,114 @@ function ResearchMemoReview({
             </div>
           </section>
         </div>
+      </details>
+    </div>
+  );
+}
+
+function SourceGroundedMemo({
+  citations,
+  markdown,
+  unsupportedClaims,
+}: {
+  citations: Citation[];
+  markdown: string;
+  unsupportedClaims: string[];
+}) {
+  const sections = extractMemoSections(markdown);
+  const primarySections = preferredMemoSections(sections).slice(0, 4);
+
+  return (
+    <div className="mt-4 rounded-md bg-white p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h4 className="text-sm font-semibold">Source-grounded memo</h4>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Summary first. Sources, open questions, and full details stay close by.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+          <span className="rounded-md bg-muted px-2 py-1">{citations.length} sources used</span>
+          <span className="rounded-md bg-muted px-2 py-1">
+            {unsupportedClaims.length} open question{unsupportedClaims.length === 1 ? "" : "s"}
+          </span>
+        </div>
+      </div>
+
+      {primarySections.length > 0 ? (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {primarySections.map((section) => (
+            <section className="rounded-md border border-border p-3" key={section.title}>
+              <h5 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                {section.title}
+              </h5>
+              <MarkdownContent
+                className="mt-2 line-clamp-6 space-y-2 text-sm leading-6 text-foreground"
+                markdown={section.body}
+              />
+            </section>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <details className="rounded-md border border-border p-3">
+          <summary className="cursor-pointer text-sm font-medium">Sources Used</summary>
+          <div className="mt-3 max-h-72 space-y-3 overflow-auto border-t border-border pt-3">
+            {citations.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No sources recorded.</p>
+            ) : (
+              citations.map((citation) => (
+                <div key={`${citation.source_id}-${citation.chunk_id ?? "source"}`}>
+                  {citation.url ? (
+                    <a
+                      className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+                      href={citation.url}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      {citation.title ?? citation.url}
+                      <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                    </a>
+                  ) : (
+                    <p className="text-sm font-medium">{citation.title ?? citation.source_id}</p>
+                  )}
+                  {citation.quote ? (
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {truncate(citation.quote, 180)}
+                    </p>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+        </details>
+
+        <details className="rounded-md border border-border p-3">
+          <summary className="cursor-pointer text-sm font-medium">
+            What We Still Do Not Know
+          </summary>
+          <div className="mt-3 max-h-72 space-y-2 overflow-auto border-t border-border pt-3">
+            {unsupportedClaims.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No unsupported claims recorded.</p>
+            ) : (
+              unsupportedClaims.map((claim) => (
+                <MarkdownContent
+                  className="space-y-2 text-sm leading-6 text-muted-foreground"
+                  key={claim}
+                  markdown={claim}
+                />
+              ))
+            )}
+          </div>
+        </details>
+      </div>
+
+      <details className="mt-3 rounded-md border border-border p-3">
+        <summary className="cursor-pointer text-sm font-medium">Full Details</summary>
+        <article className="mt-3 max-h-[28rem] min-w-0 overflow-auto border-t border-border pt-3">
+          <MarkdownContent markdown={markdown} />
+        </article>
       </details>
     </div>
   );
@@ -1848,53 +2190,7 @@ function LifecycleProgressCard({
 }: {
   overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
-  const readinessKeys = new Set([
-    ...overview.idea_readiness.completed_items.map((item) => item.key),
-  ]);
-  const steps = [
-    {
-      key: "idea",
-      label: "Idea",
-      complete:
-        readinessKeys.has("rough_idea") ||
-        Boolean(overview.strategic_snapshot.current_thesis),
-    },
-    {
-      key: "research",
-      label: "Research",
-      complete:
-        overview.evidence_health.source_count > 0 ||
-        overview.strategic_snapshot.current_stage !== "draft_idea",
-    },
-    {
-      key: "evidence",
-      label: "Evidence",
-      complete: overview.evidence_health.source_count > 0,
-    },
-    {
-      key: "assumptions",
-      label: "Assumptions",
-      complete: overview.key_assumptions.length > 0,
-    },
-    {
-      key: "validation",
-      label: "Validation",
-      complete:
-        overview.strategic_snapshot.current_stage === "validation_plan_created" ||
-        overview.strategic_snapshot.current_stage === "experiment_running" ||
-        overview.strategic_snapshot.current_stage === "decision_ready" ||
-        overview.strategic_snapshot.current_stage === "proceeding",
-    },
-    {
-      key: "decision",
-      label: "Decision",
-      complete:
-        overview.strategic_snapshot.current_stage === "decision_ready" ||
-        overview.strategic_snapshot.current_stage === "proceeding" ||
-        overview.strategic_snapshot.current_stage === "paused" ||
-        overview.strategic_snapshot.current_stage === "killed",
-    },
-  ];
+  const rows = lifecycleRows(overview);
 
   return (
     <div className="rounded-lg border border-border bg-white p-5">
@@ -1902,37 +2198,40 @@ function LifecycleProgressCard({
         <div>
           <div className="flex items-center gap-2">
             <Route className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Idea Stage</h2>
+            <h2 className="text-base font-semibold">Lifecycle Status</h2>
           </div>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Current stage: {formatStage(overview.strategic_snapshot.current_stage)}.
+            Compact view of what is complete, what is active, and where the next
+            decision pressure sits.
           </p>
         </div>
         <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-          {overview.idea_readiness.score}% ready
+          {formatStage(overview.strategic_snapshot.current_stage)}
         </span>
       </div>
-      <div className="mt-5 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {steps.map((step, index) => (
-          <div
-            className={
-              step.complete
-                ? "rounded-md border border-emerald-200 bg-emerald-50 px-3 py-3"
-                : "rounded-md border border-border bg-muted px-3 py-3"
-            }
-            key={step.key}
-          >
-            <div className="flex items-center gap-2">
-              {step.complete ? (
-                <CheckCircle2 className="h-4 w-4 text-emerald-700" aria-hidden="true" />
-              ) : (
-                <CircleAlert className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-              )}
-              <span className="text-sm font-medium">{step.label}</span>
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">Step {index + 1}</p>
-          </div>
-        ))}
+      <div className="mt-5 overflow-x-auto rounded-md border border-border">
+        <table className="min-w-[720px] w-full border-collapse text-left text-sm">
+          <thead>
+            <tr className="border-b border-border text-xs uppercase tracking-normal text-muted-foreground">
+              <th className="px-3 py-2 font-medium">Stage</th>
+              <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium">Signal</th>
+              <th className="px-3 py-2 font-medium">Next</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((row) => (
+              <tr key={row.key}>
+                <td className="px-3 py-3 font-medium text-foreground">{row.label}</td>
+                <td className="px-3 py-3">
+                  <LifecycleStatusBadge status={row.status} />
+                </td>
+                <td className="px-3 py-3 text-muted-foreground">{row.signal}</td>
+                <td className="px-3 py-3 text-muted-foreground">{row.next}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -2312,6 +2611,303 @@ function tabFromHash(hash: string): ProjectTab | null {
 
 function formatStage(stage: ProjectStage) {
   return formatLabel(stage);
+}
+
+function lifecycleStepIndex(stage: ProjectStage) {
+  if (stage === "draft_idea" || stage === "structured_intake") {
+    return 0;
+  }
+  if (stage === "brief_generated" || stage === "competitors_analyzed") {
+    return 1;
+  }
+  if (stage === "assumptions_identified") {
+    return 3;
+  }
+  if (stage === "validation_plan_created" || stage === "experiment_running") {
+    return 4;
+  }
+  if (
+    stage === "decision_ready" ||
+    stage === "paused" ||
+    stage === "killed" ||
+    stage === "proceeding"
+  ) {
+    return 5;
+  }
+  return 2;
+}
+
+type HealthTone = "good" | "warning" | "danger" | "neutral";
+
+type ProjectHealth = {
+  label: string;
+  tone: HealthTone;
+  detail: string;
+};
+
+type LifecycleStatus = "complete" | "current" | "needs_work" | "blocked";
+
+type LifecycleRow = {
+  key: string;
+  label: string;
+  status: LifecycleStatus;
+  signal: string;
+  next: string;
+};
+
+function projectHealth(
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>,
+): ProjectHealth {
+  const stage = overview.strategic_snapshot.current_stage;
+  const highRiskCount = overview.key_risks.filter(
+    (risk) => risk.severity === "critical" || risk.severity === "high",
+  ).length;
+
+  if (stage === "killed" || overview.project.status === "killed") {
+    return {
+      label: "Off track",
+      tone: "danger",
+      detail: "The project is marked as killed. Preserve the evidence trail for future review.",
+    };
+  }
+
+  if (stage === "paused" || overview.project.status === "paused") {
+    return {
+      label: "Paused",
+      tone: "neutral",
+      detail: "The project is paused. Resume with the current next best action when ready.",
+    };
+  }
+
+  if (overview.evidence_health.source_count === 0) {
+    return {
+      label: "Needs evidence",
+      tone: "warning",
+      detail: "The idea needs source-backed evidence before the recommendation can be trusted.",
+    };
+  }
+
+  if (
+    overview.current_recommendation.confidence === "low" ||
+    highRiskCount > 0 ||
+    overview.evidence_health.unsupported_claim_count > overview.evidence_health.cited_claim_count
+  ) {
+    return {
+      label: "At risk",
+      tone: "warning",
+      detail: "There are material risks or weak evidence areas that should be validated next.",
+    };
+  }
+
+  return {
+    label: "On track",
+    tone: "good",
+    detail: "The project has a clear current state, supporting evidence, and a defined next action.",
+  };
+}
+
+function HealthBadge({ health }: { health: ProjectHealth }) {
+  return (
+    <span className={healthBadgeClass(health.tone)}>
+      <span className={healthDotClass(health.tone)} aria-hidden="true" />
+      {health.label}
+    </span>
+  );
+}
+
+function healthBadgeClass(tone: HealthTone) {
+  if (tone === "good") {
+    return "inline-flex w-fit items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700";
+  }
+  if (tone === "warning") {
+    return "inline-flex w-fit items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700";
+  }
+  if (tone === "danger") {
+    return "inline-flex w-fit items-center gap-1.5 rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700";
+  }
+  return "inline-flex w-fit items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground";
+}
+
+function healthDotClass(tone: HealthTone) {
+  if (tone === "good") {
+    return "h-2 w-2 rounded-full bg-emerald-600";
+  }
+  if (tone === "warning") {
+    return "h-2 w-2 rounded-full bg-amber-500";
+  }
+  if (tone === "danger") {
+    return "h-2 w-2 rounded-full bg-red-600";
+  }
+  return "h-2 w-2 rounded-full bg-muted-foreground";
+}
+
+function lifecycleRows(
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>,
+): LifecycleRow[] {
+  const currentStepIndex = lifecycleStepIndex(overview.strategic_snapshot.current_stage);
+  const readinessKeys = new Set(overview.idea_readiness.completed_items.map((item) => item.key));
+  const ideaComplete =
+    readinessKeys.has("rough_idea") || Boolean(overview.strategic_snapshot.current_thesis);
+  const researchComplete =
+    overview.evidence_health.source_count > 0 ||
+    overview.strategic_snapshot.current_stage !== "draft_idea";
+  const validationComplete =
+    overview.strategic_snapshot.current_stage === "validation_plan_created" ||
+    overview.strategic_snapshot.current_stage === "experiment_running" ||
+    overview.strategic_snapshot.current_stage === "decision_ready" ||
+    overview.strategic_snapshot.current_stage === "proceeding";
+  const decisionComplete =
+    overview.strategic_snapshot.current_stage === "decision_ready" ||
+    overview.strategic_snapshot.current_stage === "proceeding" ||
+    overview.strategic_snapshot.current_stage === "paused" ||
+    overview.strategic_snapshot.current_stage === "killed";
+
+  const baseRows = [
+    {
+      key: "idea",
+      label: "Idea",
+      complete: ideaComplete,
+      signal: overview.strategic_snapshot.current_thesis ? "Thesis captured" : "Thesis missing",
+      next: ideaComplete ? "Pressure-test with research" : "Structure the rough idea",
+    },
+    {
+      key: "research",
+      label: "Research",
+      complete: researchComplete,
+      signal: `${overview.evidence_health.source_count} sources found`,
+      next: researchComplete ? "Review findings" : "Run a research sprint",
+    },
+    {
+      key: "evidence",
+      label: "Evidence",
+      complete: overview.evidence_health.source_count > 0,
+      signal: `${overview.evidence_health.cited_claim_count} cited claims`,
+      next:
+        overview.evidence_health.unsupported_claim_count > 0
+          ? "Resolve unsupported claims"
+          : "Keep evidence current",
+    },
+    {
+      key: "assumptions",
+      label: "Assumptions",
+      complete: overview.key_assumptions.length > 0,
+      signal: `${overview.key_assumptions.length} ranked`,
+      next: overview.key_assumptions.length > 0 ? "Validate riskiest item" : "Extract assumptions",
+    },
+    {
+      key: "validation",
+      label: "Validation",
+      complete: validationComplete,
+      signal: validationComplete ? "Plan active" : "Plan needed",
+      next: validationComplete ? "Log results" : "Create validation plan",
+    },
+    {
+      key: "decision",
+      label: "Decision",
+      complete: decisionComplete,
+      signal: decisionComplete ? "Decision ready" : "Not ready",
+      next: decisionComplete ? "Record rationale" : "Wait for validation signal",
+    },
+  ] as const;
+
+  return baseRows.map((row, index) => ({
+    key: row.key,
+    label: row.label,
+    status: row.complete ? "complete" : index === currentStepIndex ? "current" : "needs_work",
+    signal: row.signal,
+    next: row.next,
+  }));
+}
+
+function LifecycleStatusBadge({ status }: { status: LifecycleStatus }) {
+  if (status === "complete") {
+    return (
+      <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+        Complete
+      </span>
+    );
+  }
+  if (status === "current") {
+    return (
+      <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">
+        <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+        Current
+      </span>
+    );
+  }
+  if (status === "blocked") {
+    return (
+      <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
+        <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+        Blocked
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+      <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+      Needs work
+    </span>
+  );
+}
+
+function extractMemoSections(markdown: string) {
+  const lines = markdown.split(/\r?\n/);
+  const sections: Array<{ title: string; body: string }> = [];
+  let currentTitle = "Executive Verdict";
+  let currentBody: string[] = [];
+
+  for (const line of lines) {
+    const heading = line.match(/^#{1,3}\s+(.+)$/);
+    if (heading) {
+      if (currentBody.join("\n").trim().length > 0) {
+        sections.push({ title: currentTitle, body: currentBody.join("\n").trim() });
+      }
+      currentTitle = heading[1].trim();
+      currentBody = [];
+    } else {
+      currentBody.push(line);
+    }
+  }
+
+  if (currentBody.join("\n").trim().length > 0) {
+    sections.push({ title: currentTitle, body: currentBody.join("\n").trim() });
+  }
+
+  return sections.filter((section) => section.body.trim().length > 0);
+}
+
+function preferredMemoSections(sections: Array<{ title: string; body: string }>) {
+  const preferred = [
+    "executive verdict",
+    "best wedge",
+    "key findings",
+    "evidence summary",
+    "risks",
+    "assumptions",
+    "what we still do not know",
+    "recommended validation actions",
+  ];
+  const byTitle = new Map(sections.map((section) => [section.title.toLowerCase(), section]));
+  const ordered = preferred
+    .map((title) => {
+      const exact = byTitle.get(title);
+      if (exact) {
+        return exact;
+      }
+      return sections.find((section) => section.title.toLowerCase().includes(title));
+    })
+    .filter((section): section is { title: string; body: string } => Boolean(section));
+  const seen = new Set<string>();
+  return [...ordered, ...sections].filter((section) => {
+    const key = section.title.toLowerCase();
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function planToDraftState(plan: ResearchPlan): ResearchPlanDraftState {

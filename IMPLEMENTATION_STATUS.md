@@ -2,13 +2,14 @@
 
 ## Current Phase
 
-V1 Sprint 11 complete. The project UI has been refactored around a guided
-strategic workflow instead of a dense generated-object dashboard. Project
-navigation now uses Overview, Research, Evidence, Competitors, Assumptions,
-Validation, and Decisions. Overview is concise and recommendation-first,
-Research owns research sprints and memos, and long/generated content is
-progressively disclosed. Watchlists, monitoring, collaboration, portfolio
-dashboards, integrations, and multi-segment workflow packs remain V2 scope.
+V1 Sprint 12 complete. The project UI has been aligned more tightly with
+best-in-class workflow-product patterns from Linear, Jira Product Discovery,
+Dovetail, NotebookLM, and Clay. The app now puts lifecycle progress,
+recommendations, source-grounded memo reading, evidence traceability,
+assumption prioritization, validation assets, competitor grouping, and decision
+actions closer to the market UX benchmark. Watchlists, monitoring,
+collaboration, portfolio dashboards, integrations, and multi-segment workflow
+packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -705,7 +706,36 @@ Checks run:
 
 - [x] `pnpm --filter thesys-web typecheck`
 
+## Sprint 12 Scope
+
+- [x] Audit current V1 project pages against best-in-class workflow patterns
+  from Linear, Jira Product Discovery, Dovetail, NotebookLM, and Clay.
+- [x] Refine Overview as a Linear-inspired command center with one primary
+  action, strong hierarchy, lifecycle progress, and secondary technical status.
+- [x] Refine Assumptions and idea-readiness surfaces using prioritization,
+  risk, confidence, evidence-strength, and status patterns from Jira Product
+  Discovery.
+- [x] Refine Evidence and Research surfaces so findings and source-linked
+  insights lead, while raw chunks/details stay behind drawers or progressive
+  disclosure.
+- [x] Refine briefs and research memos around source-grounded reading patterns:
+  executive verdict first, citations near claims, sources used, unsupported
+  claims, and "what we still do not know."
+- [x] Refine research sprint, source discovery, competitor discovery, and
+  approval flows around inspectable plain-English workflow steps and structured
+  candidate rows/cards.
+- [x] Validate the full seeded demo journey across Overview, Research,
+  Evidence, Competitors, Assumptions, Validation, and Decisions.
+
+## Sprint 12 Verification
+
+Checks run:
+
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose restart web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+
 ## Next Sprint
 
-V2 Sprint 1: Recurring Watchlists and Market Monitoring, unless Sprint 11 visual
-QA finds polish issues.
+V2 Sprint 1: Recurring Watchlists and Market Monitoring.

@@ -149,6 +149,29 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
             markdown={overviewQuery.data.current_recommendation.rationale}
           />
         ) : null}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {[
+            ["build", "Proceed"],
+            ["pivot", "Pivot"],
+            ["pause", "Pause"],
+            ["kill", "Kill"],
+            ["run_experiment", "Continue Research"],
+          ].map(([type, label]) => (
+            <Button
+              key={type}
+              onClick={() => {
+                setDecisionType(type as DecisionType);
+                setTitle(label);
+                openDecisionForm();
+              }}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
@@ -180,7 +203,7 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
             >
               {decisionTypes.map((item) => (
                 <option key={item} value={item}>
-                  {formatLabel(item)}
+                  {decisionLabel(item)}
                 </option>
               ))}
             </select>
@@ -311,7 +334,7 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="text-sm font-semibold">{decision.title}</h3>
                           <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-                            {formatLabel(decision.decision_type)}
+                            {decisionLabel(decision.decision_type)}
                           </span>
                         </div>
                         <p className="mt-2 text-xs text-muted-foreground">
@@ -408,4 +431,18 @@ function emptyToUndefined(value: string) {
 
 function formatLabel(value: string) {
   return value.replaceAll("_", " ");
+}
+
+function decisionLabel(value: DecisionType) {
+  const labels: Record<DecisionType, string> = {
+    build: "Proceed",
+    pivot: "Pivot",
+    pause: "Pause",
+    kill: "Kill",
+    change_icp: "Change ICP",
+    change_positioning: "Change Positioning",
+    run_experiment: "Continue Research",
+    other: "Other",
+  };
+  return labels[value] ?? formatLabel(value);
 }
