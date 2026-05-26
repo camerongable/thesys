@@ -326,3 +326,65 @@ class AgenticResearchApprovalRead(BaseModel):
     sprint: ResearchSprintRead
     artifact: ArtifactRead
     version: ArtifactVersionRead
+
+
+ResearchHistoryEventType = Literal[
+    "plan_created",
+    "plan_approved",
+    "plan_rejected",
+    "source_discovery",
+    "source_ingestion",
+    "competitor_discovery",
+    "competitor_merge",
+    "memo_generated",
+    "memory_update_approved",
+    "memory_update_rejected",
+    "sprint_completed",
+    "sprint_failed",
+]
+ResearchHistoryEntityType = Literal[
+    "research_sprint",
+    "research_plan",
+    "artifact",
+    "artifact_version",
+    "evidence",
+    "competitor",
+    "assumption",
+    "risk",
+    "workflow",
+]
+
+
+class ResearchHistoryEventRead(BaseModel):
+    id: str
+    research_sprint_id: uuid.UUID
+    event_type: ResearchHistoryEventType
+    title: str
+    summary: str
+    why_it_matters: str
+    related_entity_type: ResearchHistoryEntityType
+    related_entity_id: uuid.UUID
+    created_at: datetime
+
+
+class ResearchSprintHistoryRead(BaseModel):
+    sprint: ResearchSprintRead
+    source_candidate_count: int
+    ingested_source_count: int
+    competitor_candidate_count: int
+    merged_competitor_count: int
+    memo_artifact_id: uuid.UUID | None = None
+    memo_version_id: uuid.UUID | None = None
+    memory_update_status: str | None = None
+    memory_update_summary: dict[str, object] | None = None
+    recommendation_change: str | None = None
+    events: list[ResearchHistoryEventRead] = Field(default_factory=list)
+
+
+class ProjectResearchHistoryRead(BaseModel):
+    project_id: uuid.UUID
+    sprint_count: int
+    completed_sprint_count: int
+    pending_review_sprint_count: int
+    latest_recommendation_change: str | None = None
+    sprints: list[ResearchSprintHistoryRead] = Field(default_factory=list)

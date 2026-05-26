@@ -29,3 +29,30 @@ The MVP eval currently checks:
 This is intentionally lightweight. Later eval work should add fixture datasets,
 retrieval relevance labels, groundedness scoring, prompt regression tests, and
 cost/latency thresholds.
+
+## V1 Research Eval
+
+V1 adds a local research-sprint eval dataset at
+`apps/api/app/evals/research_sprint_cases.json`. It covers 10 idea categories:
+consumer app, B2B SaaS, developer tool, marketplace, health/fitness, local
+services, AI workflow, creator economy, productivity, and ecommerce/affiliate.
+Five cases are marked demo-ready.
+
+Run the V1 research eval:
+
+```bash
+curl http://localhost:8000/api/projects/<project_id>/evals/v1-research
+```
+
+The V1 eval checks:
+
+- research sprint existence and completion/reviewability
+- source candidate discovery and ingestion
+- competitor candidate discovery and merging
+- cited research memo coverage
+- unsupported/open claim tracking
+- research-derived assumptions and risks
+- recommended validation actions
+- agentic workflow traceability and stored tool calls
+- evidence gap detection
+- token/cost and latency visibility

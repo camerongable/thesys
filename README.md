@@ -349,6 +349,7 @@ to cited evidence.
 ```bash
 curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/agentic-rag/run
 curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/agentic-rag/approve
+curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/agentic-rag/reject
 curl http://localhost:8000/api/projects/<project_id>/assumptions
 ```
 
@@ -357,3 +358,18 @@ assumptions. Use `Create Validation Plan` on a high-risk assumption to generate
 manual validation assets: screener questions, interview script, survey
 questions, landing page copy, outreach message, success criteria, note-taking
 template, and result interpretation rubric.
+
+## V1 Sprints 9-10 Research History and Quality
+
+The Overview page now includes Research History and Research Quality sections.
+Research History shows what each sprint changed, evidence and competitor
+counts, memo versions, recommendation changes, and approved or rejected memory
+updates. Research Quality runs the local V1 research eval across traceability,
+source discovery, competitor discovery, citation coverage, unsupported claims,
+assumption quality, validation actions, cost, and latency. The eval dataset
+contains 10 idea categories with 5 demo-ready cases.
+
+```bash
+curl http://localhost:8000/api/projects/<project_id>/research-history
+curl http://localhost:8000/api/projects/<project_id>/evals/v1-research
+```

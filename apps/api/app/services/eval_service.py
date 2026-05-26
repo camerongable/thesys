@@ -1,5 +1,8 @@
+import json
 import uuid
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select
@@ -8,18 +11,29 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.auth import AuthContext
 from app.db.models import (
     AIRun,
+    AIStep,
     Artifact,
+    ArtifactVersion,
     Assumption,
     Claim,
     ClaimEvidenceLink,
     Competitor,
+    CompetitorCandidate,
     Decision,
+    DiscoveredSource,
     EvidenceSource,
     Experiment,
     ExperimentResult,
+    ResearchSprint,
     Risk,
 )
-from app.schemas.evals import MvpEvalCheckRead, MvpEvalRead
+from app.schemas.evals import (
+    MvpEvalCheckRead,
+    MvpEvalRead,
+    ResearchEvalCaseRead,
+    V1ResearchEvalMetricRead,
+    V1ResearchEvalRead,
+)
 from app.services import project_service
 
 REQUIRED_BRIEF_SECTIONS = (
@@ -37,6 +51,15 @@ REQUIRED_BRIEF_SECTIONS = (
 
 @dataclass(frozen=True)
 class _Check:
+    key: str
+    label: str
+    passed: bool
+    observed: int | bool | str | None
+    expected: str
+
+
+@dataclass(frozen=True)
+class _ResearchMetric:
     key: str
     label: str
     passed: bool
@@ -155,6 +178,150 @@ def run_mvp_eval(db: Session, auth: AuthContext, project_id: uuid.UUID) -> MvpEv
     )
 
 
+def run_v1_research_eval(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> V1ResearchEvalRead:
+    project_service.get_project(db, auth, project_id)
+    counts = _v1_research_counts(db, auth, project_id)
+    latest_memo = _latest_research_memo_version(db, auth, project_id)
+    structured = latest_memo.structured_content if latest_memo else {}
+    memo = structured.get("memo") if isinstance(structured, dict) else {}
+    unsupported = memo.get("unsupported_claims") if isinstance(memo, dict) else []
+    validation_actions = (
+        memo.get("recommended_validation_actions") if isinstance(memo, dict) else []
+    )
+    tool_calls = structured.get("tool_calls") if isinstance(structured, dict) else []
+    gaps = structured.get("evidence_gaps") if isinstance(structured, dict) else []
+    dataset_cases = _research_eval_cases()
+    demo_ready_count = sum(1 for case in dataset_cases if case.demo_ready)
+
+    metrics = [
+        _ResearchMetric(
+            "eval_dataset",
+            "Research sprint eval dataset",
+            len(dataset_cases) >= 10,
+            len(dataset_cases),
+            "at least 10 idea categories",
+        ),
+        _ResearchMetric(
+            "demo_cases",
+            "Demo-ready research cases",
+            demo_ready_count >= 5,
+            demo_ready_count,
+            "at least 5 demo-ready ideas",
+        ),
+        _ResearchMetric(
+            "research_sprints",
+            "Research sprint exists",
+            counts["research_sprints"] >= 1,
+            counts["research_sprints"],
+            "at least 1 research sprint",
+        ),
+        _ResearchMetric(
+            "completed_or_reviewable_sprint",
+            "Completed or reviewable sprint",
+            counts["completed_sprints"] + counts["needs_review_sprints"] >= 1,
+            f"{counts['completed_sprints']} completed, {counts['needs_review_sprints']} reviewable",
+            "at least 1 completed or reviewable sprint",
+        ),
+        _ResearchMetric(
+            "source_discovery",
+            "Source discovery quality",
+            counts["discovered_sources"] >= 3 and counts["ingested_sources"] >= 1,
+            f"{counts['discovered_sources']} candidates, {counts['ingested_sources']} ingested",
+            "at least 3 candidates and 1 ingested source",
+        ),
+        _ResearchMetric(
+            "competitor_discovery",
+            "Competitor discovery quality",
+            counts["competitor_candidates"] >= 3 and counts["merged_competitors"] >= 1,
+            f"{counts['competitor_candidates']} candidates, {counts['merged_competitors']} merged",
+            "at least 3 candidates and 1 merged competitor",
+        ),
+        _ResearchMetric(
+            "cited_research_memo",
+            "Cited research memo",
+            latest_memo is not None and counts["research_memo_claim_links"] >= 1,
+            counts["research_memo_claim_links"],
+            "research memo with at least 1 cited claim",
+        ),
+        _ResearchMetric(
+            "unsupported_claims",
+            "Unsupported claims tracked",
+            isinstance(unsupported, list) and len(unsupported) >= 1,
+            len(unsupported) if isinstance(unsupported, list) else 0,
+            "at least 1 unsupported/open claim",
+        ),
+        _ResearchMetric(
+            "assumption_quality",
+            "Research assumptions and risks",
+            counts["high_risk_assumptions"] >= 1 and counts["risks"] >= 1,
+            f"{counts['high_risk_assumptions']} high-risk assumptions, {counts['risks']} risks",
+            "at least 1 high-risk assumption and 1 risk",
+        ),
+        _ResearchMetric(
+            "validation_actions",
+            "Next-action usefulness",
+            isinstance(validation_actions, list) and len(validation_actions) >= 1,
+            len(validation_actions) if isinstance(validation_actions, list) else 0,
+            "at least 1 recommended validation action",
+        ),
+        _ResearchMetric(
+            "agentic_trace",
+            "Agentic RAG traceability",
+            counts["agentic_research_runs"] >= 1
+            and counts["agentic_research_steps"] >= 10
+            and isinstance(tool_calls, list)
+            and len(tool_calls) >= 3,
+            (
+                f"{counts['agentic_research_runs']} runs, "
+                f"{counts['agentic_research_steps']} steps, "
+                f"{len(tool_calls) if isinstance(tool_calls, list) else 0} tool calls"
+            ),
+            "agentic run, 10+ steps, and stored tool calls",
+        ),
+        _ResearchMetric(
+            "gap_detection",
+            "Evidence gap detection",
+            isinstance(gaps, list) and len(gaps) >= 1,
+            len(gaps) if isinstance(gaps, list) else 0,
+            "at least 1 evidence gap",
+        ),
+        _ResearchMetric(
+            "cost_latency_visible",
+            "Cost and latency visibility",
+            counts["runs_with_cost"] >= 1 and counts["steps_with_latency"] >= 10,
+            (
+                f"{counts['runs_with_cost']} runs with cost, "
+                f"{counts['steps_with_latency']} steps with latency"
+            ),
+            "workflow cost and step latency are visible",
+        ),
+    ]
+    score = sum(1 for metric in metrics if metric.passed)
+    return V1ResearchEvalRead(
+        project_id=project_id,
+        passed=score == len(metrics),
+        score=score,
+        total=len(metrics),
+        metrics=[
+            V1ResearchEvalMetricRead(
+                key=metric.key,
+                label=metric.label,
+                passed=metric.passed,
+                observed=metric.observed,
+                expected=metric.expected,
+            )
+            for metric in metrics
+        ],
+        dataset_cases=dataset_cases,
+        dataset_case_count=len(dataset_cases),
+        demo_ready_case_count=demo_ready_count,
+    )
+
+
 def _counts(db: Session, auth: AuthContext, project_id: uuid.UUID) -> dict[str, int]:
     filters: dict[str, Any] = {"workspace_id": auth.workspace_id, "project_id": project_id}
     return {
@@ -184,6 +351,180 @@ def _counts(db: Session, auth: AuthContext, project_id: uuid.UUID) -> dict[str, 
             .where(Claim.workspace_id == auth.workspace_id, Claim.project_id == project_id),
         ),
     }
+
+
+def _v1_research_counts(db: Session, auth: AuthContext, project_id: uuid.UUID) -> dict[str, int]:
+    return {
+        "research_sprints": _count(
+            db,
+            select(func.count())
+            .select_from(ResearchSprint)
+            .where(
+                ResearchSprint.workspace_id == auth.workspace_id,
+                ResearchSprint.project_id == project_id,
+            ),
+        ),
+        "completed_sprints": _count(
+            db,
+            select(func.count())
+            .select_from(ResearchSprint)
+            .where(
+                ResearchSprint.workspace_id == auth.workspace_id,
+                ResearchSprint.project_id == project_id,
+                ResearchSprint.status == "completed",
+            ),
+        ),
+        "needs_review_sprints": _count(
+            db,
+            select(func.count())
+            .select_from(ResearchSprint)
+            .where(
+                ResearchSprint.workspace_id == auth.workspace_id,
+                ResearchSprint.project_id == project_id,
+                ResearchSprint.status == "needs_review",
+            ),
+        ),
+        "discovered_sources": _count(
+            db,
+            select(func.count())
+            .select_from(DiscoveredSource)
+            .where(
+                DiscoveredSource.workspace_id == auth.workspace_id,
+                DiscoveredSource.project_id == project_id,
+            ),
+        ),
+        "ingested_sources": _count(
+            db,
+            select(func.count())
+            .select_from(DiscoveredSource)
+            .where(
+                DiscoveredSource.workspace_id == auth.workspace_id,
+                DiscoveredSource.project_id == project_id,
+                DiscoveredSource.status == "ingested",
+            ),
+        ),
+        "competitor_candidates": _count(
+            db,
+            select(func.count())
+            .select_from(CompetitorCandidate)
+            .where(
+                CompetitorCandidate.workspace_id == auth.workspace_id,
+                CompetitorCandidate.project_id == project_id,
+            ),
+        ),
+        "merged_competitors": _count(
+            db,
+            select(func.count())
+            .select_from(CompetitorCandidate)
+            .where(
+                CompetitorCandidate.workspace_id == auth.workspace_id,
+                CompetitorCandidate.project_id == project_id,
+                CompetitorCandidate.status == "merged",
+            ),
+        ),
+        "research_memo_claim_links": _count(
+            db,
+            select(func.count())
+            .select_from(ClaimEvidenceLink)
+            .join(Claim, ClaimEvidenceLink.claim_id == Claim.id)
+            .join(ArtifactVersion, ArtifactVersion.id == Claim.artifact_version_id)
+            .join(Artifact, Artifact.id == ArtifactVersion.artifact_id)
+            .where(
+                Claim.workspace_id == auth.workspace_id,
+                Claim.project_id == project_id,
+                Artifact.artifact_type == "research_memo",
+            ),
+        ),
+        "high_risk_assumptions": _count(
+            db,
+            select(func.count())
+            .select_from(Assumption)
+            .where(
+                Assumption.workspace_id == auth.workspace_id,
+                Assumption.project_id == project_id,
+                (
+                    Assumption.kill_risk.is_(True)
+                    | (
+                        Assumption.importance.in_(["high", "critical"])
+                        & (Assumption.uncertainty == "high")
+                    )
+                ),
+            ),
+        ),
+        "risks": _model_count(
+            db,
+            Risk,
+            {"workspace_id": auth.workspace_id, "project_id": project_id},
+        ),
+        "agentic_research_runs": _count(
+            db,
+            select(func.count())
+            .select_from(AIRun)
+            .where(
+                AIRun.workspace_id == auth.workspace_id,
+                AIRun.project_id == project_id,
+                AIRun.workflow_type == "agentic_research",
+            ),
+        ),
+        "agentic_research_steps": _count(
+            db,
+            select(func.count())
+            .select_from(AIStep)
+            .join(AIRun, AIStep.ai_run_id == AIRun.id)
+            .where(
+                AIRun.workspace_id == auth.workspace_id,
+                AIRun.project_id == project_id,
+                AIRun.workflow_type == "agentic_research",
+            ),
+        ),
+        "runs_with_cost": _count(
+            db,
+            select(func.count())
+            .select_from(AIRun)
+            .where(
+                AIRun.workspace_id == auth.workspace_id,
+                AIRun.project_id == project_id,
+                AIRun.workflow_type == "agentic_research",
+                AIRun.total_cost.is_not(None),
+            ),
+        ),
+        "steps_with_latency": _count(
+            db,
+            select(func.count())
+            .select_from(AIStep)
+            .join(AIRun, AIStep.ai_run_id == AIRun.id)
+            .where(
+                AIRun.workspace_id == auth.workspace_id,
+                AIRun.project_id == project_id,
+                AIRun.workflow_type == "agentic_research",
+                AIStep.latency_ms.is_not(None),
+            ),
+        ),
+    }
+
+
+def _latest_research_memo_version(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> ArtifactVersion | None:
+    return db.scalar(
+        select(ArtifactVersion)
+        .join(Artifact, ArtifactVersion.artifact_id == Artifact.id)
+        .where(
+            Artifact.workspace_id == auth.workspace_id,
+            Artifact.project_id == project_id,
+            Artifact.artifact_type == "research_memo",
+        )
+        .order_by(ArtifactVersion.created_at.desc())
+    )
+
+
+@lru_cache(maxsize=1)
+def _research_eval_cases() -> list[ResearchEvalCaseRead]:
+    path = Path(__file__).resolve().parent.parent / "evals" / "research_sprint_cases.json"
+    raw_cases = json.loads(path.read_text(encoding="utf-8"))
+    return [ResearchEvalCaseRead.model_validate(raw_case) for raw_case in raw_cases]
 
 
 def _model_count(db: Session, model: type, filters: dict[str, Any]) -> int:

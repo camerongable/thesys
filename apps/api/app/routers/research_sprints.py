@@ -21,6 +21,7 @@ from app.schemas.research import (
     DiscoveredSourceActionRead,
     DiscoveredSourceListRead,
     DiscoveredSourceRead,
+    ProjectResearchHistoryRead,
     ResearchPlanRead,
     ResearchPlanUpdate,
     ResearchSprintApprovalRead,
@@ -34,6 +35,7 @@ from app.services import (
     agentic_research_service,
     competitor_discovery_service,
     opportunity_brief_service,
+    research_history_service,
     research_sprint_service,
     source_discovery_service,
 )
@@ -81,6 +83,15 @@ def list_research_sprints(
 ) -> ResearchSprintListRead:
     sprints = research_sprint_service.list_research_sprints(db, auth, project_id)
     return ResearchSprintListRead(sprints=[serialize_sprint(sprint) for sprint in sprints])
+
+
+@router.get("/research-history", response_model=ProjectResearchHistoryRead)
+def get_research_history(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> ProjectResearchHistoryRead:
+    return research_history_service.get_project_research_history(db, auth, project_id)
 
 
 @router.post("/research-sprints/plan", response_model=ResearchSprintPlanRunRead)
@@ -408,6 +419,31 @@ def approve_agentic_research_memo(
     auth: AuthContextDep,
 ) -> AgenticResearchApprovalRead:
     result = agentic_research_service.approve_research_memo(
+        db,
+        auth,
+        project_id,
+        sprint_id,
+    )
+    return AgenticResearchApprovalRead(
+        ai_run_id=result.run.id,
+        ai_step_id=result.step.id,
+        sprint=serialize_sprint(result.sprint),
+        artifact=serialize_artifact(result.artifact),
+        version=serialize_version(result.version),
+    )
+
+
+@router.post(
+    "/research-sprints/{sprint_id}/agentic-rag/reject",
+    response_model=AgenticResearchApprovalRead,
+)
+def reject_agentic_research_memo(
+    project_id: uuid.UUID,
+    sprint_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> AgenticResearchApprovalRead:
+    result = agentic_research_service.reject_research_memo(
         db,
         auth,
         project_id,

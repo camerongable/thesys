@@ -33,7 +33,7 @@ from app.schemas.overview import (
     StrategicUpdateRead,
 )
 from app.schemas.projects import ProjectRead
-from app.services import project_service
+from app.services import project_service, research_history_service
 
 
 @dataclass(frozen=True)
@@ -538,6 +538,7 @@ def _strategic_updates(
     updates.extend(_assumption_updates(db, auth, project_id))
     updates.extend(_experiment_result_updates(db, auth, project_id))
     updates.extend(_decision_updates(db, auth, project_id))
+    updates.extend(_research_history_updates(db, auth, project_id))
     updates.extend(_workflow_updates(db, auth, project_id))
     updates.sort(key=lambda update: update.created_at, reverse=True)
     return updates[:limit]
@@ -743,6 +744,39 @@ def _decision_updates(
     ]
 
 
+def _research_history_updates(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> list[StrategicUpdateRead]:
+    history = research_history_service.get_project_research_history(db, auth, project_id, limit=5)
+    updates: list[StrategicUpdateRead] = []
+    visible_events = {
+        "memo_generated",
+        "memory_update_approved",
+        "memory_update_rejected",
+        "sprint_completed",
+        "sprint_failed",
+    }
+    for sprint_history in history.sprints:
+        for event in sprint_history.events:
+            if event.event_type not in visible_events:
+                continue
+            updates.append(
+                StrategicUpdateRead(
+                    id=f"research:{event.id}",
+                    project_id=project_id,
+                    title=event.title,
+                    summary=event.summary,
+                    why_it_matters=event.why_it_matters,
+                    related_entity_type=_overview_entity_type(event.related_entity_type),
+                    related_entity_id=event.related_entity_id,
+                    created_at=event.created_at,
+                )
+            )
+    return updates
+
+
 def _workflow_updates(
     db: Session,
     auth: AuthContext,
@@ -783,6 +817,19 @@ def _workflow_updates(
             )
         )
     return updates
+
+
+def _overview_entity_type(entity_type: str) -> str:
+    if entity_type in {
+        "artifact",
+        "evidence",
+        "competitor",
+        "assumption",
+        "experiment",
+        "decision",
+    }:
+        return entity_type
+    return "workflow"
 
 
 def _counts(db: Session, auth: AuthContext, project_id: uuid.UUID) -> _OverviewCounts:

@@ -792,6 +792,62 @@ export type AgenticResearchApproval = {
   version: ArtifactVersion;
 };
 
+export type ResearchHistoryEvent = {
+  id: string;
+  research_sprint_id: string;
+  event_type:
+    | "plan_created"
+    | "plan_approved"
+    | "plan_rejected"
+    | "source_discovery"
+    | "source_ingestion"
+    | "competitor_discovery"
+    | "competitor_merge"
+    | "memo_generated"
+    | "memory_update_approved"
+    | "memory_update_rejected"
+    | "sprint_completed"
+    | "sprint_failed";
+  title: string;
+  summary: string;
+  why_it_matters: string;
+  related_entity_type:
+    | "research_sprint"
+    | "research_plan"
+    | "artifact"
+    | "artifact_version"
+    | "evidence"
+    | "competitor"
+    | "assumption"
+    | "risk"
+    | "workflow";
+  related_entity_id: string;
+  created_at: string;
+};
+
+export type ResearchSprintHistory = {
+  sprint: ResearchSprint;
+  source_candidate_count: number;
+  ingested_source_count: number;
+  competitor_candidate_count: number;
+  merged_competitor_count: number;
+  memo_artifact_id: string | null;
+  memo_version_id: string | null;
+  memory_update_status: string | null;
+  memory_update_summary: Record<string, unknown> | null;
+  recommendation_change: string | null;
+  events: ResearchHistoryEvent[];
+};
+
+export type ProjectResearchHistory = {
+  project_id: string;
+  sprint_count: number;
+  completed_sprint_count: number;
+  pending_review_sprint_count: number;
+  latest_recommendation_change: string | null;
+  sprints: ResearchSprintHistory[];
+};
+
 export type DemoSeedResult = {
   project: Project;
   created: boolean;
@@ -824,6 +880,34 @@ export type MvpEval = {
   score: number;
   total: number;
   checks: MvpEvalCheck[];
+};
+
+export type ResearchEvalCase = {
+  id: string;
+  idea_type: string;
+  idea: string;
+  expected_outputs: string[];
+  unacceptable_failures: string[];
+  demo_ready: boolean;
+};
+
+export type V1ResearchEvalMetric = {
+  key: string;
+  label: string;
+  passed: boolean;
+  observed: number | boolean | string | null;
+  expected: string;
+};
+
+export type V1ResearchEval = {
+  project_id: string;
+  passed: boolean;
+  score: number;
+  total: number;
+  metrics: V1ResearchEvalMetric[];
+  dataset_cases: ResearchEvalCase[];
+  dataset_case_count: number;
+  demo_ready_case_count: number;
 };
 
 export type StrategicRecommendation = {
@@ -1443,12 +1527,29 @@ export function approveAgenticResearchMemo(projectId: string, sprintId: string) 
   );
 }
 
+export function rejectAgenticResearchMemo(projectId: string, sprintId: string) {
+  return apiFetch<AgenticResearchApproval>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/agentic-rag/reject`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function getProjectResearchHistory(projectId: string) {
+  return apiFetch<ProjectResearchHistory>(`/api/projects/${projectId}/research-history`);
+}
+
 export function getWorkflowEventsUrl(runId: string) {
   return `${API_BASE_URL}/api/workflows/${runId}/events`;
 }
 
 export function getMvpEval(projectId: string) {
   return apiFetch<MvpEval>(`/api/projects/${projectId}/evals/mvp`);
+}
+
+export function getV1ResearchEval(projectId: string) {
+  return apiFetch<V1ResearchEval>(`/api/projects/${projectId}/evals/v1-research`);
 }
 
 export function getAIStatus() {

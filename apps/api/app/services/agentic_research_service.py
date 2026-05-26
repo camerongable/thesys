@@ -470,6 +470,79 @@ def approve_research_memo(
     )
 
 
+def reject_research_memo(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    sprint_id: uuid.UUID,
+) -> AgenticResearchApprovalResult:
+    sprint = _get_sprint(db, auth, project_id, sprint_id)
+    if sprint.status != "needs_review":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only research memos awaiting review can be rejected.",
+        )
+
+    artifact = _research_memo_for_sprint(db, auth, project_id, sprint_id)
+    version = _current_artifact_version(db, artifact)
+    run = _memo_ai_run(db, auth, project_id, version)
+    step = ai_run_service.start_step(
+        db,
+        run,
+        step_name="reject_research_memo",
+        input_json={
+            "research_sprint_id": str(sprint.id),
+            "artifact_id": str(artifact.id),
+            "artifact_version_id": str(version.id),
+        },
+    )
+    started = perf_counter()
+
+    content = dict(version.structured_content)
+    content["memory_update_status"] = "rejected"
+    content["memory_update_rejected_at"] = datetime.now(UTC).isoformat()
+    content["memory_update_rejected_by"] = str(auth.user_id)
+    content["memory_updates_written"] = False
+    version.structured_content = content
+    flag_modified(version, "structured_content")
+
+    sprint.status = "completed"
+    sprint.completed_at = datetime.now(UTC)
+    sprint.plan.status = "completed"
+    completed_step = ai_run_service.complete_step(
+        db,
+        step,
+        output_json={
+            "status": "rejected",
+            "research_sprint_status": "completed",
+            "memory_update_status": "rejected",
+            "memory_updates_written": False,
+        },
+        latency_ms=int((perf_counter() - started) * 1000),
+        tokens=None,
+        cost=Decimal("0"),
+    )
+    run = ai_run_service.complete_run(
+        db,
+        run,
+        output_summary="Research memo memory updates rejected by human reviewer.",
+        total_tokens=run.total_tokens,
+        total_cost=run.total_cost,
+        model_provider=run.model_provider or "unknown",
+        model_name=run.model_name or "unknown",
+    )
+    db.refresh(sprint)
+    version = _load_version(db, version.id)
+    artifact = _load_artifact(db, auth, project_id, artifact.id)
+    return AgenticResearchApprovalResult(
+        run=run,
+        step=completed_step,
+        sprint=sprint,
+        artifact=artifact,
+        version=version,
+    )
+
+
 def _write_approved_memory_updates(
     db: Session,
     auth: AuthContext,

@@ -2,7 +2,9 @@
 
 ## Current Phase
 
-V1 Sprint 8 complete. Approved research sprints now produce upgraded V1
+V1 Sprint 10 complete. Research sprints now have a visible history trail,
+approved/rejected memory-update records, and V1 research-quality checks backed
+by a 10-case local eval dataset. Approved research sprints produce upgraded V1
 research memos, write approved assumptions and risks into project memory after
 human review, link assumptions to cited evidence, and generate richer validation
 assets for high-risk assumptions.
@@ -625,6 +627,62 @@ Checks run:
 - [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
 - [x] `pnpm --filter thesys-web typecheck`
 
+Original V1 Sprint 9 plan:
+
+- Show research sprint history.
+- Show what changed after each sprint.
+- Show evidence added.
+- Show assumptions created/updated.
+- Show recommendation changes.
+- Show memory updates approved/rejected.
+- Show research memo versions.
+
+## V1 Sprint 9 Scope
+
+- [x] Add project research-history API:
+  - `GET /api/projects/{project_id}/research-history`
+- [x] Compute per-sprint history from research plans, source candidates,
+  competitor candidates, research memo artifact versions, workflow review state,
+  and memory-update status.
+- [x] Add explicit research memo rejection endpoint:
+  - `POST /api/projects/{project_id}/research-sprints/{sprint_id}/agentic-rag/reject`
+- [x] Preserve rejected memory updates in artifact structured content without
+  writing assumptions or risks into project memory.
+- [x] Surface research history on the Overview page with evidence counts,
+  competitor counts, memo/version links, recommendation changes, and event
+  timelines.
+- [x] Add research-specific strategic updates for memo generation, approved
+  memory updates, rejected memory updates, and sprint completion/failure.
+
+Original V1 Sprint 10 plan:
+
+- Add eval cases for autonomous research quality.
+- Add retrieval quality checks.
+- Add groundedness checks.
+- Add latency/cost tracking.
+- Add trace inspection.
+- Create polished demo projects.
+
+## V1 Sprint 10 Scope
+
+- [x] Add 10-case local research sprint eval dataset:
+  - `apps/api/app/evals/research_sprint_cases.json`
+- [x] Add V1 research eval endpoint:
+  - `GET /api/projects/{project_id}/evals/v1-research`
+- [x] Evaluate source discovery, competitor discovery, citation coverage,
+  unsupported claims, high-risk assumptions, validation actions, agentic trace
+  persistence, evidence gap detection, and cost/latency visibility.
+- [x] Show Research Quality checks on the Overview page.
+- [x] Document V1 research history and eval commands in README and docs.
+
+## V1 Sprints 9-10 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_research_history_eval.py -q`
+- [x] `cd apps/api && .venv/bin/ruff check ...`
+- [x] `pnpm --filter thesys-web typecheck`
+
 ## Next Sprint
 
-V1 Sprint 9: Strategic Update Feed and Research History.
+V2 Sprint 1: Recurring Watchlists and Market Monitoring.

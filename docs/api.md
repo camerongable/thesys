@@ -192,3 +192,24 @@ candidate snapshot instead and records the remote fetch error in chunk metadata.
 Competitor candidates can be edited before approval; approved candidates become
 project competitors, ingest their URL or candidate snapshot when available, and
 link ingested evidence chunks to the competitor for scoped retrieval.
+
+V1 agentic research, research history, and research quality APIs:
+
+```http
+POST /api/projects/{project_id}/research-sprints/{sprint_id}/agentic-rag/run
+POST /api/projects/{project_id}/research-sprints/{sprint_id}/agentic-rag/approve
+POST /api/projects/{project_id}/research-sprints/{sprint_id}/agentic-rag/reject
+
+GET  /api/projects/{project_id}/research-history
+GET  /api/projects/{project_id}/evals/v1-research
+```
+
+The agentic RAG run writes a cited `research_memo` artifact and pauses before
+major project-memory updates. Approving the memo writes research-derived
+assumptions and risks into project memory; rejecting it keeps the memo while
+recording that the proposed memory updates were rejected. Research history
+summarizes the plan, source discovery, competitor discovery, memo generation,
+memory update review, and recommendation changes for each sprint. The V1 eval
+checks source/competitor discovery, citation coverage, unsupported claims,
+assumption quality, validation actions, traceability, cost, latency, and the
+10-case research sprint eval dataset.

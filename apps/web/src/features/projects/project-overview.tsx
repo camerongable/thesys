@@ -41,7 +41,9 @@ import {
   discoverSources,
   DiscoveredSource,
   executeNextAction,
+  getProjectResearchHistory,
   getProjectOverview,
+  getV1ResearchEval,
   IdeaReadiness,
   listArtifacts,
   listCompetitorCandidates,
@@ -51,6 +53,7 @@ import {
   ProjectStage,
   rejectCompetitorCandidate,
   rejectDiscoveredSource,
+  rejectAgenticResearchMemo,
   rejectResearchSprint,
   ResearchPlan,
   ResearchPlanUpdateInput,
@@ -544,6 +547,9 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
         />
       ) : null}
 
+      <ResearchHistoryPanel projectId={projectId} />
+      <ResearchQualityPanel projectId={projectId} />
+
       {error ? (
         <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
           {error.message}
@@ -574,6 +580,161 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
             ))}
           </div>
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ResearchHistoryPanel({ projectId }: { projectId: string }) {
+  const historyQuery = useQuery({
+    queryKey: ["projects", projectId, "research-history"],
+    queryFn: () => getProjectResearchHistory(projectId),
+  });
+  const history = historyQuery.data;
+
+  return (
+    <div className="mt-6 border-t border-border pt-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold">Research History</h3>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Review what each research sprint changed, which memory updates were approved or
+            rejected, and how recommendations evolved.
+          </p>
+        </div>
+        {history ? (
+          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <span className="rounded-md bg-muted px-2 py-1">
+              {history.sprint_count} sprint{history.sprint_count === 1 ? "" : "s"}
+            </span>
+            <span className="rounded-md bg-muted px-2 py-1">
+              {history.completed_sprint_count} completed
+            </span>
+          </div>
+        ) : null}
+      </div>
+
+      {historyQuery.isLoading ? (
+        <p className="mt-3 text-sm text-muted-foreground">Loading research history...</p>
+      ) : historyQuery.isError ? (
+        <p className="mt-3 text-sm text-red-700">{(historyQuery.error as Error).message}</p>
+      ) : !history || history.sprints.length === 0 ? (
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          No research sprints yet. Run a research sprint to create a history trail.
+        </p>
+      ) : (
+        <div className="mt-4 space-y-4">
+          {history.sprints.slice(0, 3).map((sprintHistory) => (
+            <div className="rounded-md bg-muted p-4" key={sprintHistory.sprint.id}>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h4 className="text-sm font-semibold">
+                    {truncate(sprintHistory.sprint.plan.objective, 120)}
+                  </h4>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatLabel(sprintHistory.sprint.status)} ·{" "}
+                    {formatDateTime(sprintHistory.sprint.created_at)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className="rounded-md bg-white px-2 py-1">
+                    {sprintHistory.ingested_source_count}/{sprintHistory.source_candidate_count} sources
+                  </span>
+                  <span className="rounded-md bg-white px-2 py-1">
+                    {sprintHistory.merged_competitor_count}/
+                    {sprintHistory.competitor_candidate_count} competitors
+                  </span>
+                  {sprintHistory.memory_update_status ? (
+                    <span className="rounded-md bg-white px-2 py-1">
+                      {formatLabel(sprintHistory.memory_update_status)}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              {sprintHistory.recommendation_change ? (
+                <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                  Recommendation: {truncate(sprintHistory.recommendation_change, 220)}
+                </p>
+              ) : null}
+              <div className="mt-4 space-y-2">
+                {sprintHistory.events.slice(-5).map((event) => (
+                  <div className="border-l-2 border-border pl-3" key={event.id}>
+                    <p className="text-sm font-medium">{event.title}</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {event.summary}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      Why it matters: {event.why_it_matters}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResearchQualityPanel({ projectId }: { projectId: string }) {
+  const evalQuery = useQuery({
+    queryKey: ["projects", projectId, "evals", "v1-research"],
+    queryFn: () => getV1ResearchEval(projectId),
+  });
+  const evaluation = evalQuery.data;
+
+  return (
+    <div className="mt-6 border-t border-border pt-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold">Research Quality</h3>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            V1 quality checks cover source relevance, competitor discovery, citations,
+            unsupported claims, assumption quality, traceability, cost, and latency.
+          </p>
+        </div>
+        {evaluation ? (
+          <span
+            className={
+              evaluation.passed
+                ? "w-fit rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700"
+                : "w-fit rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700"
+            }
+          >
+            {evaluation.score}/{evaluation.total} checks
+          </span>
+        ) : null}
+      </div>
+
+      {evalQuery.isLoading ? (
+        <p className="mt-3 text-sm text-muted-foreground">Loading research eval...</p>
+      ) : evalQuery.isError ? (
+        <p className="mt-3 text-sm text-red-700">{(evalQuery.error as Error).message}</p>
+      ) : evaluation ? (
+        <>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {evaluation.metrics.map((metric) => (
+              <div className="rounded-md bg-muted px-3 py-2" key={metric.key}>
+                <div className="flex items-center gap-2">
+                  {metric.passed ? (
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                  ) : (
+                    <CircleAlert className="h-4 w-4 shrink-0 text-amber-600" />
+                  )}
+                  <span className="text-sm font-medium">{metric.label}</span>
+                </div>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Observed: {String(metric.observed ?? "none")}
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-xs leading-5 text-muted-foreground">
+            Eval dataset: {evaluation.dataset_case_count} idea categories,{" "}
+            {evaluation.demo_ready_case_count} demo-ready cases.
+          </p>
+        </>
       ) : null}
     </div>
   );
@@ -742,6 +903,20 @@ function ResearchDiscoveryPanel({
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "risks"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "experiments"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "research-history"] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "v1-research"] });
+      await onSprintUpdated();
+    },
+  });
+  const rejectMemoMutation = useMutation({
+    mutationFn: () => rejectAgenticResearchMemo(projectId, sprint.id),
+    onSuccess: async (result) => {
+      onRunTrace(result.ai_run_id);
+      setMemoReviewOpen(true);
+      await researchMemosQuery.refetch();
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "research-history"] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "v1-research"] });
       await onSprintUpdated();
     },
   });
@@ -808,6 +983,7 @@ function ResearchDiscoveryPanel({
     discoverCompetitorsMutation.error ??
     agenticResearchMutation.error ??
     approveMemoMutation.error ??
+    rejectMemoMutation.error ??
     approveSourceMutation.error ??
     rejectSourceMutation.error ??
     updateCandidateMutation.error ??
@@ -821,6 +997,7 @@ function ResearchDiscoveryPanel({
     discoverCompetitorsMutation.isPending ||
     agenticResearchMutation.isPending ||
     approveMemoMutation.isPending ||
+    rejectMemoMutation.isPending ||
     approveSourceMutation.isPending ||
     rejectSourceMutation.isPending ||
     updateCandidateMutation.isPending ||
@@ -943,6 +1120,8 @@ function ResearchDiscoveryPanel({
           memoryUpdateStatus={memoryUpdateStatus}
           memoryUpdateSummary={memoryUpdateSummary}
           onApprove={() => approveMemoMutation.mutate()}
+          onReject={() => rejectMemoMutation.mutate()}
+          rejectionPending={rejectMemoMutation.isPending}
           unsupportedClaims={unsupportedClaims}
           version={memoVersion}
         />
@@ -958,6 +1137,8 @@ function ResearchMemoReview({
   memoryUpdateStatus,
   memoryUpdateSummary,
   onApprove,
+  onReject,
+  rejectionPending,
   unsupportedClaims,
   version,
 }: {
@@ -967,6 +1148,8 @@ function ResearchMemoReview({
   memoryUpdateStatus: string | null;
   memoryUpdateSummary: MemoryUpdateSummary | null;
   onApprove: () => void;
+  onReject: () => void;
+  rejectionPending: boolean;
   unsupportedClaims: string[];
   version: ArtifactVersion;
 }) {
@@ -978,6 +1161,8 @@ function ResearchMemoReview({
     ? unsupportedClaims
     : unsupportedClaimRecords.map((claim) => claim.text);
   const approved = memoryUpdateStatus === "approved";
+  const rejected = memoryUpdateStatus === "rejected";
+  const reviewed = approved || rejected;
 
   return (
     <div id="research-memo-review" className="mt-5 border-t border-border pt-5">
@@ -999,19 +1184,30 @@ function ResearchMemoReview({
             className={
               approved
                 ? "w-fit rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700"
+                : rejected
+                  ? "w-fit rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700"
                 : "w-fit rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700"
             }
           >
-          {approved ? "Approved" : "Human review pending"}
+          {approved ? "Approved" : rejected ? "Rejected" : "Human review pending"}
           </span>
           <Button
-            disabled={approved || approvalPending}
+            disabled={reviewed || approvalPending || rejectionPending}
             onClick={onApprove}
             size="sm"
             type="button"
           >
             <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
             {approved ? "Approved" : approvalPending ? "Approving..." : "Approve Memo"}
+          </Button>
+          <Button
+            disabled={reviewed || approvalPending || rejectionPending}
+            onClick={onReject}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            {rejected ? "Rejected" : rejectionPending ? "Rejecting..." : "Reject Updates"}
           </Button>
         </div>
       </div>
