@@ -298,6 +298,21 @@ curl http://localhost:8000/api/workflows/<run_id>
 curl -N http://localhost:8000/api/workflows/<run_id>/events
 ```
 
+## Sprint 11 UI/UX Refactor
+
+Project navigation now follows the founder validation workflow:
+
+```text
+Overview → Research → Evidence → Competitors → Assumptions → Validation → Decisions
+```
+
+The Overview page stays recommendation-first and shows lifecycle progress,
+next action, strategic snapshot, key risks, evidence health, and recent
+strategic updates. Research sprint planning, discovery review, cited memos,
+research history, and quality checks live under the Research tab. Long generated
+outputs, process details, evidence source details, and validation plan content
+are collapsed by default so users see summaries before details.
+
 ## V1 Sprint 1 Research Planning
 
 The Overview page includes a Research Sprint card. It generates an

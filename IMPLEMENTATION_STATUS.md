@@ -2,14 +2,13 @@
 
 ## Current Phase
 
-V1 Sprint 10 complete. Research sprints now have a visible history trail,
-approved/rejected memory-update records, and V1 research-quality checks backed
-by a 10-case local eval dataset. Approved research sprints produce upgraded V1
-research memos, write approved assumptions and risks into project memory after
-human review, link assumptions to cited evidence, and generate richer validation
-assets for high-risk assumptions.
-Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
-multi-segment workflow packs remain V2 scope.
+V1 Sprint 11 complete. The project UI has been refactored around a guided
+strategic workflow instead of a dense generated-object dashboard. Project
+navigation now uses Overview, Research, Evidence, Competitors, Assumptions,
+Validation, and Decisions. Overview is concise and recommendation-first,
+Research owns research sprints and memos, and long/generated content is
+progressively disclosed. Watchlists, monitoring, collaboration, portfolio
+dashboards, integrations, and multi-segment workflow packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -683,6 +682,30 @@ Checks run:
 - [x] `cd apps/api && .venv/bin/ruff check ...`
 - [x] `pnpm --filter thesys-web typecheck`
 
+## Sprint 11 Scope
+
+- [x] Add Sprint 11 UI/UX refactor requirements to the implementation brief.
+- [x] Refactor project navigation to Overview, Research, Evidence, Competitors,
+  Assumptions, Validation, and Decisions.
+- [x] Move research sprint planning, discovery review, research memo review,
+  research history, and quality checks into the Research tab.
+- [x] Keep Overview focused on recommendation, next action, lifecycle progress,
+  strategic snapshot, top risks, evidence health, and recent strategic updates.
+- [x] Add progressive disclosure for manual evidence entry, research traces,
+  generated memos, validation plans, and source details.
+- [x] Group competitors by category and make competitor profiles easier to scan.
+- [x] Refactor assumptions around the riskiest assumption, filters, and a ranked
+  operational table.
+- [x] Rename Experiments to Validation and make validation assets copyable.
+- [x] Add current decision recommendation to the Decisions page.
+
+## Sprint 11 Verification
+
+Checks run:
+
+- [x] `pnpm --filter thesys-web typecheck`
+
 ## Next Sprint
 
-V2 Sprint 1: Recurring Watchlists and Market Monitoring.
+V2 Sprint 1: Recurring Watchlists and Market Monitoring, unless Sprint 11 visual
+QA finds polish issues.

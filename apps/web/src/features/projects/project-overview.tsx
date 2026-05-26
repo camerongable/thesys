@@ -77,11 +77,11 @@ import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 const tabs = [
   "Overview",
-  "Brief",
+  "Research",
   "Evidence",
   "Competitors",
   "Assumptions",
-  "Experiments",
+  "Validation",
   "Decisions",
 ] as const;
 type ProjectTab = (typeof tabs)[number];
@@ -186,6 +186,9 @@ export function ProjectOverview() {
                   <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
                     {project.short_description ?? "No description recorded yet."}
                   </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Last updated {formatDateTime(project.updated_at)}
+                  </p>
                 </div>
                 <div className="sm:min-w-56">
                   <AiModeIndicator />
@@ -220,18 +223,18 @@ export function ProjectOverview() {
                 onIntakeFinalized={refreshOverviewAfterIntake}
                 overview={overview}
               />
-            ) : activeTab === "Brief" ? (
-              <BriefTab projectId={project.id} />
+            ) : activeTab === "Research" ? (
+              <ResearchTab overview={overview} />
             ) : activeTab === "Evidence" ? (
               <EvidenceTab projectId={project.id} />
             ) : activeTab === "Competitors" ? (
               <CompetitorsTab projectId={project.id} />
             ) : activeTab === "Assumptions" ? (
               <AssumptionsTab
-                onOpenExperiments={() => selectTab("Experiments")}
+                onOpenExperiments={() => selectTab("Validation")}
                 projectId={project.id}
               />
-            ) : activeTab === "Experiments" ? (
+            ) : activeTab === "Validation" ? (
               <ExperimentsTab projectId={project.id} />
             ) : (
               <DecisionsTab projectId={project.id} />
@@ -283,7 +286,8 @@ function GuidedOverview({
               Confidence: {formatLabel(current_recommendation.confidence)}
             </span>
             <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-              Next: {current_recommendation.next_action_label}
+              Evidence: {overview.evidence_health.source_count} sources,{" "}
+              {overview.evidence_health.competitor_count} competitors
             </span>
           </div>
         </div>
@@ -341,23 +345,150 @@ function GuidedOverview({
         />
       ) : null}
 
-      <ResearchSprintCard projectId={overview.project.id} />
+      <LifecycleProgressCard overview={overview} />
 
-      <div className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
-        <IdeaReadinessCard readiness={idea_readiness} />
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
         <StrategicSnapshotCard snapshot={overview.strategic_snapshot} />
+        <IdeaReadinessCard readiness={idea_readiness} />
       </div>
+
+      <TopRisksCard risks={overview.key_risks} />
 
       <div className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
         <EvidenceHealthCard health={overview.evidence_health} />
         <RecentUpdatesCard updates={overview.recent_strategic_updates} />
       </div>
-
-      <KeyAssumptionsAndRisks
-        assumptions={overview.key_assumptions}
-        risks={overview.key_risks}
-      />
     </section>
+  );
+}
+
+function ResearchTab({
+  overview,
+}: {
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  return (
+    <section className="mt-6 space-y-6">
+      <PageIntro
+        actionLabel="Run Research Sprint"
+        description="Use the research agent to plan the investigation, discover sources and competitors, synthesize a cited memo, and decide what to validate next."
+        eyebrow="Research"
+        title="What did the system investigate, and what did it conclude?"
+      />
+
+      <ResearchSprintSummary projectId={overview.project.id} />
+      <ResearchSprintCard projectId={overview.project.id} />
+
+      <details className="rounded-lg border border-border bg-white p-5">
+        <summary className="cursor-pointer text-sm font-semibold">Show opportunity brief</summary>
+        <div className="mt-5 border-t border-border pt-5">
+          <BriefTab projectId={overview.project.id} />
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function PageIntro({
+  actionLabel,
+  description,
+  eyebrow,
+  title,
+}: {
+  actionLabel: string;
+  description: string;
+  eyebrow: string;
+  title: string;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-white p-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+            {eyebrow}
+          </p>
+          <h2 className="mt-2 text-xl font-semibold tracking-normal">{title}</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+            {description}
+          </p>
+        </div>
+        <span className="w-fit rounded-md bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
+          Primary action: {actionLabel}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ResearchSprintSummary({ projectId }: { projectId: string }) {
+  const sprintsQuery = useQuery({
+    queryKey: ["projects", projectId, "research-sprints", "summary"],
+    queryFn: () => listResearchSprints(projectId),
+  });
+  const historyQuery = useQuery({
+    queryKey: ["projects", projectId, "research-history", "summary"],
+    queryFn: () => getProjectResearchHistory(projectId),
+  });
+  const latestSprint = sprintsQuery.data?.[0] ?? null;
+  const latestHistory = historyQuery.data?.sprints[0] ?? null;
+
+  if (sprintsQuery.isLoading || historyQuery.isLoading) {
+    return <div className="rounded-lg border border-border bg-white p-5 text-sm text-muted-foreground">Loading latest research...</div>;
+  }
+
+  if (!latestSprint) {
+    return (
+      <div className="rounded-lg border border-dashed border-border bg-white p-5">
+        <h3 className="text-sm font-semibold">No research sprint yet.</h3>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          Run a research sprint to discover sources, identify competitors, gather evidence,
+          and generate a cited strategic memo.
+        </p>
+      </div>
+    );
+  }
+
+  const metrics = [
+    ["Status", formatLabel(latestSprint.status)],
+    ["Sources discovered", latestHistory?.source_candidate_count ?? 0],
+    ["Sources added", latestHistory?.ingested_source_count ?? 0],
+    ["Competitors found", latestHistory?.competitor_candidate_count ?? 0],
+    ["Competitors saved", latestHistory?.merged_competitor_count ?? 0],
+    ["Strategy update", latestHistory?.memory_update_status ? formatLabel(latestHistory.memory_update_status) : "pending"],
+  ] as const;
+
+  return (
+    <div className="rounded-lg border border-border bg-white p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="text-base font-semibold">Latest Research Sprint</h3>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+            {latestSprint.plan.objective}
+          </p>
+        </div>
+        <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+          {formatDateTime(latestSprint.updated_at)}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {metrics.map(([label, value]) => (
+          <div className="rounded-md bg-muted px-3 py-2" key={label}>
+            <div className="text-xs text-muted-foreground">{label}</div>
+            <div className="mt-1 text-sm font-semibold">{value}</div>
+          </div>
+        ))}
+      </div>
+      {latestHistory?.recommendation_change ? (
+        <div className="mt-4 rounded-md border border-border p-3">
+          <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+            Recommendation change
+          </h4>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            {truncate(latestHistory.recommendation_change, 260)}
+          </p>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -481,11 +612,11 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
         <div className="max-w-2xl">
           <div className="flex items-center gap-2">
             <FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Research Sprint</h2>
+            <h2 className="text-base font-semibold">Run Research Sprint</h2>
           </div>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Ask the system to plan an autonomous investigation before it discovers sources or
-            competitors. No browsing or ingestion starts until you approve the plan.
+            Ask the system to plan the investigation before it discovers sources or
+            competitors. No research starts until you approve the plan.
           </p>
         </div>
         {latestSprint ? (
@@ -496,25 +627,17 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
       </div>
 
       {!activePlan ? (
-        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="mt-5 space-y-3">
           <label className="block">
             <span className="text-sm font-medium">Research objective</span>
             <textarea
-              className="mt-2 min-h-24 w-full resize-y rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-primary"
+              className="mt-2 min-h-20 w-full resize-y rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-primary"
               onChange={(event) => setObjective(event.target.value)}
               placeholder="Investigate whether this idea has a strong wedge, which competitors matter, and what to validate next."
               value={objective}
             />
           </label>
-          <div className="flex flex-col justify-end gap-3">
-            <Button
-              disabled={busy}
-              onClick={() => startMutation.mutate()}
-              type="button"
-            >
-              <FileSearch className="h-4 w-4" aria-hidden="true" />
-              {startMutation.isPending ? "Planning..." : "Run Research Sprint"}
-            </Button>
+          <div className="flex flex-col gap-3">
             {latestSprint?.status === "approved" ? (
               <p className="text-xs leading-5 text-muted-foreground">
                 The latest plan is approved. Discover sources and competitors before generating
@@ -525,6 +648,15 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
                 The latest plan was rejected. Generate a new plan when the objective changes.
               </p>
             ) : null}
+            <Button
+              className="w-full whitespace-nowrap"
+              disabled={busy}
+              onClick={() => startMutation.mutate()}
+              type="button"
+            >
+              <FileSearch className="h-4 w-4" aria-hidden="true" />
+              {startMutation.isPending ? "Planning..." : "Run Research Sprint"}
+            </Button>
           </div>
         </div>
       ) : (
@@ -593,26 +725,27 @@ function ResearchHistoryPanel({ projectId }: { projectId: string }) {
   const history = historyQuery.data;
 
   return (
-    <div className="mt-6 border-t border-border pt-5">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold">Research History</h3>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Review what each research sprint changed, which memory updates were approved or
-            rejected, and how recommendations evolved.
-          </p>
-        </div>
-        {history ? (
-          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-            <span className="rounded-md bg-muted px-2 py-1">
-              {history.sprint_count} sprint{history.sprint_count === 1 ? "" : "s"}
-            </span>
-            <span className="rounded-md bg-muted px-2 py-1">
-              {history.completed_sprint_count} completed
-            </span>
+    <details className="mt-6 border-t border-border pt-5">
+      <summary className="cursor-pointer list-none">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold">Research History</h3>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Review what changed across previous sprints.
+            </p>
           </div>
-        ) : null}
-      </div>
+          {history ? (
+            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <span className="rounded-md bg-muted px-2 py-1">
+                {history.sprint_count} sprint{history.sprint_count === 1 ? "" : "s"}
+              </span>
+              <span className="rounded-md bg-muted px-2 py-1">
+                {history.completed_sprint_count} completed
+              </span>
+            </div>
+          ) : null}
+        </div>
+      </summary>
 
       {historyQuery.isLoading ? (
         <p className="mt-3 text-sm text-muted-foreground">Loading research history...</p>
@@ -673,7 +806,7 @@ function ResearchHistoryPanel({ projectId }: { projectId: string }) {
           ))}
         </div>
       )}
-    </div>
+    </details>
   );
 }
 
@@ -685,27 +818,28 @@ function ResearchQualityPanel({ projectId }: { projectId: string }) {
   const evaluation = evalQuery.data;
 
   return (
-    <div className="mt-6 border-t border-border pt-5">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold">Research Quality</h3>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            V1 quality checks cover source relevance, competitor discovery, citations,
-            unsupported claims, assumption quality, traceability, cost, and latency.
-          </p>
+    <details className="mt-6 border-t border-border pt-5">
+      <summary className="cursor-pointer list-none">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold">Research Quality</h3>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              View source, citation, traceability, cost, and latency checks.
+            </p>
+          </div>
+          {evaluation ? (
+            <span
+              className={
+                evaluation.passed
+                  ? "w-fit rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700"
+                  : "w-fit rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700"
+              }
+            >
+              {evaluation.score}/{evaluation.total} checks
+            </span>
+          ) : null}
         </div>
-        {evaluation ? (
-          <span
-            className={
-              evaluation.passed
-                ? "w-fit rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700"
-                : "w-fit rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700"
-            }
-          >
-            {evaluation.score}/{evaluation.total} checks
-          </span>
-        ) : null}
-      </div>
+      </summary>
 
       {evalQuery.isLoading ? (
         <p className="mt-3 text-sm text-muted-foreground">Loading research eval...</p>
@@ -736,7 +870,7 @@ function ResearchQualityPanel({ projectId }: { projectId: string }) {
           </p>
         </>
       ) : null}
-    </div>
+    </details>
   );
 }
 
@@ -856,7 +990,6 @@ function ResearchDiscoveryPanel({
   sprint: ResearchSprint;
 }) {
   const queryClient = useQueryClient();
-  const [memoReviewOpen, setMemoReviewOpen] = useState(false);
   const sourcesQuery = useQuery({
     queryKey: ["projects", projectId, "research-sprints", sprint.id, "sources"],
     queryFn: () => listDiscoveredSources(projectId, sprint.id),
@@ -888,7 +1021,6 @@ function ResearchDiscoveryPanel({
     mutationFn: () => runAgenticResearch(projectId, sprint.id),
     onSuccess: async (result) => {
       onRunTrace(result.ai_run_id);
-      setMemoReviewOpen(true);
       await researchMemosQuery.refetch();
       await onSprintUpdated();
     },
@@ -897,7 +1029,6 @@ function ResearchDiscoveryPanel({
     mutationFn: () => approveAgenticResearchMemo(projectId, sprint.id),
     onSuccess: async (result) => {
       onRunTrace(result.ai_run_id);
-      setMemoReviewOpen(true);
       await researchMemosQuery.refetch();
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "assumptions"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "risks"] });
@@ -912,7 +1043,6 @@ function ResearchDiscoveryPanel({
     mutationFn: () => rejectAgenticResearchMemo(projectId, sprint.id),
     onSuccess: async (result) => {
       onRunTrace(result.ai_run_id);
-      setMemoReviewOpen(true);
       await researchMemosQuery.refetch();
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "research-history"] });
@@ -1008,18 +1138,18 @@ function ResearchDiscoveryPanel({
     <div className="mt-6 border-t border-border pt-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h3 className="text-sm font-semibold">Discovery Review</h3>
+          <h3 className="text-sm font-semibold">Review Findings</h3>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
             Generate candidate sources and competitors from the approved plan. Review items before
             they are ingested as evidence or merged into the project competitor set, then synthesize
             a cited research memo from the project evidence graph.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid w-full grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-2 lg:w-[28rem] xl:w-[40rem]">
           <Button
+            className="w-full whitespace-nowrap"
             disabled={busy}
             onClick={() => discoverSourcesMutation.mutate()}
-            size="sm"
             type="button"
             variant="secondary"
           >
@@ -1027,9 +1157,9 @@ function ResearchDiscoveryPanel({
             {discoverSourcesMutation.isPending ? "Discovering..." : "Discover Sources"}
           </Button>
           <Button
+            className="w-full whitespace-nowrap"
             disabled={busy}
             onClick={() => discoverCompetitorsMutation.mutate()}
-            size="sm"
             type="button"
             variant="secondary"
           >
@@ -1039,13 +1169,13 @@ function ResearchDiscoveryPanel({
               : "Discover Competitors"}
           </Button>
           <Button
+            className="w-full whitespace-nowrap"
             disabled={busy || sprint.status === "completed"}
             onClick={() => agenticResearchMutation.mutate()}
-            size="sm"
             type="button"
           >
             <FileSearch className="h-4 w-4" aria-hidden="true" />
-            {agenticResearchMutation.isPending ? "Synthesizing..." : "Run Agentic RAG"}
+            {agenticResearchMutation.isPending ? "Synthesizing..." : "Generate Research Memo"}
           </Button>
         </div>
       </div>
@@ -1080,28 +1210,19 @@ function ResearchDiscoveryPanel({
             <div>
               <h4 className="text-sm font-semibold">Research memo ready for review</h4>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                The workflow used {retrievalToolCallCount} retrieval calls, found{" "}
-                {evidenceGapCount} evidence gaps, and paused before major memory updates.
+                The research agent used {retrievalToolCallCount} retrieval passes, found{" "}
+                {evidenceGapCount} evidence gaps, and paused before updating project strategy.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="w-fit rounded-md bg-white px-2 py-1 text-xs text-muted-foreground">
                 {formatLabel(memoArtifact.artifact_type)}
               </span>
-              <Button
-                onClick={() => setMemoReviewOpen((open) => !open)}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                <ScrollText className="h-4 w-4" aria-hidden="true" />
-                {memoReviewOpen ? "Hide Memo" : "Review Memo"}
-              </Button>
             </div>
           </div>
           {memoryUpdateStatus ? (
             <p className="mt-3 text-xs leading-5 text-muted-foreground">
-              Memory update status: {formatLabel(memoryUpdateStatus)}.
+              Project strategy update: {formatLabel(memoryUpdateStatus)}.
             </p>
           ) : null}
           {unsupportedClaims.length > 0 ? (
@@ -1109,22 +1230,19 @@ function ResearchDiscoveryPanel({
               Open questions: {unsupportedClaims.slice(0, 2).join("; ")}
             </p>
           ) : null}
+          <ResearchMemoReview
+            artifact={memoArtifact}
+            approvalPending={approveMemoMutation.isPending}
+            citations={citations}
+            memoryUpdateStatus={memoryUpdateStatus}
+            memoryUpdateSummary={memoryUpdateSummary}
+            onApprove={() => approveMemoMutation.mutate()}
+            onReject={() => rejectMemoMutation.mutate()}
+            rejectionPending={rejectMemoMutation.isPending}
+            unsupportedClaims={unsupportedClaims}
+            version={memoVersion}
+          />
         </div>
-      ) : null}
-
-      {memoReviewOpen && memoArtifact && memoVersion ? (
-        <ResearchMemoReview
-          artifact={memoArtifact}
-          approvalPending={approveMemoMutation.isPending}
-          citations={citations}
-          memoryUpdateStatus={memoryUpdateStatus}
-          memoryUpdateSummary={memoryUpdateSummary}
-          onApprove={() => approveMemoMutation.mutate()}
-          onReject={() => rejectMemoMutation.mutate()}
-          rejectionPending={rejectMemoMutation.isPending}
-          unsupportedClaims={unsupportedClaims}
-          version={memoVersion}
-        />
       ) : null}
     </div>
   );
@@ -1165,14 +1283,15 @@ function ResearchMemoReview({
   const reviewed = approved || rejected;
 
   return (
-    <div id="research-memo-review" className="mt-5 border-t border-border pt-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div id="research-memo-review" className="mt-4 border-t border-border pt-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h3 className="text-base font-semibold">{artifact.title}</h3>
+            <h3 className="text-sm font-semibold">Review memo and strategy updates</h3>
           </div>
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <span className="rounded-md bg-white px-2 py-1">{artifact.title}</span>
             <span className="rounded-md bg-muted px-2 py-1">Version {version.version}</span>
             <span className="rounded-md bg-muted px-2 py-1">
               {formatDateTime(version.created_at)}
@@ -1189,7 +1308,7 @@ function ResearchMemoReview({
                 : "w-fit rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700"
             }
           >
-          {approved ? "Approved" : rejected ? "Rejected" : "Human review pending"}
+          {approved ? "Approved" : rejected ? "Rejected" : "Review pending"}
           </span>
           <Button
             disabled={reviewed || approvalPending || rejectionPending}
@@ -1198,7 +1317,7 @@ function ResearchMemoReview({
             type="button"
           >
             <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-            {approved ? "Approved" : approvalPending ? "Approving..." : "Approve Memo"}
+            {approved ? "Approved" : approvalPending ? "Approving..." : "Approve Updates"}
           </Button>
           <Button
             disabled={reviewed || approvalPending || rejectionPending}
@@ -1213,8 +1332,8 @@ function ResearchMemoReview({
       </div>
 
       {memoryUpdateSummary ? (
-        <div className="mt-4 rounded-md bg-muted px-4 py-3 text-sm leading-6 text-muted-foreground">
-          <span className="font-medium text-foreground">Memory updates:</span>{" "}
+        <div className="mt-4 rounded-md bg-white px-4 py-3 text-sm leading-6 text-muted-foreground">
+          <span className="font-medium text-foreground">Project strategy updates:</span>{" "}
           {memoryUpdateSummary.assumption_ids.length} assumption
           {memoryUpdateSummary.assumption_ids.length === 1 ? "" : "s"},{" "}
           {memoryUpdateSummary.risk_ids.length} risk
@@ -1229,13 +1348,34 @@ function ResearchMemoReview({
         </div>
       ) : null}
 
-      <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <article className="min-w-0">
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-md bg-white px-3 py-2">
+          <div className="text-xs text-muted-foreground">Cited claims</div>
+          <div className="mt-1 text-sm font-semibold">{supportedClaims.length}</div>
+        </div>
+        <div className="rounded-md bg-white px-3 py-2">
+          <div className="text-xs text-muted-foreground">Sources</div>
+          <div className="mt-1 text-sm font-semibold">{citations.length}</div>
+        </div>
+        <div className="rounded-md bg-white px-3 py-2">
+          <div className="text-xs text-muted-foreground">Open questions</div>
+          <div className="mt-1 text-sm font-semibold">{displayUnsupported.length}</div>
+        </div>
+      </div>
+
+      <details className="mt-4 rounded-md bg-white p-3">
+        <summary className="cursor-pointer text-sm font-medium">Show memo text</summary>
+        <article className="mt-3 max-h-[28rem] min-w-0 overflow-auto border-t border-border pt-3">
           <MarkdownContent markdown={version.markdown_content} />
         </article>
+      </details>
 
-        <aside className="space-y-5">
-          <section className="border-b border-border pb-5">
+      <details className="mt-3 rounded-md bg-white p-3">
+        <summary className="cursor-pointer text-sm font-medium">
+          Show evidence and open questions
+        </summary>
+        <div className="mt-3 grid gap-5 border-t border-border pt-3 lg:grid-cols-3">
+          <section>
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
               <h4 className="text-sm font-semibold">Cited Claims</h4>
@@ -1276,7 +1416,7 @@ function ResearchMemoReview({
             </div>
           </section>
 
-          <section className="border-b border-border pb-5">
+          <section>
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-primary" aria-hidden="true" />
               <h4 className="text-sm font-semibold">Unsupported Claims</h4>
@@ -1330,8 +1470,8 @@ function ResearchMemoReview({
               )}
             </div>
           </section>
-        </aside>
-      </div>
+        </div>
+      </details>
     </div>
   );
 }
@@ -1362,71 +1502,86 @@ function SourceCandidateList({
       ) : (
         <div className="mt-3 space-y-3">
           {sources.map((source) => (
-            <div className="rounded-md border border-border p-3" key={source.id}>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-                      {formatLabel(source.source_type)}
-                    </span>
-                    <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-                      {formatLabel(source.status)}
-                    </span>
-                    <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-                      score {formatScore(source.relevance_score)}
-                    </span>
+            <details className="rounded-md border border-border p-3" key={source.id}>
+              <summary className="cursor-pointer list-none">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                        {formatLabel(source.source_type)}
+                      </span>
+                      <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                        {formatLabel(source.status)}
+                      </span>
+                      <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                        score {formatScore(source.relevance_score)}
+                      </span>
+                    </div>
+                    <h5 className="mt-2 line-clamp-2 text-sm font-semibold">
+                      {source.title ?? "Untitled source"}
+                    </h5>
                   </div>
-                  <h5 className="mt-2 text-sm font-semibold">
-                    {source.title ?? "Untitled source"}
-                  </h5>
+                  <div className="flex shrink-0 items-center gap-2">
+                  {source.status === "candidate" || source.status === "failed" ? (
+                    <>
+                      <Button
+                        disabled={busy}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onApprove(source.id);
+                        }}
+                        size="sm"
+                        type="button"
+                      >
+                        Approve
+                      </Button>
+                      <Button
+                        disabled={busy}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onReject(source.id);
+                        }}
+                        size="sm"
+                        type="button"
+                        variant="secondary"
+                      >
+                        Reject
+                      </Button>
+                    </>
+                  ) : null}
+                    <span className="text-xs font-medium text-primary">Show details</span>
+                  </div>
                 </div>
-                {source.status === "candidate" || source.status === "failed" ? (
-                  <div className="flex gap-2">
-                    <Button
-                      disabled={busy}
-                      onClick={() => onApprove(source.id)}
-                      size="sm"
-                      type="button"
-                    >
-                      Approve
-                    </Button>
-                    <Button
-                      disabled={busy}
-                      onClick={() => onReject(source.id)}
-                      size="sm"
-                      type="button"
-                      variant="secondary"
-                    >
-                      Reject
-                    </Button>
-                  </div>
+              </summary>
+              <div className="mt-3 border-t border-border pt-3">
+                <a
+                  className="block break-all text-xs text-primary hover:underline"
+                  href={source.url}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {source.url}
+                </a>
+                {source.snippet ? (
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    {source.snippet}
+                  </p>
+                ) : null}
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Why: {source.reason_selected}
+                </p>
+                {source.ingestion_error ? (
+                  <p className="mt-2 text-xs text-red-700">{source.ingestion_error}</p>
+                ) : null}
+                {source.ingested_at ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Evidence added {formatDateTime(source.ingested_at)}
+                  </p>
                 ) : null}
               </div>
-              <a
-                className="mt-2 block break-all text-xs text-primary hover:underline"
-                href={source.url}
-                rel="noreferrer"
-                target="_blank"
-              >
-                {source.url}
-              </a>
-              {source.snippet ? (
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  {source.snippet}
-                </p>
-              ) : null}
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                Why: {source.reason_selected}
-              </p>
-              {source.ingestion_error ? (
-                <p className="mt-2 text-xs text-red-700">{source.ingestion_error}</p>
-              ) : null}
-              {source.ingested_at ? (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Ingested {formatDateTime(source.ingested_at)}
-                </p>
-              ) : null}
-            </div>
+            </details>
           ))}
         </div>
       )}
@@ -1507,76 +1662,91 @@ function CompetitorCandidateItem({
 
   const canEdit = candidate.status === "candidate";
   return (
-    <div className="rounded-md border border-border p-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-              {formatLabel(candidate.category)}
-            </span>
-            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-              {formatLabel(candidate.status)}
-            </span>
-            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-              threat {candidate.threat_level}
-            </span>
-            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-              score {formatScore(candidate.relevance_score)}
-            </span>
+    <details className="rounded-md border border-border p-3">
+      <summary className="cursor-pointer list-none">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                {formatLabel(candidate.category)}
+              </span>
+              <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                {formatLabel(candidate.status)}
+              </span>
+              <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                threat {candidate.threat_level}
+              </span>
+              <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                score {formatScore(candidate.relevance_score)}
+              </span>
+            </div>
+            <h5 className="mt-2 line-clamp-2 text-sm font-semibold">{candidate.name}</h5>
           </div>
-          <h5 className="mt-2 text-sm font-semibold">{candidate.name}</h5>
+          <div className="flex shrink-0 items-center gap-2">
+          {candidate.status === "candidate" ? (
+            <>
+              <Button
+                disabled={busy}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onApprove(candidate.id);
+                }}
+                size="sm"
+                type="button"
+              >
+                Approve
+              </Button>
+              <Button
+                disabled={busy}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onReject(candidate.id);
+                }}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Reject
+              </Button>
+            </>
+          ) : null}
+            <span className="text-xs font-medium text-primary">Show details</span>
+          </div>
         </div>
-        {candidate.status === "candidate" ? (
-          <div className="flex gap-2">
-            <Button
-              disabled={busy}
-              onClick={() => onApprove(candidate.id)}
-              size="sm"
-              type="button"
-            >
-              Approve
-            </Button>
-            <Button
-              disabled={busy}
-              onClick={() => onReject(candidate.id)}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Reject
-            </Button>
-          </div>
+      </summary>
+
+      <div className="mt-3 border-t border-border pt-3">
+        {candidate.url ? (
+          <a
+            className="block break-all text-xs text-primary hover:underline"
+            href={candidate.url}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {candidate.url}
+          </a>
         ) : null}
-      </div>
-      {candidate.url ? (
-        <a
-          className="mt-2 block break-all text-xs text-primary hover:underline"
-          href={candidate.url}
-          rel="noreferrer"
-          target="_blank"
-        >
-          {candidate.url}
-        </a>
-      ) : null}
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">
-        {candidate.positioning ?? "No positioning note yet."}
-      </p>
-      <p className="mt-2 text-xs leading-5 text-muted-foreground">
-        Why: {candidate.why_it_matters}
-      </p>
-      {candidate.core_features.length > 0 ? (
-        <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          Features: {candidate.core_features.join(", ")}
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          {candidate.positioning ?? "No positioning note yet."}
         </p>
-      ) : null}
-      {candidate.evidence_source_id ? (
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          Evidence ingested{candidate.ingested_at ? ` ${formatDateTime(candidate.ingested_at)}` : ""}.
+          Why: {candidate.why_it_matters}
         </p>
-      ) : null}
-      {candidate.ingestion_error ? (
-        <p className="mt-2 text-xs text-red-700">{candidate.ingestion_error}</p>
-      ) : null}
+        {candidate.core_features.length > 0 ? (
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            Features: {candidate.core_features.join(", ")}
+          </p>
+        ) : null}
+        {candidate.evidence_source_id ? (
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            Evidence added{candidate.ingested_at ? ` ${formatDateTime(candidate.ingested_at)}` : ""}.
+          </p>
+        ) : null}
+        {candidate.ingestion_error ? (
+          <p className="mt-2 text-xs text-red-700">{candidate.ingestion_error}</p>
+        ) : null}
 
       {canEdit ? (
         <details className="mt-3 rounded-md bg-muted p-3">
@@ -1668,6 +1838,102 @@ function CompetitorCandidateItem({
           </div>
         </details>
       ) : null}
+      </div>
+    </details>
+  );
+}
+
+function LifecycleProgressCard({
+  overview,
+}: {
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const readinessKeys = new Set([
+    ...overview.idea_readiness.completed_items.map((item) => item.key),
+  ]);
+  const steps = [
+    {
+      key: "idea",
+      label: "Idea",
+      complete:
+        readinessKeys.has("rough_idea") ||
+        Boolean(overview.strategic_snapshot.current_thesis),
+    },
+    {
+      key: "research",
+      label: "Research",
+      complete:
+        overview.evidence_health.source_count > 0 ||
+        overview.strategic_snapshot.current_stage !== "draft_idea",
+    },
+    {
+      key: "evidence",
+      label: "Evidence",
+      complete: overview.evidence_health.source_count > 0,
+    },
+    {
+      key: "assumptions",
+      label: "Assumptions",
+      complete: overview.key_assumptions.length > 0,
+    },
+    {
+      key: "validation",
+      label: "Validation",
+      complete:
+        overview.strategic_snapshot.current_stage === "validation_plan_created" ||
+        overview.strategic_snapshot.current_stage === "experiment_running" ||
+        overview.strategic_snapshot.current_stage === "decision_ready" ||
+        overview.strategic_snapshot.current_stage === "proceeding",
+    },
+    {
+      key: "decision",
+      label: "Decision",
+      complete:
+        overview.strategic_snapshot.current_stage === "decision_ready" ||
+        overview.strategic_snapshot.current_stage === "proceeding" ||
+        overview.strategic_snapshot.current_stage === "paused" ||
+        overview.strategic_snapshot.current_stage === "killed",
+    },
+  ];
+
+  return (
+    <div className="rounded-lg border border-border bg-white p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Route className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h2 className="text-base font-semibold">Idea Stage</h2>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Current stage: {formatStage(overview.strategic_snapshot.current_stage)}.
+          </p>
+        </div>
+        <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+          {overview.idea_readiness.score}% ready
+        </span>
+      </div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {steps.map((step, index) => (
+          <div
+            className={
+              step.complete
+                ? "rounded-md border border-emerald-200 bg-emerald-50 px-3 py-3"
+                : "rounded-md border border-border bg-muted px-3 py-3"
+            }
+            key={step.key}
+          >
+            <div className="flex items-center gap-2">
+              {step.complete ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-700" aria-hidden="true" />
+              ) : (
+                <CircleAlert className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              )}
+              <span className="text-sm font-medium">{step.label}</span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">Step {index + 1}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1737,6 +2003,53 @@ function ReadinessList({
                 <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
               )}
               <span className="text-muted-foreground">{item.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TopRisksCard({
+  risks,
+}: {
+  risks: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>["key_risks"];
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-white p-5">
+      <div className="flex items-center gap-2">
+        <Beaker className="h-4 w-4 text-primary" aria-hidden="true" />
+        <h2 className="text-base font-semibold">Key Risks</h2>
+      </div>
+      {risks.length === 0 ? (
+        <p className="mt-4 text-sm leading-6 text-muted-foreground">
+          No risks recorded yet. Run research or extract assumptions to surface likely failure
+          modes and what to test next.
+        </p>
+      ) : (
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          {risks.slice(0, 3).map((risk) => (
+            <div key={risk.id} className="rounded-md border border-border p-4">
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                  {risk.severity} risk
+                </span>
+                <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                  {risk.likelihood} likelihood
+                </span>
+              </div>
+              <MarkdownContent
+                className="mt-3 line-clamp-4 space-y-2 text-sm leading-6 text-foreground"
+                markdown={risk.text}
+              />
+              <p className="mt-3 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                Recommended action
+              </p>
+              <MarkdownContent
+                className="mt-1 line-clamp-3 space-y-2 text-sm leading-6 text-muted-foreground"
+                markdown={risk.mitigation ?? "Turn this risk into a validation test."}
+              />
             </div>
           ))}
         </div>
@@ -1960,8 +2273,8 @@ function anchorForAction(action: NextBestAction): string | null {
 }
 
 function tabForActionType(actionType: string): ProjectTab {
-  if (actionType.includes("brief")) {
-    return "Brief";
+  if (actionType.includes("brief") || actionType.includes("research")) {
+    return "Research";
   }
   if (actionType.includes("competitor")) {
     return "Competitors";
@@ -1969,8 +2282,12 @@ function tabForActionType(actionType: string): ProjectTab {
   if (actionType.includes("assumption")) {
     return "Assumptions";
   }
-  if (actionType.includes("experiment") || actionType.includes("result")) {
-    return "Experiments";
+  if (
+    actionType.includes("experiment") ||
+    actionType.includes("validation") ||
+    actionType.includes("result")
+  ) {
+    return "Validation";
   }
   if (actionType.includes("decision")) {
     return "Decisions";
@@ -1983,6 +2300,12 @@ function tabForActionType(actionType: string): ProjectTab {
 
 function tabFromHash(hash: string): ProjectTab | null {
   const normalized = hash.replace("#", "").toLowerCase();
+  if (normalized === "brief") {
+    return "Research";
+  }
+  if (normalized === "experiments") {
+    return "Validation";
+  }
   const match = tabs.find((tab) => tab.toLowerCase() === normalized);
   return match ?? null;
 }

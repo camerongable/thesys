@@ -68,11 +68,16 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
 
   return (
     <section className="mt-6 space-y-6">
-      <div className="flex flex-col gap-3 border-b border-border pb-5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="rounded-lg border border-border bg-white p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-base font-semibold">Experiments</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Validation plans, success criteria, outcomes, and confidence deltas.
+            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+              Validation
+            </p>
+          <h2 className="mt-2 text-xl font-semibold tracking-normal">What should I test next?</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+            Turn the riskiest assumption into a concrete test with success criteria,
+            failure criteria, assets, result logging, and interpretation.
           </p>
         </div>
         <Button
@@ -83,6 +88,7 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
           {generateMutation.isPending ? "Generating..." : "Create Validation Plan"}
         </Button>
+        </div>
       </div>
 
       {error ? (
@@ -103,7 +109,7 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
         <div className="rounded-lg border border-border bg-white p-5">
           <div className="flex items-center gap-2">
             <Beaker className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h3 className="text-sm font-semibold">No validation experiments yet.</h3>
+              <h3 className="text-sm font-semibold">No validation experiments yet.</h3>
           </div>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             Experiments help you reduce uncertainty before building. Start by testing the
@@ -127,6 +133,11 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
           </Button>
         </div>
       ) : (
+        <>
+        <RecommendedValidationPlan
+          artifactTitle={validationPlanArtifact?.title ?? "Recommended Validation Plan"}
+          experiments={experiments}
+        />
         <div
           className={
             validationPlanVersion
@@ -161,15 +172,57 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
                   Version {validationPlanVersion.version}
                 </span>
               </div>
+              <details className="mt-4">
+                <summary className="cursor-pointer text-sm font-medium">
+                  Show full validation plan
+                </summary>
               <MarkdownContent
                 className="mt-4 space-y-4 text-sm leading-6 text-foreground"
                 markdown={validationPlanVersion.markdown_content}
               />
+              </details>
             </aside>
           ) : null}
         </div>
+        </>
       )}
     </section>
+  );
+}
+
+function RecommendedValidationPlan({
+  artifactTitle,
+  experiments,
+}: {
+  artifactTitle: string;
+  experiments: Experiment[];
+}) {
+  const recommended = experiments[0];
+  if (!recommended) {
+    return null;
+  }
+  return (
+    <div className="rounded-lg border border-border bg-white p-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+            Recommended Validation Plan
+          </p>
+          <h3 className="mt-2 text-lg font-semibold">{recommended.name}</h3>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            {artifactTitle}. Start with this test before building more product surface area.
+          </p>
+        </div>
+        <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+          {recommended.status}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <Block title="Test Type" value={recommended.method ?? "Manual validation"} />
+        <Block title="Success Criteria" value={recommended.success_criteria} />
+        <Block title="Failure Criteria" value={recommended.failure_threshold} />
+      </div>
+    </div>
   );
 }
 
@@ -208,40 +261,45 @@ function ExperimentCard({
         </span>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div>
-          <Block title="Plan" value={experiment.plan} />
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <Block title="Success Criteria" value={experiment.success_criteria} />
-            <Block title="Failure Threshold" value={experiment.failure_threshold} />
-          </div>
-          {experiment.results.length > 0 ? (
-            <div className="mt-4 space-y-3">
-              <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-                Results
-              </h4>
-              {experiment.results.map((result) => (
-                <div key={result.id} className="rounded-md border border-border p-3">
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-                      {result.outcome}
-                    </span>
-                    {result.confidence_delta ? (
-                      <span className="text-muted-foreground">
-                        delta {result.confidence_delta}
-                      </span>
-                    ) : null}
-                  </div>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    {result.result_summary}
-                  </p>
-                </div>
-              ))}
+      <details className="mt-4 rounded-md bg-muted/50 p-3">
+        <summary className="cursor-pointer text-sm font-medium">
+          Show test plan and log results
+        </summary>
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div>
+            <Block title="Plan" value={experiment.plan} />
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <Block title="Success Criteria" value={experiment.success_criteria} />
+              <Block title="Failure Threshold" value={experiment.failure_threshold} />
             </div>
-          ) : null}
+            {experiment.results.length > 0 ? (
+              <div className="mt-4 space-y-3">
+                <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                  Results
+                </h4>
+                {experiment.results.map((result) => (
+                  <div key={result.id} className="rounded-md border border-border p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                        {result.outcome}
+                      </span>
+                      {result.confidence_delta ? (
+                        <span className="text-muted-foreground">
+                          delta {result.confidence_delta}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                      {result.result_summary}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <ResultForm experiment={experiment} onSaved={onSaved} projectId={projectId} />
         </div>
-        <ResultForm experiment={experiment} onSaved={onSaved} projectId={projectId} />
-      </div>
+      </details>
     </article>
   );
 }
@@ -332,17 +390,99 @@ function ResultForm({
 }
 
 function Block({ title, value }: { title: string; value: string | null }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+
+  async function handleCopy() {
+    if (!value) {
+      return;
+    }
+    try {
+      await copyText(value);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+    window.setTimeout(() => setCopyState("idle"), 1600);
+  }
+
   return (
     <div>
-      <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-        {title}
-      </h4>
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+          {title}
+        </h4>
+        {value ? (
+          <button
+            className="text-xs font-medium text-primary hover:underline"
+            onClick={() => void handleCopy()}
+            type="button"
+          >
+            {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy"}
+          </button>
+        ) : null}
+      </div>
       <MarkdownContent
         className="mt-1 space-y-2 text-sm leading-6 text-muted-foreground"
         markdown={value ?? "Not recorded"}
       />
     </div>
   );
+}
+
+async function copyText(value: string) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {
+      // Fall back for embedded browsers that expose the Clipboard API but deny writes.
+    }
+  }
+
+  try {
+    copyWithClipboardEvent(value);
+    return;
+  } catch {
+    // Fall back to selecting a temporary textarea.
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, value.length);
+
+  try {
+    const copied = document.execCommand("copy");
+    if (!copied) {
+      throw new Error("Copy command failed");
+    }
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
+function copyWithClipboardEvent(value: string) {
+  let handled = false;
+  const onCopy = (event: ClipboardEvent) => {
+    event.clipboardData?.setData("text/plain", value);
+    event.preventDefault();
+    handled = true;
+  };
+
+  document.addEventListener("copy", onCopy);
+  try {
+    const copied = document.execCommand("copy");
+    if (!copied && !handled) {
+      throw new Error("Copy event failed");
+    }
+  } finally {
+    document.removeEventListener("copy", onCopy);
+  }
 }
 
 function formatLabel(value: string) {

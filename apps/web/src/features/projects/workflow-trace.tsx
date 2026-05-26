@@ -76,12 +76,27 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
     }));
 
   return (
-    <aside className="rounded-lg border border-border bg-white p-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <details className="rounded-lg border border-border bg-white p-4">
+      <summary className="cursor-pointer list-none">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold">Process Details</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {run?.workflow_type ? friendlyWorkflowLabel(run.workflow_type) : "Research is starting"}
+            </p>
+          </div>
+          {status ? (
+            <span className={statusClass(status)}>{formatLabel(status)}</span>
+          ) : null}
+        </div>
+      </summary>
+
+      <div className="mt-4 border-t border-border pt-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h3 className="text-sm font-semibold">Workflow Trace</h3>
+          <h3 className="text-sm font-semibold">Debug Details</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            {run?.workflow_type ? formatLabel(run.workflow_type) : "Pending workflow"}
+            {run?.workflow_type ? formatLabel(run.workflow_type) : "Pending process"}
           </p>
           {run ? (
             <p className="mt-1 text-xs text-muted-foreground">
@@ -156,7 +171,8 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
           {run.error}
         </p>
       ) : null}
-    </aside>
+      </div>
+    </details>
   );
 }
 
@@ -189,6 +205,20 @@ function statusClass(status: string) {
 
 function formatLabel(value: string) {
   return value.replaceAll("_", " ");
+}
+
+function friendlyWorkflowLabel(value: string) {
+  const labels: Record<string, string> = {
+    agentic_research: "Research memo generation",
+    competitor_analysis: "Competitor analysis",
+    evidence_retrieval: "Evidence search",
+    evidence_ingestion: "Evidence added",
+    opportunity_brief: "Brief generation",
+    structured_intake: "Idea structuring",
+    validation_plan: "Validation plan",
+    assumption_extraction: "Assumption review",
+  };
+  return labels[value] ?? formatLabel(value);
 }
 
 function formatCost(value: string | null) {

@@ -8,7 +8,7 @@ import {
   RefreshCw,
   ShieldAlert,
 } from "lucide-react";
-import { useState } from "react";
+import { ReactNode, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,10 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
   const [lastWorkflowRunId, setLastWorkflowRunId] = useState<string | null>(null);
   const [pendingPlanAssumptionId, setPendingPlanAssumptionId] = useState<string | null>(null);
   const [generatedPlan, setGeneratedPlan] = useState<GeneratedValidationPlan | null>(null);
+  const [filter, setFilter] = useState<
+    "all" | "high_risk" | "low_confidence" | "needs_validation" | "validated" | "invalidated"
+  >("all");
+  const [showAllAssumptions, setShowAllAssumptions] = useState(false);
   const assumptionsQuery = useQuery({
     queryKey: ["projects", projectId, "assumptions"],
     queryFn: () => listAssumptions(projectId),
@@ -118,14 +122,43 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
     statusMutation.error ??
     planMutation.error ??
     null;
+  const rankedAssumptions = [...assumptions].sort(compareAssumptions);
+  const riskiestAssumption = rankedAssumptions[0] ?? null;
+  const visibleAssumptions = rankedAssumptions.filter((assumption) => {
+    if (filter === "high_risk") {
+      return assumption.kill_risk || assumption.importance === "critical" || assumption.importance === "high";
+    }
+    if (filter === "low_confidence") {
+      return confidenceValue(assumption.confidence_score) < 0.4;
+    }
+    if (filter === "needs_validation") {
+      return assumption.status === "untested" || assumption.status === "testing";
+    }
+    if (filter === "validated") {
+      return assumption.status === "validated";
+    }
+    if (filter === "invalidated") {
+      return assumption.status === "invalidated";
+    }
+    return true;
+  });
+  const displayedAssumptions = showAllAssumptions
+    ? visibleAssumptions
+    : visibleAssumptions.slice(0, 5);
+  const hiddenAssumptionCount = visibleAssumptions.length - displayedAssumptions.length;
 
   return (
     <section className="mt-6 space-y-6">
-      <div className="flex flex-col gap-3 border-b border-border pb-5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="rounded-lg border border-border bg-white p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-base font-semibold">Assumptions and Risks</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Ranked by kill risk, importance, and uncertainty.
+            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+              Assumptions
+            </p>
+          <h2 className="mt-2 text-xl font-semibold tracking-normal">What must be true?</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+            Turn strategic uncertainty into operational validation priorities. Start with
+            the riskiest assumption, then work down the ranked list.
           </p>
         </div>
         <Button
@@ -136,6 +169,7 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
           {extractMutation.isPending ? "Extracting..." : "Extract Assumptions"}
         </Button>
+        </div>
       </div>
 
       {error ? (
@@ -154,14 +188,65 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
         runId={lastWorkflowRunId}
       />
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+      {riskiestAssumption ? (
         <div className="rounded-lg border border-border bg-white p-5">
-          <div className="flex items-center justify-between border-b border-border pb-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />
+                <h3 className="text-base font-semibold">Riskiest Assumption</h3>
+              </div>
+              <MarkdownContent
+                className="mt-3 max-w-3xl space-y-2 text-sm leading-6 text-foreground"
+                markdown={riskiestAssumption.text}
+              />
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                <Badge>{riskLabel(riskiestAssumption)}</Badge>
+                <Badge>{formatConfidence(riskiestAssumption.confidence_score)}</Badge>
+                <Badge>{evidenceStrength(riskiestAssumption.evidence_links.length)}</Badge>
+                <Badge>{formatLabel(riskiestAssumption.status)}</Badge>
+              </div>
+              {riskiestAssumption.recommended_test ? (
+                <MarkdownContent
+                  className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground"
+                  markdown={riskiestAssumption.recommended_test}
+                />
+              ) : null}
+            </div>
+            <Button
+              disabled={planMutation.isPending}
+              onClick={() => planMutation.mutate(riskiestAssumption.id)}
+              type="button"
+            >
+              <Beaker className="h-4 w-4" aria-hidden="true" />
+              Create Validation Plan
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid gap-5">
+        <div className="rounded-lg border border-border bg-white p-5">
+          <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />
               <h3 className="text-sm font-semibold">Ranked Assumptions</h3>
             </div>
-            <span className="text-sm text-muted-foreground">{assumptions.length} total</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                onChange={(event) => setFilter(event.target.value as typeof filter)}
+                value={filter}
+              >
+                <option value="all">All</option>
+                <option value="high_risk">High risk</option>
+                <option value="low_confidence">Low confidence</option>
+                <option value="needs_validation">Needs validation</option>
+                <option value="validated">Validated</option>
+                <option value="invalidated">Invalidated</option>
+              </select>
+              <span className="text-sm text-muted-foreground">{visibleAssumptions.length} shown</span>
+            </div>
           </div>
 
           {assumptionsQuery.isLoading ? (
@@ -187,8 +272,14 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
               </Button>
             </div>
           ) : (
-            <div className="mt-4 space-y-4">
-              {assumptions.map((assumption) => {
+            <div className="mt-4 space-y-3">
+              {visibleAssumptions.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                  No assumptions match this filter.
+                </div>
+              ) : null}
+
+              {displayedAssumptions.map((assumption, index) => {
                 const isGeneratingPlan =
                   planMutation.isPending && pendingPlanAssumptionId === assumption.id;
                 const generatedPlanForAssumption =
@@ -204,94 +295,127 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                   : experimentsByAssumption.get(assumption.id) ?? [];
 
                 return (
-                  <div key={assumption.id} className="rounded-md border border-border p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <article
+                    className="rounded-md border border-border p-4"
+                    key={assumption.id}
+                  >
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
                       <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
-                          <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-                            {assumption.importance}
+                        <div className="flex items-start gap-3">
+                          <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground">
+                            {index + 1}
                           </span>
-                          <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-                            uncertainty {assumption.uncertainty}
-                          </span>
-                          {assumption.kill_risk ? (
-                            <span className="rounded-md bg-red-50 px-2 py-1 text-red-700">
-                              kill risk
-                            </span>
-                          ) : null}
-                          {assumption.evidence_links.length > 0 ? (
-                            <span className="rounded-md bg-emerald-50 px-2 py-1 text-emerald-700">
-                              {assumption.evidence_links.length} evidence link
-                              {assumption.evidence_links.length === 1 ? "" : "s"}
-                            </span>
-                          ) : null}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                              Assumption
+                            </p>
+                            <MarkdownContent
+                              className="mt-2 max-w-3xl space-y-2 text-sm leading-6 text-foreground"
+                              markdown={assumption.text}
+                            />
+                            <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                              <Badge>{riskLabel(assumption)}</Badge>
+                              <Badge>{formatConfidence(assumption.confidence_score)}</Badge>
+                              <Badge>{evidenceStrength(assumption.evidence_links.length)}</Badge>
+                            </div>
+                            {assumption.recommended_test ? (
+                              <details className="mt-3">
+                                <summary className="cursor-pointer text-xs font-medium text-primary">
+                                  Show validation method
+                                </summary>
+                                <MarkdownContent
+                                  className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
+                                  markdown={assumption.recommended_test}
+                                />
+                              </details>
+                            ) : null}
+                          </div>
                         </div>
-                        <MarkdownContent
-                          className="mt-3 space-y-2 text-sm leading-6 text-foreground"
-                          markdown={assumption.text}
+                        <ValidationPlanSummary
+                          isFresh={Boolean(generatedPlanForAssumption)}
+                          onOpenExperiments={onOpenExperiments}
+                          experiments={planExperiments}
                         />
                       </div>
-                      <div className="shrink-0 text-sm text-muted-foreground">
-                        {formatConfidence(assumption.confidence_score)}
+
+                      <div className="rounded-md bg-muted/50 p-3">
+                        <label
+                          className="text-xs font-medium uppercase tracking-normal text-muted-foreground"
+                          htmlFor={`assumption-status-${assumption.id}`}
+                        >
+                          Status
+                        </label>
+                        <select
+                          className="mt-2 w-full rounded-md border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                          disabled={statusMutation.isPending}
+                          id={`assumption-status-${assumption.id}`}
+                          onChange={(event) =>
+                            statusMutation.mutate({
+                              assumption,
+                              status: event.target.value as Assumption["status"],
+                            })
+                          }
+                          value={assumption.status}
+                        >
+                          {["untested", "testing", "validated", "invalidated", "inconclusive"].map(
+                            (status) => (
+                              <option key={status} value={status}>
+                                {formatLabel(status)}
+                              </option>
+                            ),
+                          )}
+                        </select>
+                        <Button
+                          aria-busy={isGeneratingPlan}
+                          className="mt-3 w-full whitespace-nowrap"
+                          disabled={planMutation.isPending}
+                          onClick={() => planMutation.mutate(assumption.id)}
+                          type="button"
+                        >
+                          <Beaker className="h-4 w-4" aria-hidden="true" />
+                          {isGeneratingPlan ? "Generating..." : "Create Validation Plan"}
+                        </Button>
                       </div>
                     </div>
-
-                    {assumption.recommended_test ? (
-                      <MarkdownContent
-                        className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground"
-                        markdown={assumption.recommended_test}
-                      />
-                    ) : null}
-
-                    <ValidationPlanSummary
-                      isFresh={Boolean(generatedPlanForAssumption)}
-                      onOpenExperiments={onOpenExperiments}
-                      experiments={planExperiments}
-                    />
-
-                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <select
-                        className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary sm:w-56"
-                        disabled={statusMutation.isPending}
-                        onChange={(event) =>
-                          statusMutation.mutate({
-                            assumption,
-                            status: event.target.value as Assumption["status"],
-                          })
-                        }
-                        value={assumption.status}
-                      >
-                        {["untested", "testing", "validated", "invalidated", "inconclusive"].map(
-                          (status) => (
-                            <option key={status} value={status}>
-                              {formatLabel(status)}
-                            </option>
-                          ),
-                        )}
-                      </select>
-                      <Button
-                        aria-busy={isGeneratingPlan}
-                        disabled={planMutation.isPending}
-                        onClick={() => planMutation.mutate(assumption.id)}
-                        type="button"
-                      >
-                        <Beaker className="h-4 w-4" aria-hidden="true" />
-                        {isGeneratingPlan ? "Generating..." : "Create Validation Plan"}
-                      </Button>
-                    </div>
-                  </div>
+                  </article>
                 );
               })}
+              {hiddenAssumptionCount > 0 ? (
+                <Button
+                  onClick={() => setShowAllAssumptions(true)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Show {hiddenAssumptionCount} more assumptions
+                </Button>
+              ) : showAllAssumptions && visibleAssumptions.length > 5 ? (
+                <Button
+                  onClick={() => setShowAllAssumptions(false)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Show fewer assumptions
+                </Button>
+              ) : null}
             </div>
           )}
         </div>
 
-        <aside className="rounded-lg border border-border bg-white p-5">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h3 className="text-sm font-semibold">Risks</h3>
-          </div>
-          <div className="mt-4 space-y-3">
+        <details className="rounded-lg border border-border bg-white p-5">
+          <summary className="cursor-pointer list-none">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-primary" aria-hidden="true" />
+                <h3 className="text-sm font-semibold">Risks</h3>
+              </div>
+              <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                {risks.length}
+              </span>
+            </div>
+          </summary>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {risksQuery.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading risks...</p>
             ) : risks.length === 0 ? (
@@ -326,7 +450,7 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
               ))
             )}
           </div>
-        </aside>
+        </details>
       </div>
     </section>
   );
@@ -350,8 +474,8 @@ function ValidationPlanSummary({
 
   return (
     <div className="mt-4 border-l-2 border-emerald-600 bg-emerald-50 px-4 py-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+      <details>
+        <summary className="cursor-pointer list-none">
           <div className="flex items-center gap-2 text-sm font-medium text-emerald-900">
             <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
             {isFresh ? "Validation plan created" : "Validation plan available"}
@@ -360,25 +484,25 @@ function ValidationPlanSummary({
             {experiments.length} experiment{experiments.length === 1 ? "" : "s"}{" "}
             {isFresh ? "written" : "linked"} for this assumption.
           </p>
-        </div>
+        </summary>
         {onOpenExperiments ? (
-          <Button onClick={onOpenExperiments} size="sm" type="button" variant="secondary">
-            View in Experiments
+          <Button className="mt-3" onClick={onOpenExperiments} size="sm" type="button" variant="secondary">
+            View in Validation
             <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </Button>
         ) : null}
-      </div>
 
-      <div className="mt-3 space-y-3">
-        {shownExperiments.map((experiment) => (
-          <GeneratedExperimentSummary experiment={experiment} key={experiment.id} />
-        ))}
-        {hiddenCount > 0 ? (
-          <p className="border-t border-emerald-200 pt-3 text-sm text-emerald-950/80">
-            {hiddenCount} more experiment{hiddenCount === 1 ? "" : "s"} available in Experiments.
-          </p>
-        ) : null}
-      </div>
+        <div className="mt-3 space-y-3">
+          {shownExperiments.map((experiment) => (
+            <GeneratedExperimentSummary experiment={experiment} key={experiment.id} />
+          ))}
+          {hiddenCount > 0 ? (
+            <p className="border-t border-emerald-200 pt-3 text-sm text-emerald-950/80">
+              {hiddenCount} more experiment{hiddenCount === 1 ? "" : "s"} available in Validation.
+            </p>
+          ) : null}
+        </div>
+      </details>
     </div>
   );
 }
@@ -424,7 +548,7 @@ function GeneratedExperimentBlock({ title, value }: { title: string; value: stri
 
 function formatConfidence(value: string | null) {
   if (value === null) {
-    return "No confidence";
+    return "Confidence unknown";
   }
   const parsed = Number(value);
   if (Number.isNaN(parsed)) {
@@ -435,4 +559,54 @@ function formatConfidence(value: string | null) {
 
 function formatLabel(value: string) {
   return value.replaceAll("_", " ");
+}
+
+function Badge({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+      {children}
+    </span>
+  );
+}
+
+function compareAssumptions(a: Assumption, b: Assumption) {
+  const score = (assumption: Assumption) =>
+    (assumption.kill_risk ? 100 : 0) +
+    importanceScore(assumption.importance) +
+    uncertaintyScore(assumption.uncertainty) -
+    confidenceValue(assumption.confidence_score) * 10;
+  return score(b) - score(a);
+}
+
+function importanceScore(value: Assumption["importance"]) {
+  return { critical: 40, high: 30, medium: 15, low: 5 }[value];
+}
+
+function uncertaintyScore(value: Assumption["uncertainty"]) {
+  return { high: 25, medium: 12, low: 3 }[value];
+}
+
+function confidenceValue(value: string | null) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function riskLabel(assumption: Assumption) {
+  if (assumption.kill_risk || assumption.importance === "critical") {
+    return "High risk";
+  }
+  if (assumption.importance === "high" || assumption.uncertainty === "high") {
+    return "Medium risk";
+  }
+  return "Lower risk";
+}
+
+function evidenceStrength(linkCount: number) {
+  if (linkCount >= 3) {
+    return "Evidence strong";
+  }
+  if (linkCount >= 1) {
+    return "Evidence partial";
+  }
+  return "Evidence weak";
 }

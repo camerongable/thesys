@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   createDecision,
   DecisionType,
+  getProjectOverview,
   listArtifacts,
   listAssumptions,
   listDecisions,
@@ -63,6 +64,10 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
     queryKey: ["projects", projectId, "experiments"],
     queryFn: () => listExperiments(projectId),
   });
+  const overviewQuery = useQuery({
+    queryKey: ["projects", projectId, "overview", "decision-recommendation"],
+    queryFn: () => getProjectOverview(projectId),
+  });
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -106,20 +111,65 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
     createMutation.error ??
     null;
 
+  function openDecisionForm() {
+    const panel = document.getElementById("record-decision-panel") as HTMLDetailsElement | null;
+    if (panel) {
+      panel.open = true;
+    }
+    window.setTimeout(() => document.getElementById("decision-title")?.focus(), 0);
+  }
+
   return (
     <section className="mt-6 space-y-6">
+      <div className="rounded-lg border border-border bg-white p-5">
+        <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+          Decisions
+        </p>
+        <h2 className="mt-2 text-xl font-semibold tracking-normal">
+          What did we decide, and why?
+        </h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+          Record build, pivot, pause, kill, or continue-research decisions with rationale,
+          supporting evidence, and a revisit trigger.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-border bg-white p-5">
+        <div className="flex items-center gap-2">
+          <ScrollText className="h-4 w-4 text-primary" aria-hidden="true" />
+          <h3 className="text-base font-semibold">Current Decision Recommendation</h3>
+        </div>
+        <p className="mt-3 text-sm leading-6 text-foreground">
+          {overviewQuery.data?.current_recommendation.recommendation ??
+            "Loading current recommendation..."}
+        </p>
+        {overviewQuery.data?.current_recommendation.rationale ? (
+          <MarkdownContent
+            className="mt-2 max-w-3xl space-y-2 text-sm leading-6 text-muted-foreground"
+            markdown={overviewQuery.data.current_recommendation.rationale}
+          />
+        ) : null}
+      </div>
+
       <div className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
-        <form
-          className="rounded-lg border border-border bg-white p-5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            createMutation.mutate();
-          }}
+        <details
+          className="self-start rounded-lg border border-border bg-white p-5"
+          id="record-decision-panel"
         >
-          <div className="flex items-center gap-2">
-            <Plus className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Record Decision</h2>
-          </div>
+          <summary className="cursor-pointer list-none">
+            <div className="flex items-center gap-2">
+              <Plus className="h-4 w-4 text-primary" aria-hidden="true" />
+              <h2 className="text-base font-semibold">Record Decision</h2>
+            </div>
+          </summary>
+
+          <form
+            className="mt-5 border-t border-border pt-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              createMutation.mutate();
+            }}
+          >
 
           <label className="mt-4 block">
             <span className="text-sm font-medium">Type</span>
@@ -213,9 +263,10 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
             <ScrollText className="h-4 w-4" aria-hidden="true" />
             {createMutation.isPending ? "Recording..." : "Record Decision"}
           </Button>
-        </form>
+          </form>
+        </details>
 
-        <div className="rounded-lg border border-border bg-white p-5">
+        <div className="self-start rounded-lg border border-border bg-white p-5">
           <div className="flex items-center justify-between border-b border-border pb-4">
             <div className="flex items-center gap-2">
               <ScrollText className="h-4 w-4 text-primary" aria-hidden="true" />
@@ -241,7 +292,7 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
               </p>
               <Button
                 className="mt-3"
-                onClick={() => document.getElementById("decision-title")?.focus()}
+                onClick={openDecisionForm}
                 size="sm"
                 type="button"
                 variant="secondary"
@@ -253,28 +304,30 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
           ) : (
             <div className="mt-4 space-y-4">
               {decisions.map((decision) => (
-                <article key={decision.id} className="rounded-md border border-border p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-sm font-semibold">{decision.title}</h3>
-                        <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-                          {formatLabel(decision.decision_type)}
-                        </span>
+                <details key={decision.id} className="rounded-md border border-border p-4">
+                  <summary className="cursor-pointer list-none">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-sm font-semibold">{decision.title}</h3>
+                          <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                            {formatLabel(decision.decision_type)}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {new Date(decision.created_at).toLocaleDateString()}
+                          {decision.review_date ? ` · review ${decision.review_date}` : ""}
+                        </p>
                       </div>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        {new Date(decision.created_at).toLocaleDateString()}
-                        {decision.review_date ? ` · review ${decision.review_date}` : ""}
-                      </p>
+                      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                        <Link2 className="h-3.5 w-3.5" aria-hidden="true" />
+                        {decision.links.length}
+                      </span>
                     </div>
-                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                      <Link2 className="h-3.5 w-3.5" aria-hidden="true" />
-                      {decision.links.length}
-                    </span>
-                  </div>
+                  </summary>
                   {decision.rationale ? (
                     <MarkdownContent
-                      className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground"
+                      className="mt-3 border-t border-border pt-3 text-sm leading-6 text-muted-foreground"
                       markdown={decision.rationale}
                     />
                   ) : null}
@@ -298,7 +351,7 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
                       ))}
                     </div>
                   ) : null}
-                </article>
+                </details>
               ))}
             </div>
           )}

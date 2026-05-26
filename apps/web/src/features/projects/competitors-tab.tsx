@@ -114,8 +114,41 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
 
   return (
     <section className="mt-6 space-y-6">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-        <div className="rounded-lg border border-border bg-white p-5">
+      <div className="rounded-lg border border-border bg-white p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+              Competitors
+            </p>
+            <h2 className="mt-2 text-xl font-semibold tracking-normal">
+              Who are we up against?
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Scan competitors, substitutes, and adjacent alternatives by category. The goal
+              is to identify crowded areas and the strongest wedge.
+            </p>
+          </div>
+          <Button
+            className="w-full whitespace-nowrap sm:w-64"
+            disabled={analyzeMutation.isPending}
+            onClick={() => analyzeMutation.mutate()}
+            type="button"
+          >
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            {analyzeMutation.isPending ? "Analyzing..." : "Analyze Competitors"}
+          </Button>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-4">
+          <Metric label="Competitors" value={competitors.length} />
+          <Metric label="Sources" value={analyzeMutation.data?.ingested_source_count ?? 0} />
+          <Metric label="Cited claims" value={claims.length} />
+          <Metric label="Unsupported" value={unsupportedClaims.length} />
+        </div>
+      </div>
+
+      <details className="rounded-lg border border-border bg-white p-5">
+        <summary className="cursor-pointer text-sm font-semibold">Add competitor manually</summary>
+        <div className="mt-5 border-t border-border pt-5">
           <div className="flex items-center gap-2">
             <Plus className="h-4 w-4 text-primary" aria-hidden="true" />
             <h2 className="text-base font-semibold">Add Competitor</h2>
@@ -162,38 +195,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
             {createMutation.isPending ? "Adding..." : "Add"}
           </Button>
         </div>
-
-        <div className="rounded-lg border border-border bg-white p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <Map className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h2 className="text-base font-semibold">Landscape</h2>
-              </div>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                {currentVersion
-                  ? `Current artifact version ${currentVersion.version}.`
-                  : "No competitor landscape generated yet."}
-              </p>
-            </div>
-            <Button
-              disabled={analyzeMutation.isPending}
-              onClick={() => analyzeMutation.mutate()}
-              type="button"
-            >
-              <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              {analyzeMutation.isPending ? "Analyzing..." : "Analyze Competitors"}
-            </Button>
-          </div>
-          {analyzeMutation.data ? (
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              <Metric label="Sources" value={analyzeMutation.data.ingested_source_count} />
-              <Metric label="Retrieved" value={analyzeMutation.data.retrieval_result_count} />
-              <Metric label="Profiles" value={analyzeMutation.data.competitors.length} />
-            </div>
-          ) : null}
-        </div>
-      </div>
+      </details>
 
       {error ? (
         <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -247,20 +249,23 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
               </Button>
             </div>
           ) : (
-            <div className="mt-4 grid gap-4">
-              {competitors.map((competitor) => (
-                <CompetitorProfile key={competitor.id} competitor={competitor} />
-              ))}
-            </div>
+            <CompetitorGroups competitors={competitors} />
           )}
         </div>
 
         <aside className="space-y-5">
-          <div className="rounded-lg border border-border bg-white p-5">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h3 className="text-sm font-semibold">Cited Claims</h3>
-            </div>
+          <details className="rounded-lg border border-border bg-white p-5">
+            <summary className="cursor-pointer list-none">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
+                  <h3 className="text-sm font-semibold">Cited Claims</h3>
+                </div>
+                <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                  {claims.length}
+                </span>
+              </div>
+            </summary>
             <div className="mt-4 space-y-3">
               {claims.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No claims recorded.</p>
@@ -284,13 +289,20 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
                 ))
               )}
             </div>
-          </div>
+          </details>
 
-          <div className="rounded-lg border border-border bg-white p-5">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h3 className="text-sm font-semibold">Unsupported Claims</h3>
-            </div>
+          <details className="rounded-lg border border-border bg-white p-5">
+            <summary className="cursor-pointer list-none">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-primary" aria-hidden="true" />
+                  <h3 className="text-sm font-semibold">Unsupported Claims</h3>
+                </div>
+                <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                  {unsupportedClaims.length}
+                </span>
+              </div>
+            </summary>
             <div className="mt-4 space-y-2">
               {unsupportedClaims.length === 0 ? (
                 <p className="text-sm text-muted-foreground">None recorded.</p>
@@ -304,17 +316,18 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
                 ))
               )}
             </div>
-          </div>
+          </details>
 
           {currentVersion ? (
             <div className="rounded-lg border border-border bg-white p-5">
-              <h3 className="text-sm font-semibold">Artifact</h3>
-              <div className="mt-4 max-h-96 overflow-auto rounded-md bg-muted p-3">
+              <h3 className="text-sm font-semibold">Full Landscape Details</h3>
+              <details className="mt-4 rounded-md bg-muted p-3">
+                <summary className="cursor-pointer text-sm font-medium">Show generated analysis</summary>
                 <MarkdownContent
-                  className="space-y-3 text-sm leading-6 text-foreground"
+                  className="mt-3 max-h-96 space-y-3 overflow-auto text-sm leading-6 text-foreground"
                   markdown={currentVersion.markdown_content}
                 />
-              </div>
+              </details>
             </div>
           ) : null}
         </aside>
@@ -323,65 +336,104 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
   );
 }
 
+function CompetitorGroups({ competitors }: { competitors: Competitor[] }) {
+  const groups: Array<[string, Competitor[]]> = [
+    ["Direct Competitors", competitors.filter((item) => item.category === "direct")],
+    ["Indirect / Adjacent Competitors", competitors.filter((item) => item.category === "adjacent")],
+    ["Substitute Behaviors", competitors.filter((item) => item.category === "substitute" || item.category === "manual_alternative")],
+    ["Incumbent Platforms", competitors.filter((item) => item.category === "incumbent")],
+    ["Unknown / Needs Review", competitors.filter((item) => item.category === "unknown")],
+  ];
+  return (
+    <div className="mt-4 space-y-5">
+      {groups
+        .filter(([, items]) => items.length > 0)
+        .map(([label, items]) => (
+          <section key={label}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">{label}</h3>
+              <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                {items.length}
+              </span>
+            </div>
+            <div className="mt-3 grid gap-3">
+              {items.map((competitor) => (
+                <CompetitorProfile key={competitor.id} competitor={competitor} />
+              ))}
+            </div>
+          </section>
+        ))}
+    </div>
+  );
+}
+
 function CompetitorProfile({ competitor }: { competitor: Competitor }) {
   return (
-    <div className="rounded-md border border-border p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold">{competitor.name}</h3>
-            <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-              {formatLabel(competitor.category)}
-            </span>
-            <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-              threat {competitor.threat_level}
-            </span>
+    <details className="rounded-md border border-border p-4">
+      <summary className="cursor-pointer list-none">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold">{competitor.name}</h3>
+              <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                {formatLabel(competitor.category)}
+              </span>
+              <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                threat {competitor.threat_level}
+              </span>
+            </div>
           </div>
-          {competitor.url ? (
-            <a
-              className="mt-2 inline-flex max-w-full items-center gap-1 truncate text-sm text-primary hover:underline"
-              href={competitor.url}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">{competitor.url}</span>
-            </a>
-          ) : null}
-        </div>
-        <span className="shrink-0 text-xs text-muted-foreground">
-          {competitor.evidence_links.length} source
-          {competitor.evidence_links.length === 1 ? "" : "s"}
-        </span>
-      </div>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <ProfileBlock title="Positioning" value={competitor.positioning} />
-        <ProfileBlock title="Pricing" value={competitor.pricing_summary} />
-        <ProfileBlock title="Strengths" value={competitor.strengths} />
-        <ProfileBlock title="Weaknesses" value={competitor.weaknesses} />
-      </div>
-
-      {competitor.key_features.length > 0 ? (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {competitor.key_features.map((feature) => (
-            <span
-              className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
-              key={feature}
-            >
-              {feature}
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              {competitor.evidence_links.length} source
+              {competitor.evidence_links.length === 1 ? "" : "s"}
             </span>
-          ))}
+            <span className="text-xs font-medium text-primary">Show profile</span>
+          </div>
         </div>
-      ) : null}
+      </summary>
 
-      {competitor.differentiation_notes ? (
-        <MarkdownContent
-          className="mt-4 space-y-2 text-sm leading-6 text-muted-foreground"
-          markdown={competitor.differentiation_notes}
-        />
-      ) : null}
-    </div>
+      <div className="mt-4 border-t border-border pt-4">
+        {competitor.url ? (
+          <a
+            className="inline-flex max-w-full items-center gap-1 truncate text-sm text-primary hover:underline"
+            href={competitor.url}
+            rel="noreferrer"
+            target="_blank"
+          >
+            <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{competitor.url}</span>
+          </a>
+        ) : null}
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <ProfileBlock title="Positioning" value={competitor.positioning} />
+          <ProfileBlock title="Pricing" value={competitor.pricing_summary} />
+          <ProfileBlock title="Strengths" value={competitor.strengths} />
+          <ProfileBlock title="Weaknesses" value={competitor.weaknesses} />
+        </div>
+
+        {competitor.key_features.length > 0 ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {competitor.key_features.map((feature) => (
+              <span
+                className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
+                key={feature}
+              >
+                {feature}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {competitor.differentiation_notes ? (
+          <MarkdownContent
+            className="mt-4 space-y-2 text-sm leading-6 text-muted-foreground"
+            markdown={competitor.differentiation_notes}
+          />
+        ) : null}
+      </div>
+    </details>
   );
 }
 

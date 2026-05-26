@@ -32,19 +32,8 @@ export function ProjectList() {
 
   return (
     <main className="min-h-screen">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl">
-        <aside className="hidden w-64 border-r border-border bg-white px-5 py-6 md:block">
-          <div className="text-sm font-semibold">Thesys</div>
-          <nav className="mt-8 space-y-1 text-sm text-muted-foreground">
-            <Link className="block rounded-md bg-muted px-3 py-2 text-foreground" href="/projects">
-              Projects
-            </Link>
-            <span className="block rounded-md px-3 py-2 text-muted-foreground">Evidence</span>
-            <span className="block rounded-md px-3 py-2 text-muted-foreground">Settings</span>
-          </nav>
-        </aside>
-
-        <section className="flex-1 px-5 py-6 md:px-8">
+      <div className="mx-auto min-h-screen w-full max-w-6xl px-5 py-6 md:px-8">
+        <section>
           <header className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm text-muted-foreground">
