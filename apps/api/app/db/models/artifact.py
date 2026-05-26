@@ -210,6 +210,43 @@ class Assumption(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="untested")
     recommended_test: Mapped[str | None] = mapped_column(Text)
 
+    evidence_links: Mapped[list["AssumptionEvidenceLink"]] = relationship(
+        back_populates="assumption",
+        cascade="all, delete-orphan",
+        order_by="AssumptionEvidenceLink.created_at",
+    )
+
+
+class AssumptionEvidenceLink(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "assumption_evidence_links"
+
+    assumption_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("assumptions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    evidence_source_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("evidence_sources.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    evidence_chunk_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("evidence_chunks.id", ondelete="SET NULL"),
+        index=True,
+    )
+    relevance_score: Mapped[Decimal | None] = mapped_column(Numeric)
+    quote: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    assumption: Mapped[Assumption] = relationship(back_populates="evidence_links")
+
 
 class Risk(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "risks"

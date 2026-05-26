@@ -133,6 +133,13 @@ def test_generate_validation_plan_and_log_result_updates_confidence(
     assert plan_body["used_stub"] is True
     assert plan_body["artifact"]["artifact_type"] == "validation_plan"
     assert plan_body["artifact"]["current_version"]["version"] == 1
+    plan_structured = plan_body["artifact"]["current_version"]["structured_content"]["plans"][0]
+    assert plan_structured["screener_questions"]
+    assert plan_structured["landing_page_copy"]
+    assert plan_structured["outreach_message"]
+    assert plan_structured["note_taking_template"]
+    assert plan_structured["result_interpretation_rubric"]
+    assert "Landing Page Copy" in plan_body["artifact"]["current_version"]["markdown_content"]
     assert len(plan_body["experiments"]) == 1
     experiment = plan_body["experiments"][0]
     assert experiment["assumption_id"] == assumption["id"]

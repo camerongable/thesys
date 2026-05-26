@@ -298,6 +298,15 @@ export type Assumption = {
   recommended_test: string | null;
   created_at: string;
   updated_at: string;
+  evidence_links: {
+    id: string;
+    assumption_id: string;
+    evidence_source_id: string;
+    evidence_chunk_id: string | null;
+    relevance_score: string | null;
+    quote: string | null;
+    created_at: string;
+  }[];
 };
 
 export type Risk = {

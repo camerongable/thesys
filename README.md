@@ -336,3 +336,24 @@ curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<s
 curl http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/competitor-candidates
 curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/competitor-candidates/<candidate_id>/approve
 ```
+
+## V1 Sprints 5-8 Research Memo and Validation Assets
+
+After approving sources and competitors, run the agentic RAG research workflow
+from the Overview page. It writes an upgraded `research_memo` with cited claims,
+unsupported claims, evidence gaps, risk and assumption drafts, and a memory
+update preview. The memo pauses at human review. Approving it writes the
+research-derived assumptions and risks into project memory and links assumptions
+to cited evidence.
+
+```bash
+curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/agentic-rag/run
+curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/agentic-rag/approve
+curl http://localhost:8000/api/projects/<project_id>/assumptions
+```
+
+The Assumptions tab shows evidence-link counts for research-derived
+assumptions. Use `Create Validation Plan` on a high-risk assumption to generate
+manual validation assets: screener questions, interview script, survey
+questions, landing page copy, outreach message, success criteria, note-taking
+template, and result interpretation rubric.

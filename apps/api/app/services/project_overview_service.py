@@ -574,6 +574,12 @@ def _artifact_updates(
             "The project now has experiments tied to assumptions.",
             "This turns strategic uncertainty into concrete user-facing tests.",
         ),
+        "research_memo": (
+            "Research memo completed",
+            "The research sprint produced a cited strategic memo.",
+            "This connects discovered evidence, competitor pressure, assumptions, and "
+            "recommended validation actions in one reviewable artifact.",
+        ),
     }
     updates: list[StrategicUpdateRead] = []
     for artifact in artifacts:

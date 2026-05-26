@@ -780,6 +780,11 @@ def _fake_validation_plan_set(subject: str) -> dict[str, Any]:
                 "target_respondent": (
                     "A target buyer or user who recently experienced the workflow pain."
                 ),
+                "screener_questions": [
+                    "Are you in the suspected initial customer segment?",
+                    "Have you handled this workflow in the last 30 days?",
+                    "Did you use a tool, person, spreadsheet, or manual workaround?",
+                ],
                 "steps": [
                     "Recruit five target respondents from the suspected initial segment.",
                     "Ask each respondent to reconstruct their most recent workflow example.",
@@ -798,6 +803,25 @@ def _fake_validation_plan_set(subject: str) -> dict[str, Any]:
                     "How painful is the current workaround?",
                     "What budget exists for solving it?",
                 ],
+                "landing_page_copy": (
+                    "A focused workflow for teams who are tired of stitching together "
+                    "manual workarounds. Join the pilot if this problem costs you time "
+                    "every week."
+                ),
+                "outreach_message": (
+                    "I am validating a focused workflow for people who recently handled "
+                    "this problem. Could I ask you 20 minutes of questions about how you "
+                    "solve it today?"
+                ),
+                "note_taking_template": (
+                    "Recent example:\nCurrent workaround:\nConsequence:\nBudget or pilot "
+                    "signal:\nObjections:\nNext step:"
+                ),
+                "result_interpretation_rubric": (
+                    "Proceed if respondents report recent repeated pain and concrete pilot "
+                    "or payment interest. Pivot if pain exists but the workflow or segment "
+                    "is wrong. Pause if pain is rare or already solved well enough."
+                ),
                 "success_criteria": (
                     "At least three of five respondents describe recent, repeated pain and "
                     "two provide a concrete willingness-to-pay or pilot signal."
@@ -816,9 +840,16 @@ def _fake_validation_plan_set(subject: str) -> dict[str, Any]:
                 "assumption_text": "The target segment has urgent pain.",
                 "method": "customer_interview",
                 "target_respondent": "Target users in the suspected initial segment.",
+                "screener_questions": ["Have you experienced this problem recently?"],
                 "steps": ["Recruit respondents.", "Run interviews.", "Score results."],
                 "interview_questions": ["When did this problem last happen?"],
                 "survey_questions": ["How urgent is this problem?"],
+                "landing_page_copy": "Join the validation pilot for this focused workflow.",
+                "outreach_message": "Could I ask you about how you solve this problem today?",
+                "note_taking_template": "Recent example:\nCurrent workaround:\nSignal:",
+                "result_interpretation_rubric": (
+                    "Proceed with strong recent pain; pivot or pause if the signal is weak."
+                ),
                 "success_criteria": "Most respondents report recent pain.",
                 "failure_threshold": "Respondents do not report recent pain.",
                 "expected_signal_strength": "medium",

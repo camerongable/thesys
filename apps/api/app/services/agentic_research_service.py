@@ -28,6 +28,7 @@ from app.db.models import (
     Artifact,
     ArtifactVersion,
     Assumption,
+    AssumptionEvidenceLink,
     Claim,
     ClaimEvidenceLink,
     Competitor,
@@ -37,10 +38,16 @@ from app.db.models import (
     EvidenceSource,
     Project,
     ResearchSprint,
+    Risk,
 )
 from app.schemas.artifacts import Citation, ClaimDraft
 from app.schemas.evidence import EvidenceRetrievalResultRead, EvidenceRetrieveCreate
-from app.schemas.research import AgenticResearchMemoDraft, ResearchFindingDraft
+from app.schemas.research import (
+    AgenticResearchMemoDraft,
+    ResearchAssumptionDraft,
+    ResearchFindingDraft,
+    ResearchRiskDraft,
+)
 from app.services import ai_run_service, project_service, retrieval_service
 
 
@@ -414,11 +421,14 @@ def approve_research_memo(
     )
     started = perf_counter()
 
+    project = project_service.get_project(db, auth, project_id)
+    memory_summary = _write_approved_memory_updates(db, auth, project, sprint, version)
     content = dict(version.structured_content)
     content["memory_update_status"] = "approved"
     content["memory_update_approved_at"] = datetime.now(UTC).isoformat()
     content["memory_update_approved_by"] = str(auth.user_id)
-    content["memory_updates_written"] = False
+    content["memory_updates_written"] = True
+    content["memory_update_summary"] = memory_summary
     version.structured_content = content
     flag_modified(version, "structured_content")
 
@@ -432,7 +442,8 @@ def approve_research_memo(
             "status": "approved",
             "research_sprint_status": "completed",
             "memory_update_status": "approved",
-            "memory_updates_written": False,
+            "memory_updates_written": True,
+            "memory_update_summary": memory_summary,
         },
         latency_ms=int((perf_counter() - started) * 1000),
         tokens=None,
@@ -456,6 +467,233 @@ def approve_research_memo(
         sprint=sprint,
         artifact=artifact,
         version=version,
+    )
+
+
+def _write_approved_memory_updates(
+    db: Session,
+    auth: AuthContext,
+    project: Project,
+    sprint: ResearchSprint,
+    version: ArtifactVersion,
+) -> dict[str, Any]:
+    content = dict(version.structured_content or {})
+    memo = AgenticResearchMemoDraft.model_validate(content.get("memo") or {})
+    assumptions = _upsert_research_assumptions(db, auth, project, memo)
+    risks = _upsert_research_risks(db, auth, project, memo)
+    _link_assumptions_to_research_evidence(db, assumptions, memo)
+    _refresh_project_confidence_from_research(project, assumptions)
+    db.flush()
+    return {
+        "research_sprint_id": str(sprint.id),
+        "assumption_ids": [str(assumption.id) for assumption in assumptions],
+        "risk_ids": [str(risk.id) for risk in risks],
+        "recommended_validation_actions": memo.recommended_validation_actions,
+        "first_validation_target_assumption_id": str(assumptions[0].id)
+        if assumptions
+        else None,
+    }
+
+
+def _upsert_research_assumptions(
+    db: Session,
+    auth: AuthContext,
+    project: Project,
+    memo: AgenticResearchMemoDraft,
+) -> list[Assumption]:
+    drafts = memo.riskiest_assumptions or _fallback_research_assumptions(memo)
+    existing = {
+        _normalize_key(assumption.text): assumption
+        for assumption in db.scalars(
+            select(Assumption).where(
+                Assumption.workspace_id == auth.workspace_id,
+                Assumption.project_id == project.id,
+            )
+        )
+    }
+    assumptions: list[Assumption] = []
+    for draft in drafts:
+        key = _normalize_key(draft.text)
+        confidence = _assumption_confidence_from_research(draft)
+        assumption = existing.get(key)
+        if assumption is None:
+            assumption = Assumption(
+                workspace_id=auth.workspace_id,
+                project_id=project.id,
+                text=draft.text.strip(),
+                category=_optional_truncate(draft.category, 100),
+                importance=draft.importance,
+                uncertainty=draft.uncertainty,
+                kill_risk=draft.kill_risk,
+                confidence_score=confidence,
+                status="untested",
+                recommended_test=draft.recommended_test
+                or _first_recommended_validation_action(memo),
+            )
+            db.add(assumption)
+            db.flush()
+            existing[key] = assumption
+        else:
+            assumption.category = _optional_truncate(draft.category, 100)
+            assumption.importance = draft.importance
+            assumption.uncertainty = draft.uncertainty
+            assumption.kill_risk = draft.kill_risk
+            assumption.confidence_score = confidence
+            assumption.recommended_test = (
+                draft.recommended_test
+                or assumption.recommended_test
+                or _first_recommended_validation_action(memo)
+            )
+        assumptions.append(assumption)
+    return assumptions
+
+
+def _upsert_research_risks(
+    db: Session,
+    auth: AuthContext,
+    project: Project,
+    memo: AgenticResearchMemoDraft,
+) -> list[Risk]:
+    drafts = memo.key_risks or _fallback_research_risks(memo)
+    existing = {
+        _normalize_key(risk.text): risk
+        for risk in db.scalars(
+            select(Risk).where(
+                Risk.workspace_id == auth.workspace_id,
+                Risk.project_id == project.id,
+            )
+        )
+    }
+    risks: list[Risk] = []
+    for draft in drafts:
+        key = _normalize_key(draft.text)
+        risk = existing.get(key)
+        if risk is None:
+            risk = Risk(
+                workspace_id=auth.workspace_id,
+                project_id=project.id,
+                text=draft.text.strip(),
+                category=_optional_truncate(draft.category, 100),
+                severity=draft.severity,
+                likelihood=draft.likelihood,
+                mitigation=draft.mitigation,
+                status="open",
+            )
+            db.add(risk)
+            existing[key] = risk
+        else:
+            risk.category = _optional_truncate(draft.category, 100)
+            risk.severity = draft.severity
+            risk.likelihood = draft.likelihood
+            risk.mitigation = draft.mitigation
+        risks.append(risk)
+    return risks
+
+
+def _link_assumptions_to_research_evidence(
+    db: Session,
+    assumptions: list[Assumption],
+    memo: AgenticResearchMemoDraft,
+) -> None:
+    citations_by_text = {
+        _normalize_key(draft.text): draft.citations
+        for draft in memo.riskiest_assumptions
+        if draft.citations
+    }
+    fallback_citations = memo.citations[:3]
+    for assumption in assumptions:
+        citations = citations_by_text.get(_normalize_key(assumption.text)) or fallback_citations
+        for citation in citations[:3]:
+            exists = db.scalar(
+                select(AssumptionEvidenceLink.id).where(
+                    AssumptionEvidenceLink.assumption_id == assumption.id,
+                    AssumptionEvidenceLink.evidence_source_id == citation.source_id,
+                    AssumptionEvidenceLink.evidence_chunk_id == citation.chunk_id,
+                )
+            )
+            if exists is not None:
+                continue
+            db.add(
+                AssumptionEvidenceLink(
+                    assumption_id=assumption.id,
+                    evidence_source_id=citation.source_id,
+                    evidence_chunk_id=citation.chunk_id,
+                    relevance_score=_decimal_score(citation.relevance_score),
+                    quote=citation.quote,
+                )
+            )
+
+
+def _refresh_project_confidence_from_research(
+    project: Project,
+    assumptions: list[Assumption],
+) -> None:
+    scores = [
+        assumption.confidence_score
+        for assumption in assumptions
+        if assumption.confidence_score is not None
+    ]
+    if scores:
+        project.confidence_score = Decimal(str(round(sum(scores) / Decimal(len(scores)), 4)))
+
+
+def _fallback_research_assumptions(
+    memo: AgenticResearchMemoDraft,
+) -> list[ResearchAssumptionDraft]:
+    assumption_text = (
+        memo.unsupported_claims[0]
+        if memo.unsupported_claims
+        else "The target user has urgent enough pain to try a focused validation workflow."
+    )
+    return [
+        ResearchAssumptionDraft(
+            text=assumption_text,
+            category="validation",
+            importance="critical",
+            uncertainty="high",
+            kill_risk=True,
+            confidence_score=0.3,
+            recommended_test=_first_recommended_validation_action(memo),
+            evidence_strength="weak",
+            citations=memo.citations[:2],
+        )
+    ]
+
+
+def _fallback_research_risks(memo: AgenticResearchMemoDraft) -> list[ResearchRiskDraft]:
+    risk_text = (
+        memo.evidence_gaps[0]
+        if memo.evidence_gaps
+        else "The evidence base may still be too weak to justify a build decision."
+    )
+    return [
+        ResearchRiskDraft(
+            text=risk_text,
+            category="evidence",
+            severity="high",
+            likelihood="high",
+            mitigation=_first_recommended_validation_action(memo),
+            citations=memo.citations[:2],
+        )
+    ]
+
+
+def _assumption_confidence_from_research(draft: ResearchAssumptionDraft) -> Decimal | None:
+    if draft.confidence_score is not None:
+        return _decimal_score(draft.confidence_score)
+    defaults = {
+        "strong": Decimal("0.65"),
+        "medium": Decimal("0.45"),
+        "weak": Decimal("0.25"),
+    }
+    return defaults[draft.evidence_strength]
+
+
+def _first_recommended_validation_action(memo: AgenticResearchMemoDraft) -> str:
+    return (
+        memo.recommended_validation_actions[0]
+        if memo.recommended_validation_actions
+        else "Run five target-customer interviews focused on the riskiest assumption."
     )
 
 
@@ -911,10 +1149,13 @@ def _memo_messages(
         ChatMessage(
             role="user",
             content=(
-                "Generate the final cited research memo as structured JSON. Keep every "
-                "narrative field concise. Include findings, claims with citations, evidence "
-                "gaps, unsupported claims, recommended validation actions, and a decision "
-                "recommendation.\n\n"
+            "Generate the final cited research memo as structured JSON. Keep every "
+                "narrative field concise. Include the V1 memo sections: market landscape, "
+                "customer pain signals, competitor landscape, substitute behaviors, "
+                "pricing or business model signals, key risks, riskiest assumptions, "
+                "evidence summary, what remains unknown, recommended validation actions, "
+                "and a decision recommendation. Include claims with citations and mark "
+                "unsupported claims explicitly.\n\n"
                 f"{json.dumps(payload, ensure_ascii=True, default=str, separators=(',', ':'))}"
             ),
         ),
@@ -988,6 +1229,7 @@ def _write_research_memo_step(
                 "evidence_gaps": gaps,
                 "critic": critic,
                 "memory_update_status": "pending_human_approval",
+                "memory_update_preview": _memory_update_preview(memo),
             },
             generated_by_ai_run_id=run.id,
             created_by=auth.user_id,
@@ -1223,7 +1465,22 @@ def _render_markdown_memo(project: Project, memo: AgenticResearchMemoDraft) -> s
         f"({finding.evidence_strength} evidence)"
         for finding in memo.findings
     ) or "- No findings generated."
+    risks = "\n".join(
+        f"- **{risk.severity}**: {risk.text}"
+        + (f" Mitigation: {risk.mitigation}" if risk.mitigation else "")
+        for risk in memo.key_risks
+    ) or "- No research-derived risks generated."
+    assumptions = "\n".join(
+        f"- **{assumption.importance} / {assumption.uncertainty} uncertainty**: "
+        f"{assumption.text}"
+        + (f" Test: {assumption.recommended_test}" if assumption.recommended_test else "")
+        for assumption in memo.riskiest_assumptions
+    ) or "- No research-derived assumptions generated."
     gaps = "\n".join(f"- {gap}" for gap in memo.evidence_gaps) or "- None"
+    unknowns = (
+        "\n".join(f"- {unknown}" for unknown in memo.what_we_still_do_not_know)
+        or gaps
+    )
     actions = "\n".join(
         f"- {action}" for action in memo.recommended_validation_actions
     ) or "- None"
@@ -1237,10 +1494,21 @@ def _render_markdown_memo(project: Project, memo: AgenticResearchMemoDraft) -> s
             f"# Research Memo: {project.name}",
             f"## Executive Verdict\n{memo.executive_verdict}",
             f"## Best Wedge\n{memo.best_wedge}",
+            f"## Market Landscape\n{memo.market_landscape or 'Not enough evidence yet.'}",
+            f"## Customer Pain Signals\n{memo.customer_pain_signals or 'Not enough evidence yet.'}",
+            f"## Competitor Landscape\n{memo.competitor_landscape or 'Not enough evidence yet.'}",
+            f"## Substitute Behaviors\n{memo.substitute_behaviors or 'Not enough evidence yet.'}",
+            "## Pricing / Business Model Signals\n"
+            + (memo.pricing_business_model_signals or "Not enough evidence yet."),
+            f"## Key Risks\n{risks}",
+            f"## Riskiest Assumptions\n{assumptions}",
+            f"## Evidence Summary\n{memo.evidence_summary or 'No evidence summary generated.'}",
             f"## Findings\n{findings}",
-            f"## Evidence Gaps\n{gaps}",
+            f"## What We Still Do Not Know\n{unknowns}",
             f"## Recommended Validation Actions\n{actions}",
             f"## Decision Recommendation\n{memo.decision_recommendation}",
+            "## MVP Brief Comparison\n"
+            + (memo.comparison_to_mvp_brief or "No prior opportunity brief comparison generated."),
             f"## Evidence Appendix\n{citations}",
             f"## Unsupported Claims / Open Questions\n{unsupported}",
         ]
@@ -1293,6 +1561,65 @@ def _fallback_memo(
             )
         )
     unsupported = list(gaps) or ["Validated willingness-to-pay evidence remains limited."]
+    riskiest_assumptions = [
+        ResearchAssumptionDraft(
+            text=(
+                f"{target} has urgent, repeated pain and will make time for a new "
+                "workflow."
+            ),
+            category="demand",
+            importance="critical",
+            uncertainty="high",
+            kill_risk=True,
+            confidence_score=0.35 if citations else 0.25,
+            recommended_test=(
+                f"Interview five {target} users about recent examples, current "
+                "workarounds, and switching triggers."
+            ),
+            evidence_strength="medium" if citations else "weak",
+            citations=citations[:2],
+        ),
+        ResearchAssumptionDraft(
+            text="The willingness-to-pay signal is strong enough to justify building.",
+            category="business_model",
+            importance="critical",
+            uncertainty="high",
+            kill_risk=True,
+            confidence_score=0.25,
+            recommended_test=(
+                "Use pricing-sensitivity questions and a pilot signup ask during discovery."
+            ),
+            evidence_strength="weak",
+            citations=citations[:1],
+        ),
+    ]
+    key_risks = [
+        ResearchRiskDraft(
+            text="The research evidence may show workflow pain but not budget or urgency.",
+            category="demand",
+            severity="high",
+            likelihood="high" if not citations else "medium",
+            mitigation=(
+                "Prioritize willingness-to-pay and urgency questions in the first "
+                "validation pass."
+            ),
+            citations=citations[:2],
+        ),
+        ResearchRiskDraft(
+            text=(
+                "Existing tools or manual workflows may already be good enough for the "
+                "narrow wedge."
+            ),
+            category="competition",
+            severity="high",
+            likelihood="unknown",
+            mitigation=(
+                "Ask users to compare the concept against their current workaround and "
+                "named tools."
+            ),
+            citations=citations[:2],
+        ),
+    ]
     return AgenticResearchMemoDraft(
         executive_verdict=(
             f"Continue researching {project_name}, but keep the validation focus narrow: "
@@ -1302,8 +1629,36 @@ def _fallback_memo(
             "The best current wedge is the narrowest workflow where evidence shows repeated "
             "pain, visible current workarounds, and an obvious reason to switch."
         ),
+        market_landscape=(
+            "The market should be evaluated around the specific repeated workflow rather than "
+            "the broad category. The available evidence is enough to define initial questions, "
+            "but not enough to make a confident market-size claim."
+        ),
+        customer_pain_signals=(
+            "The strongest pain signal is time spent stitching together scattered inputs before "
+            "making a decision. Direct customer evidence is still needed."
+        ),
+        competitor_landscape=(
+            "Approved competitors and substitutes should be treated as positioning pressure, "
+            "especially where they already own the customer workflow."
+        ),
+        substitute_behaviors=(
+            "Manual notes, spreadsheets, generic AI prompts, and lightweight current tools are "
+            "the default substitutes to test against."
+        ),
+        pricing_business_model_signals=(
+            "Pricing evidence is weak. The next validation step should test whether the target "
+            "user has enough urgency and budget to pay."
+        ),
         findings=findings,
+        key_risks=key_risks,
+        riskiest_assumptions=riskiest_assumptions,
+        evidence_summary=(
+            f"The sprint selected {len(selected_evidence)} evidence chunks and identified "
+            f"{len(unsupported)} weak or unsupported areas."
+        ),
         evidence_gaps=unsupported[:8],
+        what_we_still_do_not_know=unsupported[:8],
         recommended_validation_actions=[
             f"Interview five {target} users about their current workaround.",
             "Ask for recent examples, time spent, current alternatives, and switching triggers.",
@@ -1312,6 +1667,10 @@ def _fallback_memo(
         decision_recommendation=(
             "Do not commit to a broad build yet. Run validation against the riskiest "
             "assumption and update project memory after human review."
+        ),
+        comparison_to_mvp_brief=(
+            "Compared with a static opportunity brief, this research memo emphasizes current "
+            "evidence gaps, competitor pressure, and the next validation action."
         ),
         claims=claims,
         citations=citations,
@@ -1449,6 +1808,32 @@ def _evidence_bundles(results: list[EvidenceRetrievalResultRead]) -> list[dict[s
         }
         for result in results
     ]
+
+
+def _memory_update_preview(memo: AgenticResearchMemoDraft) -> dict[str, Any]:
+    assumptions = memo.riskiest_assumptions or _fallback_research_assumptions(memo)
+    risks = memo.key_risks or _fallback_research_risks(memo)
+    return {
+        "assumptions": [
+            {
+                "text": assumption.text,
+                "importance": assumption.importance,
+                "uncertainty": assumption.uncertainty,
+                "kill_risk": assumption.kill_risk,
+                "evidence_strength": assumption.evidence_strength,
+            }
+            for assumption in assumptions
+        ],
+        "risks": [
+            {
+                "text": risk.text,
+                "severity": risk.severity,
+                "likelihood": risk.likelihood,
+            }
+            for risk in risks
+        ],
+        "recommended_validation_actions": memo.recommended_validation_actions,
+    }
 
 
 def _research_sources(
@@ -1595,3 +1980,7 @@ def _term_set(text: str) -> set[str]:
         for term in (part.strip(".,:;!?()[]{}\"'").casefold() for part in text.split())
         if len(term) > 2
     }
+
+
+def _normalize_key(value: str) -> str:
+    return " ".join(value.casefold().split())

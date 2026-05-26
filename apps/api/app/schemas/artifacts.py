@@ -104,6 +104,18 @@ class ClaimRead(BaseModel):
     evidence_links: list[ClaimEvidenceLinkRead] = Field(default_factory=list)
 
 
+class AssumptionEvidenceLinkRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    assumption_id: uuid.UUID
+    evidence_source_id: uuid.UUID
+    evidence_chunk_id: uuid.UUID | None
+    relevance_score: Decimal | None
+    quote: str | None
+    created_at: datetime
+
+
 class AssumptionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -119,6 +131,7 @@ class AssumptionRead(BaseModel):
     recommended_test: str | None
     created_at: datetime
     updated_at: datetime
+    evidence_links: list[AssumptionEvidenceLinkRead] = Field(default_factory=list)
 
 
 class RiskRead(BaseModel):

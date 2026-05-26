@@ -4,7 +4,17 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import AIRun, AIStep, Artifact, Claim, ClaimEvidenceLink, ResearchSprint
+from app.db.models import (
+    AIRun,
+    AIStep,
+    Artifact,
+    Assumption,
+    AssumptionEvidenceLink,
+    Claim,
+    ClaimEvidenceLink,
+    ResearchSprint,
+    Risk,
+)
 from app.services.evidence_service import ParsedSource
 
 
@@ -93,6 +103,10 @@ def test_agentic_research_runs_multi_step_rag_and_writes_reviewable_memo(
     assert body["evidence_gap_count"] >= 1
     assert body["artifact"]["artifact_type"] == "research_memo"
     assert body["version"]["structured_content"]["research_sprint_id"] == sprint_id
+    assert "## Market Landscape" in body["version"]["markdown_content"]
+    assert "## Riskiest Assumptions" in body["version"]["markdown_content"]
+    assert body["version"]["structured_content"]["memo"]["riskiest_assumptions"]
+    assert body["version"]["structured_content"]["memory_update_preview"]["assumptions"]
     assert body["version"]["structured_content"]["memory_update_status"] == (
         "pending_human_approval"
     )
@@ -164,8 +178,13 @@ def test_agentic_research_memo_can_be_approved_after_review(
     assert body["sprint"]["plan"]["status"] == "completed"
     assert body["version"]["id"] == run_body["version"]["id"]
     assert body["version"]["structured_content"]["memory_update_status"] == "approved"
-    assert body["version"]["structured_content"]["memory_updates_written"] is False
+    assert body["version"]["structured_content"]["memory_updates_written"] is True
     assert body["version"]["structured_content"]["memory_update_approved_by"] is not None
+    assert body["version"]["structured_content"]["memory_update_summary"]["assumption_ids"]
+    assert body["version"]["structured_content"]["memory_update_summary"]["risk_ids"]
+    assert db_session.scalar(select(Assumption)) is not None
+    assert db_session.scalar(select(Risk)) is not None
+    assert db_session.scalar(select(AssumptionEvidenceLink)) is not None
 
     run = db_session.scalar(select(AIRun).where(AIRun.id == uuid.UUID(body["ai_run_id"])))
     assert run is not None

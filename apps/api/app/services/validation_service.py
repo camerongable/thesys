@@ -563,7 +563,9 @@ def _validation_plan_messages(
             content=(
                 "Generate validation experiments for founder assumptions. Echo each provided "
                 "assumption id exactly. Plans must be operational: target respondent, steps, "
-                "questions, success criteria, failure threshold, and expected signal strength."
+                "screener questions, interview questions, survey questions, landing page copy, "
+                "outreach copy, note-taking template, interpretation rubric, success criteria, "
+                "failure threshold, and expected signal strength."
             ),
         ),
         ChatMessage(
@@ -668,6 +670,11 @@ def _fallback_validation_plan_item(assumption: Assumption) -> ValidationPlanDraf
             "People who match the target user profile and recently tried to solve this "
             "problem."
         ),
+        screener_questions=[
+            "Are you part of the target customer segment for this workflow?",
+            "Have you experienced this problem in the last 30 days?",
+            "Did you use a tool, spreadsheet, person, or workaround to solve it?",
+        ],
         steps=[
             "Recruit five target users with recent experience of the problem.",
             "Ask each participant to describe the last time the problem occurred.",
@@ -685,6 +692,25 @@ def _fallback_validation_plan_item(assumption: Assumption) -> ValidationPlanDraf
             "How satisfied are you with your current workaround?",
             "How likely would you be to try this workflow in the next month?",
         ],
+        landing_page_copy=(
+            "Turn a messy, repeated workflow into a clear next action. Join the validation "
+            "pilot if this problem is already costing you time each week."
+        ),
+        outreach_message=(
+            "I am testing a focused workflow for people who recently dealt with this problem. "
+            "Could I ask you 20 minutes of questions about how you handle it today? No sales "
+            "pitch; I am trying to learn whether this is painful enough to solve."
+        ),
+        note_taking_template=(
+            "Recent example:\nCurrent workaround:\nTime or money spent:\nTrigger to switch:\n"
+            "Objections:\nWillingness-to-pay signal:\nFollow-up permission:"
+        ),
+        result_interpretation_rubric=(
+            "Proceed if users describe recent painful examples, name repeated current "
+            "workarounds, and ask for access. Pivot if pain exists but the proposed workflow "
+            "does not match their buying trigger. Kill or pause if the problem is rare, "
+            "low-stakes, or fully satisfied by existing alternatives."
+        ),
         success_criteria=(
             "At least three of five participants describe a recent painful example and ask "
             "to try or see the workflow again."
@@ -974,9 +1000,15 @@ def _render_validation_plan_markdown(project: Project, draft: ValidationPlanSetD
                     f"## Experiment {index}: {plan.assumption_text}",
                     f"**Method:** {plan.method}",
                     f"**Target respondent:** {plan.target_respondent}",
+                    "### Screener Questions\n" + _markdown_list(plan.screener_questions),
                     "### Steps\n" + _markdown_list(plan.steps),
                     "### Interview Questions\n" + _markdown_list(plan.interview_questions),
                     "### Survey Questions\n" + _markdown_list(plan.survey_questions),
+                    f"### Landing Page Copy\n{plan.landing_page_copy or 'Not generated.'}",
+                    f"### Outreach Message\n{plan.outreach_message or 'Not generated.'}",
+                    f"### Note-Taking Template\n{plan.note_taking_template or 'Not generated.'}",
+                    "### Result Interpretation Rubric\n"
+                    + (plan.result_interpretation_rubric or "Not generated."),
                     f"### Success Criteria\n{plan.success_criteria}",
                     f"### Failure Threshold\n{plan.failure_threshold}",
                     f"### Expected Signal Strength\n{plan.expected_signal_strength}",
@@ -990,9 +1022,15 @@ def _render_experiment_plan(plan: dict[str, Any]) -> str:
     return "\n\n".join(
         [
             f"Target respondent: {plan.get('target_respondent')}",
+            "Screener questions:\n" + _markdown_list(plan.get("screener_questions") or []),
             "Steps:\n" + _markdown_list(plan.get("steps") or []),
             "Interview questions:\n" + _markdown_list(plan.get("interview_questions") or []),
             "Survey questions:\n" + _markdown_list(plan.get("survey_questions") or []),
+            f"Landing page copy: {plan.get('landing_page_copy') or 'Not generated.'}",
+            f"Outreach message: {plan.get('outreach_message') or 'Not generated.'}",
+            f"Note-taking template: {plan.get('note_taking_template') or 'Not generated.'}",
+            "Result interpretation rubric: "
+            + str(plan.get("result_interpretation_rubric") or "Not generated."),
             f"Expected signal strength: {plan.get('expected_signal_strength')}",
         ]
     )

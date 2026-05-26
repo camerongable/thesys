@@ -24,7 +24,7 @@ import {
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -224,7 +224,10 @@ export function ProjectOverview() {
             ) : activeTab === "Competitors" ? (
               <CompetitorsTab projectId={project.id} />
             ) : activeTab === "Assumptions" ? (
-              <AssumptionsTab projectId={project.id} />
+              <AssumptionsTab
+                onOpenExperiments={() => selectTab("Experiments")}
+                projectId={project.id}
+              />
             ) : activeTab === "Experiments" ? (
               <ExperimentsTab projectId={project.id} />
             ) : (
@@ -365,6 +368,12 @@ type ResearchPlanDraftState = {
   source_types: string;
   assumptions_to_test: string;
   expected_outputs: string;
+};
+
+type MemoryUpdateSummary = {
+  assumption_ids: string[];
+  risk_ids: string[];
+  recommended_validation_actions: string[];
 };
 
 function ResearchSprintCard({ projectId }: { projectId: string }) {
@@ -685,6 +694,7 @@ function ResearchDiscoveryPanel({
   projectId: string;
   sprint: ResearchSprint;
 }) {
+  const queryClient = useQueryClient();
   const [memoReviewOpen, setMemoReviewOpen] = useState(false);
   const sourcesQuery = useQuery({
     queryKey: ["projects", projectId, "research-sprints", sprint.id, "sources"],
@@ -728,6 +738,10 @@ function ResearchDiscoveryPanel({
       onRunTrace(result.ai_run_id);
       setMemoReviewOpen(true);
       await researchMemosQuery.refetch();
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "assumptions"] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "risks"] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "experiments"] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
       await onSprintUpdated();
     },
   });
@@ -788,6 +802,7 @@ function ResearchDiscoveryPanel({
   const evidenceGapCount =
     agenticResearchMutation.data?.evidence_gap_count ?? evidenceGapsFromArtifact(memoArtifact).length;
   const memoryUpdateStatus = memoryUpdateStatusFromArtifact(memoArtifact);
+  const memoryUpdateSummary = memoryUpdateSummaryFromArtifact(memoArtifact);
   const error =
     discoverSourcesMutation.error ??
     discoverCompetitorsMutation.error ??
@@ -926,6 +941,7 @@ function ResearchDiscoveryPanel({
           approvalPending={approveMemoMutation.isPending}
           citations={citations}
           memoryUpdateStatus={memoryUpdateStatus}
+          memoryUpdateSummary={memoryUpdateSummary}
           onApprove={() => approveMemoMutation.mutate()}
           unsupportedClaims={unsupportedClaims}
           version={memoVersion}
@@ -940,6 +956,7 @@ function ResearchMemoReview({
   approvalPending,
   citations,
   memoryUpdateStatus,
+  memoryUpdateSummary,
   onApprove,
   unsupportedClaims,
   version,
@@ -948,6 +965,7 @@ function ResearchMemoReview({
   approvalPending: boolean;
   citations: Citation[];
   memoryUpdateStatus: string | null;
+  memoryUpdateSummary: MemoryUpdateSummary | null;
   onApprove: () => void;
   unsupportedClaims: string[];
   version: ArtifactVersion;
@@ -984,7 +1002,7 @@ function ResearchMemoReview({
                 : "w-fit rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700"
             }
           >
-            {approved ? "Approved" : "Human review pending"}
+          {approved ? "Approved" : "Human review pending"}
           </span>
           <Button
             disabled={approved || approvalPending}
@@ -997,6 +1015,23 @@ function ResearchMemoReview({
           </Button>
         </div>
       </div>
+
+      {memoryUpdateSummary ? (
+        <div className="mt-4 rounded-md bg-muted px-4 py-3 text-sm leading-6 text-muted-foreground">
+          <span className="font-medium text-foreground">Memory updates:</span>{" "}
+          {memoryUpdateSummary.assumption_ids.length} assumption
+          {memoryUpdateSummary.assumption_ids.length === 1 ? "" : "s"},{" "}
+          {memoryUpdateSummary.risk_ids.length} risk
+          {memoryUpdateSummary.risk_ids.length === 1 ? "" : "s"} written after approval.
+          {memoryUpdateSummary.recommended_validation_actions.length > 0 ? (
+            <span>
+              {" "}
+              First validation action:{" "}
+              {truncate(memoryUpdateSummary.recommended_validation_actions[0], 160)}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <article className="min-w-0">
@@ -1831,6 +1866,18 @@ function retrievalToolCallCountFromArtifact(artifact: Artifact | null) {
 function memoryUpdateStatusFromArtifact(artifact: Artifact | null) {
   const status = artifact?.current_version?.structured_content.memory_update_status;
   return typeof status === "string" ? status : null;
+}
+
+function memoryUpdateSummaryFromArtifact(artifact: Artifact | null): MemoryUpdateSummary | null {
+  const summary = asRecord(artifact?.current_version?.structured_content.memory_update_summary);
+  if (!summary) {
+    return null;
+  }
+  return {
+    assumption_ids: stringsFromUnknown(summary.assumption_ids),
+    risk_ids: stringsFromUnknown(summary.risk_ids),
+    recommended_validation_actions: stringsFromUnknown(summary.recommended_validation_actions),
+  };
 }
 
 function stringsFromUnknown(value: unknown) {

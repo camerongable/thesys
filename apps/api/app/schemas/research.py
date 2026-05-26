@@ -5,7 +5,15 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.artifacts import ArtifactRead, ArtifactVersionRead, Citation, ClaimDraft, ClaimRead
+from app.schemas.artifacts import (
+    ArtifactRead,
+    ArtifactVersionRead,
+    AssumptionDraft,
+    Citation,
+    ClaimDraft,
+    ClaimRead,
+    RiskDraft,
+)
 
 ResearchPlanStatus = Literal["draft", "approved", "rejected", "completed"]
 ResearchSprintStatus = Literal[
@@ -262,13 +270,32 @@ class ResearchFindingDraft(BaseModel):
     citations: list[Citation] = Field(default_factory=list, max_length=5)
 
 
+class ResearchAssumptionDraft(AssumptionDraft):
+    evidence_strength: Literal["weak", "medium", "strong"] = "weak"
+    citations: list[Citation] = Field(default_factory=list, max_length=5)
+
+
+class ResearchRiskDraft(RiskDraft):
+    citations: list[Citation] = Field(default_factory=list, max_length=5)
+
+
 class AgenticResearchMemoDraft(BaseModel):
     executive_verdict: str = Field(min_length=1, max_length=2000)
     best_wedge: str = Field(min_length=1, max_length=2000)
+    market_landscape: str = Field(default="", max_length=3000)
+    customer_pain_signals: str = Field(default="", max_length=3000)
+    competitor_landscape: str = Field(default="", max_length=3000)
+    substitute_behaviors: str = Field(default="", max_length=3000)
+    pricing_business_model_signals: str = Field(default="", max_length=3000)
     findings: list[ResearchFindingDraft] = Field(default_factory=list, max_length=10)
+    key_risks: list[ResearchRiskDraft] = Field(default_factory=list, max_length=8)
+    riskiest_assumptions: list[ResearchAssumptionDraft] = Field(default_factory=list, max_length=8)
+    evidence_summary: str = Field(default="", max_length=3000)
     evidence_gaps: list[str] = Field(default_factory=list, max_length=10)
+    what_we_still_do_not_know: list[str] = Field(default_factory=list, max_length=10)
     recommended_validation_actions: list[str] = Field(default_factory=list, max_length=8)
     decision_recommendation: str = Field(min_length=1, max_length=2000)
+    comparison_to_mvp_brief: str | None = Field(default=None, max_length=2000)
     claims: list[ClaimDraft] = Field(default_factory=list, max_length=12)
     citations: list[Citation] = Field(default_factory=list, max_length=20)
     unsupported_claims: list[str] = Field(default_factory=list, max_length=12)

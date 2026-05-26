@@ -2,11 +2,10 @@
 
 ## Current Phase
 
-V1 Sprint 5 complete. Approved research sprints can now run a traced agentic
-RAG workflow that plans subquestions, selects retrieval tools, executes
-project-scoped retrieval, detects evidence gaps, performs follow-up retrieval,
-synthesizes a cited research memo, critiques weak claims, writes a reviewable
-`research_memo` artifact, and pauses before major project-memory updates.
+V1 Sprint 8 complete. Approved research sprints now produce upgraded V1
+research memos, write approved assumptions and risks into project memory after
+human review, link assumptions to cited evidence, and generate richer validation
+assets for high-risk assumptions.
 Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
 multi-segment workflow packs remain V2 scope.
 
@@ -559,6 +558,73 @@ Checks run:
 - [x] `pnpm --filter thesys-web typecheck`
 - [x] In-app browser verification for memo review and approval UI.
 
+Original V1 Sprint 6 plan:
+
+- Upgrade research memos so they feel like sharp strategic analysis.
+- Add sections for market landscape, pain signals, competitors, substitutes,
+  pricing signals, risks, assumptions, evidence summary, unknowns, validation
+  actions, and decision recommendation.
+- Keep citations and unsupported claims visible.
+- Trace memo versions back to research sprints, sources, evidence, and claims.
+
+## V1 Sprint 6 Scope
+
+- [x] Extend `AgenticResearchMemoDraft` with V1 memo sections.
+- [x] Render upgraded research memo markdown with the required V1 sections.
+- [x] Add research-derived risk and assumption drafts to memo structured content.
+- [x] Add memory-update previews to research memo artifact versions.
+- [x] Keep cited claims, unsupported claims, selected evidence, tool calls,
+  gaps, critic output, and sprint/version links in structured content.
+- [x] Show approved memory-update summaries in the memo review UI.
+
+Original V1 Sprint 7 plan:
+
+- Convert research findings into operational validation priorities.
+- Create or update assumptions and risks after user approval.
+- Rank assumptions by importance, uncertainty, evidence strength, and kill risk.
+- Link assumptions to evidence.
+- Refresh overview recommendation and next best action after memory changes.
+
+## V1 Sprint 7 Scope
+
+- [x] Add `assumption_evidence_links` table and Alembic migration.
+- [x] Add assumption evidence links to API schemas and web types.
+- [x] Change research memo approval from metadata-only approval to a memory
+  writer that creates or updates assumptions and risks.
+- [x] Link research-derived assumptions to cited evidence chunks.
+- [x] Update project confidence from research-derived assumption confidence.
+- [x] Invalidate overview, assumptions, risks, and experiments after memo
+  approval so the UI reflects the new state.
+- [x] Add research memo strategic update language to the Overview feed.
+
+Original V1 Sprint 8 plan:
+
+- Help users take action after research.
+- Generate validation assets from high-risk assumptions.
+- Include interview scripts, screeners, survey questions, landing page copy,
+  outreach messages, success criteria, note templates, and result rubrics.
+- Keep external execution manual and user-controlled.
+
+## V1 Sprint 8 Scope
+
+- [x] Extend validation plan schemas with screener questions, landing page copy,
+  outreach copy, note-taking templates, and result interpretation rubrics.
+- [x] Update validation-plan prompting and deterministic stubs to generate the
+  richer validation asset set.
+- [x] Render validation assets into artifact markdown and experiment plans.
+- [x] Show evidence-link counts on research-derived assumptions.
+- [x] Preserve the existing manual experiment execution and result logging flow.
+
+## V1 Sprints 6-8 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check ...`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_agentic_research.py app/tests/test_validation.py -q`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+
 ## Next Sprint
 
-V1 Sprint 6: Research Memo and Opportunity Brief Upgrade.
+V1 Sprint 9: Strategic Update Feed and Research History.
