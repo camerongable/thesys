@@ -1,390 +1,675 @@
 # Thesys
 
-This repository contains the local development foundation for Thesys: an
-AI-native workspace for turning rough business ideas into
-structured, evidence-backed strategic projects.
+**Agentic RAG platform for evidence-backed idea validation.**
 
-The implementation follows `IMPLEMENTATION_BRIEF.md`. Sprints 0-10 establish the
-monorepo, local infrastructure, project workspace foundation, AI gateway
-infrastructure, structured intake, evidence/RAG, cited briefs, competitors,
-assumptions, validation plans, decisions, demo seeding, MVP eval checks, and
-workflow trace UI, live LLM demo readiness, and a guided strategic overview
-that makes the next validation step explicit.
+Thesys helps founders and builders turn rough business ideas into structured validation decisions. Given a rough idea, the system can run an autonomous research sprint, discover sources and competitors, ingest evidence, generate a cited research memo, identify risky assumptions, create validation plans, and guide build / pivot / pause / kill decisions.
 
-## Repository Layout
+This project demonstrates production-style AI software engineering patterns: **agentic RAG**, **retrieval-grounded generation**, **persistent project memory**, **human-in-the-loop workflows**, **source traceability**, and **decision-oriented AI UX**.
 
-```text
-apps/
-  api/        FastAPI backend, SQLAlchemy, Alembic
-  web/        Next.js App Router frontend
-infra/
-  litellm/    LiteLLM local proxy config
-  postgres/   Postgres initialization scripts
-docs/         Architecture, API, data model, eval, and security notes
-```
+---
 
-## Prerequisites
+## Why Thesys Exists
 
-- Docker Desktop with Docker Compose v2
-- Node.js 20+
-- pnpm 10+
-- Python 3.11+
+Most AI idea tools generate advice in a single conversation.
 
-## Local Setup
+Thesys is built around a different premise:
 
-1. Copy the environment template:
+> Idea validation is not a chat. It is a stateful workflow.
 
-   ```bash
-   cp .env.example .env
-   ```
+A founder does not just need “startup advice.” They need to know:
 
-2. Start the local stack:
+- Is this idea worth pursuing?
+- Who or what am I really competing against?
+- What evidence supports or weakens the thesis?
+- What assumptions must be true?
+- What should I validate before building?
+- Should I proceed, pivot, pause, or kill the idea?
 
-   ```bash
-   docker compose up --build
-   ```
+Thesys turns that process into a structured AI-native workflow.
 
-   If Docker build can reach Docker Hub but resets connections to
-   `registry.npmjs.org`, override the package registry for the web image:
+---
 
-   ```bash
-   NPM_REGISTRY=https://registry.npmmirror.com/ docker compose up --build
-   ```
-
-3. Open the services:
-
-   - Web: http://localhost:3000
-   - API healthcheck: http://localhost:8000/health
-   - MinIO console: http://localhost:9001
-   - LiteLLM proxy: http://localhost:4000
-
-The API container runs Alembic migrations on startup. The local stack defaults
-to deterministic LLM stubs so the demo remains runnable without paid model
-access.
-
-## Local Auth
-
-Sprint 1 uses `AUTH_MODE=dev`. The backend auto-provisions a local user and
-workspace from these headers:
+## Core Product Flow
 
 ```text
-X-Dev-User-Email
-X-Dev-User-Name
+Rough idea
+→ autonomous research sprint
+→ source and competitor discovery
+→ evidence ingestion
+→ cited research memo
+→ competitor / substitute map
+→ ranked assumptions
+→ validation plan
+→ experiment results
+→ decision recommendation
 ```
 
-If those headers are omitted, the defaults from `.env.example` are used.
+The goal is not to replace founder judgment. The goal is to make founder judgment more evidence-backed, structured, and repeatable.
 
-## Local Development Without Docker
+---
 
-API:
+## What Makes This Different From a Chatbot
 
-```bash
-cd apps/api
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-alembic upgrade head
-uvicorn app.main:app --reload
+Thesys does not store a loose chat transcript as the primary product object.
+
+It stores structured strategic state:
+
+- project thesis
+- target customer
+- primary problem
+- evidence sources
+- cited findings
+- open questions
+- competitors and substitutes
+- assumptions
+- risks
+- validation plans
+- experiment results
+- recommendations
+- decisions
+- strategic updates
+
+This allows the system to reason over a project over time instead of answering disconnected prompts.
+
+---
+
+## Key Features
+
+### Guided Strategic Workspace
+
+Each project has a lifecycle:
+
+```text
+Idea → Research → Evidence → Assumptions → Validation → Decision
 ```
 
-Web:
+The UI keeps the user focused on:
 
-```bash
-cd apps/web
-pnpm install
-pnpm run dev
-```
-
-## Sprint 0 Acceptance Checks
-
-```bash
-docker compose config
-cd apps/api && pytest
-cd apps/web && pnpm install && pnpm run typecheck
-```
-
-## Sprint 1 Manual Checks
-
-```bash
-curl http://localhost:8000/api/me
-curl http://localhost:8000/api/projects
-curl -X POST http://localhost:8000/api/projects \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Demo project","short_description":"Initial project state"}'
-```
-
-Then open http://localhost:3000/projects and create a project through the UI.
-
-## Sprint 2 Manual Check
-
-By default, local Docker AI calls use the deterministic dev stub. This keeps
-the app demoable without paid model access and avoids accidentally using
-provider keys exported in your shell.
-
-```bash
-curl -X POST http://localhost:8000/api/ai/test-structured-output \
-  -H "Content-Type: application/json" \
-  -d '{"idea":"AI workspace for independent fitness coaches"}'
-```
-
-Set `LLM_STUB_MODE=never` and provide a real provider key in `.env` to force
-calls through LiteLLM. Docker forwards those keys into both the API and LiteLLM
-containers.
-
-## Sprint 9 Local Open-Weight Demo
-
-Sprint 9 keeps deterministic hash embeddings for retrieval, but allows the MVP
-generation workflows to run against a live local model through LiteLLM and
-Ollama. This avoids per-token OpenAI API billing during development.
-
-1. Install Ollama and pull the recommended dev model:
-
-   ```bash
-   ollama pull qwen2.5:3b
-   ```
-
-   Larger variants such as `qwen2.5:7b` and `qwen2.5:14b` are more capable, but
-   `qwen2.5:3b` is the better default for responsive local development.
-
-2. Set local open-weight values in `.env`:
-
-   ```bash
-   LLM_STUB_MODE=never
-   LITELLM_MODEL=dev-local-qwen
-   LITELLM_TIMEOUT_SECONDS=180
-   LITELLM_API_KEY=sk-local-dev
-   LITELLM_MASTER_KEY=sk-local-dev
-   LLM_STRUCTURED_OUTPUT_REPAIR_ATTEMPTS=1
-   LLM_FALLBACK_POLICY=emergency
-   OLLAMA_API_BASE=http://host.docker.internal:11434
-   ```
-
-   Structured-output validation remains strict. `LLM_STRUCTURED_OUTPUT_REPAIR_ATTEMPTS`
-   controls how many times the configured model can repair invalid JSON before
-   the workflow fails or falls back. `LLM_FALLBACK_POLICY` accepts `disabled`,
-   `emergency`, or `always`; use `emergency` for live demos so LiteLLM is tried
-   first and deterministic fallback is only used after model/validation failure.
-
-3. Restart LiteLLM and the API:
-
-   ```bash
-   docker compose restart litellm api
-   ```
-
-4. Check the configured AI mode:
-
-   ```bash
-   curl http://localhost:8000/api/ai/status
-   ```
-
-   The web UI also shows an AI mode badge on project pages. It reports
-   `Stub mode` or `Live LLM`, the configured model, and LiteLLM reachability.
-
-5. Run the structured-output smoke test:
-
-   ```bash
-   curl -X POST http://localhost:8000/api/ai/test-structured-output \
-     -H "Content-Type: application/json" \
-     -d '{"idea":"AI workspace for independent fitness coaches"}'
-   ```
-
-   In live mode, confirm:
-
-   ```json
-   {
-     "used_stub": false,
-     "model_provider": "litellm"
-   }
-   ```
-
-6. In the web UI, create or open a project and run the MVP AI actions:
-
-   - Analyze Idea
-   - Generate Brief
-   - Analyze Competitors
-   - Extract Assumptions
-   - Generate Plans
-
-Workflow traces show provider/model metadata, step status, token counts, and
-cost when LiteLLM returns it. If the provider fails, the API returns an
-actionable error and the failed workflow step stores the provider error.
-
-To test against OpenAI later, set `LITELLM_MODEL=dev-gpt-4o-mini` and provide
-`OPENAI_API_KEY` in `.env`. To test against Gemini through Google AI Studio,
-set `LITELLM_MODEL=dev-gemini-3.5-flash` and provide `GEMINI_API_KEY`.
-
-## Sprint 4 Manual Checks
-
-Add a note source:
-
-```bash
-curl -X POST http://localhost:8000/api/projects/<project_id>/evidence/note \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Interview notes","text":"Coaches spend hours reviewing weekly check-ins."}'
-```
-
-Retrieve evidence:
-
-```bash
-curl -X POST http://localhost:8000/api/projects/<project_id>/evidence/retrieve \
-  -H "Content-Type: application/json" \
-  -d '{"query":"weekly coach check-ins","mode":"hybrid","top_k":5}'
-```
-
-The project page now includes an Evidence tab for URL, note, and file ingestion,
-source listing, and hybrid/semantic/keyword retrieval.
-
-## Sprint 8 Demo Script
-
-Start the stack:
-
-```bash
-docker compose up --build
-```
-
-Seed the demo project:
-
-```bash
-curl -X POST http://localhost:8000/api/demo/seed
-```
-
-Open http://localhost:3000/projects, or open the `next_url` returned by the
-seed response. The demo project includes:
-
-- structured project thesis, segments, and problems
-- three evidence notes with chunks and embeddings
-- a cited opportunity brief
-- competitor profiles and a competitor landscape artifact
-- assumptions and risks
-- validation plan artifact
-- logged experiment result
-- linked decision record
-- workflow traces and MVP readiness checks
-
-## Sprint 10 Guided Overview
-
-Project pages now open on a founder-facing command center. The Overview tab
-shows:
-
-- current lifecycle stage
-- current recommendation and rationale
-- one primary next best action
-- idea readiness instead of developer-facing MVP checks
-- strategic snapshot
+- current verdict
+- next best action
+- project stage
+- risk level
+- confidence level
 - evidence health
-- recent strategic updates
-- key assumptions and risks
+- riskiest assumption
 
-The supporting API endpoints are:
+---
 
-```bash
-curl http://localhost:8000/api/projects/<project_id>/overview
-curl http://localhost:8000/api/projects/<project_id>/readiness
-curl http://localhost:8000/api/projects/<project_id>/strategic-updates
-curl -X POST http://localhost:8000/api/projects/<project_id>/next-action
-```
+### Autonomous Research Sprints
 
-Run the MVP readiness eval:
+A user can start with a rough idea and run a research sprint.
 
-```bash
-curl http://localhost:8000/api/projects/<project_id>/evals/mvp
-```
+The system:
 
-Inspect workflow traces:
+1. creates a research plan
+2. discovers relevant sources
+3. identifies competitors and substitutes
+4. ingests evidence
+5. retrieves relevant context
+6. generates a cited research memo
+7. identifies gaps and assumptions
+8. recommends what to validate next
 
-```bash
-curl http://localhost:8000/api/projects/<project_id>/workflows
-curl http://localhost:8000/api/workflows/<run_id>
-curl -N http://localhost:8000/api/workflows/<run_id>/events
-```
+---
 
-## Sprint 11 UI/UX Refactor
+### Source and Competitor Discovery
 
-Project navigation now follows the founder validation workflow:
+Thesys can discover and classify:
+
+- direct competitors
+- indirect competitors
+- substitute behaviors
+- incumbent platforms
+- adjacent solutions
+- manual workarounds
+
+The system emphasizes that the real competitor is often not another startup. It may be ChatGPT, Notion, spreadsheets, Reddit, YouTube, or an existing manual workflow.
+
+---
+
+### Evidence-Backed Findings
+
+Research output is grounded in ingested sources.
+
+The Evidence page separates:
+
+- supported findings
+- open questions
+- source records
+- evidence gaps
+
+The app is designed to make uncertainty visible instead of hiding it behind confident AI prose.
+
+---
+
+### Assumption Ranking
+
+Thesys turns research into operational validation priorities.
+
+Each assumption can be ranked by:
+
+- risk
+- confidence
+- evidence strength
+- validation status
+- recommended validation method
+
+This helps the user identify the assumption most likely to kill the idea if false.
+
+---
+
+### Validation Planning
+
+For the riskiest assumptions, Thesys can generate validation assets:
+
+- customer interview scripts
+- screener questions
+- survey questions
+- landing page copy
+- outreach messages
+- success criteria
+- failure criteria
+- results rubric
+
+The goal is to move from “interesting research” to “what should I test next?”
+
+---
+
+### Decision Workflow
+
+Thesys supports structured decisions:
+
+- proceed
+- pivot
+- pause
+- kill
+- continue research
+
+Decisions can include:
+
+- rationale
+- supporting evidence
+- unresolved risks
+- revisit triggers
+- experiment results
+
+---
+
+## AI Engineering Concepts Demonstrated
+
+This project demonstrates several modern AI engineering patterns:
+
+- Agentic RAG workflows
+- Retrieval-grounded generation
+- Source discovery and evidence ingestion
+- Competitor and substitute discovery
+- Persistent memory beyond chat history
+- Human-in-the-loop approval
+- Cited findings and open-question tracking
+- Assumption and risk scoring
+- Validation experiment generation
+- Decision logging and recommendation history
+- Stage-aware AI product UX
+- Multi-step workflow orchestration
+- Evidence traceability
+
+---
+
+## Architecture Overview
 
 ```text
-Overview → Research → Evidence → Competitors → Assumptions → Validation → Decisions
+Frontend
+  ↓
+API Layer
+  ↓
+Project Memory / Domain Model
+  ↓
+Research Sprint Orchestrator
+  ↓
+Source Discovery / Competitor Discovery
+  ↓
+Evidence Ingestion Pipeline
+  ↓
+Retrieval Layer
+  ↓
+LLM Gateway / Model Abstraction
+  ↓
+Cited Synthesis / Critique / Memory Update
 ```
 
-The Overview page stays recommendation-first and shows lifecycle progress,
-next action, strategic snapshot, key risks, evidence health, and recent
-strategic updates. Research sprint planning, discovery review, cited memos,
-research history, and quality checks live under the Research tab. Long generated
-outputs, process details, evidence source details, and validation plan content
-are collapsed by default so users see summaries before details.
+---
 
-## V1 Sprint 1 Research Planning
+## Core System Layers
 
-The Overview page includes a Research Sprint card. It generates an
-approval-ready research plan, lets the user edit/save/approve/reject it, and
-keeps the workflow trace visible. Approval is required before any autonomous
-source discovery, competitor discovery, browsing, or ingestion.
+### 1. Web UI
+
+The frontend provides a guided project workspace with tabs for:
+
+- Overview
+- Research
+- Evidence
+- Competitors
+- Assumptions
+- Validation
+- Decisions
+
+The UX is verdict-first: users see the current recommendation and next best action before digging into evidence or process details.
+
+---
+
+### 2. API Layer
+
+The backend exposes project and workflow APIs for:
+
+- project lifecycle state
+- research sprint execution
+- source discovery
+- competitor discovery
+- evidence ingestion
+- artifact generation
+- assumption scoring
+- validation planning
+- decision recording
+
+---
+
+### 3. Agentic Research Workflow
+
+The research workflow is designed as a multi-step agentic RAG process.
+
+```text
+Research Planner
+→ Source Discovery
+→ Competitor Discovery
+→ Evidence Ingestion
+→ Retrieval
+→ Gap Detection
+→ Synthesis
+→ Critique
+→ Human Approval
+→ Project Memory Update
+```
+
+The system does not blindly update strategic state. Major updates can be reviewed before being committed to project memory.
+
+---
+
+### 4. Retrieval Layer
+
+The retrieval system supports evidence-grounded generation.
+
+Core responsibilities:
+
+- ingest source content
+- extract text
+- chunk documents
+- generate embeddings
+- store source metadata
+- retrieve relevant evidence
+- link claims to sources
+- surface open questions when evidence is weak
+
+---
+
+### 5. Persistent Strategic Memory
+
+The app models strategy as durable state, not chat history.
+
+Key entities include:
+
+```text
+Project
+Thesis
+EvidenceSource
+EvidenceChunk
+Finding
+OpenQuestion
+Competitor
+Assumption
+ValidationPlan
+ExperimentResult
+Decision
+StrategicUpdate
+ResearchSprint
+ResearchMemo
+```
+
+---
+
+## Example Agentic Research Sprint
+
+Given this idea:
+
+```text
+An AI assistant for independent fitness coaches that helps them manage client programming, check-ins, and workout adjustments.
+```
+
+Thesys can produce:
+
+```text
+Verdict:
+Do not build a generic fitness AI assistant yet. Validate whether independent coaches will pay for workflow automation around check-ins and client adherence.
+
+Best wedge:
+Client check-in summarization and program adjustment support for solo online coaches.
+
+Top competitors/substitutes:
+Trainerize, TrueCoach, Google Sheets, manual WhatsApp/Instagram check-ins, ChatGPT.
+
+Riskiest assumption:
+Independent coaches will pay for a dedicated AI workflow instead of continuing manual client management.
+
+First validation test:
+Interview 5–10 independent coaches and test willingness to pay for automated check-in summarization.
+```
+
+---
+
+## Tech Stack
+
+### Frontend
+
+- Next.js
+- TypeScript
+- Tailwind CSS or equivalent styling system
+
+### Backend
+
+- FastAPI
+- Python
+- PostgreSQL
+- pgvector
+
+### AI / Orchestration
+
+- LangGraph-style workflow orchestration
+- LiteLLM-style model abstraction
+- LLM provider APIs
+- Embeddings
+- Vector retrieval
+
+### Infrastructure
+
+- Docker
+- Docker Compose
+- Environment-based configuration
+
+---
+
+## Local Development
+
+### Prerequisites
+
+- Node.js
+- Python 3.11+
+- Docker
+- Docker Compose
+- PostgreSQL with pgvector support
+- LLM provider API key
+
+---
+
+### 1. Clone the Repository
 
 ```bash
-curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/plan \
-  -H "Content-Type: application/json" \
-  -d '{"objective":"Investigate the market, competitors, and validation risks."}'
-
-curl http://localhost:8000/api/projects/<project_id>/research-sprints
-
-curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/approve \
-  -H "Content-Type: application/json" \
-  -d '{"research_questions":["Which segment has the most urgent pain?"]}'
+git clone <github-url>
+cd thesys
 ```
 
-## V1 Sprints 2-3 Discovery Review
+---
 
-After approving a research sprint, use the Overview page Discovery Review
-section to generate candidate sources and competitors. In live mode, discovery
-uses LiteLLM structured output and records token/cost metadata in the workflow
-trace; local stub mode uses deterministic fallback candidates. Sources stay in
-a candidate state until approved; approval ingests a reviewed URL snapshot into
-the existing evidence pipeline. Competitor candidates can be edited before
-approval; approval creates or updates first-class project competitor records.
+### 2. Configure Environment Variables
 
 ```bash
-curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/sources/discover
-curl http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/sources
-curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/sources/<source_id>/approve
-
-curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/competitor-candidates/discover
-curl http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/competitor-candidates
-curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/competitor-candidates/<candidate_id>/approve
+cp .env.example .env
 ```
 
-## V1 Sprints 5-8 Research Memo and Validation Assets
-
-After approving sources and competitors, run the agentic RAG research workflow
-from the Overview page. It writes an upgraded `research_memo` with cited claims,
-unsupported claims, evidence gaps, risk and assumption drafts, and a memory
-update preview. The memo pauses at human review. Approving it writes the
-research-derived assumptions and risks into project memory and links assumptions
-to cited evidence.
+Example environment variables:
 
 ```bash
-curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/agentic-rag/run
-curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/agentic-rag/approve
-curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/agentic-rag/reject
-curl http://localhost:8000/api/projects/<project_id>/assumptions
+# Application
+APP_ENV=development
+FRONTEND_URL=http://localhost:3000
+BACKEND_URL=http://localhost:8000
+
+# Database
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/thesys
+
+# LLM / Model Gateway
+OPENAI_API_KEY=your_key_here
+ANTHROPIC_API_KEY=your_key_here
+LITELLM_API_KEY=your_key_here
+
+# Embeddings
+EMBEDDING_MODEL=text-embedding-3-small
+
+# Optional
+LANGFUSE_PUBLIC_KEY=
+LANGFUSE_SECRET_KEY=
+LANGFUSE_HOST=
 ```
 
-The Assumptions tab shows evidence-link counts for research-derived
-assumptions. Use `Create Validation Plan` on a high-risk assumption to generate
-manual validation assets: screener questions, interview script, survey
-questions, landing page copy, outreach message, success criteria, note-taking
-template, and result interpretation rubric.
+---
 
-## V1 Sprints 9-10 Research History and Quality
-
-The Overview page now includes Research History and Research Quality sections.
-Research History shows what each sprint changed, evidence and competitor
-counts, memo versions, recommendation changes, and approved or rejected memory
-updates. Research Quality runs the local V1 research eval across traceability,
-source discovery, competitor discovery, citation coverage, unsupported claims,
-assumption quality, validation actions, cost, and latency. The eval dataset
-contains 10 idea categories with 5 demo-ready cases.
+### 3. Start Infrastructure
 
 ```bash
-curl http://localhost:8000/api/projects/<project_id>/research-history
-curl http://localhost:8000/api/projects/<project_id>/evals/v1-research
+docker compose up -d
 ```
+
+---
+
+### 4. Install Backend Dependencies
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+---
+
+### 5. Run Backend
+
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+---
+
+### 6. Install Frontend Dependencies
+
+```bash
+cd frontend
+npm install
+```
+
+---
+
+### 7. Run Frontend
+
+```bash
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+---
+
+## Suggested Demo Flow
+
+Use this flow when reviewing the project:
+
+1. Create a project from a rough idea.
+2. Run an autonomous research sprint.
+3. Review the research result.
+4. Inspect discovered sources and competitors.
+5. Review supported findings and open questions.
+6. Open the assumption matrix.
+7. Create a validation plan for the riskiest assumption.
+8. Log experiment results.
+9. Record a proceed / pivot / pause / kill decision.
+
+---
+
+## Product Design Principles
+
+### Verdict First
+
+The app should answer:
+
+```text
+What should I do next?
+```
+
+before showing the user the machinery behind the recommendation.
+
+---
+
+### Evidence With Receipts
+
+Every important factual finding should link back to evidence or be marked as an open question.
+
+---
+
+### Strategic State Over Chat
+
+The system should model durable strategic objects rather than relying on a chat transcript.
+
+---
+
+### Human-in-the-Loop
+
+The app should assist with research and synthesis, but users remain responsible for approving major strategic updates and decisions.
+
+---
+
+### Validate Before Building
+
+The core workflow is designed to prevent premature building by identifying the most important assumptions to test first.
+
+---
+
+## Current Status
+
+This is a V1 proof-of-concept.
+
+Implemented or demonstrated:
+
+- project lifecycle workflow
+- autonomous research sprint
+- source discovery
+- competitor/substitute discovery
+- evidence ingestion
+- cited research memo generation
+- assumption ranking
+- validation planning
+- decision recommendation
+- guided UI around next best action
+
+Planned future work:
+
+- recurring market monitoring
+- team collaboration
+- multi-project portfolio dashboard
+- integrations
+- advanced evaluation dashboard
+- consultant / product discovery / investor workflow packs
+
+---
+
+## Roadmap
+
+### V1: Autonomous Research and Validation Copilot (current)
+
+Core promise:
+
+> Give me a rough idea, and I’ll investigate the market, identify competitors, gather evidence, and tell me what to validate next.
+
+Key capabilities:
+
+- autonomous research sprint
+- source discovery
+- competitor discovery
+- evidence ingestion
+- agentic RAG synthesis
+- assumption extraction
+- validation plan generation
+- decision recommendations
+
+---
+
+### V2: Living Strategic Intelligence Platform
+
+Core promise:
+
+> Continuously track strategic evidence, monitor changes, help teams make decisions, and manage portfolios of opportunities over time.
+
+Potential capabilities:
+
+- recurring watchlists
+- market monitoring
+- strategic alerts
+- team workspaces
+- collaboration
+- portfolio comparison
+- integrations
+- advanced evals
+- workflow packs for consultants, PMs, investors, and innovation teams
+
+---
+
+## Lessons Learned
+
+This project explores several product and engineering lessons:
+
+1. **AI product value comes from workflow, not just generation.**
+   A generic AI answer is easy to produce. A persistent, stateful workflow is harder and more valuable.
+
+2. **RAG needs UX.**
+   It is not enough to retrieve sources. Users need to understand what the evidence supports, what remains uncertain, and what action follows.
+
+3. **Agentic systems need constraints.**
+   Human approval, inspectable steps, and source traceability are essential for trust.
+
+4. **Strategic products need opinionated outputs.**
+   Users do not only need summaries. They need judgment, tradeoffs, and next actions.
+
+5. **Memory should be domain-specific.**
+   Long-lived state should model the real workflow: thesis, evidence, assumptions, experiments, and decisions.
+
+---
+
+## Portfolio Notes
+
+This project was built to demonstrate AI systems and product engineering skills relevant to modern AI software roles:
+
+- full-stack AI application architecture
+- agentic RAG workflow design
+- retrieval-grounded generation
+- persistent memory modeling
+- human-in-the-loop AI workflows
+- evidence-backed UX
+- product-oriented AI system design
+- workflow orchestration
+- stateful decision support
+
+---
+
+## License
+
+This project is currently provided for portfolio and educational purposes.
+
+---
+
+## Author
+
+Built by Cameron Gable.
+
+- GitHub: https://github.com/camerongable
+- LinkedIn: https://www.linkedin.com/in/cameron-gable
