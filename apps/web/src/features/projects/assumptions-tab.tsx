@@ -8,7 +8,7 @@ import {
   RefreshCw,
   ShieldAlert,
 } from "lucide-react";
-import { ReactNode, useState } from "react";
+import { Fragment, ReactNode, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -134,6 +134,9 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
     null;
   const rankedAssumptions = [...assumptions].sort(compareAssumptions);
   const riskiestAssumption = rankedAssumptions[0] ?? null;
+  const topValidationPriorities = rankedAssumptions
+    .filter((assumption) => assumption.status !== "validated")
+    .slice(0, 3);
   const visibleAssumptions = rankedAssumptions.filter((assumption) =>
     matchesAssumptionFilter(assumption, filter),
   );
@@ -174,10 +177,18 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
     selectedAssumption !== null &&
     planMutation.isPending &&
     pendingPlanAssumptionId === selectedAssumption.id;
+  const tracePending = extractMutation.isPending || planMutation.isPending;
   const selectFilter = (nextFilter: AssumptionFilter) => {
     setFilter(nextFilter);
     setShowAllAssumptions(false);
     setSelectedAssumptionId(null);
+  };
+  const runAssumptionAction = (assumption: Assumption, planExperiments: Experiment[]) => {
+    if (planExperiments.length > 0 && onOpenExperiments) {
+      onOpenExperiments();
+      return;
+    }
+    planMutation.mutate(assumption.id);
   };
 
   return (
@@ -212,15 +223,22 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
         </div>
       ) : null}
 
-      <WorkflowTrace
-        pending={extractMutation.isPending || planMutation.isPending}
-        pendingSteps={
-          extractMutation.isPending
-            ? ["extract_assumptions_risks"]
-            : ["generate_validation_plan", "write_artifact_version", "write_experiments"]
-        }
-        runId={lastWorkflowRunId}
-      />
+      {tracePending || lastWorkflowRunId ? (
+        <details className="rounded-lg border border-border bg-white p-5" open={tracePending}>
+          <summary className="cursor-pointer text-sm font-semibold">View activity trace</summary>
+          <div className="mt-4 border-t border-border pt-4">
+            <WorkflowTrace
+              pending={tracePending}
+              pendingSteps={
+                extractMutation.isPending
+                  ? ["extract_assumptions_risks"]
+                  : ["generate_validation_plan", "write_artifact_version", "write_experiments"]
+              }
+              runId={lastWorkflowRunId}
+            />
+          </div>
+        </details>
+      ) : null}
 
       {riskiestAssumption ? (
         <div className="rounded-lg border border-border bg-white p-5">
@@ -250,14 +268,32 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
             <Button
               className="w-full justify-center whitespace-nowrap sm:w-60"
               disabled={planMutation.isPending}
-              onClick={() => planMutation.mutate(riskiestAssumption.id)}
+              onClick={() =>
+                runAssumptionAction(
+                  riskiestAssumption,
+                  experimentsByAssumption.get(riskiestAssumption.id) ?? [],
+                )
+              }
               type="button"
             >
               <Beaker className="h-4 w-4" aria-hidden="true" />
-              Create Validation Plan
+              {assumptionCtaLabel(
+                experimentsByAssumption.get(riskiestAssumption.id) ?? [],
+                false,
+              )}
             </Button>
           </div>
         </div>
+      ) : null}
+
+      {topValidationPriorities.length > 0 ? (
+        <TopValidationPriorities
+          assumptions={topValidationPriorities}
+          experimentsByAssumption={experimentsByAssumption}
+          onAction={runAssumptionAction}
+          pendingAssumptionId={pendingPlanAssumptionId}
+          pending={planMutation.isPending}
+        />
       ) : null}
 
       {rankedAssumptions.length > 0 ? (
@@ -363,18 +399,18 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
               ) : null}
 
               {visibleAssumptions.length > 0 ? (
-                <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+                <div className="space-y-3">
                   <div className="min-w-0 space-y-3">
-                    <div className="hidden overflow-x-auto lg:block">
-                      <table className="w-full min-w-[820px] border-collapse text-left text-sm">
+                    <div className="hidden overflow-hidden rounded-md border border-border lg:block">
+                      <table className="w-full table-fixed border-collapse text-left text-sm">
                         <thead>
                           <tr className="border-b border-border text-xs uppercase tracking-normal text-muted-foreground">
-                            <th className="py-3 pr-4 font-medium">Assumption</th>
-                            <th className="py-3 pr-4 font-medium">Risk</th>
-                            <th className="py-3 pr-4 font-medium">Confidence</th>
-                            <th className="py-3 pr-4 font-medium">Evidence</th>
-                            <th className="py-3 pr-4 font-medium">Status</th>
-                            <th className="w-40 py-3 pr-0 font-medium">Action</th>
+                            <th className="w-[42%] px-3 py-3 font-medium">Assumption</th>
+                            <th className="w-[8%] px-3 py-3 font-medium">Risk</th>
+                            <th className="w-[12%] px-3 py-3 font-medium">Confidence</th>
+                            <th className="w-[9%] px-3 py-3 font-medium">Evidence</th>
+                            <th className="w-[15%] px-3 py-3 font-medium">Status</th>
+                            <th className="w-[14%] px-3 py-3 font-medium">Action</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
@@ -382,76 +418,93 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                             const isGeneratingPlan =
                               planMutation.isPending && pendingPlanAssumptionId === assumption.id;
                             const isSelected = selectedAssumption?.id === assumption.id;
+                            const planExperiments = experimentsByAssumption.get(assumption.id) ?? [];
                             return (
-                              <tr
-                                className={[
-                                  "cursor-pointer align-top transition",
-                                  isSelected
-                                    ? "bg-muted/70"
-                                    : "hover:bg-muted/40",
-                                ].join(" ")}
-                                key={assumption.id}
-                                onClick={() => setSelectedAssumptionId(assumption.id)}
-                              >
-                                <td className="max-w-xl py-4 pr-4">
-                                  <div className="line-clamp-3 text-foreground">{assumption.text}</div>
-                                  {assumption.recommended_test ? (
-                                    <div className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                                      {assumption.recommended_test}
-                                    </div>
-                                  ) : null}
-                                </td>
-                                <td className="py-4 pr-4">
-                                  <Badge>{riskLabel(assumption)}</Badge>
-                                </td>
-                                <td className="py-4 pr-4">
-                                  <Badge>{formatConfidence(assumption.confidence_score)}</Badge>
-                                </td>
-                                <td className="py-4 pr-4">
-                                  <Badge>{evidenceStrength(assumption.evidence_links.length)}</Badge>
-                                </td>
-                                <td className="py-4 pr-4">
-                                  <select
-                                    className="w-36 rounded-md border border-border bg-white px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary"
-                                    disabled={statusMutation.isPending}
-                                    onClick={(event) => event.stopPropagation()}
-                                    onChange={(event) =>
-                                      statusMutation.mutate({
-                                        assumption,
-                                        status: event.target.value as Assumption["status"],
-                                      })
-                                    }
-                                    value={assumption.status}
-                                  >
-                                    {[
-                                      "untested",
-                                      "testing",
-                                      "validated",
-                                      "invalidated",
-                                      "inconclusive",
-                                    ].map((status) => (
-                                      <option key={status} value={status}>
-                                        {formatLabel(status)}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </td>
-                                <td className="py-4 pr-0">
-                                  <Button
-                                    aria-busy={isGeneratingPlan}
-                                    className="min-w-36 justify-center whitespace-nowrap"
-                                    disabled={planMutation.isPending}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      planMutation.mutate(assumption.id);
-                                    }}
-                                    size="sm"
-                                    type="button"
-                                  >
-                                    {isGeneratingPlan ? "Creating..." : "Create Plan"}
-                                  </Button>
-                                </td>
-                              </tr>
+                              <Fragment key={assumption.id}>
+                                <tr
+                                  className={[
+                                    "cursor-pointer align-top transition",
+                                    isSelected
+                                      ? "bg-muted/70"
+                                      : "hover:bg-muted/40",
+                                  ].join(" ")}
+                                  onClick={() => setSelectedAssumptionId(assumption.id)}
+                                >
+                                  <td className="px-3 py-4">
+                                    <div className="line-clamp-3 text-foreground">{assumption.text}</div>
+                                    {assumption.recommended_test ? (
+                                      <div className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                                        {assumption.recommended_test}
+                                      </div>
+                                    ) : null}
+                                  </td>
+                                  <td className="px-3 py-4">
+                                    <Badge>{compactRiskLabel(assumption)}</Badge>
+                                  </td>
+                                  <td className="px-3 py-4">
+                                    <Badge>{compactConfidenceLabel(assumption.confidence_score)}</Badge>
+                                  </td>
+                                  <td className="px-3 py-4">
+                                    <Badge>{compactEvidenceLabel(assumption.evidence_links.length)}</Badge>
+                                  </td>
+                                  <td className="px-3 py-4">
+                                    <select
+                                      className="w-full rounded-md border border-border bg-white px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                                      disabled={statusMutation.isPending}
+                                      onClick={(event) => event.stopPropagation()}
+                                      onChange={(event) =>
+                                        statusMutation.mutate({
+                                          assumption,
+                                          status: event.target.value as Assumption["status"],
+                                        })
+                                      }
+                                      value={assumption.status}
+                                    >
+                                      {[
+                                        "untested",
+                                        "testing",
+                                        "validated",
+                                        "invalidated",
+                                        "inconclusive",
+                                      ].map((status) => (
+                                        <option key={status} value={status}>
+                                          {formatLabel(status)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td className="px-3 py-4">
+                                    <Button
+                                      aria-busy={isGeneratingPlan}
+                                      className="w-full justify-center whitespace-nowrap px-2"
+                                      disabled={planMutation.isPending}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        runAssumptionAction(assumption, planExperiments);
+                                      }}
+                                      size="sm"
+                                      type="button"
+                                      variant="secondary"
+                                    >
+                                      {assumptionCtaLabel(planExperiments, isGeneratingPlan)}
+                                    </Button>
+                                  </td>
+                                </tr>
+                                {isSelected ? (
+                                  <tr className="bg-muted/40">
+                                    <td className="px-3 py-3" colSpan={6}>
+                                      <AssumptionDetailPanel
+                                        assumption={assumption}
+                                        experiments={selectedPlanExperiments}
+                                        isFreshPlan={Boolean(selectedGeneratedPlan)}
+                                        isGeneratingPlan={selectedIsGeneratingPlan}
+                                        onCreatePlan={(assumptionId) => planMutation.mutate(assumptionId)}
+                                        onOpenExperiments={onOpenExperiments}
+                                      />
+                                    </td>
+                                  </tr>
+                                ) : null}
+                              </Fragment>
                             );
                           })}
                         </tbody>
@@ -549,11 +602,12 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                                   aria-busy={isGeneratingPlan}
                                   className="mt-3 w-full whitespace-nowrap"
                                   disabled={planMutation.isPending}
-                                  onClick={() => planMutation.mutate(assumption.id)}
+                                  onClick={() => runAssumptionAction(assumption, planExperiments)}
                                   type="button"
+                                  variant="secondary"
                                 >
                                   <Beaker className="h-4 w-4" aria-hidden="true" />
-                                  {isGeneratingPlan ? "Generating..." : "Create Validation Plan"}
+                                  {assumptionCtaLabel(planExperiments, isGeneratingPlan)}
                                 </Button>
                               </div>
                             </div>
@@ -563,18 +617,6 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                     </div>
                   </div>
 
-                  <AssumptionDetailPanel
-                    assumption={selectedAssumption}
-                    experiments={selectedPlanExperiments}
-                    isFreshPlan={Boolean(selectedGeneratedPlan)}
-                    isGeneratingPlan={selectedIsGeneratingPlan}
-                    onCreatePlan={(assumptionId) => planMutation.mutate(assumptionId)}
-                    onOpenExperiments={onOpenExperiments}
-                    onStatusChange={(assumption, status) =>
-                      statusMutation.mutate({ assumption, status })
-                    }
-                    statusPending={statusMutation.isPending}
-                  />
                 </div>
               ) : null}
               {hiddenAssumptionCount > 0 ? (
@@ -662,29 +704,44 @@ function AssumptionPriorityMatrix({
   onSelect: (assumption: Assumption) => void;
   selectedAssumptionId: string | null;
 }) {
+  const validateFirstIds = new Set(
+    assumptions
+      .filter(
+        (assumption) =>
+          isDecisionCritical(assumption) &&
+          isHighRisk(assumption) &&
+          isLowConfidence(assumption),
+      )
+      .slice(0, 3)
+      .map((assumption) => assumption.id),
+  );
   const quadrants = [
     {
       key: "validate-first",
       title: "Validate first",
-      subtitle: "High risk / low confidence",
-      items: assumptions.filter((assumption) => isHighRisk(assumption) && isLowConfidence(assumption)),
+      subtitle: "Top decision-critical items",
+      items: assumptions.filter((assumption) => validateFirstIds.has(assumption.id)),
     },
     {
       key: "monitor",
       title: "Monitor",
-      subtitle: "High risk / higher confidence",
-      items: assumptions.filter((assumption) => isHighRisk(assumption) && !isLowConfidence(assumption)),
+      subtitle: "High risk - watch closely",
+      items: assumptions.filter(
+        (assumption) =>
+          isHighRisk(assumption) &&
+          !validateFirstIds.has(assumption.id),
+      ),
     },
     {
       key: "research-later",
       title: "Research later",
-      subtitle: "Lower risk / low confidence",
+      subtitle: "Lower risk - Low confidence",
       items: assumptions.filter((assumption) => !isHighRisk(assumption) && isLowConfidence(assumption)),
     },
     {
       key: "safe",
       title: "Safer assumptions",
-      subtitle: "Lower risk / higher confidence",
+      subtitle: "Lower risk - Higher confidence",
       items: assumptions.filter((assumption) => !isHighRisk(assumption) && !isLowConfidence(assumption)),
     },
   ];
@@ -757,6 +814,84 @@ function AssumptionPriorityMatrix({
   );
 }
 
+function TopValidationPriorities({
+  assumptions,
+  experimentsByAssumption,
+  onAction,
+  pending,
+  pendingAssumptionId,
+}: {
+  assumptions: Assumption[];
+  experimentsByAssumption: Map<string, Experiment[]>;
+  onAction: (assumption: Assumption, planExperiments: Experiment[]) => void;
+  pending: boolean;
+  pendingAssumptionId: string | null;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-white p-5">
+      <div className="flex flex-col gap-2 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h3 className="text-sm font-semibold">Top Validation Priorities</h3>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Start here. The full matrix remains available below, but these are the assumptions
+            most likely to change the decision.
+          </p>
+        </div>
+        <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+          top {assumptions.length}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        {assumptions.map((assumption, index) => {
+          const planExperiments = experimentsByAssumption.get(assumption.id) ?? [];
+          const isPending = pending && pendingAssumptionId === assumption.id;
+          return (
+            <article className="rounded-md border border-border p-4" key={assumption.id}>
+              <div className="flex items-start gap-3">
+                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground">
+                  {index + 1}
+                </span>
+                <div className="min-w-0">
+                  <MarkdownContent
+                    className="line-clamp-4 space-y-2 text-sm font-semibold leading-6 text-foreground"
+                    markdown={assumption.text}
+                  />
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                    <Badge>{compactRiskLabel(assumption)}</Badge>
+                    <Badge>{compactConfidenceLabel(assumption.confidence_score)}</Badge>
+                    <Badge>{compactEvidenceLabel(assumption.evidence_links.length)}</Badge>
+                  </div>
+                </div>
+              </div>
+              {assumption.recommended_test ? (
+                <MarkdownContent
+                  className="mt-3 line-clamp-3 space-y-2 text-sm leading-6 text-muted-foreground"
+                  markdown={assumption.recommended_test}
+                />
+              ) : null}
+              <Button
+                aria-busy={isPending}
+                className="mt-4 w-full"
+                disabled={pending}
+                onClick={() => onAction(assumption, planExperiments)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <Beaker className="h-4 w-4" aria-hidden="true" />
+                {assumptionCtaLabel(planExperiments, isPending)}
+              </Button>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AssumptionDetailPanel({
   assumption,
   experiments,
@@ -764,98 +899,71 @@ function AssumptionDetailPanel({
   isGeneratingPlan,
   onCreatePlan,
   onOpenExperiments,
-  onStatusChange,
-  statusPending,
 }: {
-  assumption: Assumption | null;
+  assumption: Assumption;
   experiments: Experiment[];
   isFreshPlan: boolean;
   isGeneratingPlan: boolean;
   onCreatePlan: (assumptionId: string) => void;
   onOpenExperiments?: () => void;
-  onStatusChange: (assumption: Assumption, status: Assumption["status"]) => void;
-  statusPending: boolean;
 }) {
-  if (!assumption) {
-    return (
-      <aside className="rounded-md border border-dashed border-border bg-muted/30 p-4">
-        <h4 className="text-sm font-semibold">Assumption detail</h4>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Select an assumption to review the recommended test, linked evidence, status, and
-          validation plan.
-        </p>
-      </aside>
-    );
-  }
-
   return (
-    <aside className="self-start rounded-md border border-border bg-muted/30 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-            Assumption detail
-          </p>
-          <h4 className="mt-2 text-sm font-semibold leading-6">{assumption.text}</h4>
+    <div className="rounded-md border border-border bg-background/60 p-4">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+              Assumption detail
+            </p>
+            <Badge>{formatLabel(assumption.status)}</Badge>
+          </div>
+          <h4 className="mt-2 max-w-4xl text-sm font-semibold leading-6">{assumption.text}</h4>
+
+          {assumption.recommended_test ? (
+            <div className="mt-4 border-t border-border pt-4">
+              <h5 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                Recommended validation
+              </h5>
+              <MarkdownContent
+                className="mt-2 max-w-4xl space-y-2 text-sm leading-6 text-muted-foreground"
+                markdown={assumption.recommended_test}
+              />
+            </div>
+          ) : null}
         </div>
-        <Badge>{formatLabel(assumption.status)}</Badge>
-      </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <DetailMetric label="Risk" value={riskLabel(assumption)} />
-        <DetailMetric label="Confidence" value={formatConfidence(assumption.confidence_score)} />
-        <DetailMetric label="Evidence" value={evidenceStrength(assumption.evidence_links.length)} />
-        <DetailMetric label="Citations" value={String(assumption.evidence_links.length)} />
-      </div>
-
-      <label
-        className="mt-4 block text-xs font-medium uppercase tracking-normal text-muted-foreground"
-        htmlFor={`selected-assumption-status-${assumption.id}`}
-      >
-        Status
-      </label>
-      <select
-        className="mt-2 w-full rounded-md border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
-        disabled={statusPending}
-        id={`selected-assumption-status-${assumption.id}`}
-        onChange={(event) => onStatusChange(assumption, event.target.value as Assumption["status"])}
-        value={assumption.status}
-      >
-        {["untested", "testing", "validated", "invalidated", "inconclusive"].map((status) => (
-          <option key={status} value={status}>
-            {formatLabel(status)}
-          </option>
-        ))}
-      </select>
-
-      {assumption.recommended_test ? (
-        <div className="mt-4 border-t border-border pt-4">
-          <h5 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-            Recommended validation
-          </h5>
-          <MarkdownContent
-            className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
-            markdown={assumption.recommended_test}
-          />
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <DetailMetric label="Risk" value={compactRiskLabel(assumption)} />
+            <DetailMetric label="Confidence" value={compactConfidenceLabel(assumption.confidence_score)} />
+            <DetailMetric label="Evidence" value={compactEvidenceLabel(assumption.evidence_links.length)} />
+            <DetailMetric label="Citations" value={String(assumption.evidence_links.length)} />
+          </div>
+          <Button
+            aria-busy={isGeneratingPlan}
+            className="w-full justify-center whitespace-nowrap"
+            disabled={isGeneratingPlan}
+            onClick={() => {
+              if (experiments.length > 0 && onOpenExperiments) {
+                onOpenExperiments();
+                return;
+              }
+              onCreatePlan(assumption.id);
+            }}
+            type="button"
+          >
+            <Beaker className="h-4 w-4" aria-hidden="true" />
+            {assumptionCtaLabel(experiments, isGeneratingPlan)}
+          </Button>
         </div>
-      ) : null}
-
-      <Button
-        aria-busy={isGeneratingPlan}
-        className="mt-4 w-full justify-center whitespace-nowrap"
-        disabled={isGeneratingPlan}
-        onClick={() => onCreatePlan(assumption.id)}
-        type="button"
-      >
-        <Beaker className="h-4 w-4" aria-hidden="true" />
-        {isGeneratingPlan ? "Creating..." : "Create Validation Plan"}
-      </Button>
+      </div>
 
       <ValidationPlanSummary
         experiments={experiments}
         isFresh={isFreshPlan}
         onOpenExperiments={onOpenExperiments}
       />
-    </aside>
+    </div>
   );
 }
 
@@ -960,13 +1068,38 @@ function GeneratedExperimentBlock({ title, value }: { title: string; value: stri
 
 function formatConfidence(value: string | null) {
   if (value === null) {
+    return "Unknown confidence";
+  }
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) {
+    return value;
+  }
+  const percentage = `${Math.round(parsed * 100)}%`;
+  if (parsed >= 0.7) {
+    return `High confidence (${percentage})`;
+  }
+  if (parsed >= 0.4) {
+    return `Medium confidence (${percentage})`;
+  }
+  return `Low confidence (${percentage})`;
+}
+
+function compactConfidenceLabel(value: string | null) {
+  if (value === null) {
     return "Unknown";
   }
   const parsed = Number(value);
   if (Number.isNaN(parsed)) {
     return value;
   }
-  return `${Math.round(parsed * 100)}%`;
+  const percentage = `${Math.round(parsed * 100)}%`;
+  if (parsed >= 0.7) {
+    return `High (${percentage})`;
+  }
+  if (parsed >= 0.4) {
+    return `Medium (${percentage})`;
+  }
+  return `Low (${percentage})`;
 }
 
 function formatLabel(value: string) {
@@ -975,7 +1108,7 @@ function formatLabel(value: string) {
 
 function Badge({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-flex w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+    <span className="inline-flex w-fit whitespace-nowrap rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
       {children}
     </span>
   );
@@ -1066,6 +1199,16 @@ function filterDescription(filter: AssumptionFilter) {
 
 function riskLabel(assumption: Assumption) {
   if (assumption.kill_risk || assumption.importance === "critical") {
+    return "High risk";
+  }
+  if (assumption.importance === "high" || assumption.uncertainty === "high") {
+    return "Medium risk";
+  }
+  return "Lower risk";
+}
+
+function compactRiskLabel(assumption: Assumption) {
+  if (assumption.kill_risk || assumption.importance === "critical") {
     return "High";
   }
   if (assumption.importance === "high" || assumption.uncertainty === "high") {
@@ -1078,16 +1221,46 @@ function isHighRisk(assumption: Assumption) {
   return assumption.kill_risk || assumption.importance === "critical" || assumption.importance === "high";
 }
 
+function isDecisionCritical(assumption: Assumption) {
+  return assumption.kill_risk || assumption.importance === "critical";
+}
+
 function isLowConfidence(assumption: Assumption) {
   return confidenceValue(assumption.confidence_score) < 0.4;
 }
 
+function assumptionCtaLabel(experiments: Experiment[], pending: boolean) {
+  if (pending) {
+    return "Creating...";
+  }
+  if (experiments.length === 0) {
+    return "Create Plan";
+  }
+  if (experiments.some((experiment) => experiment.results.length > 0)) {
+    return "Review Evidence";
+  }
+  if (experiments.some((experiment) => experiment.status === "running")) {
+    return "Log Results";
+  }
+  return "Open Plan";
+}
+
 function evidenceStrength(linkCount: number) {
+  if (linkCount >= 3) {
+    return "Strong evidence";
+  }
+  if (linkCount >= 1) {
+    return "Partial evidence";
+  }
+  return "Needs evidence";
+}
+
+function compactEvidenceLabel(linkCount: number) {
   if (linkCount >= 3) {
     return "Strong";
   }
   if (linkCount >= 1) {
     return "Partial";
   }
-  return "Weak";
+  return "None";
 }

@@ -59,12 +59,30 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
     generateMutation.data?.artifact ?? artifactsQuery.data?.[0] ?? null;
   const validationPlanVersion = validationPlanArtifact?.current_version ?? null;
   const assumptionById = new Map(assumptions.map((assumption) => [assumption.id, assumption]));
+  const hasExperiments = experiments.length > 0;
+  const hasLoggedResults = experiments.some((experiment) => experiment.results.length > 0);
+  const primaryActionLabel = validationPrimaryActionLabel(hasExperiments, hasLoggedResults);
   const error =
     experimentsQuery.error ??
     assumptionsQuery.error ??
     artifactsQuery.error ??
     generateMutation.error ??
     null;
+
+  function runPrimaryAction() {
+    if (!hasExperiments) {
+      generateMutation.mutate();
+      return;
+    }
+    if (hasLoggedResults) {
+      if (typeof window !== "undefined") {
+        window.location.hash = "decisions";
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
+      }
+      return;
+    }
+    document.getElementById("log-results-panel")?.scrollIntoView({ behavior: "smooth" });
+  }
 
   return (
     <section className="mt-6 space-y-6">
@@ -84,12 +102,12 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
           </div>
           <Button
             className="w-full justify-center whitespace-nowrap sm:w-60"
-            disabled={generateMutation.isPending || assumptions.length === 0}
-            onClick={() => generateMutation.mutate()}
+            disabled={generateMutation.isPending || (!hasExperiments && assumptions.length === 0)}
+            onClick={runPrimaryAction}
             type="button"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            {generateMutation.isPending ? "Generating..." : "Create Validation Plan"}
+            {generateMutation.isPending ? "Generating..." : primaryActionLabel}
           </Button>
         </div>
       </div>
@@ -100,11 +118,18 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
         </div>
       ) : null}
 
-      <WorkflowTrace
-        pending={generateMutation.isPending}
-        pendingSteps={["generate_validation_plan", "write_artifact_version", "write_experiments"]}
-        runId={generateMutation.data?.ai_run_id ?? null}
-      />
+      {generateMutation.isPending || generateMutation.data?.ai_run_id ? (
+        <details className="rounded-lg border border-border bg-white p-5" open={generateMutation.isPending}>
+          <summary className="cursor-pointer text-sm font-semibold">View activity trace</summary>
+          <div className="mt-4 border-t border-border pt-4">
+            <WorkflowTrace
+              pending={generateMutation.isPending}
+              pendingSteps={["generate_validation_plan", "write_artifact_version", "write_experiments"]}
+              runId={generateMutation.data?.ai_run_id ?? null}
+            />
+          </div>
+        </details>
+      ) : null}
 
       {experimentsQuery.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading experiments...</p>
@@ -140,6 +165,7 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
         <RecommendedValidationPlan
           artifactTitle={validationPlanArtifact?.title ?? "Recommended Validation Plan"}
           experiments={experiments}
+          hasLoggedResults={hasLoggedResults}
         />
         <div
           className={
@@ -196,9 +222,11 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
 function RecommendedValidationPlan({
   artifactTitle,
   experiments,
+  hasLoggedResults,
 }: {
   artifactTitle: string;
   experiments: Experiment[];
+  hasLoggedResults: boolean;
 }) {
   const recommended = experiments[0];
   if (!recommended) {
@@ -209,7 +237,7 @@ function RecommendedValidationPlan({
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-            Recommended Validation Plan
+            Your Next Test
           </p>
           <h3 className="mt-2 text-lg font-semibold">{recommended.name}</h3>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -217,13 +245,20 @@ function RecommendedValidationPlan({
           </p>
         </div>
         <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-          {recommended.status}
+          {hasLoggedResults ? "results logged" : recommended.status}
         </span>
       </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
-        <Block title="Test Type" value={recommended.method ?? "Manual validation"} />
-        <Block title="Success Criteria" value={recommended.success_criteria} />
-        <Block title="Failure Criteria" value={recommended.failure_threshold} />
+      <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <Block title="Goal" value={recommended.name} />
+        <Block title="Run" value={recommended.plan} />
+        <Block title="Success" value={recommended.success_criteria} />
+        <Block title="Failure" value={recommended.failure_threshold} />
+      </div>
+      <div className="mt-4 rounded-md border border-border bg-muted/40 p-3">
+        <Block
+          title="Next after results"
+          value="Update confidence and review whether the evidence supports continuing research, pivoting, pausing, killing, or proceeding narrowly."
+        />
       </div>
       <ValidationAssetGrid experiment={recommended} />
     </div>
@@ -238,9 +273,7 @@ function ValidationAssetGrid({ experiment }: { experiment: Experiment }) {
     },
     {
       title: "Screener Questions",
-      value: experiment.plan
-        ? `Use the target respondent profile from the plan.\n\n${experiment.plan}`
-        : null,
+      value: "1. Have you recently tried to solve this problem?\n2. What did you use instead?\n3. How painful was the workaround?\n4. Did you spend money or serious time on it?",
     },
     {
       title: "Survey Questions",
@@ -251,8 +284,12 @@ function ValidationAssetGrid({ experiment }: { experiment: Experiment }) {
     {
       title: "Outreach Message",
       value: experiment.plan
-        ? `I'm researching ${experiment.name.toLowerCase()} and looking for quick feedback from people who match this workflow. Would you be open to a short conversation?`
+        ? `I'm researching ${experiment.name.toLowerCase()} and looking for quick feedback from people who recently faced this situation. Would you be open to a short conversation?`
         : null,
+    },
+    {
+      title: "Landing Page Copy",
+      value: `Validate demand for ${experiment.name.toLowerCase()} before building. Ask visitors to describe their current workaround and whether they would try a dedicated solution.`,
     },
     {
       title: "Results Rubric",
@@ -274,8 +311,8 @@ function ValidationAssetGrid({ experiment }: { experiment: Experiment }) {
         </span>
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
-        {assets.map((asset) => (
-          <details className="rounded-md border border-border p-3" key={asset.title}>
+        {assets.map((asset, index) => (
+          <details className="rounded-md border border-border p-3" key={asset.title} open={index === 0}>
             <summary className="cursor-pointer text-sm font-medium">{asset.title}</summary>
             <div className="mt-3 border-t border-border pt-3">
               <Block title={asset.title} value={asset.value || "Not generated yet"} />
@@ -322,27 +359,29 @@ function ExperimentCard({
         </span>
       </div>
 
-      <details className="mt-4 rounded-md bg-muted/50 p-3">
-        <summary className="cursor-pointer text-sm font-medium">
-          Show test plan and log results
-        </summary>
-        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div>
-            <Block title="Plan" value={experiment.plan} />
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-4">
+          <div className="rounded-md bg-muted/50 p-3">
+            <Block title="Step-by-Step Test Plan" value={experiment.plan} />
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <Block title="Success Criteria" value={experiment.success_criteria} />
-              <Block title="Failure Threshold" value={experiment.failure_threshold} />
+              <Block title="Failure Criteria" value={experiment.failure_threshold} />
             </div>
-            {experiment.results.length > 0 ? (
-              <div className="mt-4 space-y-3">
-                <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-                  Results
-                </h4>
-                {experiment.results.map((result) => (
+          </div>
+          <ResultInterpretation experiment={experiment} />
+          <details className="rounded-md border border-border p-3">
+            <summary className="cursor-pointer text-sm font-medium">
+              Show logged results
+            </summary>
+            <div className="mt-3 space-y-3 border-t border-border pt-3">
+              {experiment.results.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No results logged yet.</p>
+              ) : (
+                experiment.results.map((result) => (
                   <div key={result.id} className="rounded-md border border-border p-3">
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-                        {result.outcome}
+                        {formatLabel(result.outcome)}
                       </span>
                       {result.confidence_delta ? (
                         <span className="text-muted-foreground">
@@ -354,14 +393,49 @@ function ExperimentCard({
                       {result.result_summary}
                     </p>
                   </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-          <ResultForm experiment={experiment} onSaved={onSaved} projectId={projectId} />
+                ))
+              )}
+            </div>
+          </details>
         </div>
-      </details>
+        <ResultForm experiment={experiment} onSaved={onSaved} projectId={projectId} />
+      </div>
     </article>
+  );
+}
+
+function ResultInterpretation({ experiment }: { experiment: Experiment }) {
+  const latestResult = [...experiment.results].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  )[0];
+
+  if (!latestResult) {
+    return (
+      <div className="rounded-md border border-border p-3">
+        <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+          Result Interpretation
+        </h4>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          No result has been logged. Run the test, then record the outcome before making a
+          proceed or pivot decision.
+        </p>
+      </div>
+    );
+  }
+
+  const interpretation = resultInterpretation(latestResult.outcome);
+  return (
+    <div className="rounded-md border border-border p-3">
+      <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+        Result Interpretation
+      </h4>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        {interpretation}
+      </p>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        Latest signal: {latestResult.result_summary}
+      </p>
+    </div>
   );
 }
 
@@ -377,16 +451,27 @@ function ResultForm({
   const [summary, setSummary] = useState("");
   const [outcome, setOutcome] = useState<ExperimentOutcome>("positive");
   const [rawNotes, setRawNotes] = useState("");
+  const [evidenceStrength, setEvidenceStrength] = useState("medium");
+  const [confidenceChange, setConfidenceChange] = useState("no_change");
+  const [recommendationChange, setRecommendationChange] = useState("no_change");
   const mutation = useMutation({
     mutationFn: () =>
       logExperimentResult(projectId, experiment.id, {
         result_summary: summary,
         outcome,
-        raw_notes: rawNotes.trim().length > 0 ? rawNotes : undefined,
+        raw_notes: resultNotes({
+          confidenceChange,
+          evidenceStrength,
+          rawNotes,
+          recommendationChange,
+        }),
       }),
     onSuccess: async () => {
       setSummary("");
       setRawNotes("");
+      setEvidenceStrength("medium");
+      setConfidenceChange("no_change");
+      setRecommendationChange("no_change");
       await onSaved();
     },
   });
@@ -394,6 +479,7 @@ function ResultForm({
   return (
     <form
       className="rounded-md border border-border p-4"
+      id={experiment.results.length === 0 ? "log-results-panel" : undefined}
       onSubmit={(event) => {
         event.preventDefault();
         mutation.mutate();
@@ -401,8 +487,11 @@ function ResultForm({
     >
       <div className="flex items-center gap-2">
         <CheckCircle2 className="h-4 w-4 text-primary" aria-hidden="true" />
-        <h4 className="text-sm font-semibold">Log Result</h4>
+        <h4 className="text-sm font-semibold">Log Results</h4>
       </div>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        The validation loop is not complete until real-world results are logged.
+      </p>
       {mutation.error ? (
         <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
           {(mutation.error as Error).message}
@@ -423,7 +512,7 @@ function ResultForm({
         </select>
       </label>
       <label className="mt-3 block">
-        <span className="text-sm font-medium">Summary</span>
+        <span className="text-sm font-medium">What happened?</span>
         <textarea
           className="mt-2 min-h-24 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
           onChange={(event) => setSummary(event.target.value)}
@@ -431,7 +520,47 @@ function ResultForm({
         />
       </label>
       <label className="mt-3 block">
-        <span className="text-sm font-medium">Raw Notes</span>
+        <span className="text-sm font-medium">Evidence strength</span>
+        <select
+          className="mt-2 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+          onChange={(event) => setEvidenceStrength(event.target.value)}
+          value={evidenceStrength}
+        >
+          {["weak", "medium", "strong"].map((item) => (
+            <option key={item} value={item}>
+              {formatLabel(item)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="mt-3 block">
+        <span className="text-sm font-medium">Should confidence change?</span>
+        <select
+          className="mt-2 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+          onChange={(event) => setConfidenceChange(event.target.value)}
+          value={confidenceChange}
+        >
+          <option value="increase">Increase confidence</option>
+          <option value="no_change">No change yet</option>
+          <option value="decrease">Decrease confidence</option>
+        </select>
+      </label>
+      <label className="mt-3 block">
+        <span className="text-sm font-medium">Should the recommendation change?</span>
+        <select
+          className="mt-2 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+          onChange={(event) => setRecommendationChange(event.target.value)}
+          value={recommendationChange}
+        >
+          <option value="no_change">No change yet</option>
+          <option value="revisit">Revisit recommendation</option>
+          <option value="proceed">Consider proceeding</option>
+          <option value="pivot">Consider pivoting</option>
+          <option value="pause">Consider pausing</option>
+        </select>
+      </label>
+      <label className="mt-3 block">
+        <span className="text-sm font-medium">Interview notes / raw evidence</span>
         <textarea
           className="mt-2 min-h-20 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
           onChange={(event) => setRawNotes(event.target.value)}
@@ -444,10 +573,53 @@ function ResultForm({
         type="submit"
       >
         <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-        {mutation.isPending ? "Saving..." : "Save Result"}
+        {mutation.isPending ? "Logging..." : "Log Result"}
       </Button>
     </form>
   );
+}
+
+function resultInterpretation(outcome: ExperimentOutcome) {
+  if (outcome === "positive") {
+    return "This strengthens the tested assumption. Revisit the decision after checking whether the signal is strong enough to justify the next build step.";
+  }
+  if (outcome === "negative") {
+    return "This weakens the tested assumption. Consider pivoting, narrowing the wedge, or pausing before building more.";
+  }
+  if (outcome === "mixed") {
+    return "This is a partial signal. Run a tighter follow-up test before treating the assumption as validated.";
+  }
+  return "This is not decision-grade evidence yet. Clarify the respondent profile or test design and run another validation pass.";
+}
+
+function validationPrimaryActionLabel(hasExperiments: boolean, hasLoggedResults: boolean) {
+  if (!hasExperiments) {
+    return "Create Validation Plan";
+  }
+  if (hasLoggedResults) {
+    return "Review Decision";
+  }
+  return "Log Results";
+}
+
+function resultNotes({
+  confidenceChange,
+  evidenceStrength,
+  rawNotes,
+  recommendationChange,
+}: {
+  confidenceChange: string;
+  evidenceStrength: string;
+  rawNotes: string;
+  recommendationChange: string;
+}) {
+  const parts = [
+    rawNotes.trim(),
+    `Evidence strength: ${formatLabel(evidenceStrength)}`,
+    `Confidence change: ${formatLabel(confidenceChange)}`,
+    `Recommendation change: ${formatLabel(recommendationChange)}`,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
 }
 
 function Block({ title, value }: { title: string; value: string | null }) {

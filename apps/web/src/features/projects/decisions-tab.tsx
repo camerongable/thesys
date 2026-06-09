@@ -1,13 +1,15 @@
 "use client";
 
-import { Link2, Plus, ScrollText } from "lucide-react";
+import { AlertTriangle, Link2, Plus, ScrollText } from "lucide-react";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import {
+  Assumption,
   createDecision,
   DecisionType,
+  Experiment,
   getProjectOverview,
   listArtifacts,
   listAssumptions,
@@ -102,12 +104,20 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
   const evidence = evidenceQuery.data ?? [];
   const artifacts = artifactsQuery.data ?? [];
   const experiments = experimentsQuery.data ?? [];
+  const hasLoggedResults = experiments.some((experiment) => experiment.results.length > 0);
+  const suggestedDecision = buildDecisionSuggestion({
+    assumptions,
+    evidenceCount: evidence.length,
+    experiments,
+    overview: overviewQuery.data,
+  });
   const error =
     decisionsQuery.error ??
     assumptionsQuery.error ??
     evidenceQuery.error ??
     artifactsQuery.error ??
     experimentsQuery.error ??
+    overviewQuery.error ??
     createMutation.error ??
     null;
 
@@ -117,6 +127,28 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
       panel.open = true;
     }
     window.setTimeout(() => document.getElementById("decision-title")?.focus(), 0);
+  }
+
+  function applyDecisionSuggestion(type: DecisionType, label: string) {
+    const suggestion = buildDecisionSuggestion({
+      assumptions,
+      decisionType: type,
+      evidenceCount: evidence.length,
+      experiments,
+      label,
+      overview: overviewQuery.data,
+    });
+    setDecisionType(type);
+    setTitle(suggestion.title);
+    setRationale(suggestion.rationale);
+    setExpectedOutcome(suggestion.expectedOutcome);
+    if (suggestion.linkedAssumptionId) {
+      setLinkedAssumptions([suggestion.linkedAssumptionId]);
+    }
+    if (suggestion.linkedExperimentIds.length > 0) {
+      setLinkedExperiments(suggestion.linkedExperimentIds);
+    }
+    openDecisionForm();
   }
 
   return (
@@ -137,17 +169,70 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
       <div className="rounded-lg border border-border bg-white p-5">
         <div className="flex items-center gap-2">
           <ScrollText className="h-4 w-4 text-primary" aria-hidden="true" />
-          <h3 className="text-base font-semibold">Current Decision Recommendation</h3>
+          <h3 className="text-base font-semibold">Recommended Decision</h3>
         </div>
-        <p className="mt-3 text-sm leading-6 text-foreground">
-          {overviewQuery.data?.current_recommendation.recommendation ??
-            "Loading current recommendation..."}
+        <p className="mt-3 text-lg font-semibold leading-7 text-foreground">
+          {suggestedDecision.title}
         </p>
-        {overviewQuery.data?.current_recommendation.rationale ? (
-          <MarkdownContent
-            className="mt-2 max-w-3xl space-y-2 text-sm leading-6 text-muted-foreground"
-            markdown={overviewQuery.data.current_recommendation.rationale}
-          />
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+          {suggestedDecision.rationale}
+        </p>
+        {overviewQuery.data?.current_recommendation.recommendation ? (
+          <p className="mt-3 border-l-2 border-primary/50 pl-3 text-sm leading-6 text-muted-foreground">
+            Strategic verdict: {overviewQuery.data.current_recommendation.recommendation}
+          </p>
+        ) : null}
+        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+          <div className="rounded-md border border-border bg-muted/40 p-4">
+            <h4 className="text-sm font-semibold">Suggested Decision</h4>
+            <p className="mt-2 text-sm font-medium text-foreground">
+              {suggestedDecision.title}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              {suggestedDecision.rationale}
+            </p>
+            {suggestedDecision.missingEvidence.length > 0 ? (
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Do not proceed until: {suggestedDecision.missingEvidence[0]}
+              </p>
+            ) : null}
+            <Button
+              className="mt-3"
+              onClick={() =>
+                applyDecisionSuggestion(suggestedDecision.type, suggestedDecision.actionLabel)
+              }
+              size="sm"
+              type="button"
+            >
+              Use Suggested Decision
+            </Button>
+          </div>
+          <div className="rounded-md border border-border bg-white p-4">
+            <h4 className="text-sm font-semibold">Evidence Required Before Proceeding</h4>
+            <div className="mt-3 space-y-2">
+              {suggestedDecision.missingEvidence.length === 0 ? (
+                <p className="text-sm leading-6 text-muted-foreground">
+                  No major missing evidence is flagged, but review the rationale before
+                  proceeding.
+                </p>
+              ) : (
+                suggestedDecision.missingEvidence.map((item) => (
+                  <p className="text-sm leading-6 text-muted-foreground" key={item}>
+                    {item}
+                  </p>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+        {!hasLoggedResults ? (
+          <div className="mt-4 flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <p>
+              Proceed is premature until at least one validation result is logged. You can
+              still record it, but the evidence trail will show the warning.
+            </p>
+          </div>
         ) : null}
         <div className="mt-4 flex flex-wrap gap-2">
           {[
@@ -159,11 +244,7 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
           ].map(([type, label]) => (
             <Button
               key={type}
-              onClick={() => {
-                setDecisionType(type as DecisionType);
-                setTitle(label);
-                openDecisionForm();
-              }}
+              onClick={() => applyDecisionSuggestion(type as DecisionType, label)}
               size="sm"
               type="button"
               variant="secondary"
@@ -264,7 +345,7 @@ export function DecisionsTab({ projectId }: DecisionsTabProps) {
             />
             <LinkPicker
               items={artifacts}
-              label="Link artifacts"
+              label="Link briefs, memos, or plans"
               onChange={setLinkedArtifacts}
               selected={linkedArtifacts}
               titleFor={(item) => item.title}
@@ -418,6 +499,144 @@ function LinkPicker<T extends { id: string }>({
       </div>
     </fieldset>
   );
+}
+
+type DecisionSuggestion = {
+  actionLabel: string;
+  expectedOutcome: string;
+  linkedAssumptionId: string | null;
+  linkedExperimentIds: string[];
+  missingEvidence: string[];
+  rationale: string;
+  title: string;
+  type: DecisionType;
+};
+
+function buildDecisionSuggestion({
+  assumptions,
+  decisionType,
+  evidenceCount,
+  experiments,
+  label,
+  overview,
+}: {
+  assumptions: Assumption[];
+  decisionType?: DecisionType;
+  evidenceCount: number;
+  experiments: Experiment[];
+  label?: string;
+  overview: Awaited<ReturnType<typeof getProjectOverview>> | undefined;
+}): DecisionSuggestion {
+  const hasExperiments = experiments.length > 0;
+  const hasLoggedResults = experiments.some((experiment) => experiment.results.length > 0);
+  const riskiestAssumption = [...assumptions].sort(compareDecisionAssumptions)[0] ?? null;
+  const unresolvedHighRisk = riskiestAssumption
+    ? riskiestAssumption.status !== "validated"
+    : false;
+  const type = decisionType ?? "run_experiment";
+  const actionLabel = label ?? decisionLabel(type);
+  const currentRecommendation =
+    overview?.current_recommendation.recommendation ?? "Continue research. Do not build yet.";
+  const currentRationale =
+    overview?.current_recommendation.rationale ??
+    "The project needs decision-grade evidence before a build decision is justified.";
+  const explicitRecommendedDecision =
+    currentRecommendation.match(/^Recommended decision:\s*(.+)$/i)?.[1] ?? null;
+  const missingEvidence = [
+    evidenceCount === 0 ? "Add or gather source-backed evidence for the core claim." : null,
+    assumptions.length === 0 ? "Identify and rank the riskiest assumptions." : null,
+    !hasExperiments ? "Create a validation plan for the riskiest assumption." : null,
+    !hasLoggedResults ? "Log at least one real validation result." : null,
+    unresolvedHighRisk && riskiestAssumption
+      ? `Resolve the riskiest assumption: ${riskiestAssumption.text}`
+      : null,
+  ].filter((item): item is string => Boolean(item));
+
+  if (type === "build") {
+    return {
+      actionLabel,
+      expectedOutcome: hasLoggedResults
+        ? "Move into a narrow build pass only if the logged validation result supports the riskiest assumption."
+        : "This should trigger a review after validation results are logged, because proceed evidence is currently missing.",
+      linkedAssumptionId: riskiestAssumption?.id ?? null,
+      linkedExperimentIds: experiments.slice(0, 1).map((experiment) => experiment.id),
+      missingEvidence,
+      rationale: hasLoggedResults
+        ? `Proceed only with a narrow scope. Current recommendation: ${currentRecommendation}`
+        : `Proceed is premature. ${currentRationale} Log validation evidence before committing build effort.`,
+      title: hasLoggedResults ? "Proceed with narrow scope" : "Proceed with validation warning",
+      type,
+    };
+  }
+
+  if (type === "pivot") {
+    return {
+      actionLabel,
+      expectedOutcome:
+        "Use the evidence trail to narrow the wedge, change the target customer, or reposition the idea before more build work.",
+      linkedAssumptionId: riskiestAssumption?.id ?? null,
+      linkedExperimentIds: experiments.slice(0, 1).map((experiment) => experiment.id),
+      missingEvidence,
+      rationale: `A pivot is justified only if the current riskiest assumption is weak or invalidated. Current recommendation: ${currentRecommendation}`,
+      title: "Pivot based on validation signal",
+      type,
+    };
+  }
+
+  if (type === "pause" || type === "kill") {
+    return {
+      actionLabel,
+      expectedOutcome:
+        type === "kill"
+          ? "Stop active work and preserve the evidence trail for future reference."
+          : "Pause build work until a stronger validation signal is available.",
+      linkedAssumptionId: riskiestAssumption?.id ?? null,
+      linkedExperimentIds: experiments.slice(0, 1).map((experiment) => experiment.id),
+      missingEvidence,
+      rationale: `Use this only when the missing evidence is material enough to stop momentum. Current recommendation: ${currentRecommendation}`,
+      title: type === "kill" ? "Kill the idea" : "Pause until evidence improves",
+      type,
+    };
+  }
+
+  return {
+    actionLabel: label ?? "Continue Research",
+    expectedOutcome:
+      "Run or complete the next validation test, update confidence in the riskiest assumption, and revisit the decision after results are logged.",
+    linkedAssumptionId: riskiestAssumption?.id ?? null,
+    linkedExperimentIds: experiments
+      .filter((experiment) => experiment.results.length === 0)
+      .slice(0, 1)
+      .map((experiment) => experiment.id),
+    missingEvidence,
+    rationale: `${currentRationale} The next decision should wait until the validation loop has real evidence.`,
+    title: explicitRecommendedDecision
+      ? sentenceCase(explicitRecommendedDecision)
+      : hasLoggedResults
+        ? "Continue research unless the result supports a narrow proceed decision"
+        : "Continue research. Do not proceed yet",
+    type: "run_experiment",
+  };
+}
+
+function sentenceCase(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function compareDecisionAssumptions(a: Assumption, b: Assumption) {
+  const score = (assumption: Assumption) =>
+    (assumption.kill_risk ? 100 : 0) +
+    importanceScore(assumption.importance) +
+    uncertaintyScore(assumption.uncertainty);
+  return score(b) - score(a);
+}
+
+function importanceScore(value: Assumption["importance"]) {
+  return { critical: 40, high: 30, medium: 15, low: 5 }[value];
+}
+
+function uncertaintyScore(value: Assumption["uncertainty"]) {
+  return { high: 25, medium: 12, low: 3 }[value];
 }
 
 function toggle(values: string[], value: string) {

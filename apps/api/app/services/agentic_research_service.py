@@ -1208,6 +1208,11 @@ def _memo_messages(
             "Cite factual claims with source_id and chunk_id from evidence_bundles.",
             "Mark unsupported factual claims as unsupported_claims.",
             "Be opinionated, skeptical, and specific about what to validate next.",
+            "The executive verdict must be a strategic recommendation, not a workflow instruction.",
+            "Include what not to build yet and what evidence is still missing inside "
+            "the decision recommendation or evidence gaps.",
+            "Avoid generic language like 'has potential' unless it is followed by a "
+            "concrete do-not-build-yet warning and next test.",
         ],
     }
     return [
@@ -1227,8 +1232,11 @@ def _memo_messages(
                 "customer pain signals, competitor landscape, substitute behaviors, "
                 "pricing or business model signals, key risks, riskiest assumptions, "
                 "evidence summary, what remains unknown, recommended validation actions, "
-                "and a decision recommendation. Include claims with citations and mark "
-                "unsupported claims explicitly.\n\n"
+                "and a decision recommendation. The result must make these fields obvious: "
+                "Verdict, Best Wedge, Top Competitors/Substitutes, Biggest Risk, "
+                "Riskiest Assumption, First Validation Test, What Not To Build Yet, "
+                "Evidence Still Missing, and Recommended Decision. Include claims with "
+                "citations and mark unsupported claims explicitly.\n\n"
                 f"{json.dumps(payload, ensure_ascii=True, default=str, separators=(',', ':'))}"
             ),
         ),

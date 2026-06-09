@@ -111,6 +111,10 @@ option {
     background-color: hsl(var(--card) / 0.7) !important;
   }
 
+  .dark .bg-white\/95 {
+    background-color: hsl(var(--card) / 0.95) !important;
+  }
+
   .dark .bg-red-50 {
     background-color: hsl(var(--danger-muted)) !important;
   }

@@ -173,7 +173,7 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
               Evidence keeps the product from becoming generic AI advice. Use this page to
-              inspect sources and cited claims without reading raw chunks by default.
+              inspect sources and supported findings without reading raw chunks by default.
             </p>
           </div>
           <Button
@@ -187,8 +187,8 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <Metric label="Sources" value={health?.source_count ?? sources.length} />
           <Metric label="Competitors" value={health?.competitor_count ?? 0} />
-          <Metric label="Cited claims" value={health?.cited_claim_count ?? 0} />
-          <Metric label="Unsupported claims" value={health?.unsupported_claim_count ?? 0} />
+          <Metric label="Supported findings" value={health?.cited_claim_count ?? 0} />
+          <Metric label="Open questions" value={health?.unsupported_claim_count ?? 0} />
           <Metric label="Weakest area" value={health?.weakest_evidence_area ?? "Unknown"} />
         </div>
       </div>
@@ -417,7 +417,7 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
             <summary className="cursor-pointer list-none">
               <div className="flex items-center gap-2">
                 <Search className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h2 className="text-base font-semibold">Search Evidence</h2>
+                <h2 className="text-base font-semibold">Raw Retrieval Search</h2>
               </div>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
                 Search raw chunks only when you need to inspect retrieval details.
@@ -499,7 +499,10 @@ function EvidenceFindingsPanel({
 }) {
   const supportedClaims = citedClaims.slice(0, 4);
   const weakClaims = unsupportedClaims.slice(0, 3);
-  const hasEvidence = sourceCount > 0 || citedClaims.length > 0 || unsupportedClaims.length > 0;
+  const summarySourceCount = health?.source_count ?? sourceCount;
+  const supportedCount = health?.cited_claim_count ?? citedClaims.length;
+  const openCount = health?.unsupported_claim_count ?? unsupportedClaims.length;
+  const hasEvidence = summarySourceCount > 0 || supportedCount > 0 || openCount > 0;
 
   return (
     <div className="rounded-lg border border-border bg-white p-5">
@@ -515,9 +518,9 @@ function EvidenceFindingsPanel({
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-          <span className="rounded-md bg-muted px-2 py-1">{sourceCount} sources</span>
-          <span className="rounded-md bg-muted px-2 py-1">{citedClaims.length} cited</span>
-          <span className="rounded-md bg-muted px-2 py-1">{unsupportedClaims.length} unsupported</span>
+          <span className="rounded-md bg-muted px-2 py-1">{summarySourceCount} sources</span>
+          <span className="rounded-md bg-muted px-2 py-1">{supportedCount} supported</span>
+          <span className="rounded-md bg-muted px-2 py-1">{openCount} open</span>
         </div>
       </div>
 
@@ -538,7 +541,7 @@ function EvidenceFindingsPanel({
           <div className="min-w-0">
             <div className="flex items-center justify-between gap-3">
               <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-                Supported claims
+                Supported findings
               </h4>
               <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
                 top {supportedClaims.length}
@@ -546,11 +549,26 @@ function EvidenceFindingsPanel({
             </div>
             <div className="mt-3 divide-y divide-border rounded-md border border-border">
               {supportedClaims.length === 0 ? (
-                <p className="p-3 text-sm text-muted-foreground">No cited claims recorded yet.</p>
+                <p className="p-3 text-sm text-muted-foreground">No supported findings recorded yet.</p>
               ) : (
                 supportedClaims.map((claim) => (
                   <div className="p-3" key={claim.id}>
-                    <p className="text-sm leading-6 text-foreground">{claim.text}</p>
+                    <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                      Finding
+                    </p>
+                    <p className="mt-1 text-sm font-semibold leading-6 text-foreground">
+                      {findingHeadline(claim.text)}
+                    </p>
+                    <p className="mt-2 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                      Evidence
+                    </p>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">{claim.text}</p>
+                    <p className="mt-2 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                      Implication
+                    </p>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                      {findingImplication(claim.text)}
+                    </p>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span className="rounded-md bg-muted px-2 py-1">
                         {claim.support_level}
@@ -571,8 +589,8 @@ function EvidenceFindingsPanel({
             <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
               <HealthMetric label="Sources" value={String(health?.source_count ?? sourceCount)} />
               <HealthMetric label="Competitors" value={String(health?.competitor_count ?? 0)} />
-              <HealthMetric label="Cited" value={String(health?.cited_claim_count ?? citedClaims.length)} />
-              <HealthMetric label="Unsupported" value={String(health?.unsupported_claim_count ?? unsupportedClaims.length)} />
+              <HealthMetric label="Supported" value={String(health?.cited_claim_count ?? citedClaims.length)} />
+              <HealthMetric label="Open" value={String(health?.unsupported_claim_count ?? unsupportedClaims.length)} />
             </dl>
             <div className="mt-4 border-t border-border pt-4">
               <h5 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
@@ -582,25 +600,61 @@ function EvidenceFindingsPanel({
                 {health?.weakest_evidence_area ?? "Not enough evidence to identify a weak area."}
               </p>
             </div>
-            <details className="mt-4">
-              <summary className="cursor-pointer text-sm font-medium">Weak or unsupported claims</summary>
-              <div className="mt-3 space-y-2 border-t border-border pt-3">
+            <div className="mt-4 border-t border-border pt-4">
+              <h5 className="text-sm font-semibold">Open questions / evidence gaps</h5>
+              <div className="mt-3 space-y-2">
                 {weakClaims.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No unsupported claims recorded.</p>
+                  <p className="text-sm text-muted-foreground">No open questions recorded.</p>
                 ) : (
                   weakClaims.map((claim) => (
-                    <p className="text-sm leading-6 text-muted-foreground" key={claim}>
-                      {claim}
-                    </p>
+                    <div className="rounded-md border border-border bg-background/60 p-3" key={claim}>
+                      <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                        Open question
+                      </p>
+                      <p className="mt-1 text-sm font-semibold leading-6 text-foreground">
+                        {claim}
+                      </p>
+                      <p className="mt-2 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                        Why it matters
+                      </p>
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                        This is a decision risk until evidence proves or weakens it.
+                      </p>
+                      <p className="mt-2 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                        Recommended evidence
+                      </p>
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                        Run customer interviews, pricing tests, or source discovery targeted at this question.
+                      </p>
+                    </div>
                   ))
                 )}
               </div>
-            </details>
+            </div>
           </aside>
         </div>
       )}
     </div>
   );
+}
+
+function findingHeadline(text: string) {
+  const sentence = text.split(/[.!?]/).find((part) => part.trim().length > 0)?.trim();
+  return sentence && sentence.length <= 90 ? sentence : truncate(sentence ?? text, 90);
+}
+
+function findingImplication(text: string) {
+  const lower = text.toLowerCase();
+  if (lower.includes("pay") || lower.includes("pricing") || lower.includes("willingness")) {
+    return "Treat willingness to pay as the next decision-grade evidence target before building more product.";
+  }
+  if (lower.includes("competitor") || lower.includes("substitute") || lower.includes("alternative")) {
+    return "Position against the existing workaround, not only direct product competitors.";
+  }
+  if (lower.includes("trust") || lower.includes("rationale")) {
+    return "The product must show why the recommendation is credible, not just generate an answer.";
+  }
+  return "Use this finding to narrow the next validation question and avoid broad build scope.";
 }
 
 function HealthMetric({ label, value }: { label: string; value: string }) {
@@ -677,16 +731,16 @@ function ClaimsPanel({
   return (
     <div className="rounded-lg border border-border bg-white p-5">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold">Claims</h2>
+        <h2 className="text-base font-semibold">Findings and Open Questions</h2>
         <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-          {citedClaims.length} cited
+          {citedClaims.length} supported
         </span>
       </div>
       <details className="mt-4 rounded-md border border-border p-3" open={citedClaims.length > 0}>
-        <summary className="cursor-pointer text-sm font-medium">Cited Claims</summary>
+        <summary className="cursor-pointer text-sm font-medium">Supported Findings</summary>
         <div className="mt-3 max-h-72 space-y-3 overflow-auto border-t border-border pt-3">
           {citedClaims.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No cited claims recorded yet.</p>
+            <p className="text-sm text-muted-foreground">No supported findings recorded yet.</p>
           ) : (
             citedClaims.slice(0, 8).map((claim) => (
               <div key={claim.id} className="border-b border-border pb-3 last:border-b-0">
@@ -701,10 +755,10 @@ function ClaimsPanel({
         </div>
       </details>
       <details className="mt-3 rounded-md border border-border p-3">
-        <summary className="cursor-pointer text-sm font-medium">Unsupported Claims</summary>
+        <summary className="cursor-pointer text-sm font-medium">Open Questions</summary>
         <div className="mt-3 max-h-72 space-y-2 overflow-auto border-t border-border pt-3">
           {unsupportedClaims.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No unsupported claims recorded.</p>
+            <p className="text-sm text-muted-foreground">No open questions recorded.</p>
           ) : (
             unsupportedClaims.slice(0, 8).map((claim) => (
               <p className="text-sm leading-6 text-muted-foreground" key={claim}>

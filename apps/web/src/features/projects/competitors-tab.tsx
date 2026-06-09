@@ -103,6 +103,14 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
     competitors.find((competitor) => competitor.id === selectedCompetitorId) ??
     competitors[0] ??
     null;
+  const directCount = competitors.filter((competitor) => competitor.category === "direct").length;
+  const substituteCount = competitors.filter(
+    (competitor) =>
+      competitor.category === "substitute" || competitor.category === "manual_alternative",
+  ).length;
+  const highThreatCount = competitors.filter(
+    (competitor) => competitor.threat_level === "high",
+  ).length;
   const selectCompetitor = (competitorId: string) => {
     setSelectedCompetitorId(competitorId);
     if (window.innerWidth < 1024) {
@@ -150,25 +158,40 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
             type="button"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            {analyzeMutation.isPending ? "Analyzing..." : "Analyze Competitors"}
+            {analyzeMutation.isPending ? "Analyzing..." : "Analyze Landscape"}
           </Button>
         </div>
         <div className="mt-5 grid gap-3 sm:grid-cols-4">
           <Metric label="Competitors" value={competitors.length} />
-          <Metric label="Sources" value={analyzeMutation.data?.ingested_source_count ?? 0} />
-          <Metric label="Cited claims" value={claims.length} />
-          <Metric label="Unsupported" value={unsupportedClaims.length} />
+          <Metric label="Direct" value={directCount} />
+          <Metric label="Substitutes" value={substituteCount} />
+          <Metric label="High threat" value={highThreatCount} />
         </div>
-        {currentVersion ? (
-          <div className="mt-5 rounded-md border border-border bg-muted/50 p-4">
-            <div className="flex items-center gap-2">
-              <Map className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h3 className="text-sm font-semibold">Competitor Landscape Summary</h3>
+        {currentVersion || competitors.length > 0 ? (
+          <div className="mt-5 grid gap-4 rounded-md border border-border bg-muted/50 p-4 lg:grid-cols-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <Map className="h-4 w-4 text-primary" aria-hidden="true" />
+                <h3 className="text-sm font-semibold">Competitor Landscape Summary</h3>
+              </div>
+              {currentVersion ? (
+                <MarkdownContent
+                  className="mt-2 line-clamp-5 space-y-2 text-sm leading-6 text-muted-foreground"
+                  markdown={firstMeaningfulParagraph(currentVersion.markdown_content)}
+                />
+              ) : (
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  The page has competitors recorded, but no synthesized landscape memo yet.
+                  Analyze the landscape to turn profiles into a strategic read.
+                </p>
+              )}
             </div>
-            <MarkdownContent
-              className="mt-2 line-clamp-4 space-y-2 text-sm leading-6 text-muted-foreground"
-              markdown={firstMeaningfulParagraph(currentVersion.markdown_content)}
-            />
+            <div>
+              <h3 className="text-sm font-semibold">Strategic Implication</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                {competitorImplication(competitors)}
+              </p>
+            </div>
           </div>
         ) : null}
       </div>
@@ -230,26 +253,31 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
         </div>
       ) : null}
 
-      <WorkflowTrace
-        pending={analyzeMutation.isPending}
-        pendingSteps={[
-          "load_project_state",
-          "load_user_seeded_competitors",
-          "fetch_competitor_sources",
-          "retrieve_competitor_evidence",
-          "extract_competitor_profiles",
-          "citation_audit",
-          "write_competitor_landscape",
-        ]}
-        runId={analyzeMutation.data?.ai_run_id ?? activeCompetitorRun?.id ?? null}
-      />
+      <details className="rounded-lg border border-border bg-white p-5">
+        <summary className="cursor-pointer text-sm font-semibold">View research trace</summary>
+        <div className="mt-4 border-t border-border pt-4">
+          <WorkflowTrace
+            pending={analyzeMutation.isPending}
+            pendingSteps={[
+              "load_project_state",
+              "load_user_seeded_competitors",
+              "fetch_competitor_sources",
+              "retrieve_competitor_evidence",
+              "extract_competitor_profiles",
+              "citation_audit",
+              "write_competitor_landscape",
+            ]}
+            runId={analyzeMutation.data?.ai_run_id ?? activeCompetitorRun?.id ?? null}
+          />
+        </div>
+      </details>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="rounded-lg border border-border bg-white p-5">
           <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <Users className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h2 className="text-base font-semibold">Profiles</h2>
+              <h2 className="text-base font-semibold">Grouped Competitors</h2>
             </div>
             <span className="text-sm text-muted-foreground">{competitors.length} total</span>
           </div>
@@ -272,7 +300,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
                 variant="secondary"
               >
                 <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                {analyzeMutation.isPending ? "Analyzing..." : "Analyze Competitors"}
+                {analyzeMutation.isPending ? "Analyzing..." : "Analyze Landscape"}
               </Button>
             </div>
           ) : (
@@ -292,7 +320,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
-                  <h3 className="text-sm font-semibold">Cited Claims</h3>
+                  <h3 className="text-sm font-semibold">Supported Findings</h3>
                 </div>
                 <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
                   {claims.length}
@@ -301,7 +329,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
             </summary>
             <div className="mt-4 space-y-3">
               {claims.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No claims recorded.</p>
+                <p className="text-sm text-muted-foreground">No supported findings recorded.</p>
               ) : (
                 claims.map((claim) => (
                   <div key={claim.id} className="rounded-md border border-border p-3">
@@ -329,7 +357,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-primary" aria-hidden="true" />
-                  <h3 className="text-sm font-semibold">Unsupported Claims</h3>
+                  <h3 className="text-sm font-semibold">Open Questions</h3>
                 </div>
                 <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
                   {unsupportedClaims.length}
@@ -338,7 +366,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
             </summary>
             <div className="mt-4 space-y-2">
               {unsupportedClaims.length === 0 ? (
-                <p className="text-sm text-muted-foreground">None recorded.</p>
+                <p className="text-sm text-muted-foreground">No open questions recorded.</p>
               ) : (
                 unsupportedClaims.map((claim) => (
                   <MarkdownContent
@@ -380,8 +408,12 @@ function CompetitorGroups({
 }) {
   const groups: Array<[string, Competitor[]]> = [
     ["Direct Competitors", competitors.filter((item) => item.category === "direct")],
-    ["Indirect Competitors", competitors.filter((item) => item.category === "manual_alternative")],
-    ["Substitute Behaviors", competitors.filter((item) => item.category === "substitute")],
+    [
+      "Substitute Behaviors",
+      competitors.filter(
+        (item) => item.category === "substitute" || item.category === "manual_alternative",
+      ),
+    ],
     ["Incumbent Platforms", competitors.filter((item) => item.category === "incumbent")],
     ["Adjacent Solutions", competitors.filter((item) => item.category === "adjacent")],
     ["Unknown / Needs Review", competitors.filter((item) => item.category === "unknown")],
@@ -435,7 +467,7 @@ function CompetitorProfile({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-semibold">{competitor.name}</h3>
+              <h3 className="text-sm font-semibold">{competitorDisplayName(competitor)}</h3>
               <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
                 {formatLabel(competitor.category)}
               </span>
@@ -531,7 +563,7 @@ function CompetitorDetailPanel({ competitor }: { competitor: Competitor | null }
           <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
             Competitor detail
           </p>
-          <h3 className="mt-2 text-base font-semibold">{competitor.name}</h3>
+          <h3 className="mt-2 text-base font-semibold">{competitorDisplayName(competitor)}</h3>
         </div>
         <span className={threatBadgeClass(competitor.threat_level)}>
           {competitor.threat_level} threat
@@ -617,6 +649,47 @@ function firstMeaningfulParagraph(markdown: string) {
     .map((part) => part.replace(/^#{1,3}\s+/gm, "").trim())
     .find((part) => part.length > 40);
   return paragraph ?? markdown;
+}
+
+function competitorImplication(competitors: Competitor[]) {
+  if (competitors.length === 0) {
+    return "No landscape has been established yet. Run competitor analysis before making a build decision.";
+  }
+  const substituteCount = competitors.filter(
+    (competitor) =>
+      competitor.category === "substitute" || competitor.category === "manual_alternative",
+  ).length;
+  const highThreatCount = competitors.filter(
+    (competitor) => competitor.threat_level === "high",
+  ).length;
+  if (substituteCount > 0) {
+    return "The hardest competitor may be the current workaround, not another startup. Validate that users will switch from existing tools or manual behavior before building more product.";
+  }
+  if (highThreatCount > 0) {
+    return "High-threat alternatives are already present. The wedge needs to be narrow enough that the product is chosen for a specific painful job, not as a broad replacement.";
+  }
+  return "The landscape does not yet show a clear blocker, but switching behavior and willingness to pay still need evidence before proceeding.";
+}
+
+function competitorDisplayName(competitor: Competitor) {
+  const name = competitor.name.trim();
+  const normalized = name.toLowerCase();
+  if (normalized.includes("demand") && normalized.includes("plant")) {
+    if (normalized.includes("social") || normalized.includes("educational")) {
+      return "Local plant workshops and plant communities";
+    }
+    return "Plant-care content and community substitutes";
+  }
+  if (normalized.includes("social-educational")) {
+    return "Social learning communities";
+  }
+  if (normalized.includes("manual") || competitor.category === "manual_alternative") {
+    return name.includes("plus") ? name : "Manual workflow and existing workaround";
+  }
+  if (normalized.includes("chatgpt") || normalized.includes("perplexity")) {
+    return name;
+  }
+  return name;
 }
 
 function unsupportedFromResult(

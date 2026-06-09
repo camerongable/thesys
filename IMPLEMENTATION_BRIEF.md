@@ -5555,6 +5555,571 @@ This refactor is complete when:
 
 ---
 
+## V1 Sprint 13: UX/Product Activation Refactor
+
+# Founder Strategic Intelligence OS — V1 UX/Product Activation Refactor
+
+## Context
+
+The app has completed the V1 functionality required for the proof-of-concept:
+
+- project workspace
+- structured intake
+- guided overview
+- autonomous research sprint
+- source discovery
+- competitor discovery
+- evidence ingestion
+- RAG / agentic RAG synthesis
+- cited research memo
+- assumptions and risks
+- validation plan and generated assets
+- experiment result logging
+- decisions
+- strategic updates
+
+The current UI has improved, but it can still feel like a generated-object
+workspace. The product now needs to make the V1 value obvious in the first
+session because this version is intended to validate whether the product is
+commercially worth pursuing before V2.
+
+UX is not polish for this sprint. UX is part of the product value proposition.
+
+The narrow wedge remains:
+
+> Take a rough idea, investigate it, identify the real risks, and tell the user exactly what to validate next.
+
+## Product North Star
+
+The product should feel like:
+
+> A strategic advisor with receipts.
+
+Not:
+
+> A dashboard of AI-generated artifacts.
+
+The central user journey is:
+
+```text
+rough idea
+→ autonomous research
+→ evidence-backed verdict
+→ competitor/substitute understanding
+→ riskiest assumptions
+→ validation plan
+→ results
+→ decision
+```
+
+The user should always understand:
+
+1. What did the system learn?
+2. What is the current verdict?
+3. Why does the verdict matter?
+4. What evidence supports it?
+5. What is still uncertain?
+6. What is the riskiest assumption?
+7. What should I do next?
+8. What decision should I avoid making too early?
+
+The app should reduce ambiguity, not create more reading.
+
+## Core Product Promise
+
+The V1 product promise should be:
+
+> In one session, go from a rough idea to a clear, evidence-backed validation plan.
+
+More specifically:
+
+> The app investigates an idea, finds competitors and substitutes, gathers evidence, identifies the riskiest assumptions, and recommends the next validation action before the user wastes time building.
+
+Every major screen should reinforce this promise.
+
+## Most Important UX Shift
+
+Refactor the product around this hierarchy:
+
+```text
+Verdict
+→ Next Action
+→ Why
+→ Evidence
+→ Details
+→ Debug / Trace
+```
+
+The UI should show the strategic outcome first, then let the user inspect the
+machinery if they want to.
+
+## Current App Diagnosis
+
+What is working well:
+
+- Lifecycle progress communicates that the app is a workflow, not a chatbot.
+- Next Best Action is the right product primitive.
+- Assumption ranking and the risk/confidence matrix are strong differentiators.
+- Competitor grouping correctly treats substitutes and manual workflows as real competition.
+- Validation assets bridge research and action.
+- Source-grounded memos have the right high-level structure.
+
+Major problems to fix:
+
+- The app does not communicate value fast enough.
+- The UI shows too much machinery too early.
+- Primary UI language is still too implementation-heavy.
+- The project list feels like an admin table instead of strategic state.
+- Research output needs to be more opinionated.
+- Validation is actionable but cluttered.
+- Decisions feel like a form instead of an advisory surface.
+
+## Global UX Requirements
+
+### 1. Add a Persistent Verdict Bar
+
+Add a compact persistent Verdict Bar near the top of every project page under
+the project header. It should summarize:
+
+- current verdict
+- next action
+- risk
+- confidence
+- current stage
+
+Example:
+
+```text
+Verdict: Do not build yet. Validate willingness to pay first.
+Next: Interview 5 solo founders.
+Risk: High
+Confidence: Medium-low
+Stage: Validation plan ready
+```
+
+Rules:
+
+- The verdict bar appears on every project tab.
+- It is concise.
+- It is more prominent than system health.
+- It is not a giant card.
+- It keeps the user anchored.
+
+### 2. Rename Current State to Strategic Verdict
+
+On the Overview page, replace "Current State" with "Strategic Verdict."
+
+The verdict must be direct. Prefer:
+
+```text
+Do not build yet. Validate willingness to pay first.
+```
+
+over:
+
+```text
+Run the validation experiment before building.
+```
+
+Add a clear "Why" paragraph and a specific next action.
+
+### 3. Make Every Page Answer One Question
+
+| Page | User Question |
+|---|---|
+| Overview | What is the current verdict and what should I do next? |
+| Research | What did the app investigate and conclude? |
+| Evidence | What sources support the analysis? |
+| Competitors | Who or what am I really competing against? |
+| Assumptions | What must be true for this idea to work? |
+| Validation | What should I test next and how? |
+| Decisions | What should I decide, and why? |
+
+Each page should have one primary purpose, one primary CTA, summary before
+details, and details behind progressive disclosure.
+
+### 4. Use Summary First, Details Second
+
+Every page should follow this structure:
+
+```text
+1. Page-level verdict / summary
+2. One primary action
+3. Key data or findings
+4. Secondary sections
+5. Inspectable details
+6. Debug or technical traces, if needed
+```
+
+### 5. Collapse Operational Details by Default
+
+Collapse by default:
+
+- research workflow steps
+- source candidates
+- competitor candidates
+- full memo details
+- research quality checks
+- old research plans
+- raw source chunks
+- repeated validation assets
+- debug/tool-call information
+
+### 6. Replace Implementation Language with User Language
+
+| Current / Avoid | Replace With |
+|---|---|
+| Workflow | Research step / activity |
+| Source candidate | Source found |
+| Competitor candidate | Competitor found |
+| Strategy update approved | Recommendation updated |
+| Memory update | Project update |
+| Source-grounded memo | Research memo |
+| Cited claims | Supported findings |
+| Unsupported claims | Open questions / needs evidence |
+| Research quality | Trust checks |
+| Agentic RAG | Research agent |
+| Tool call | Research action |
+| Ingested | Added to evidence |
+| Artifact | Brief / memo / plan |
+| Process details | Research trace |
+| Finalize intake | Generate brief / save thesis |
+| Execute workflow | Run research |
+
+Technical terms can remain in hidden debug views, code, logs, or developer
+panels.
+
+### 7. Improve Visual Tone
+
+- Keep dark mode if desired, but make bright accent usage restrained.
+- Use bright accent only for primary CTAs and active state.
+- Use calmer semantic colors for risk, status, and confidence.
+- Ensure light mode is polished.
+- Reduce badge noise.
+- Avoid cards inside cards where possible.
+- Use spacing and hierarchy instead of outlines everywhere.
+
+The product should feel like a serious strategic tool, not an internal dev
+console.
+
+## Project List / Home Page Refactor
+
+The project list page should sell the product's value immediately.
+
+Required project card fields:
+
+- project name
+- one-line idea
+- current verdict
+- stage
+- next action
+- evidence summary
+- last updated
+
+Required home page CTA:
+
+```text
+Validate an idea before you build.
+
+Paste a rough idea. The app will investigate the market, find competitors,
+identify risks, and recommend what to test first.
+
+[Investigate New Idea]
+```
+
+Add quick-start options when creating a project if feasible:
+
+- Quick Scan: get a fast verdict, top competitors, and first validation risk.
+- Deep Research Sprint: discover sources, analyze competitors, generate a cited memo, and create a validation plan.
+
+Acceptance:
+
+- Home page communicates what the app does without explanation.
+- Project cards show strategic state, not just metadata.
+- Counts are accurate or removed.
+- User can start a new idea investigation from the home page.
+
+## First-Run / New Project Flow
+
+Required flow:
+
+```text
+1. User enters rough idea.
+2. User chooses scan type: Quick Scan or Deep Research Sprint.
+3. App shows proposed research plan.
+4. User approves or edits plan.
+5. App runs investigation.
+6. App returns verdict, best wedge, competitors/substitutes, riskiest assumption, and first validation test.
+```
+
+Do not send the user to a dense tabbed dashboard immediately after first
+research. Show a focused Research Result screen first when feasible.
+
+## Overview Page Refactor
+
+Required layout:
+
+1. Strategic Verdict
+2. Next Best Action
+3. Riskiest Assumption
+4. Lifecycle Progress
+5. Evidence / Trust Summary
+6. Recent Strategic Updates
+7. Collapsed Details
+
+Overview should fit mostly within one standard laptop viewport. The user should
+immediately see verdict, next action, and riskiest assumption.
+
+## Research Page Refactor
+
+Default view should be Research Summary.
+
+Required structure:
+
+1. Research Summary
+2. Inspect Research Run
+3. Run New Research
+
+Research Summary should lead with:
+
+- best wedge
+- biggest risk
+- top substitute
+- first validation test
+- decision recommendation
+
+Move workflow steps, source candidates, competitor candidates, retry passes,
+evidence gaps, trust checks, and old research plans behind "Inspect research
+run."
+
+## Evidence Page Refactor
+
+Use these terms:
+
+- Supported findings
+- Open questions
+- Sources
+- Evidence gaps
+
+Required layout:
+
+1. Evidence Summary
+2. Supported Findings
+3. Open Questions / Evidence Gaps
+4. Sources
+5. Source Detail
+6. Raw Retrieval Search
+
+Evidence should start with what the evidence means, not a raw source list.
+
+## Competitors Page Refactor
+
+Add a Competitor Landscape Summary and Strategic Implication.
+
+Group competitors by:
+
+- Direct Competitors
+- Indirect Competitors
+- Substitute Behaviors
+- Incumbent Platforms
+- Adjacent Solutions
+
+Each competitor row/card should show name, category, threat level, why it
+matters, positioning, evidence count, and a detail action.
+
+Fix or remove unreliable top metrics.
+
+## Assumptions Page Refactor
+
+Preserve the risk/confidence matrix. Make the riskiest assumption obvious in
+under five seconds.
+
+Use qualitative labels first:
+
+- Low confidence
+- Partial evidence
+- Needs validation
+
+Quadrant labels:
+
+- Validate First: high risk, low confidence
+- Monitor: high risk, higher confidence
+- Research Later: lower risk, low confidence
+- Safer Assumptions: lower risk, higher confidence
+
+Use one primary CTA for the riskiest assumption. Row-level actions should be
+secondary.
+
+## Validation Page Refactor
+
+Required layout:
+
+1. Validation Objective
+2. Step-by-Step Test Plan
+3. Success / Failure Criteria
+4. Validation Assets
+5. Log Results
+6. Result Interpretation
+7. Linked Decision
+
+Validation assets should be grouped, copyable, concise, and deduplicated.
+Result logging should be prominent because the loop is not complete until
+results are logged.
+
+## Decisions Page Refactor
+
+Required layout:
+
+1. Current Decision Recommendation
+2. Suggested Decision
+3. Rationale
+4. Evidence Required Before Proceeding
+5. Decision Actions
+6. Decision Ledger
+
+The page should prefill or strongly suggest a decision from current project
+state. It should feel advisory, not passive.
+
+## Demo Project Requirement
+
+Create at least one polished, non-meta demo project. Recommended demo:
+
+```text
+AI Assistant for Independent Fitness Coaches
+```
+
+It should include rough idea, research sprint, sources, competitors/substitutes,
+research memo, assumptions, validation plan, sample result, and decision
+recommendation.
+
+## Output Quality Requirements
+
+Every research result should include:
+
+- Verdict
+- Best wedge
+- Top substitute competitor
+- Riskiest assumption
+- First validation test
+- What not to build yet
+- What evidence is still missing
+
+Recommendations should be specific. The app should be comfortable saying "not
+yet" or "too broad."
+
+## Trust and Data Consistency Requirements
+
+- Workspace/project-level counts must be accurate or clearly scoped.
+- If a card says 27 sources, source pages should reflect 27 sources.
+- If competitor rows show source counts, top competitor metrics should not show zero unless correctly scoped.
+- If there are many sources but few supported findings, explain that clearly.
+- Avoid unexplained percentages.
+- Explain confidence scores.
+- Show when evidence is weak.
+- Show source freshness.
+- Do not overstate conclusions.
+
+## Interaction and Layout Requirements
+
+- Use a maximum readable width for long text.
+- Avoid too many nested cards.
+- Use consistent section spacing.
+- Use compact tables where appropriate.
+- Use detail drawers for object inspection.
+- Use accordions for secondary content.
+- Make primary CTAs visually obvious.
+- Make secondary CTAs muted.
+- Make destructive decisions visually distinct.
+- Use progressive disclosure labels such as "View details," "Inspect sources," "Show full memo," "View research trace," "Show raw chunks," and "Review evidence."
+- Consider a sticky or semi-sticky project verdict bar on scroll.
+- Ensure laptop, large desktop, and tablet-width layouts remain usable.
+
+## Design Inspiration
+
+Use these conceptually, not as clones:
+
+- Linear: overview command center, project header, lifecycle clarity, clean navigation.
+- Dovetail: evidence repository, research findings, source-linked insights.
+- NotebookLM: source-grounded memo reading, citations, source panels, open questions.
+- Jira Product Discovery: assumptions, risk/confidence prioritization, readiness.
+- Clay: research sprint execution, item-level approval/status, inspectable automation.
+
+## Implementation Plan
+
+Work in this order:
+
+1. UX Audit.
+2. Add global Verdict Bar.
+3. Refactor Home / Project List.
+4. Refactor First-Run Flow.
+5. Refactor Overview.
+6. Refactor Research.
+7. Refactor Evidence.
+8. Refactor Competitors.
+9. Refactor Assumptions.
+10. Refactor Validation.
+11. Refactor Decisions.
+12. Improve Demo Project.
+13. Run Usability QA.
+
+## Usability Task Tests
+
+Run these manually after implementation:
+
+1. New user understands product from home page in under 30 seconds.
+2. User understands project verdict and next action in under 10 seconds.
+3. User understands research results without reading workflow details.
+4. User can tell what evidence is supported and what is still uncertain.
+5. User can tell who/what the real competition is.
+6. User identifies the riskiest assumption and validation method in under 10 seconds.
+7. User understands how to run the validation test and log results.
+8. User understands recommended decision and missing evidence.
+
+## Non-Goals
+
+Do not build V2 features:
+
+- recurring monitoring
+- team collaboration
+- billing
+- multi-segment workflow packs
+- external integrations
+- advanced admin
+- mobile app
+- investor workflow
+- consultant workflow
+- product discovery workflow
+
+This refactor is about making V1 compelling enough to validate commercially.
+
+## Final Acceptance Criteria
+
+Sprint 13 is complete when:
+
+- Home page explains the product promise clearly.
+- Project cards show verdict and next action.
+- New users can start an idea investigation easily.
+- Every project page has persistent verdict/next-action context.
+- Overview is short, verdict-first, and actionable.
+- Research page leads with conclusions, not process.
+- Evidence page leads with supported findings and open questions.
+- Competitors page explains strategic implications.
+- Assumptions page makes the riskiest assumption obvious.
+- Validation page makes the next test easy to run.
+- Decisions page recommends a decision and explains missing evidence.
+- Technical terminology is removed from primary UX.
+- Long/generated content is summarized before details.
+- Operational/debug details are collapsed by default.
+- Metrics are consistent and trustworthy.
+- The app feels like a strategic advisor with receipts.
+- The V1 wow moment is obvious: user enters an idea, the app investigates, finds competitors and evidence, identifies the riskiest assumption, and recommends what to validate next.
+
+The final product should make a user think:
+
+> I could have asked ChatGPT for advice, but this app turned my idea into a structured validation decision.
+
+---
+
 # V1 Non-Goals
 
 Do not include these in V1 unless they are trivial side effects of existing work:
@@ -6689,3 +7254,48 @@ It should feel like a living strategic system:
 - it evolves with the user
 
 That is the difference between a commodity AI wrapper and an AI-native strategic intelligence product.
+
+---
+
+# 34. V1 Sprint 13 Product Clarity + Strategic Judgment Addendum
+
+Sprint 13 includes an additional product-clarity pass before V2 begins.
+
+The goal is to make the V1 feel like a strategic advisor with receipts, not a
+workflow dashboard. The application should consistently answer:
+
+- what the app found
+- what the strategic verdict is
+- what the strongest wedge is
+- who or what the real competitors and substitutes are
+- what the riskiest assumption is
+- what to validate next
+- what decision should not be made too early
+
+Required changes:
+
+- Replace procedural verdicts such as "Record Decision" with strategic verdicts
+  such as "Do not build yet. Validate willingness to pay first."
+- Separate validation workflow progress from idea confidence.
+- Keep stage labels honest: a validation plan alone is not a decision-ready
+  state.
+- Make CTAs state-aware so existing validation plans lead to logging results,
+  not creating duplicate plans.
+- Lead Research, Evidence, Competitors, Assumptions, Validation, and Decisions
+  pages with conclusions before process details.
+- Add top 1-3 validation priorities above the full assumptions matrix/table.
+- Make Evidence findings implication-driven and open questions actionable.
+- Make Decisions recommend an actual decision with rationale and missing
+  evidence.
+- Keep the seeded independent fitness coach demo as the primary non-meta demo.
+
+Acceptance criteria:
+
+- Project cards, verdict bar, Overview, and Decisions use the same strategic
+  recommendation language.
+- Workflow progress cannot be confused with idea quality.
+- Counts and status labels are scoped clearly enough to avoid visible trust
+  contradictions.
+- The desired first-session reaction is: "This did not just give me AI advice;
+  it investigated my idea, showed the real competition, identified the riskiest
+  assumption, and told me what to test before building."

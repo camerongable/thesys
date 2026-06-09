@@ -18,9 +18,9 @@ def test_project_overview_guides_new_project(client: TestClient) -> None:
 
     assert overview["strategic_snapshot"]["current_stage"] == "draft_idea"
     assert overview["current_recommendation"]["recommendation"] == (
-        "Structure the idea before judging it."
+        "Do not judge the idea yet. First define the target user, problem, and riskiest belief."
     )
-    assert overview["next_best_action"]["label"] == "Structure Idea"
+    assert overview["next_best_action"]["label"] == "Define the thesis"
     assert overview["idea_readiness"]["score"] < 50
     assert "checks" not in overview["idea_readiness"]
     assert overview["evidence_health"]["source_count"] == 0
@@ -40,7 +40,7 @@ def test_project_overview_summarizes_demo_project(client: TestClient) -> None:
     overview = overview_response.json()
 
     assert overview["strategic_snapshot"]["current_stage"] == "proceeding"
-    assert overview["next_best_action"]["label"] == "Plan Next Milestone"
+    assert overview["next_best_action"]["label"] == "Review decision and next milestone"
     assert overview["idea_readiness"]["status"] == "decision_ready"
     assert overview["idea_readiness"]["score"] == 100
     assert overview["evidence_health"]["source_count"] >= 3
@@ -58,4 +58,6 @@ def test_project_overview_summarizes_demo_project(client: TestClient) -> None:
 
     readiness_response = client.get(f"/api/projects/{project_id}/readiness")
     assert readiness_response.status_code == 200
-    assert readiness_response.json()["recommended_next_action"] == "Plan Next Milestone"
+    assert readiness_response.json()["recommended_next_action"] == (
+        "Review decision and next milestone"
+    )

@@ -190,7 +190,7 @@ def _next_best_action(project_id: uuid.UUID, stage: str) -> NextBestActionRead:
     action_map: dict[str, tuple[str, str, str, str, str]] = {
         "draft_idea": (
             "structure_idea",
-            "Structure Idea",
+            "Define the thesis",
             "Turn the rough idea into target users, problems, solution shape, and uncertainties.",
             "A structured thesis gives every later brief, evidence search, and validation "
             "plan a usable foundation.",
@@ -198,7 +198,7 @@ def _next_best_action(project_id: uuid.UUID, stage: str) -> NextBestActionRead:
         ),
         "structured_intake": (
             "generate_brief",
-            "Generate Opportunity Brief",
+            "Run first research pass",
             "Create the first evidence-backed view of the opportunity.",
             "The brief turns project state and evidence into a source-grounded thesis, "
             "risks, and validation path.",
@@ -206,7 +206,7 @@ def _next_best_action(project_id: uuid.UUID, stage: str) -> NextBestActionRead:
         ),
         "brief_generated": (
             "analyze_competitors",
-            "Analyze Competitors",
+            "Map competitors and substitutes",
             "Pressure-test the thesis against direct competitors, substitutes, and manual "
             "alternatives.",
             "Competitor analysis exposes crowded areas and identifies a narrower wedge "
@@ -215,36 +215,37 @@ def _next_best_action(project_id: uuid.UUID, stage: str) -> NextBestActionRead:
         ),
         "competitors_analyzed": (
             "review_assumptions",
-            "Review Assumptions",
+            "Find the riskiest assumption",
             "Identify what must be true for this idea to work.",
             "Ranked assumptions show which beliefs can kill the idea and should be tested first.",
             "assumptions",
         ),
         "assumptions_identified": (
             "create_validation_plan",
-            "Create Validation Plan",
+            "Create the first validation test",
             "Convert the riskiest assumptions into concrete experiments.",
             "A validation plan reduces uncertainty before committing to build.",
             "experiments",
         ),
         "validation_plan_created": (
-            "start_experiment",
-            "Start Experiment",
-            "Begin collecting validation evidence for the highest-risk assumption.",
-            "Evidence from real users is the fastest way to update confidence in the thesis.",
+            "log_results",
+            "Run the test and log results",
+            "Collect validation evidence for the highest-risk assumption.",
+            "Real user evidence is the fastest way to update confidence before building.",
             "experiments",
         ),
         "experiment_running": (
             "add_results",
-            "Add Results",
+            "Log validation results",
             "Log what happened during validation and update confidence.",
             "Results convert activity into reusable evidence for the next strategic decision.",
             "experiments",
         ),
         "decision_ready": (
-            "record_decision",
-            "Record Decision",
-            "Capture whether to proceed, pivot, pause, or kill the idea.",
+            "use_suggested_decision",
+            "Review validation evidence",
+            "Review logged validation evidence and choose proceed, pivot, pause, kill, "
+            "or continue research.",
             "Decision records preserve what changed, why it mattered, and when to revisit the bet.",
             "decisions",
         ),
@@ -264,8 +265,8 @@ def _next_best_action(project_id: uuid.UUID, stage: str) -> NextBestActionRead:
             "decisions",
         ),
         "proceeding": (
-            "plan_next_milestone",
-            "Plan Next Milestone",
+            "review_decision",
+            "Review decision and next milestone",
             "Use the validated thesis to decide the next build or discovery milestone.",
             "Proceeding without an explicit next milestone makes it harder to keep learning "
             "tied to evidence.",
@@ -342,19 +343,19 @@ def _idea_readiness(context: _OverviewContext, recommended_action: str) -> IdeaR
             key="thesis",
             label="Thesis exists",
             status="complete" if project.current_thesis_id else "missing",
-            related_action="Structure Idea",
+            related_action="Define the thesis",
         ),
         ReadinessItemRead(
             key="target_customer",
             label="Target customer is specific",
             status=target_customer_status,  # type: ignore[arg-type]
-            related_action="Structure Idea",
+            related_action="Define the thesis",
         ),
         ReadinessItemRead(
             key="problem_hypothesis",
             label="Problem hypothesis exists",
             status="complete" if project.problems else "missing",
-            related_action="Structure Idea",
+            related_action="Define the thesis",
         ),
         ReadinessItemRead(
             key="evidence_sources",
@@ -364,9 +365,9 @@ def _idea_readiness(context: _OverviewContext, recommended_action: str) -> IdeaR
         ),
         ReadinessItemRead(
             key="competitors",
-            label="Competitors analyzed",
+            label="Competitors and substitutes mapped",
             status="complete" if counts.competitor_landscapes > 0 else "missing",
-            related_action="Analyze Competitors",
+            related_action="Map competitors and substitutes",
         ),
         ReadinessItemRead(
             key="assumptions",
@@ -382,19 +383,19 @@ def _idea_readiness(context: _OverviewContext, recommended_action: str) -> IdeaR
         ),
         ReadinessItemRead(
             key="validation_plan",
-            label="Validation plan exists",
+            label="Validation test exists",
             status=(
                 "complete"
                 if counts.validation_plans > 0 or counts.experiments > 0
                 else "missing"
             ),
-            related_action="Create Validation Plan",
+            related_action="Create the first validation test",
         ),
         ReadinessItemRead(
             key="decision",
             label="Decision recorded",
             status="complete" if counts.decisions > 0 else "missing",
-            related_action="Record Decision",
+            related_action="Use the suggested decision",
         ),
     ]
     complete_count = sum(1 for item in items if item.status == "complete")
@@ -456,48 +457,61 @@ def _current_recommendation(
     stage: str,
     next_action: NextBestActionRead,
 ) -> StrategicRecommendationRead:
+    riskiest = _top_assumption(context)
+    assumption_text = _short_text(
+        riskiest.text if riskiest is not None else "the riskiest assumption"
+    )
+    target = _primary_segment(context.project) or "the target user"
+    problem = _short_text(
+        _primary_problem(context.project)
+        or "the stated problem"
+    )
+    latest_decision = context.latest_decision
     recommendations: dict[str, tuple[str, str]] = {
         "draft_idea": (
-            "Structure the idea before judging it.",
+            "Do not judge the idea yet. First define the target user, problem, "
+            "and riskiest belief.",
             "The project still lacks enough structured thesis, customer, and problem data "
             "to make a grounded recommendation.",
         ),
         "structured_intake": (
-            "Create the first evidence-backed opportunity view.",
-            "The thesis has structure, but the project needs a cited brief to separate "
-            "evidence from assumptions.",
+            f"Do not build yet. Run research to test whether {target} has evidence-backed pain.",
+            f"The thesis names {target} and {problem}, but the project still needs cited "
+            "evidence and competitor pressure before a build decision is credible.",
         ),
         "brief_generated": (
-            "Pressure-test the thesis against competitors.",
+            "Do not build yet. Pressure-test the thesis against competitors and substitutes.",
             "A brief exists, but the positioning remains weak until substitutes and direct "
             "competitors are compared.",
         ),
         "competitors_analyzed": (
-            "Review the riskiest assumptions before planning validation.",
+            "Do not build yet. Identify the assumption that could kill the idea first.",
             "Competitor context is available; the next leverage point is identifying what "
             "must be true for the idea to work.",
         ),
         "assumptions_identified": (
-            "Turn the highest-risk assumption into a validation plan.",
+            f"Do not build yet. Validate this first: {assumption_text}.",
             "The project has enough assumptions and risks to start reducing uncertainty "
-            "through concrete tests.",
+            "through a concrete test instead of more product work.",
         ),
         "validation_plan_created": (
-            "Run the validation experiment before building.",
-            "A plan exists, but confidence should change only after real-world evidence is logged.",
+            "Do not build yet. Run the highest-risk validation test and log the result.",
+            "A validation plan exists, but idea confidence should change only after "
+            f"real-world evidence is logged for: {assumption_text}.",
         ),
         "experiment_running": (
-            "Log validation results as soon as there is a signal.",
+            f"Continue validation. Do not proceed until {assumption_text} has a clear signal.",
             "The project is collecting evidence; recording outcomes will make the next "
             "recommendation inspectable.",
         ),
         "decision_ready": (
-            "Record a proceed, pivot, pause, or kill decision.",
-            "Validation results exist, so the evidence trail is strong enough to preserve "
-            "the decision rationale.",
+            "Recommended decision: continue research unless the logged result clearly "
+            "supports proceeding.",
+            "Validation results exist, so the project can make a decision, but proceed "
+            "should remain high-friction if the riskiest assumption is unresolved.",
         ),
         "paused": (
-            "Keep the idea paused until a concrete new learning goal exists.",
+            "Keep the idea paused until a concrete new learning goal or stronger wedge exists.",
             "The current state says not to continue active validation without revisiting "
             "the rationale.",
         ),
@@ -506,12 +520,22 @@ def _current_recommendation(
             "The project has been killed or archived; the useful work is preserving why.",
         ),
         "proceeding": (
-            "Plan the next milestone from the validated wedge.",
-            "A proceed-style decision exists; the next step should keep execution tied to "
-            "the evidence already collected.",
+            (
+                f"Proceed with the narrowed decision: {_short_text(latest_decision.title)}."
+                if latest_decision is not None
+                else "Proceed narrowly from the validated wedge."
+            ),
+            (
+                latest_decision.rationale
+                if latest_decision is not None and latest_decision.rationale
+                else "A proceed-style decision exists; the next step should keep execution tied to "
+                "the evidence already collected."
+            ),
         ),
     }
-    recommendation, rationale = recommendations[stage]
+    recommendation, rationale = _project_specific_recommendation(context, stage) or recommendations[
+        stage
+    ]
     return StrategicRecommendationRead(
         id=f"computed:{context.project.id}:{stage}",
         project_id=context.project.id,
@@ -1024,6 +1048,66 @@ def _last_evidence_update(
     )
 
 
+def _top_assumption(context: _OverviewContext) -> Assumption | None:
+    def score(assumption: Assumption) -> int:
+        confidence = assumption.confidence_score or Decimal("0")
+        confidence_penalty = int((Decimal("1") - confidence) * 10)
+        return (
+            (100 if assumption.kill_risk else 0)
+            + _importance_rank(assumption.importance) * 20
+            + _uncertainty_rank(assumption.uncertainty) * 10
+            + confidence_penalty
+        )
+
+    if not context.key_assumptions:
+        return None
+    return sorted(context.key_assumptions, key=score, reverse=True)[0]
+
+
+def _project_specific_recommendation(
+    context: _OverviewContext,
+    stage: str,
+) -> tuple[str, str] | None:
+    if _looks_like_plant_education_project(context.project):
+        if stage in {"validation_plan_created", "experiment_running"}:
+            return (
+                "Pivot away from generic plant education. Test a local workshop/community "
+                "wedge first.",
+                "Free substitutes like YouTube, Reddit, plant-care apps, blogs, and local "
+                "nurseries make a broad plant education app hard to justify. The next "
+                "evidence should show whether novice owners will pay or commit to a "
+                "structured local learning experience.",
+            )
+        if stage == "decision_ready":
+            return (
+                "Recommended decision: continue research or pivot toward local plant workshops.",
+                "Do not proceed with a generic plant-care app yet. The strongest unresolved "
+                "question is whether plant owners will pay for structured guidance instead "
+                "of using free content, apps, nurseries, or community advice.",
+            )
+    return None
+
+
+def _looks_like_plant_education_project(project: Project) -> bool:
+    text = " ".join(
+        [
+            project.name or "",
+            project.short_description or "",
+            *(problem.description for problem in project.problems),
+        ]
+    ).casefold()
+    return "plant" in text and (
+        "care" in text or "education" in text or "learn" in text or "workshop" in text
+    )
+
+
+def _short_text(value: str, max_length: int = 150) -> str:
+    text = " ".join(value.split())
+    if len(text) <= max_length:
+        return text
+    return f"{text[: max_length - 3].rstrip()}..."
+
+
 def _primary_segment(project: Project) -> str | None:
     primary = next(
         (segment for segment in project.customer_segments if segment.priority == "primary"),
@@ -1137,6 +1221,14 @@ def _weakest_evidence_area(context: _OverviewContext) -> str:
 
 def _severity_rank(value: str | None) -> int:
     return {"critical": 4, "high": 3, "medium": 2, "low": 1}.get(value or "", 0)
+
+
+def _importance_rank(value: str | None) -> int:
+    return {"critical": 4, "high": 3, "medium": 2, "low": 1}.get(value or "", 0)
+
+
+def _uncertainty_rank(value: str | None) -> int:
+    return {"high": 3, "medium": 2, "low": 1}.get(value or "", 0)
 
 
 def _format_label(value: str) -> str:

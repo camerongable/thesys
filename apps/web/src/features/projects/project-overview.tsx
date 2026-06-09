@@ -56,6 +56,7 @@ import {
   rejectDiscoveredSource,
   rejectAgenticResearchMemo,
   rejectResearchSprint,
+  RecommendationConfidence,
   ResearchPlan,
   ResearchPlanUpdateInput,
   ResearchSprint,
@@ -104,10 +105,15 @@ export function ProjectOverview() {
     if (typeof window === "undefined") {
       return;
     }
-    const tab = tabFromHash(window.location.hash);
-    if (tab) {
-      setActiveTab(tab);
-    }
+    const syncTabFromHash = () => {
+      const tab = tabFromHash(window.location.hash);
+      if (tab) {
+        setActiveTab(tab);
+      }
+    };
+    syncTabFromHash();
+    window.addEventListener("hashchange", syncTabFromHash);
+    return () => window.removeEventListener("hashchange", syncTabFromHash);
   }, []);
 
   const overview = overviewQuery.data;
@@ -155,7 +161,7 @@ export function ProjectOverview() {
 
   return (
     <main className="min-h-screen px-5 py-6 md:px-8">
-      <div className="mx-auto max-w-6xl">
+      <div className="mx-auto max-w-7xl">
         <div className="flex items-center justify-between gap-3">
           <Link
             className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
@@ -200,6 +206,8 @@ export function ProjectOverview() {
                 <ProjectHeaderStatus overview={overview} />
               </div>
             </header>
+
+            <ProjectVerdictBar overview={overview} />
 
             <nav
               className="mt-5 flex gap-2 overflow-x-auto border-b border-border"
@@ -286,19 +294,107 @@ function GuidedOverview({
           onFinalized={onIntakeFinalized}
           project={overview.project}
         />
-      ) : null}
+      ) : (
+        <details className="rounded-lg border border-border bg-white p-5">
+          <summary className="cursor-pointer list-none">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />
+                <h2 className="text-base font-semibold">Idea Details</h2>
+              </div>
+              <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                Collapsed
+              </span>
+            </div>
+          </summary>
+          <div className="mt-4 border-t border-border pt-4">
+            <StructuredIntakeWizard
+              onFinalized={onIntakeFinalized}
+              project={overview.project}
+            />
+          </div>
+        </details>
+      )}
 
-      <LifecycleProgressCard overview={overview} />
+      <RiskiestAssumptionCard overview={overview} onAction={onAction} />
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <StrategicSnapshotCard snapshot={overview.strategic_snapshot} />
+        <StageAwareSummary overview={overview} />
         <EvidenceHealthCard health={overview.evidence_health} />
       </div>
+
+      <LifecycleProgressCard overview={overview} />
 
       <TopRisksCard risks={overview.key_risks} />
 
       <RecentUpdatesCard updates={overview.recent_strategic_updates} />
     </section>
+  );
+}
+
+function ProjectVerdictBar({
+  overview,
+}: {
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const risk = highestRiskLabel(overview);
+  return (
+    <section className="sticky top-0 z-20 mt-4 rounded-lg border border-border bg-card/95 px-4 py-3 text-card-foreground shadow-sm backdrop-blur">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(13rem,0.34fr)_9rem_10rem_10rem] lg:items-center">
+        <div className="min-w-0">
+          <div className="text-[0.68rem] font-medium uppercase tracking-normal text-muted-foreground">
+            Verdict
+          </div>
+          <div
+            className="mt-1 truncate text-sm font-semibold text-foreground"
+            title={overview.current_recommendation.recommendation}
+          >
+            {overview.current_recommendation.recommendation}
+          </div>
+        </div>
+        <div className="min-w-0">
+          <div className="text-[0.68rem] font-medium uppercase tracking-normal text-muted-foreground">
+            Next
+          </div>
+          <div
+            className="mt-1 truncate text-sm font-medium"
+            title={overview.next_best_action.label}
+          >
+            {overview.next_best_action.label}
+          </div>
+        </div>
+        <VerdictBarMetric label="Strategic risk" value={risk} tone={riskTone(risk)} />
+        <VerdictBarMetric
+          label="Idea confidence"
+          value={formatConfidenceValue(overview.current_recommendation.confidence)}
+          tone={overview.current_recommendation.confidence === "high" ? "good" : "warning"}
+        />
+        <VerdictBarMetric
+          label="Stage"
+          value={formatStage(overview.strategic_snapshot.current_stage)}
+          tone="neutral"
+        />
+      </div>
+    </section>
+  );
+}
+
+function VerdictBarMetric({
+  label,
+  tone,
+  value,
+}: {
+  label: string;
+  tone: HealthTone;
+  value: string;
+}) {
+  return (
+    <div>
+      <div className="text-[0.68rem] font-medium uppercase tracking-normal text-muted-foreground">
+        {label}
+      </div>
+      <span className={`${tonePillClass(tone)} mt-1 max-w-full truncate`}>{value}</span>
+    </div>
   );
 }
 
@@ -312,15 +408,19 @@ function ProjectHeaderStatus({
     <div className="rounded-lg border border-border bg-white p-3 sm:w-80">
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-          Project health
+          Project status
         </span>
         <HealthBadge health={health} />
       </div>
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
         <HeaderStatusMetric label="Stage" value={formatStage(overview.strategic_snapshot.current_stage)} />
-        <HeaderStatusMetric label="Readiness" value={`${overview.idea_readiness.score}%`} />
+        <HeaderStatusMetric label="Workflow progress" value={`${overview.idea_readiness.score}%`} />
+        <HeaderStatusMetric
+          label="Idea confidence"
+          value={formatConfidenceValue(overview.current_recommendation.confidence)}
+        />
+        <HeaderStatusMetric label="Strategic risk" value={highestRiskLabel(overview)} />
         <HeaderStatusMetric label="Evidence" value={`${overview.evidence_health.source_count} sources`} />
-        <HeaderStatusMetric label="Focus" value={overview.next_best_action.label} />
       </div>
     </div>
   );
@@ -355,9 +455,10 @@ function OverviewStatusPanel({
   const health = projectHealth(overview);
   const metrics = [
     ["Stage", formatStage(overview.strategic_snapshot.current_stage)],
-    ["Confidence", formatLabel(currentRecommendation.confidence)],
+    ["Idea confidence", formatConfidenceValue(currentRecommendation.confidence)],
+    ["Strategic risk", highestRiskLabel(overview)],
     ["Evidence", `${overview.evidence_health.source_count} sources`],
-    ["Readiness", `${overview.idea_readiness.score}%`],
+    ["Workflow progress", `${overview.idea_readiness.score}%`],
   ] as const;
 
   return (
@@ -367,19 +468,22 @@ function OverviewStatusPanel({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <Lightbulb className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h2 className="text-base font-semibold">Current State</h2>
+              <h2 className="text-base font-semibold">Strategic Verdict</h2>
             </div>
             <HealthBadge health={health} />
           </div>
           <h3 className="mt-4 text-xl font-semibold tracking-normal">
             {currentRecommendation.recommendation}
           </h3>
+          <p className="mt-4 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+            Why
+          </p>
           <MarkdownContent
-            className="mt-3 max-w-3xl space-y-2 text-sm leading-6 text-muted-foreground"
+            className="mt-2 max-w-3xl space-y-2 text-sm leading-6 text-muted-foreground"
             markdown={currentRecommendation.rationale}
           />
           <div className="mt-5 overflow-hidden rounded-md border border-border">
-            <div className="grid divide-y divide-border text-sm sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+            <div className="grid divide-y divide-border text-sm sm:grid-cols-5 sm:divide-x sm:divide-y-0">
               {metrics.map(([label, value]) => (
                 <div className="px-3 py-2" key={label}>
                   <div className="text-xs text-muted-foreground">{label}</div>
@@ -442,6 +546,95 @@ function OverviewStatusPanel({
   );
 }
 
+function RiskiestAssumptionCard({
+  onAction,
+  overview,
+}: {
+  onAction: (action: NextBestAction) => void;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const assumption = riskiestAssumption(overview);
+  if (!assumption) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-white p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="max-w-3xl">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h2 className="text-base font-semibold">Riskiest Assumption</h2>
+          </div>
+          <MarkdownContent
+            className="mt-3 space-y-2 text-lg font-semibold leading-7 text-foreground"
+            markdown={assumption.text}
+          />
+          {assumption.recommended_test ? (
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              Recommended test: {assumption.recommended_test}
+            </p>
+          ) : null}
+        </div>
+        <div className="grid min-w-64 gap-2 sm:grid-cols-3 lg:grid-cols-1">
+          <AssumptionSignal
+            label="Risk"
+            value={assumption.kill_risk ? "High" : formatLabel(assumption.importance)}
+            tone={
+              assumption.kill_risk ||
+              assumption.importance === "critical" ||
+              assumption.importance === "high"
+                ? "warning"
+                : "neutral"
+            }
+          />
+          <AssumptionSignal
+            label="Confidence"
+            value={assumptionConfidenceLabel(assumption.confidence_score)}
+            tone={
+              assumption.confidence_score && Number(assumption.confidence_score) >= 0.65
+                ? "good"
+                : "warning"
+            }
+          />
+          <AssumptionSignal
+            label="Evidence"
+            value={assumption.evidence_links.length > 0 ? "Partial evidence" : "Needs evidence"}
+            tone={assumption.evidence_links.length > 0 ? "neutral" : "warning"}
+          />
+        </div>
+      </div>
+      <div className="mt-4 flex justify-end">
+        <Button
+          onClick={() => onAction(overview.next_best_action)}
+          type="button"
+          variant="secondary"
+        >
+          <Target className="h-4 w-4" aria-hidden="true" />
+          {overview.next_best_action.label}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AssumptionSignal({
+  label,
+  tone,
+  value,
+}: {
+  label: string;
+  tone: HealthTone;
+  value: string;
+}) {
+  return (
+    <div className="rounded-md bg-muted px-3 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <span className={`${tonePillClass(tone)} mt-1`}>{value}</span>
+    </div>
+  );
+}
+
 function ResearchTab({
   overview,
 }: {
@@ -450,14 +643,35 @@ function ResearchTab({
   return (
     <section className="mt-6 space-y-6">
       <PageIntro
-        actionLabel="Run Research Sprint"
-        description="Use the research agent to plan the investigation, discover sources and competitors, synthesize a cited memo, and decide what to validate next."
+        actionLabel="Run Research"
+        description="Use the research agent to plan the investigation, discover sources and competitors, synthesize a research memo, and decide what to validate next."
         eyebrow="Research"
         title="What did the system investigate, and what did it conclude?"
       />
 
+      <ResearchResultCard overview={overview} />
+
       <ResearchSprintSummary projectId={overview.project.id} />
-      <ResearchSprintCard projectId={overview.project.id} />
+
+      <details className="rounded-lg border border-border bg-white p-5">
+        <summary className="cursor-pointer list-none">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold">Inspect research run or start new research</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Review source discovery, competitor discovery, memo approval, trust checks,
+                and research trace details.
+              </p>
+            </div>
+            <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+              Details collapsed
+            </span>
+          </div>
+        </summary>
+        <div className="mt-5 border-t border-border pt-5">
+          <ResearchSprintCard projectId={overview.project.id} />
+        </div>
+      </details>
 
       <details className="rounded-lg border border-border bg-white p-5">
         <summary className="cursor-pointer text-sm font-semibold">Show opportunity brief</summary>
@@ -466,6 +680,48 @@ function ResearchTab({
         </div>
       </details>
     </section>
+  );
+}
+
+function ResearchResultCard({
+  overview,
+}: {
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const assumption = riskiestAssumption(overview);
+  const topSubstitute =
+    overview.evidence_health.competitor_count > 0
+      ? "See mapped competitors and substitutes"
+      : "Competitors still need to be mapped";
+
+  return (
+    <div className="rounded-lg border border-border bg-white p-5">
+      <div className="flex items-center gap-2">
+        <FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />
+        <h3 className="text-base font-semibold">Research Result</h3>
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <ResultBlock title="Verdict" value={overview.current_recommendation.recommendation} />
+        <ResultBlock title="Best Wedge" value={overview.strategic_snapshot.proposed_wedge ?? "Wedge still needs evidence."} />
+        <ResultBlock title="Top Competitors / Substitutes" value={topSubstitute} />
+        <ResultBlock title="Biggest Risk" value={overview.strategic_snapshot.main_risk ?? "The largest risk has not been identified yet."} />
+        <ResultBlock title="Riskiest Assumption" value={assumption?.text ?? "No assumptions ranked yet."} />
+        <ResultBlock title="First Validation Test" value={assumption?.recommended_test ?? overview.next_best_action.description} />
+        <ResultBlock title="What Not To Build Yet" value="Do not expand product scope until the riskiest assumption has real validation evidence." />
+        <ResultBlock title="Recommended Decision" value={overview.current_recommendation.rationale} />
+      </div>
+    </div>
+  );
+}
+
+function ResultBlock({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="rounded-md bg-muted/50 px-3 py-2">
+      <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+        {title}
+      </p>
+      <MarkdownContent className="mt-1 text-sm leading-6 text-foreground" markdown={value} />
+    </div>
   );
 }
 
@@ -554,16 +810,16 @@ function ResearchWorkflowTimeline({
     {
       label: "Discovered sources",
       complete: (history?.source_candidate_count ?? 0) > 0,
-      detail: `${history?.source_candidate_count ?? 0} candidate${
+      detail: `${history?.source_candidate_count ?? 0} source${
         (history?.source_candidate_count ?? 0) === 1 ? "" : "s"
-      }`,
+      } found`,
     },
     {
       label: "Found competitors",
       complete: (history?.competitor_candidate_count ?? 0) > 0,
-      detail: `${history?.competitor_candidate_count ?? 0} candidate${
+      detail: `${history?.competitor_candidate_count ?? 0} competitor${
         (history?.competitor_candidate_count ?? 0) === 1 ? "" : "s"
-      }`,
+      } found`,
     },
     {
       label: "Added evidence",
@@ -578,7 +834,7 @@ function ResearchWorkflowTimeline({
       detail: history?.memo_artifact_id ? "Memo ready" : "Not generated",
     },
     {
-      label: "Updated strategy",
+      label: "Updated recommendation",
       complete: history?.memory_update_status === "approved",
       detail: history?.memory_update_status
         ? formatLabel(history.memory_update_status)
@@ -589,13 +845,13 @@ function ResearchWorkflowTimeline({
     <div className="mt-5 rounded-md border border-border p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h4 className="text-sm font-semibold">Research workflow</h4>
+          <h4 className="text-sm font-semibold">Research activity</h4>
           <p className="mt-1 text-xs text-muted-foreground">
-            Inspect the run as plain-language steps before accepting strategy updates.
+            Inspect the run as plain-language steps before accepting project updates.
           </p>
         </div>
         <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-          Clay-style execution view
+          Details
         </span>
       </div>
       <div className="mt-4 overflow-x-auto rounded-md border border-border">
@@ -670,7 +926,7 @@ function ResearchSprintSummary({ projectId }: { projectId: string }) {
         <h3 className="text-sm font-semibold">No research sprint yet.</h3>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           Run a research sprint to discover sources, identify competitors, gather evidence,
-          and generate a cited strategic memo.
+          and generate a research memo.
         </p>
       </div>
     );
@@ -682,7 +938,7 @@ function ResearchSprintSummary({ projectId }: { projectId: string }) {
     ["Sources added", latestHistory?.ingested_source_count ?? 0],
     ["Competitors found", latestHistory?.competitor_candidate_count ?? 0],
     ["Competitors saved", latestHistory?.merged_competitor_count ?? 0],
-    ["Strategy update", latestHistory?.memory_update_status ? formatLabel(latestHistory.memory_update_status) : "pending"],
+    ["Project update", latestHistory?.memory_update_status ? formatLabel(latestHistory.memory_update_status) : "pending"],
   ] as const;
 
   return (
@@ -722,7 +978,10 @@ function ResearchSprintSummary({ projectId }: { projectId: string }) {
           </p>
         </div>
       ) : null}
-      <ResearchWorkflowTimeline sprint={latestSprint} history={latestHistory} />
+      <details className="mt-4 rounded-md border border-border p-3">
+        <summary className="cursor-pointer text-sm font-medium">Inspect research steps</summary>
+        <ResearchWorkflowTimeline sprint={latestSprint} history={latestHistory} />
+      </details>
     </div>
   );
 }
@@ -847,7 +1106,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
         <div className="max-w-2xl">
           <div className="flex items-center gap-2">
             <FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Run Research Sprint</h2>
+            <h2 className="text-base font-semibold">Run Research</h2>
           </div>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             Ask the system to plan the investigation before it discovers sources or
@@ -890,7 +1149,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
               type="button"
             >
               <FileSearch className="h-4 w-4" aria-hidden="true" />
-              {startMutation.isPending ? "Planning..." : "Run Research Sprint"}
+              {startMutation.isPending ? "Planning..." : "Run Research"}
             </Button>
           </div>
         </div>
@@ -1057,7 +1316,7 @@ function ResearchQualityPanel({ projectId }: { projectId: string }) {
       <summary className="cursor-pointer list-none">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-sm font-semibold">Research Quality</h3>
+            <h3 className="text-sm font-semibold">Trust Checks</h3>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               View source, citation, traceability, cost, and latency checks.
             </p>
@@ -1172,7 +1431,7 @@ function ResearchPlanEditor({
           value={draft.assumptions_to_test}
         />
         <PlanTextArea
-          label="Expected output artifacts"
+          label="Expected outputs"
           onChange={(value) => updateField("expected_outputs", value)}
           value={draft.expected_outputs}
         />
@@ -1375,8 +1634,8 @@ function ResearchDiscoveryPanel({
         <div>
           <h3 className="text-sm font-semibold">Review Findings</h3>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-            Generate candidate sources and competitors from the approved plan. Review items before
-            they are ingested as evidence or merged into the project competitor set, then synthesize
+            Generate sources and competitors from the approved plan. Review items before
+            they are added as evidence or merged into the project competitor set, then synthesize
             a cited research memo from the project evidence graph.
           </p>
         </div>
@@ -1446,7 +1705,7 @@ function ResearchDiscoveryPanel({
               <h4 className="text-sm font-semibold">Research memo ready for review</h4>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 The research agent used {retrievalToolCallCount} retrieval passes, found{" "}
-                {evidenceGapCount} evidence gaps, and paused before updating project strategy.
+                {evidenceGapCount} evidence gaps, and paused before updating the project.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1457,7 +1716,7 @@ function ResearchDiscoveryPanel({
           </div>
           {memoryUpdateStatus ? (
             <p className="mt-3 text-xs leading-5 text-muted-foreground">
-              Project strategy update: {formatLabel(memoryUpdateStatus)}.
+              Project update: {formatLabel(memoryUpdateStatus)}.
             </p>
           ) : null}
           {unsupportedClaims.length > 0 ? (
@@ -1523,7 +1782,7 @@ function ResearchMemoReview({
         <div>
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h3 className="text-sm font-semibold">Review memo and strategy updates</h3>
+            <h3 className="text-sm font-semibold">Review memo and project updates</h3>
           </div>
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
             <span className="rounded-md bg-white px-2 py-1">{artifact.title}</span>
@@ -1568,7 +1827,7 @@ function ResearchMemoReview({
 
       {memoryUpdateSummary ? (
         <div className="mt-4 rounded-md bg-white px-4 py-3 text-sm leading-6 text-muted-foreground">
-          <span className="font-medium text-foreground">Project strategy updates:</span>{" "}
+          <span className="font-medium text-foreground">Project updates:</span>{" "}
           {memoryUpdateSummary.assumption_ids.length} assumption
           {memoryUpdateSummary.assumption_ids.length === 1 ? "" : "s"},{" "}
           {memoryUpdateSummary.risk_ids.length} risk
@@ -1585,7 +1844,7 @@ function ResearchMemoReview({
 
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <div className="rounded-md bg-white px-3 py-2">
-          <div className="text-xs text-muted-foreground">Cited claims</div>
+          <div className="text-xs text-muted-foreground">Supported findings</div>
           <div className="mt-1 text-sm font-semibold">{supportedClaims.length}</div>
         </div>
         <div className="rounded-md bg-white px-3 py-2">
@@ -1612,11 +1871,11 @@ function ResearchMemoReview({
           <section>
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h4 className="text-sm font-semibold">Cited Claims</h4>
+              <h4 className="text-sm font-semibold">Supported Findings</h4>
             </div>
             <div className="mt-4 space-y-3">
               {supportedClaims.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No cited claims recorded.</p>
+                <p className="text-sm text-muted-foreground">No supported findings recorded.</p>
               ) : (
                 supportedClaims.map((claim) => (
                   <div key={claim.id} className="border-b border-border pb-3 last:border-b-0">
@@ -1653,7 +1912,7 @@ function ResearchMemoReview({
           <section>
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h4 className="text-sm font-semibold">Unsupported Claims</h4>
+              <h4 className="text-sm font-semibold">Open Questions</h4>
             </div>
             <div className="mt-4 space-y-2">
               {displayUnsupported.length === 0 ? (
@@ -1726,7 +1985,7 @@ function SourceGroundedMemo({
     <div className="mt-4 rounded-md bg-white p-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h4 className="text-sm font-semibold">Source-grounded memo</h4>
+          <h4 className="text-sm font-semibold">Research memo</h4>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             Summary first. Sources, open questions, and full details stay close by.
           </p>
@@ -1794,7 +2053,7 @@ function SourceGroundedMemo({
           </summary>
           <div className="mt-3 max-h-72 space-y-2 overflow-auto border-t border-border pt-3">
             {unsupportedClaims.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No unsupported claims recorded.</p>
+              <p className="text-sm text-muted-foreground">No open questions recorded.</p>
             ) : (
               unsupportedClaims.map((claim) => (
                 <MarkdownContent
@@ -1832,14 +2091,14 @@ function SourceCandidateList({
   return (
     <div>
       <div className="flex items-center justify-between gap-3">
-        <h4 className="text-sm font-semibold">Source Candidates</h4>
+        <h4 className="text-sm font-semibold">Sources Found</h4>
         <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
           {sources.length}
         </span>
       </div>
       {sources.length === 0 ? (
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          No candidate sources yet. Run source discovery after approving the research plan.
+          No sources found yet. Run source discovery after approving the research plan.
         </p>
       ) : (
         <div className="mt-3 space-y-3">
@@ -1947,14 +2206,14 @@ function CompetitorCandidateList({
   return (
     <div>
       <div className="flex items-center justify-between gap-3">
-        <h4 className="text-sm font-semibold">Competitor Candidates</h4>
+        <h4 className="text-sm font-semibold">Competitors Found</h4>
         <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
           {candidates.length}
         </span>
       </div>
       {candidates.length === 0 ? (
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          No competitor candidates yet. Run competitor discovery to review direct competitors,
+          No competitors found yet. Run competitor discovery to review direct competitors,
           substitutes, and incumbents.
         </p>
       ) : (
@@ -2093,7 +2352,7 @@ function CompetitorCandidateItem({
       {canEdit ? (
         <details className="mt-3 rounded-md bg-muted p-3">
           <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-            Edit candidate
+            Edit competitor found
           </summary>
           <div className="mt-3 grid gap-3">
             <label className="block">
@@ -2175,7 +2434,7 @@ function CompetitorCandidateItem({
               size="sm"
               type="button"
             >
-              Save Candidate
+              Save Competitor
             </Button>
           </div>
         </details>
@@ -2193,22 +2452,23 @@ function LifecycleProgressCard({
   const rows = lifecycleRows(overview);
 
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <details className="rounded-lg border border-border bg-white p-5">
+      <summary className="cursor-pointer list-none">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <Route className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Lifecycle Status</h2>
+            <h2 className="text-base font-semibold">Validation Workflow Progress</h2>
           </div>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Compact view of what is complete, what is active, and where the next
-            decision pressure sits.
+            {overview.idea_readiness.score}% complete. This is workflow progress, not a score for idea quality.
           </p>
         </div>
         <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
           {formatStage(overview.strategic_snapshot.current_stage)}
         </span>
       </div>
+      </summary>
       <div className="mt-5 overflow-x-auto rounded-md border border-border">
         <table className="min-w-[720px] w-full border-collapse text-left text-sm">
           <thead>
@@ -2233,7 +2493,7 @@ function LifecycleProgressCard({
           </tbody>
         </table>
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -2376,6 +2636,60 @@ function StrategicSnapshotCard({ snapshot }: { snapshot: StrategicSnapshot }) {
   );
 }
 
+function StageAwareSummary({
+  overview,
+}: {
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const stage = overview.strategic_snapshot.current_stage;
+  const title =
+    stage === "validation_plan_created" || stage === "experiment_running"
+      ? "Validation Focus"
+      : stage === "decision_ready" || stage === "proceeding"
+        ? "Decision Focus"
+        : stage === "brief_generated" || stage === "competitors_analyzed"
+          ? "Research Focus"
+          : "Strategic Snapshot";
+  const summary =
+    stage === "validation_plan_created"
+      ? "A validation plan exists. The next useful work is running the test and logging real evidence before making a build decision."
+      : stage === "experiment_running"
+        ? "Validation is active. Preserve the signal by logging results as soon as the test produces evidence."
+        : stage === "decision_ready"
+          ? "Validation results exist. Use the evidence trail to decide whether to continue research, pivot, pause, kill, or proceed narrowly."
+          : stage === "proceeding"
+            ? "A decision has been recorded. Keep the next milestone tied to the evidence and revisit trigger."
+            : stage === "assumptions_identified"
+              ? "The next useful work is converting the riskiest belief into one concrete validation test."
+              : "Use this snapshot to keep the thesis, target user, wedge, and risk in view while research is still forming.";
+
+  return (
+    <div className="rounded-lg border border-border bg-white p-5">
+      <div className="flex items-center gap-2">
+        <ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />
+        <h2 className="text-base font-semibold">{title}</h2>
+      </div>
+      <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">{summary}</p>
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <SnapshotField label="Target User" value={overview.strategic_snapshot.target_user} />
+        <SnapshotField label="Primary Problem" value={overview.strategic_snapshot.primary_problem} />
+        <SnapshotField label="Best Wedge" value={overview.strategic_snapshot.proposed_wedge} />
+        <SnapshotField label="Main Risk" value={overview.strategic_snapshot.main_risk} />
+      </div>
+      <details className="mt-4 border-t border-border pt-4">
+        <summary className="cursor-pointer text-sm font-medium">Show thesis details</summary>
+        <div className="mt-3 grid gap-4 md:grid-cols-2">
+          <SnapshotField label="Current Thesis" value={overview.strategic_snapshot.current_thesis} />
+          <SnapshotField
+            label="Idea Confidence"
+            value={formatConfidenceValue(overview.strategic_snapshot.current_confidence)}
+          />
+        </div>
+      </details>
+    </div>
+  );
+}
+
 function SnapshotField({ label, value }: { label: string; value: string | null }) {
   return (
     <div>
@@ -2404,8 +2718,8 @@ function EvidenceHealthCard({
   const metrics = [
     ["Sources", health.source_count],
     ["Competitors", health.competitor_count],
-    ["Cited claims", health.cited_claim_count],
-    ["Unsupported claims", health.unsupported_claim_count],
+    ["Supported findings", health.cited_claim_count],
+    ["Open questions", health.unsupported_claim_count],
     ["Validated assumptions", health.validated_assumption_count],
   ] as const;
   return (
@@ -2610,7 +2924,20 @@ function tabFromHash(hash: string): ProjectTab | null {
 }
 
 function formatStage(stage: ProjectStage) {
-  return formatLabel(stage);
+  const labels: Record<ProjectStage, string> = {
+    draft_idea: "Draft idea",
+    structured_intake: "Structured intake",
+    brief_generated: "Research ready",
+    competitors_analyzed: "Competitors mapped",
+    assumptions_identified: "Assumptions identified",
+    validation_plan_created: "Validation plan ready",
+    experiment_running: "Validation running",
+    decision_ready: "Decision recommended",
+    paused: "Paused",
+    killed: "Killed",
+    proceeding: "Decision recorded",
+  };
+  return labels[stage] ?? formatLabel(stage);
 }
 
 function lifecycleStepIndex(stage: ProjectStage) {
@@ -2693,17 +3020,107 @@ function projectHealth(
     overview.evidence_health.unsupported_claim_count > overview.evidence_health.cited_claim_count
   ) {
     return {
-      label: "At risk",
+      label: "High strategic risk",
       tone: "warning",
       detail: "There are material risks or weak evidence areas that should be validated next.",
     };
   }
 
   return {
-    label: "On track",
+    label: "Workflow on track",
     tone: "good",
-    detail: "The project has a clear current state, supporting evidence, and a defined next action.",
+    detail: "The workflow has a clear current state, supporting evidence, and a defined next action. This does not mean the idea is proven.",
   };
+}
+
+function riskiestAssumption(
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>,
+) {
+  const score = (assumption: (typeof overview.key_assumptions)[number]) => {
+    const importance =
+      assumption.importance === "critical"
+        ? 4
+        : assumption.importance === "high"
+          ? 3
+          : assumption.importance === "medium"
+            ? 2
+            : 1;
+    const uncertainty =
+      assumption.uncertainty === "high" ? 3 : assumption.uncertainty === "medium" ? 2 : 1;
+    return importance * 3 + uncertainty * 2 + (assumption.kill_risk ? 4 : 0);
+  };
+  return [...overview.key_assumptions].sort((a, b) => score(b) - score(a))[0] ?? null;
+}
+
+function highestRiskLabel(
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>,
+) {
+  const assumption = riskiestAssumption(overview);
+  const topRisk = overview.key_risks[0];
+  if (
+    topRisk?.severity === "critical" ||
+    assumption?.importance === "critical" ||
+    assumption?.kill_risk
+  ) {
+    return "High";
+  }
+  if (topRisk?.severity === "high" || assumption?.importance === "high") {
+    return "High";
+  }
+  if (topRisk?.severity === "medium" || assumption?.importance === "medium") {
+    return "Medium";
+  }
+  if (topRisk || assumption) {
+    return "Low";
+  }
+  return "Unknown";
+}
+
+function riskTone(value: string): HealthTone {
+  if (value === "High") {
+    return "warning";
+  }
+  if (value === "Medium") {
+    return "neutral";
+  }
+  if (value === "Unknown") {
+    return "neutral";
+  }
+  return "good";
+}
+
+function tonePillClass(tone: HealthTone) {
+  if (tone === "good") {
+    return "inline-flex w-fit rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700";
+  }
+  if (tone === "warning") {
+    return "inline-flex w-fit rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700";
+  }
+  if (tone === "danger") {
+    return "inline-flex w-fit rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700";
+  }
+  return "inline-flex w-fit rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground";
+}
+
+function assumptionConfidenceLabel(value: string | null) {
+  if (!value) {
+    return "Unknown confidence";
+  }
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) {
+    return "Unknown confidence";
+  }
+  if (parsed >= 0.7) {
+    return "High confidence";
+  }
+  if (parsed >= 0.4) {
+    return "Medium confidence";
+  }
+  return "Low confidence";
+}
+
+function formatConfidenceValue(value: RecommendationConfidence) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function HealthBadge({ health }: { health: ProjectHealth }) {
@@ -2781,10 +3198,10 @@ function lifecycleRows(
       key: "evidence",
       label: "Evidence",
       complete: overview.evidence_health.source_count > 0,
-      signal: `${overview.evidence_health.cited_claim_count} cited claims`,
+      signal: `${overview.evidence_health.cited_claim_count} supported findings`,
       next:
         overview.evidence_health.unsupported_claim_count > 0
-          ? "Resolve unsupported claims"
+          ? "Resolve open questions"
           : "Keep evidence current",
     },
     {
@@ -2798,15 +3215,15 @@ function lifecycleRows(
       key: "validation",
       label: "Validation",
       complete: validationComplete,
-      signal: validationComplete ? "Plan active" : "Plan needed",
-      next: validationComplete ? "Log results" : "Create validation plan",
+      signal: validationComplete ? "Validation test exists" : "Test needed",
+      next: validationComplete ? "Log results" : "Create validation test",
     },
     {
       key: "decision",
       label: "Decision",
       complete: decisionComplete,
-      signal: decisionComplete ? "Decision ready" : "Not ready",
-      next: decisionComplete ? "Record rationale" : "Wait for validation signal",
+      signal: decisionComplete ? "Decision recommended or recorded" : "Not decision-grade yet",
+      next: decisionComplete ? "Review decision rationale" : "Wait for validation signal",
     },
   ] as const;
 

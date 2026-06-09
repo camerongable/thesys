@@ -565,7 +565,10 @@ def _validation_plan_messages(
                 "assumption id exactly. Plans must be operational: target respondent, steps, "
                 "screener questions, interview questions, survey questions, landing page copy, "
                 "outreach copy, note-taking template, interpretation rubric, success criteria, "
-                "failure threshold, and expected signal strength."
+                "failure threshold, and expected signal strength. Make the first test specific "
+                "enough to run this week. Prefer willingness-to-pay or switching-behavior tests "
+                "when the business risk is unclear. State what should not be built until the "
+                "test result is known."
             ),
         ),
         ChatMessage(

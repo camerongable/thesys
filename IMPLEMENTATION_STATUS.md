@@ -2,12 +2,12 @@
 
 ## Current Phase
 
-V1 Sprint 12 complete. The project UI has been aligned more tightly with
-best-in-class workflow-product patterns from Linear, Jira Product Discovery,
-Dovetail, NotebookLM, and Clay. The app now puts lifecycle progress,
-recommendations, source-grounded memo reading, evidence traceability,
-assumption prioritization, validation assets, competitor grouping, and decision
-actions closer to the market UX benchmark. Watchlists, monitoring,
+V1 Sprint 13 started. The brief now defines the UX/Product Activation Refactor
+around a verdict-first product promise: rough idea to evidence-backed validation
+plan in one session. The first implementation slice added the Sprint 13 UX
+audit, persistent project Verdict Bar, a sharper Strategic Verdict overview
+surface, a riskiest-assumption overview card, project-list strategic state
+cards, and a more activation-oriented new-project flow. Watchlists, monitoring,
 collaboration, portfolio dashboards, integrations, and multi-segment workflow
 packs remain V2 scope.
 
@@ -736,6 +736,62 @@ Checks run:
 - [x] `curl -fsS http://localhost:8000/health`
 - [x] `curl -I -fsS http://localhost:3000/projects`
 
-## Next Sprint
+## Sprint 13 Scope
 
-V2 Sprint 1: Recurring Watchlists and Market Monitoring.
+- [x] Add Sprint 13 UX/Product Activation Refactor to `IMPLEMENTATION_BRIEF.md`.
+- [x] Create Sprint 13 UX audit/TODO list.
+- [x] Add persistent project Verdict Bar across project tabs.
+- [x] Rename Overview Current State to Strategic Verdict and add explicit Why framing.
+- [x] Surface Riskiest Assumption on the Overview page.
+- [x] Refactor the home/project list around product promise, verdict, stage, next action,
+  and project-scoped evidence state.
+- [x] Make the new-project form start from "Investigate a New Idea" and add Quick Scan /
+  Deep Research Sprint choice.
+- [x] Refactor Research page so conclusions lead and run/process details are secondary.
+- [x] Refactor Evidence page around supported findings and open questions.
+- [x] Refactor Competitors page around landscape summary and strategic implication.
+- [x] Refactor Assumptions labels and CTA hierarchy.
+- [x] Refactor Validation into a step-by-step execution guide.
+- [x] Refactor Decisions into suggested decision, rationale, and missing evidence.
+- [x] Improve seeded demo project presentation if needed.
+- [x] Run Sprint 13 usability task tests.
+- [x] Add Sprint 13 product-clarity addendum for strategic judgment, state-aware
+  CTAs, workflow-progress labeling, and implication-driven evidence.
+- [x] Replace procedural overview/verdict language with strategic recommendations
+  from the shared overview service.
+- [x] Clarify workflow progress vs idea confidence in the project header,
+  verdict bar, Overview, and lifecycle details.
+- [x] Add Research Result, Top Validation Priorities, state-aware validation
+  CTAs, and stronger decision recommendations.
+
+## Sprint 13 Verification
+
+Checks run:
+
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] Manual code-path QA against Sprint 13 usability tasks:
+  - home/project list promise and strategic project cards
+  - project verdict bar and Overview verdict/next action/riskiest assumption
+  - Research conclusions before inspectable run details
+  - Evidence supported findings and open questions before raw sources
+  - Competitors landscape summary, substitutes, and strategic implication
+  - Assumptions risk/confidence labels and primary riskiest-assumption CTA
+  - Validation step plan, assets, prominent result logging, and interpretation
+  - Decisions suggested decision, rationale, and missing evidence
+- [x] `git diff --check`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] `docker compose restart web`
+- [x] `curl -I -fsS http://localhost:3000/projects` after restart
+- [x] Browser smoke check for `/projects` and seeded demo project verdict context
+- [x] Re-run Sprint 13 product-clarity checks after the additional addendum:
+  - strategic project card/verdict bar wording
+  - hash navigation across project tabs
+  - assumptions top priorities and no horizontal overflow
+  - evidence implication/open-question format and consistent counts
+  - validation state-aware CTA and decision handoff
+
+## Next Work
+
+Sprint 13 implementation is complete. V2 should not start until the user has
+tested the refactored V1 flow in the running containers.
