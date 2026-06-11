@@ -19,9 +19,14 @@ import { WorkflowTrace } from "@/features/projects/workflow-trace";
 type StructuredIntakeWizardProps = {
   onFinalized?: () => Promise<string | null> | string | null;
   project: Project;
+  sectionId?: string;
 };
 
-export function StructuredIntakeWizard({ onFinalized, project }: StructuredIntakeWizardProps) {
+export function StructuredIntakeWizard({
+  onFinalized,
+  project,
+  sectionId = "structured-intake",
+}: StructuredIntakeWizardProps) {
   const queryClient = useQueryClient();
   const [rawIdea, setRawIdea] = useState(
     project.short_description ?? project.current_thesis?.thesis_text ?? "",
@@ -78,8 +83,8 @@ export function StructuredIntakeWizard({ onFinalized, project }: StructuredIntak
       setAppliedAnswers([]);
       setFinalizedMessage(
         nextActionLabel
-          ? `Structured thesis saved to the project. Next best action is now ${nextActionLabel}.`
-          : "Structured thesis saved to the project.",
+          ? `Project context saved. Next step is now ${nextActionLabel}.`
+          : "Project context saved.",
       );
     },
   });
@@ -95,19 +100,19 @@ export function StructuredIntakeWizard({ onFinalized, project }: StructuredIntak
   }
 
   return (
-    <section id="structured-intake" className="mt-6 rounded-lg border border-border bg-white p-5">
+    <section id={sectionId} className="mt-6 rounded-lg border border-border bg-card p-5">
       <div className="flex flex-col gap-4 border-b border-border pb-5 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Structured Intake</h2>
+            <h2 className="text-base font-semibold">Project context</h2>
           </div>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
             Rough idea, target segments, problem hypotheses, and unresolved questions.
           </p>
         </div>
         {project.customer_segments.length > 0 || project.problems.length > 0 ? (
-          <span className="inline-flex w-fit items-center gap-2 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+          <span className="inline-flex w-fit items-center gap-2 rounded-md bg-success-muted px-2 py-1 text-xs font-medium text-success-foreground">
             <Check className="h-3.5 w-3.5" aria-hidden="true" />
             Structured
           </span>
@@ -115,7 +120,7 @@ export function StructuredIntakeWizard({ onFinalized, project }: StructuredIntak
       </div>
 
       <label className="mt-5 block">
-        <span className="text-sm font-medium">Rough Idea</span>
+        <span className="text-sm font-medium">Rough idea</span>
         <textarea
           id="structured-intake-raw-idea"
           className="mt-2 min-h-32 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
@@ -132,7 +137,7 @@ export function StructuredIntakeWizard({ onFinalized, project }: StructuredIntak
           type="button"
         >
           <Sparkles className="h-4 w-4" aria-hidden="true" />
-          {analyzeMutation.isPending ? "Structuring..." : "Structure Idea"}
+          {analyzeMutation.isPending ? "Structuring..." : "Structure context"}
         </Button>
         <Button
           disabled={pending || !intake || filledAnswers.length === 0}
@@ -143,7 +148,7 @@ export function StructuredIntakeWizard({ onFinalized, project }: StructuredIntak
           <CircleHelp className="h-4 w-4" aria-hidden="true" />
           {answerMutation.isPending
             ? "Applying answers..."
-            : `Apply ${filledAnswers.length === 1 ? "Answer" : "Answers"} to Draft`}
+            : `Apply ${filledAnswers.length === 1 ? "answer" : "answers"} to draft`}
         </Button>
         <Button
           disabled={pending || !intake}
@@ -152,12 +157,15 @@ export function StructuredIntakeWizard({ onFinalized, project }: StructuredIntak
           variant="secondary"
         >
           <FileCheck className="h-4 w-4" aria-hidden="true" />
-          {finalizeMutation.isPending ? "Saving..." : "Save Structured Thesis"}
+          {finalizeMutation.isPending ? "Saving..." : "Save project context"}
         </Button>
       </div>
 
       {error ? (
-        <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div
+          className="mt-4 break-words rounded-md border border-danger-border bg-danger-muted px-3 py-2 text-sm text-danger-foreground"
+          role="alert"
+        >
           {(error as Error).message}
         </div>
       ) : null}
@@ -176,10 +184,10 @@ export function StructuredIntakeWizard({ onFinalized, project }: StructuredIntak
       </div>
 
       {appliedAnswers.length > 0 ? (
-        <div className="mt-4 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+        <div className="mt-4 rounded-md border border-success-border bg-success-muted px-3 py-2 text-sm text-success-foreground">
           Applied {appliedAnswers.length}{" "}
           {appliedAnswers.length === 1 ? "clarifying answer" : "clarifying answers"} to the draft.
-          Save Structured Thesis to update the project and next best action.
+          Save project context to update the project and next step.
         </div>
       ) : null}
 
@@ -192,10 +200,10 @@ export function StructuredIntakeWizard({ onFinalized, project }: StructuredIntak
               markdown={intake.one_sentence_summary}
             />
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <ListBlock label="Target Users" values={intake.target_users} />
-              <ListBlock label="Problem Hypotheses" values={intake.problem_hypotheses} />
-              <ListBlock label="Suspected Competitors" values={intake.suspected_competitors} />
-              <ListBlock label="Key Uncertainties" values={intake.key_uncertainties} />
+              <ListBlock label="Target users" values={intake.target_users} />
+              <ListBlock label="Problem hypotheses" values={intake.problem_hypotheses} />
+              <ListBlock label="Suspected competitors" values={intake.suspected_competitors} />
+              <ListBlock label="Key uncertainties" values={intake.key_uncertainties} />
             </div>
             <div className="mt-4 rounded-md bg-muted px-3 py-2 text-sm">
               <span className="font-medium">Proposed solution:</span>
@@ -207,7 +215,7 @@ export function StructuredIntakeWizard({ onFinalized, project }: StructuredIntak
           </div>
 
           <div className="border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
-            <h3 className="text-sm font-semibold">Clarifying Questions</h3>
+            <h3 className="text-sm font-semibold">Clarifying questions</h3>
             <div className="mt-3 space-y-3">
               {answers.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No open questions.</p>
@@ -230,7 +238,7 @@ export function StructuredIntakeWizard({ onFinalized, project }: StructuredIntak
       ) : null}
 
       {finalizedMessage ? (
-        <div className="mt-4 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+        <div className="mt-4 rounded-md border border-success-border bg-success-muted px-3 py-2 text-sm text-success-foreground">
           {finalizedMessage}
         </div>
       ) : null}

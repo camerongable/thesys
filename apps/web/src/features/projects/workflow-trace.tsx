@@ -76,13 +76,13 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
     }));
 
   return (
-    <details className="rounded-lg border border-border bg-white p-4">
+    <details className="rounded-lg border border-border bg-card p-4">
       <summary className="cursor-pointer list-none">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-sm font-semibold">Process Details</h3>
+            <h3 className="text-sm font-semibold">Process details</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              {run?.workflow_type ? friendlyWorkflowLabel(run.workflow_type) : "Research is starting"}
+              {run?.workflow_type ? friendlyWorkflowLabel(run.workflow_type) : "Evidence review is starting"}
             </p>
           </div>
           {status ? (
@@ -93,21 +93,21 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
 
       <div className="mt-4 border-t border-border pt-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold">Debug Details</h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {run?.workflow_type ? formatLabel(run.workflow_type) : "Pending process"}
-          </p>
-          {run ? (
+          <div>
+            <h3 className="text-sm font-semibold">Debug details</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              {run.model_provider ?? "unknown provider"} · {run.model_name ?? "unknown model"}
+              {run?.workflow_type ? friendlyWorkflowLabel(run.workflow_type) : "Pending process"}
             </p>
+            {run ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {run.model_provider ?? "unknown provider"} · {run.model_name ?? "unknown model"}
+              </p>
+            ) : null}
+          </div>
+          {status ? (
+            <span className={statusClass(status)}>{formatLabel(status)}</span>
           ) : null}
         </div>
-        {status ? (
-          <span className={statusClass(status)}>{formatLabel(status)}</span>
-        ) : null}
-      </div>
 
       {run ? (
         <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
@@ -121,7 +121,10 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
       ) : null}
 
       {streamError ? (
-        <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+        <div
+          className="mt-3 break-words rounded-md border border-danger-border bg-danger-muted px-3 py-2 text-xs text-danger-foreground"
+          role="alert"
+        >
           {streamError}
         </div>
       ) : null}
@@ -135,7 +138,7 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
               <StepIcon status={pending && !run ? pendingStepStatus(index) : step.status} />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{formatLabel(step.step_name)}</span>
+                  <span className="font-medium">{friendlyStepLabel(step.step_name)}</span>
                   <span className="text-xs text-muted-foreground">
                     {formatLabel(pending && !run ? pendingStepStatus(index) : step.status)}
                   </span>
@@ -152,7 +155,7 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
                   </p>
                 ) : null}
                 {step.error ? (
-                  <p className="mt-1 text-xs text-red-700">{step.error}</p>
+                  <p className="mt-1 text-xs text-danger-foreground">{step.error}</p>
                 ) : null}
               </div>
             </div>
@@ -167,7 +170,7 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
       ) : null}
 
       {run?.error ? (
-        <p className="mt-4 border-t border-border pt-3 text-xs leading-5 text-red-700">
+        <p className="mt-4 border-t border-border pt-3 text-xs leading-5 text-danger-foreground">
           {run.error}
         </p>
       ) : null}
@@ -178,10 +181,10 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
 
 function StepIcon({ status }: { status: string }) {
   if (status === "succeeded") {
-    return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" aria-hidden="true" />;
+    return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success-foreground" aria-hidden="true" />;
   }
   if (status === "failed") {
-    return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-700" aria-hidden="true" />;
+    return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-danger-foreground" aria-hidden="true" />;
   }
   if (status === "running") {
     return <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" aria-hidden="true" />;
@@ -195,10 +198,10 @@ function pendingStepStatus(index: number) {
 
 function statusClass(status: string) {
   if (status === "succeeded") {
-    return "w-fit rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700";
+    return "w-fit rounded-md bg-success-muted px-2 py-1 text-xs font-medium text-success-foreground";
   }
   if (status === "failed" || status === "cancelled") {
-    return "w-fit rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700";
+    return "w-fit rounded-md bg-danger-muted px-2 py-1 text-xs font-medium text-danger-foreground";
   }
   return "w-fit rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground";
 }
@@ -209,14 +212,23 @@ function formatLabel(value: string) {
 
 function friendlyWorkflowLabel(value: string) {
   const labels: Record<string, string> = {
-    agentic_research: "Research memo generation",
+    agentic_research: "Evidence memo generation",
     competitor_analysis: "Competitor analysis",
     evidence_retrieval: "Evidence search",
     evidence_ingestion: "Evidence added",
     opportunity_brief: "Brief generation",
+    research_sprint_planning: "Evidence review planning",
     structured_intake: "Idea structuring",
     validation_plan: "Validation plan",
     assumption_extraction: "Assumption review",
+  };
+  return labels[value] ?? formatLabel(value);
+}
+
+function friendlyStepLabel(value: string) {
+  const labels: Record<string, string> = {
+    generate_research_plan: "Generate evidence plan",
+    research_sprint_planning: "Evidence review planning",
   };
   return labels[value] ?? formatLabel(value);
 }

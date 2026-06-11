@@ -4,6 +4,7 @@ import { AlertTriangle, FileText, RefreshCw, ShieldCheck } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { DomainError, DomainHeader, DomainPanel } from "@/features/projects/decision-room";
 import {
   Artifact,
   generateOpportunityBrief,
@@ -60,52 +61,61 @@ export function BriefTab({ projectId }: BriefTabProps) {
 
   return (
     <section className="mt-6 space-y-6">
-      <div className="flex flex-col gap-3 border-b border-border pb-5 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-base font-semibold">Opportunity Brief</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Source-grounded brief, cited claims, unsupported claims, and version history.
-          </p>
-        </div>
-        <Button
-          disabled={generateMutation.isPending}
-          onClick={() => generateMutation.mutate()}
-          type="button"
-        >
-          <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          {generateMutation.isPending
-            ? "Generating..."
-            : currentVersion
-              ? "Regenerate Brief"
-              : "Generate Opportunity Brief"}
-        </Button>
-      </div>
+      <DomainHeader
+        action={
+          <Button
+            disabled={generateMutation.isPending}
+            onClick={() => generateMutation.mutate()}
+            type="button"
+          >
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            {generateMutation.isPending
+              ? "Generating brief..."
+              : currentVersion
+                ? "Regenerate brief"
+                : "Generate brief"}
+          </Button>
+        }
+        description="Keep the generated thesis tied to cited claims, unsupported claims, and version history so the brief stays useful as decision evidence."
+        icon={<FileText className="h-4 w-4 text-primary" aria-hidden="true" />}
+        question="What is the current cited thesis?"
+        signals={[
+          { label: "Version", value: currentVersion ? currentVersion.version : "None" },
+          { label: "Cited claims", tone: claims.length > 0 ? "success" : "neutral", value: claims.length },
+          { label: "Open questions", tone: unsupportedClaims.length > 0 ? "warning" : "neutral", value: unsupportedClaims.length },
+          { label: "History", value: current?.versions.length ?? 0 },
+        ]}
+        title="Opportunity Brief"
+      />
 
       {error ? (
-        <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-          {(error as Error).message}
-        </div>
+        <DomainError message={(error as Error).message} />
       ) : null}
 
-      <WorkflowTrace
-        pending={generateMutation.isPending}
-        pendingSteps={[
-          "load_project_state",
-          "retrieve_existing_evidence",
-          "generate_structured_brief",
-          "citation_audit",
-          "write_artifact_version",
-        ]}
-        runId={generateMutation.data?.ai_run_id ?? activeBriefRun?.id ?? null}
-      />
+      <details className="rounded-lg border border-border bg-card p-5" open={generateMutation.isPending}>
+        <summary className="cursor-pointer text-sm font-semibold">View brief trace</summary>
+        <div className="mt-4 border-t border-border pt-4">
+          <WorkflowTrace
+            pending={generateMutation.isPending}
+            pendingSteps={[
+              "load_project_state",
+              "retrieve_existing_evidence",
+              "generate_structured_brief",
+              "citation_audit",
+              "write_artifact_version",
+            ]}
+            runId={generateMutation.data?.ai_run_id ?? activeBriefRun?.id ?? null}
+          />
+        </div>
+      </details>
 
       {artifactsQuery.isLoading ? (
         <div className="text-sm text-muted-foreground">Loading brief...</div>
       ) : !currentVersion ? (
-        <div className="rounded-lg border border-border bg-white p-5">
+        <DomainPanel>
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h3 className="text-sm font-semibold">No brief generated yet.</h3>
+            <h3 className="text-sm font-semibold">No opportunity brief yet.</h3>
           </div>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             The opportunity brief turns project state and evidence into a cited thesis,
@@ -121,12 +131,12 @@ export function BriefTab({ projectId }: BriefTabProps) {
             variant="secondary"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            {generateMutation.isPending ? "Generating..." : "Generate Opportunity Brief"}
+            {generateMutation.isPending ? "Generating brief..." : "Generate brief"}
           </Button>
-        </div>
+        </DomainPanel>
       ) : (
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <article className="rounded-lg border border-border bg-white p-5">
+          <article className="rounded-lg border border-border bg-card p-5">
             <div className="flex flex-wrap items-center gap-2 border-b border-border pb-4">
               <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
               <h3 className="text-sm font-semibold">{current?.title ?? "Opportunity Brief"}</h3>
@@ -138,14 +148,14 @@ export function BriefTab({ projectId }: BriefTabProps) {
           </article>
 
           <aside className="space-y-5">
-            <div className="rounded-lg border border-border bg-white p-5">
+            <div className="rounded-lg border border-border bg-card p-5">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h3 className="text-sm font-semibold">Cited Claims</h3>
+                <h3 className="text-sm font-semibold">Cited claims</h3>
               </div>
               <div className="mt-4 space-y-3">
                 {claims.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No claims recorded.</p>
+                  <p className="text-sm text-muted-foreground">No cited claims recorded.</p>
                 ) : (
                   claims.map((claim) => (
                     <div key={claim.id} className="rounded-md border border-border p-3">
@@ -184,14 +194,14 @@ export function BriefTab({ projectId }: BriefTabProps) {
               </div>
             </div>
 
-            <div className="rounded-lg border border-border bg-white p-5">
+            <div className="rounded-lg border border-border bg-card p-5">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h3 className="text-sm font-semibold">Unsupported Claims</h3>
+                <h3 className="text-sm font-semibold">Unsupported claims</h3>
               </div>
               <div className="mt-4 space-y-2">
                 {unsupportedClaims.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">None recorded.</p>
+                  <p className="text-sm text-muted-foreground">No unsupported claims recorded.</p>
                 ) : (
                   unsupportedClaims.map((claim) => (
                     <MarkdownContent
@@ -205,8 +215,8 @@ export function BriefTab({ projectId }: BriefTabProps) {
             </div>
 
             {current && current.versions.length > 0 ? (
-              <div className="rounded-lg border border-border bg-white p-5">
-                <h3 className="text-sm font-semibold">Version History</h3>
+              <div className="rounded-lg border border-border bg-card p-5">
+                <h3 className="text-sm font-semibold">Version history</h3>
                 <div className="mt-4 space-y-2">
                   {current.versions.map((version) => (
                     <div

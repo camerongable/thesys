@@ -13,6 +13,7 @@ import { ChangeEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { DomainError, DomainHeader, DomainPanel } from "@/features/projects/decision-room";
 import {
   addEvidenceNote,
   addEvidenceUrl,
@@ -162,36 +163,29 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
 
   return (
     <section className="mt-6 space-y-6">
-      <div className="rounded-lg border border-border bg-white p-5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-              Evidence
-            </p>
-            <h2 className="mt-2 text-xl font-semibold tracking-normal">
-              What sources support the analysis?
-            </h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              Evidence keeps the product from becoming generic AI advice. Use this page to
-              inspect sources and supported findings without reading raw chunks by default.
-            </p>
-          </div>
-          <Button
-            onClick={openAddEvidence}
-            type="button"
-          >
+      <DomainHeader
+        action={
+          <Button onClick={openAddEvidence} type="button">
             <LinkIcon className="h-4 w-4" aria-hidden="true" />
-            Add Evidence
+            Add source
           </Button>
-        </div>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <Metric label="Sources" value={health?.source_count ?? sources.length} />
-          <Metric label="Competitors" value={health?.competitor_count ?? 0} />
-          <Metric label="Supported findings" value={health?.cited_claim_count ?? 0} />
-          <Metric label="Open questions" value={health?.unsupported_claim_count ?? 0} />
-          <Metric label="Weakest area" value={health?.weakest_evidence_area ?? "Unknown"} />
-        </div>
-      </div>
+        }
+        description="Keep the idea tied to source-backed claims. Start with what is cited, then open raw chunks only when the decision needs a receipt."
+        icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
+        question="What can we cite before deciding?"
+        signals={[
+          { label: "Sources", value: health?.source_count ?? sources.length },
+          { label: "Competitors", value: health?.competitor_count ?? 0 },
+          { label: "Supported findings", value: health?.cited_claim_count ?? 0 },
+          {
+            label: "Open questions",
+            tone: health && health.unsupported_claim_count > 0 ? "warning" : "neutral",
+            value: health?.unsupported_claim_count ?? 0,
+          },
+          { label: "Weakest area", value: health?.weakest_evidence_area ?? "Unknown" },
+        ]}
+        title="Evidence"
+      />
 
       <EvidenceFindingsPanel
         citedClaims={citedClaims}
@@ -201,15 +195,15 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
         unsupportedClaims={unsupportedClaims}
       />
 
-      <details id="add-evidence-panel" className="rounded-lg border border-border bg-white p-5">
+      <details id="add-evidence-panel" className="rounded-lg border border-border bg-card p-5">
         <summary className="cursor-pointer text-sm font-semibold">
-          Add evidence manually
+          Add source manually
         </summary>
-      <div className="mt-5 grid gap-4 border-t border-border pt-5 lg:grid-cols-3">
-        <div className="self-start rounded-lg border border-border bg-white p-5">
+      <div className="mt-5 grid gap-5 border-t border-border pt-5 lg:grid-cols-3 lg:divide-x lg:divide-border">
+        <div className="self-start lg:pr-5">
           <div className="flex items-center gap-2">
             <LinkIcon className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Add URL</h2>
+            <h2 className="text-base font-semibold">Add source URL</h2>
           </div>
           <label className="mt-4 block">
             <span className="text-sm font-medium">URL</span>
@@ -223,7 +217,7 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
             />
           </label>
           <label className="mt-3 block">
-            <span className="text-sm font-medium">Title</span>
+            <span className="text-sm font-medium">Source title</span>
             <input
               id="evidence-note-title"
               className="mt-2 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
@@ -238,17 +232,17 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
             type="button"
           >
             <LinkIcon className="h-4 w-4" aria-hidden="true" />
-            {urlMutation.isPending ? "Adding..." : "Add URL"}
+            {urlMutation.isPending ? "Adding URL..." : "Add source URL"}
           </Button>
         </div>
 
-        <div className="rounded-lg border border-border bg-white p-5">
+        <div className="border-t border-border pt-5 lg:border-t-0 lg:px-5 lg:pt-0">
           <div className="flex items-center gap-2">
             <Type className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Add Note</h2>
+            <h2 className="text-base font-semibold">Add evidence note</h2>
           </div>
           <label className="mt-4 block">
-            <span className="text-sm font-medium">Title</span>
+            <span className="text-sm font-medium">Note title</span>
             <input
               className="mt-2 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
               onChange={(event) => setNoteTitle(event.target.value)}
@@ -256,7 +250,7 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
             />
           </label>
           <label className="mt-3 block">
-            <span className="text-sm font-medium">Text</span>
+                <span className="text-sm font-medium">Note text</span>
             <textarea
               className="mt-2 min-h-24 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
               onChange={(event) => setNoteText(event.target.value)}
@@ -270,14 +264,14 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
             type="button"
           >
             <Type className="h-4 w-4" aria-hidden="true" />
-            {noteMutation.isPending ? "Adding..." : "Add Note"}
+            {noteMutation.isPending ? "Adding note..." : "Add evidence note"}
           </Button>
         </div>
 
-        <div className="rounded-lg border border-border bg-white p-5">
+        <div className="border-t border-border pt-5 lg:border-t-0 lg:pl-5 lg:pt-0">
           <div className="flex items-center gap-2">
             <FileUp className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Upload File</h2>
+            <h2 className="text-base font-semibold">Upload evidence file</h2>
           </div>
           <label className="mt-4 block">
             <span className="text-sm font-medium">PDF, text, or Markdown</span>
@@ -295,24 +289,22 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
             type="button"
           >
             <FileUp className="h-4 w-4" aria-hidden="true" />
-            {fileMutation.isPending ? "Uploading..." : "Upload"}
+            {fileMutation.isPending ? "Uploading file..." : "Upload file"}
           </Button>
         </div>
       </div>
       </details>
 
       {error ? (
-        <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-          {(error as Error).message}
-        </div>
+        <DomainError message={(error as Error).message} />
       ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="self-start rounded-lg border border-border bg-white p-5">
+        <DomainPanel className="self-start">
           <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <Database className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h2 className="text-base font-semibold">Sources</h2>
+              <h2 className="text-base font-semibold">Evidence sources</h2>
             </div>
             <span className="text-sm text-muted-foreground">{sources.length} total</span>
           </div>
@@ -342,14 +334,12 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
           {sourcesQuery.isLoading ? (
             <div className="mt-4 text-sm text-muted-foreground">Loading sources...</div>
           ) : sourcesQuery.isError ? (
-            <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-              {(sourcesQuery.error as Error).message}
-            </div>
+            <DomainError message={(sourcesQuery.error as Error).message} />
           ) : sources.length === 0 ? (
-            <div className="mt-4 rounded-md border border-dashed border-border p-4">
-              <h3 className="text-sm font-semibold">No evidence yet.</h3>
+            <div className="mt-4 border-t border-dashed border-border pt-4">
+              <h3 className="text-sm font-semibold">No sources yet.</h3>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Evidence keeps this from becoming generic AI advice. Run a research sprint
+                Evidence keeps this from becoming generic AI advice. Plan an evidence review
                 or add competitor pages, customer notes, market research, reviews, forum
                 threads, or interview notes.
               </p>
@@ -361,7 +351,7 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
                 variant="secondary"
               >
                 <LinkIcon className="h-4 w-4" aria-hidden="true" />
-                Add Evidence
+                Add source
               </Button>
             </div>
           ) : (
@@ -408,23 +398,23 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
               ) : null}
             </div>
           )}
-        </div>
+        </DomainPanel>
 
         <aside className="self-start space-y-4">
           <SourceDetailPanel source={selectedSource} />
           <ClaimsPanel citedClaims={citedClaims} unsupportedClaims={unsupportedClaims} />
-          <details className="rounded-lg border border-border bg-white p-5">
+          <details className="rounded-lg border border-border bg-card p-5">
             <summary className="cursor-pointer list-none">
               <div className="flex items-center gap-2">
                 <Search className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h2 className="text-base font-semibold">Raw Retrieval Search</h2>
+                <h2 className="text-base font-semibold">Search source chunks</h2>
               </div>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Search raw chunks only when you need to inspect retrieval details.
+                Search stored source text when you need to inspect retrieval details.
               </p>
             </summary>
           <label className="mt-4 block border-t border-border pt-4">
-              <span className="text-sm font-medium">Query</span>
+              <span className="text-sm font-medium">Search query</span>
               <textarea
                 className="mt-2 min-h-20 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
                 onChange={(event) => setRetrievalQuery(event.target.value)}
@@ -450,16 +440,16 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
               type="button"
             >
               <Search className="h-4 w-4" aria-hidden="true" />
-              {retrievalMutation.isPending ? "Searching..." : "Search Evidence"}
+              {retrievalMutation.isPending ? "Searching sources..." : "Search sources"}
             </Button>
 
             {retrievalMutation.data ? (
-              <div className="mt-5 space-y-3">
+              <div className="mt-5 divide-y divide-border">
                 {retrievalMutation.data.results.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No matching chunks.</p>
                 ) : (
                   retrievalMutation.data.results.map((result) => (
-                    <details key={result.chunk_id} className="rounded-md border border-border p-3">
+                    <details key={result.chunk_id} className="py-3 first:pt-0">
                       <summary className="cursor-pointer list-none">
                         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                           <span className="font-medium text-foreground">
@@ -505,12 +495,12 @@ function EvidenceFindingsPanel({
   const hasEvidence = summarySourceCount > 0 || supportedCount > 0 || openCount > 0;
 
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <DomainPanel>
       <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <Database className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h3 className="text-sm font-semibold">Evidence-backed Findings</h3>
+            <h3 className="text-sm font-semibold">Supported findings</h3>
           </div>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             Start with what the sources support. Open source details only when you need the
@@ -525,45 +515,45 @@ function EvidenceFindingsPanel({
       </div>
 
       {!hasEvidence ? (
-        <div className="mt-4 rounded-md border border-dashed border-border p-4">
-          <h4 className="text-sm font-semibold">No evidence-backed findings yet.</h4>
+        <div className="mt-4 border-t border-dashed border-border pt-4">
+          <h4 className="text-sm font-semibold">No supported findings yet.</h4>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Add sources or run a research sprint so recommendations can point back to concrete
+            Add sources or plan an evidence review so recommendations can point back to concrete
             evidence.
           </p>
           <Button className="mt-3" onClick={onAddEvidence} size="sm" type="button" variant="secondary">
             <LinkIcon className="h-4 w-4" aria-hidden="true" />
-            Add Evidence
+            Add source
           </Button>
         </div>
       ) : (
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="min-w-0">
             <div className="flex items-center justify-between gap-3">
-              <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+              <h4 className="text-sm font-semibold text-muted-foreground">
                 Supported findings
               </h4>
               <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
                 top {supportedClaims.length}
               </span>
             </div>
-            <div className="mt-3 divide-y divide-border rounded-md border border-border">
+            <div className="mt-3 divide-y divide-border">
               {supportedClaims.length === 0 ? (
-                <p className="p-3 text-sm text-muted-foreground">No supported findings recorded yet.</p>
+                <p className="py-3 text-sm text-muted-foreground">No supported findings recorded yet.</p>
               ) : (
                 supportedClaims.map((claim) => (
-                  <div className="p-3" key={claim.id}>
-                    <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                  <div className="py-3" key={claim.id}>
+                    <p className="text-xs font-medium text-muted-foreground">
                       Finding
                     </p>
                     <p className="mt-1 text-sm font-semibold leading-6 text-foreground">
                       {findingHeadline(claim.text)}
                     </p>
-                    <p className="mt-2 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                    <p className="mt-2 text-xs font-medium text-muted-foreground">
                       Evidence
                     </p>
                     <p className="mt-1 text-sm leading-6 text-muted-foreground">{claim.text}</p>
-                    <p className="mt-2 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                    <p className="mt-2 text-xs font-medium text-muted-foreground">
                       Implication
                     </p>
                     <p className="mt-1 text-sm leading-6 text-muted-foreground">
@@ -584,7 +574,7 @@ function EvidenceFindingsPanel({
             </div>
           </div>
 
-          <aside className="rounded-md border border-border bg-muted/30 p-4">
+          <aside className="border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
             <h4 className="text-sm font-semibold">Evidence health</h4>
             <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
               <HealthMetric label="Sources" value={String(health?.source_count ?? sourceCount)} />
@@ -593,7 +583,7 @@ function EvidenceFindingsPanel({
               <HealthMetric label="Open" value={String(health?.unsupported_claim_count ?? unsupportedClaims.length)} />
             </dl>
             <div className="mt-4 border-t border-border pt-4">
-              <h5 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+            <h5 className="text-xs font-medium text-muted-foreground">
                 Weakest area
               </h5>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -602,25 +592,25 @@ function EvidenceFindingsPanel({
             </div>
             <div className="mt-4 border-t border-border pt-4">
               <h5 className="text-sm font-semibold">Open questions / evidence gaps</h5>
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 divide-y divide-border">
                 {weakClaims.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No open questions recorded.</p>
                 ) : (
                   weakClaims.map((claim) => (
-                    <div className="rounded-md border border-border bg-background/60 p-3" key={claim}>
-                      <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                    <div className="py-3 first:pt-0" key={claim}>
+                      <p className="text-xs font-medium text-muted-foreground">
                         Open question
                       </p>
                       <p className="mt-1 text-sm font-semibold leading-6 text-foreground">
                         {claim}
                       </p>
-                      <p className="mt-2 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                      <p className="mt-2 text-xs font-medium text-muted-foreground">
                         Why it matters
                       </p>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">
                         This is a decision risk until evidence proves or weakens it.
                       </p>
-                      <p className="mt-2 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                      <p className="mt-2 text-xs font-medium text-muted-foreground">
                         Recommended evidence
                       </p>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">
@@ -634,7 +624,7 @@ function EvidenceFindingsPanel({
           </aside>
         </div>
       )}
-    </div>
+    </DomainPanel>
   );
 }
 
@@ -646,7 +636,7 @@ function findingHeadline(text: string) {
 function findingImplication(text: string) {
   const lower = text.toLowerCase();
   if (lower.includes("pay") || lower.includes("pricing") || lower.includes("willingness")) {
-    return "Treat willingness to pay as the next decision-grade evidence target before building more product.";
+    return "Treat willingness to pay as the next proof target before building more product.";
   }
   if (lower.includes("competitor") || lower.includes("substitute") || lower.includes("alternative")) {
     return "Position against the existing workaround, not only direct product competitors.";
@@ -659,7 +649,7 @@ function findingImplication(text: string) {
 
 function HealthMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md bg-background/70 px-3 py-2">
+    <div>
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="mt-1 font-semibold">{value}</dd>
     </div>
@@ -668,7 +658,7 @@ function HealthMetric({ label, value }: { label: string; value: string }) {
 
 function SourceDetailPanel({ source }: { source: EvidenceSource | null }) {
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <DomainPanel>
       <div className="flex items-center gap-2">
         <Database className="h-4 w-4 text-primary" aria-hidden="true" />
         <h2 className="text-base font-semibold">Source Detail</h2>
@@ -707,7 +697,7 @@ function SourceDetailPanel({ source }: { source: EvidenceSource | null }) {
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             {source.summary ?? source.text_preview ?? "No summary available."}
           </p>
-          <details className="mt-3 rounded-md bg-muted p-3">
+          <details className="mt-3 border-t border-border pt-3">
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
               Show source preview
             </summary>
@@ -717,7 +707,7 @@ function SourceDetailPanel({ source }: { source: EvidenceSource | null }) {
           </details>
         </div>
       )}
-    </div>
+    </DomainPanel>
   );
 }
 
@@ -729,14 +719,14 @@ function ClaimsPanel({
   unsupportedClaims: string[];
 }) {
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <DomainPanel>
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-base font-semibold">Findings and Open Questions</h2>
         <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
           {citedClaims.length} supported
         </span>
       </div>
-      <details className="mt-4 rounded-md border border-border p-3" open={citedClaims.length > 0}>
+      <details className="mt-4 border-t border-border pt-3" open={citedClaims.length > 0}>
         <summary className="cursor-pointer text-sm font-medium">Supported Findings</summary>
         <div className="mt-3 max-h-72 space-y-3 overflow-auto border-t border-border pt-3">
           {citedClaims.length === 0 ? (
@@ -754,7 +744,7 @@ function ClaimsPanel({
           )}
         </div>
       </details>
-      <details className="mt-3 rounded-md border border-border p-3">
+      <details className="mt-3 border-t border-border pt-3">
         <summary className="cursor-pointer text-sm font-medium">Open Questions</summary>
         <div className="mt-3 max-h-72 space-y-2 overflow-auto border-t border-border pt-3">
           {unsupportedClaims.length === 0 ? (
@@ -768,7 +758,7 @@ function ClaimsPanel({
           )}
         </div>
       </details>
-    </div>
+    </DomainPanel>
   );
 }
 
@@ -790,7 +780,7 @@ function SourceRow({
   selected: boolean;
 }) {
   return (
-    <details className={selected ? "bg-emerald-50/40 px-3 py-4" : "py-4"}>
+    <details className={selected ? "bg-success-muted px-3 py-4" : "py-4"}>
       <summary className="cursor-pointer list-none">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
@@ -825,10 +815,10 @@ function SourceRow({
         </button>
       </div>
       </summary>
-      <div className="mt-4 rounded-md bg-muted p-3">
+      <div className="mt-4 border-t border-border pt-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+            <h4 className="text-xs font-medium text-muted-foreground">
               Source Details
             </h4>
             {source.url ? (
@@ -845,7 +835,7 @@ function SourceRow({
               {source.text_preview ?? source.summary ?? "No preview available."}
             </p>
             {source.ingestion_error ? (
-              <p className="mt-2 text-sm text-red-700">{source.ingestion_error}</p>
+              <p className="mt-2 text-sm text-danger-foreground">{source.ingestion_error}</p>
             ) : null}
           </div>
           <div className="flex shrink-0 gap-2">
@@ -873,15 +863,6 @@ function SourceRow({
         </div>
       </div>
     </details>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="rounded-md bg-muted px-3 py-2">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-semibold">{value}</div>
-    </div>
   );
 }
 

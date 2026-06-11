@@ -13,6 +13,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { DomainError, DomainHeader, DomainPanel } from "@/features/projects/decision-room";
 import {
   analyzeCompetitors,
   Artifact,
@@ -137,20 +138,8 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
 
   return (
     <section className="mt-6 space-y-6">
-      <div className="rounded-lg border border-border bg-white p-5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-              Competitors
-            </p>
-            <h2 className="mt-2 text-xl font-semibold tracking-normal">
-              Who are we up against?
-            </h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              Scan competitors, substitutes, and adjacent alternatives by category. The goal
-              is to identify crowded areas and the strongest wedge.
-            </p>
-          </div>
+      <DomainHeader
+        action={
           <Button
             className="w-full whitespace-nowrap sm:w-64"
             disabled={analyzeMutation.isPending}
@@ -158,21 +147,28 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
             type="button"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            {analyzeMutation.isPending ? "Analyzing..." : "Analyze Landscape"}
+            {analyzeMutation.isPending ? "Analyzing competitors..." : "Analyze competitors"}
           </Button>
-        </div>
-        <div className="mt-5 grid gap-3 sm:grid-cols-4">
-          <Metric label="Competitors" value={competitors.length} />
-          <Metric label="Direct" value={directCount} />
-          <Metric label="Substitutes" value={substituteCount} />
-          <Metric label="High threat" value={highThreatCount} />
-        </div>
-        {currentVersion || competitors.length > 0 ? (
-          <div className="mt-5 grid gap-4 rounded-md border border-border bg-muted/50 p-4 lg:grid-cols-2">
+        }
+        description="Map direct products, substitutes, incumbents, and manual workarounds so the next decision is based on switching pressure rather than category guesses."
+        icon={<Users className="h-4 w-4 text-primary" aria-hidden="true" />}
+        question="Is there a defensible wedge?"
+        signals={[
+          { label: "Competitors", value: competitors.length },
+          { label: "Direct", value: directCount },
+          { label: "Substitutes", tone: substituteCount > 0 ? "warning" : "neutral", value: substituteCount },
+          { label: "High threat", tone: highThreatCount > 0 ? "danger" : "neutral", value: highThreatCount },
+        ]}
+        title="Competitors"
+      />
+
+      {currentVersion || competitors.length > 0 ? (
+        <DomainPanel>
+          <div className="grid gap-4 rounded-md border border-border bg-surface p-4 lg:grid-cols-2">
             <div>
               <div className="flex items-center gap-2">
                 <Map className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h3 className="text-sm font-semibold">Competitor Landscape Summary</h3>
+                <h3 className="text-sm font-semibold">Landscape read</h3>
               </div>
               {currentVersion ? (
                 <MarkdownContent
@@ -187,21 +183,21 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
               )}
             </div>
             <div>
-              <h3 className="text-sm font-semibold">Strategic Implication</h3>
+              <h3 className="text-sm font-semibold">Decision implication</h3>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
                 {competitorImplication(competitors)}
               </p>
             </div>
           </div>
-        ) : null}
-      </div>
+        </DomainPanel>
+      ) : null}
 
-      <details className="rounded-lg border border-border bg-white p-5">
+      <details className="rounded-lg border border-border bg-card p-5">
         <summary className="cursor-pointer text-sm font-semibold">Add competitor manually</summary>
         <div className="mt-5 border-t border-border pt-5">
           <div className="flex items-center gap-2">
             <Plus className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Add Competitor</h2>
+            <h2 className="text-base font-semibold">Add competitor</h2>
           </div>
           <label className="mt-4 block">
             <span className="text-sm font-medium">Name</span>
@@ -242,19 +238,17 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
             type="button"
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
-            {createMutation.isPending ? "Adding..." : "Add"}
+            {createMutation.isPending ? "Adding competitor..." : "Add competitor"}
           </Button>
         </div>
       </details>
 
       {error ? (
-        <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-          {readableErrorMessage(error)}
-        </div>
+        <DomainError message={readableErrorMessage(error)} />
       ) : null}
 
-      <details className="rounded-lg border border-border bg-white p-5">
-        <summary className="cursor-pointer text-sm font-semibold">View research trace</summary>
+      <details className="rounded-lg border border-border bg-card p-5">
+        <summary className="cursor-pointer text-sm font-semibold">View analysis trace</summary>
         <div className="mt-4 border-t border-border pt-4">
           <WorkflowTrace
             pending={analyzeMutation.isPending}
@@ -273,11 +267,11 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
       </details>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="rounded-lg border border-border bg-white p-5">
+        <DomainPanel>
           <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <Users className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h2 className="text-base font-semibold">Grouped Competitors</h2>
+              <h2 className="text-base font-semibold">Competitor groups</h2>
             </div>
             <span className="text-sm text-muted-foreground">{competitors.length} total</span>
           </div>
@@ -286,10 +280,10 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
             <div className="mt-4 text-sm text-muted-foreground">Loading competitors...</div>
           ) : competitors.length === 0 ? (
             <div className="mt-4 rounded-md border border-dashed border-border p-4">
-              <h3 className="text-sm font-semibold">No competitors analyzed yet.</h3>
+              <h3 className="text-sm font-semibold">No competitors mapped yet.</h3>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Competitor analysis helps identify substitutes, crowded areas, positioning
-                gaps, and potential wedges.
+                Competitor analysis identifies substitutes, crowded areas, positioning gaps,
+                and possible wedges.
               </p>
               <Button
                 className="mt-3"
@@ -300,7 +294,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
                 variant="secondary"
               >
                 <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                {analyzeMutation.isPending ? "Analyzing..." : "Analyze Landscape"}
+                {analyzeMutation.isPending ? "Analyzing competitors..." : "Analyze competitors"}
               </Button>
             </div>
           ) : (
@@ -310,12 +304,12 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
               selectedCompetitorId={selectedCompetitor?.id ?? null}
             />
           )}
-        </div>
+        </DomainPanel>
 
         <aside className="self-start space-y-5 lg:sticky lg:top-4">
           <CompetitorDetailPanel competitor={selectedCompetitor} />
 
-          <details className="rounded-lg border border-border bg-white p-5">
+          <details className="rounded-lg border border-border bg-card p-5">
             <summary className="cursor-pointer list-none">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
@@ -352,7 +346,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
             </div>
           </details>
 
-          <details className="rounded-lg border border-border bg-white p-5">
+          <details className="rounded-lg border border-border bg-card p-5">
             <summary className="cursor-pointer list-none">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
@@ -380,8 +374,8 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
           </details>
 
           {currentVersion ? (
-            <div className="rounded-lg border border-border bg-white p-5">
-              <h3 className="text-sm font-semibold">Full Landscape Details</h3>
+            <DomainPanel>
+              <h3 className="text-sm font-semibold">Full competitor analysis</h3>
               <details className="mt-4 rounded-md bg-muted p-3">
                 <summary className="cursor-pointer text-sm font-medium">Show generated analysis</summary>
                 <MarkdownContent
@@ -389,7 +383,7 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
                   markdown={currentVersion.markdown_content}
                 />
               </details>
-            </div>
+            </DomainPanel>
           ) : null}
         </aside>
       </div>
@@ -490,7 +484,7 @@ function CompetitorProfile({
               }}
               type="button"
             >
-              View detail
+              View details
             </button>
             <span className="text-xs font-medium text-muted-foreground">Expand profile</span>
           </div>
@@ -545,7 +539,7 @@ function CompetitorDetailPanel({ competitor }: { competitor: Competitor | null }
   if (!competitor) {
     return (
       <div
-        className="rounded-lg border border-dashed border-border bg-white p-5"
+        className="rounded-lg border border-dashed border-border bg-card p-5"
         id="competitor-detail-panel"
       >
         <h3 className="text-sm font-semibold">Competitor detail</h3>
@@ -557,10 +551,10 @@ function CompetitorDetailPanel({ competitor }: { competitor: Competitor | null }
   }
 
   return (
-    <div className="rounded-lg border border-border bg-white p-5" id="competitor-detail-panel">
+    <DomainPanel className="lg:sticky lg:top-4" id="competitor-detail-panel">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+          <p className="text-xs font-medium text-muted-foreground">
             Competitor detail
           </p>
           <h3 className="mt-2 text-base font-semibold">{competitorDisplayName(competitor)}</h3>
@@ -597,7 +591,7 @@ function CompetitorDetailPanel({ competitor }: { competitor: Competitor | null }
         <ProfileBlock title="Positioning" value={competitor.positioning} />
         <ProfileBlock title="Why it matters" value={competitor.differentiation_notes} />
       </div>
-    </div>
+    </DomainPanel>
   );
 }
 
@@ -613,7 +607,7 @@ function DetailMetric({ label, value }: { label: string; value: string }) {
 function ProfileBlock({ title, value }: { title: string; value: string | null }) {
   return (
     <div>
-      <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+      <h4 className="text-xs font-medium text-muted-foreground">
         {title}
       </h4>
       <MarkdownContent
@@ -624,23 +618,14 @@ function ProfileBlock({ title, value }: { title: string; value: string | null })
   );
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-md bg-muted px-3 py-2">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold">{value}</div>
-    </div>
-  );
-}
-
 function threatBadgeClass(value: string) {
   if (value === "high") {
-    return "rounded-md bg-red-50 px-2 py-1 text-xs text-red-700";
+    return "rounded-md bg-danger-muted px-2 py-1 text-xs text-danger-foreground";
   }
   if (value === "medium") {
-    return "rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-700";
+    return "rounded-md bg-warning-muted px-2 py-1 text-xs text-warning-foreground";
   }
-  return "rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-700";
+  return "rounded-md bg-success-muted px-2 py-1 text-xs text-success-foreground";
 }
 
 function firstMeaningfulParagraph(markdown: string) {

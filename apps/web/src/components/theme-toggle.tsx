@@ -37,7 +37,7 @@ export function ThemeToggle() {
   return (
     <button
       aria-label={`Switch to ${nextTheme} mode`}
-      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-muted px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className="inline-flex h-11 w-11 items-center justify-center gap-2 rounded-md border border-border bg-card px-0 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus sm:h-10 sm:w-auto sm:px-3"
       onClick={() => {
         applyTheme(nextTheme);
         setTheme(nextTheme);

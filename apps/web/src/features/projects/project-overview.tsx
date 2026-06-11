@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Beaker,
   Building2,
+  ChevronDown,
   CheckCircle2,
   CircleAlert,
   ClipboardCheck,
@@ -20,10 +21,11 @@ import {
   ShieldCheck,
   ShieldAlert,
   Target,
+  type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -68,9 +70,17 @@ import {
   updateResearchPlan,
 } from "@/lib/api";
 import { AssumptionsTab } from "@/features/projects/assumptions-tab";
+import {
+  assumptionBeliefText,
+  clarifyDecisionNarrative,
+  decisionBlockerText,
+  evidenceReadinessText,
+  nextProofText,
+} from "@/features/projects/assumption-copy";
 import { BriefTab } from "@/features/projects/brief-tab";
 import { CompetitorsTab } from "@/features/projects/competitors-tab";
 import { DecisionsTab } from "@/features/projects/decisions-tab";
+import { DomainError, DomainHeader, DomainPanel } from "@/features/projects/decision-room";
 import { EvidenceTab } from "@/features/projects/evidence-tab";
 import { ExperimentsTab } from "@/features/projects/experiments-tab";
 import { MarkdownContent } from "@/features/projects/markdown-content";
@@ -78,20 +88,58 @@ import { StructuredIntakeWizard } from "@/features/projects/structured-intake-wi
 import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 const tabs = [
-  "Overview",
-  "Research",
-  "Evidence",
-  "Competitors",
-  "Assumptions",
+  "Decision",
+  "Intelligence",
   "Validation",
-  "Decisions",
+  "Record",
 ] as const;
 type ProjectTab = (typeof tabs)[number];
+type IntelligenceDetailMode = "evidence" | "competitors" | "review" | "brief";
+type ValidationDetailMode = "tests" | "blockers";
+type RecordDetailMode = "history" | "brief";
+
+type EvidenceReviewQueueItem =
+  | { id: string; kind: "source"; source: DiscoveredSource }
+  | { id: string; kind: "competitor"; candidate: CompetitorCandidate }
+  | { artifact: Artifact; id: string; kind: "memo"; version: ArtifactVersion };
+
+const projectSections: {
+  tab: ProjectTab;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+}[] = [
+  {
+    tab: "Decision",
+    label: "Decision",
+    description: "Verdict and next step",
+    icon: Lightbulb,
+  },
+  {
+    tab: "Intelligence",
+    label: "Intelligence",
+    description: "Sources and market",
+    icon: FileSearch,
+  },
+  {
+    tab: "Validation",
+    label: "Validation",
+    description: "Blockers and tests",
+    icon: Beaker,
+  },
+  {
+    tab: "Record",
+    label: "Record",
+    description: "Decisions and history",
+    icon: ScrollText,
+  },
+];
 
 export function ProjectOverview() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
-  const [activeTab, setActiveTab] = useState<ProjectTab>("Overview");
+  const [activeTab, setActiveTab] = useState<ProjectTab>("Decision");
+  const [activeAnchor, setActiveAnchor] = useState<string | null>(null);
   const overviewQuery = useQuery({
     queryKey: ["projects", projectId, "overview"],
     queryFn: () => getProjectOverview(projectId),
@@ -106,10 +154,13 @@ export function ProjectOverview() {
       return;
     }
     const syncTabFromHash = () => {
-      const tab = tabFromHash(window.location.hash);
+      const hash = window.location.hash;
+      const rawAnchor = hash.replace("#", "") || null;
+      const tab = tabFromHash(hash) ?? tabFromAnchor(rawAnchor);
       if (tab) {
         setActiveTab(tab);
       }
+      setActiveAnchor(tabFromHash(hash) ? null : rawAnchor);
     };
     syncTabFromHash();
     window.addEventListener("hashchange", syncTabFromHash);
@@ -121,6 +172,7 @@ export function ProjectOverview() {
 
   function selectTab(tab: ProjectTab) {
     setActiveTab(tab);
+    setActiveAnchor(null);
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", `#${tab.toLowerCase()}`);
     }
@@ -136,12 +188,24 @@ export function ProjectOverview() {
   function activateAction(action: NextBestAction) {
     const tab = tabForAction(action);
     const anchor = anchorForAction(action);
+    openWorkspace(tab, anchor);
+  }
+
+  function openWorkspace(tab: ProjectTab, anchor: string | null = null) {
     setActiveTab(tab);
+    setActiveAnchor(anchor);
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", `#${anchor ?? tab.toLowerCase()}`);
     }
     if (anchor) {
       window.setTimeout(() => {
+        if (anchor === "structured-intake") {
+          const drawer = document.getElementById(anchor) as HTMLDetailsElement | null;
+          if (drawer?.tagName === "DETAILS") {
+            drawer.open = true;
+            drawer.dispatchEvent(new Event("toggle"));
+          }
+        }
         const target = document.getElementById(anchor);
         if (target) {
           window.scrollTo({
@@ -160,11 +224,11 @@ export function ProjectOverview() {
   }
 
   return (
-    <main className="min-h-screen px-5 py-6 md:px-8">
-      <div className="mx-auto max-w-7xl">
+    <main className="min-h-screen px-4 py-5 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1500px]">
         <div className="flex items-center justify-between gap-3">
           <Link
-            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+            className="-ml-2 inline-flex min-h-11 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
             href="/projects"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
@@ -174,88 +238,329 @@ export function ProjectOverview() {
         </div>
 
         {overviewQuery.isLoading ? (
-          <div className="mt-8 text-sm text-muted-foreground">Loading project...</div>
+          <ProjectOverviewSkeleton />
         ) : overviewQuery.isError ? (
-          <div className="mt-8 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-            {(overviewQuery.error as Error).message}
+          <div className="mt-8">
+            <DomainError
+              action={
+                <Button
+                  className="w-fit border-danger-border text-danger-foreground hover:bg-danger-muted"
+                  onClick={() => void overviewQuery.refetch()}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Retry project
+                </Button>
+              }
+              message={(overviewQuery.error as Error).message}
+            />
           </div>
         ) : overview && project ? (
           <>
-            <header className="mt-6 border-b border-border pb-6">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-                      {formatStage(overview.strategic_snapshot.current_stage)}
-                    </span>
-                    <span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
-                      {formatLabel(project.status)}
-                    </span>
-                  </div>
-                  <h1 className="mt-3 text-2xl font-semibold tracking-normal">{project.name}</h1>
-                  <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-                    {project.short_description ?? "No description recorded yet."}
-                  </p>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Last updated {formatDateTime(project.updated_at)}
-                  </p>
-                  <div className="mt-4 max-w-3xl">
-                    <LifecycleMiniRail currentStage={overview.strategic_snapshot.current_stage} />
-                  </div>
+            <header className="mt-6 border-b border-border pb-5">
+              <div className="min-w-0">
+                <div className="hidden flex-wrap items-center gap-2 sm:flex">
+                  <span className={stageBadgeClass(overview.strategic_snapshot.current_stage)}>
+                    {formatStage(overview.strategic_snapshot.current_stage)}
+                  </span>
+                  <span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+                    {formatLabel(project.status)}
+                  </span>
                 </div>
-                <ProjectHeaderStatus overview={overview} />
+                <h1 className="mt-3 text-2xl font-semibold tracking-normal sm:text-3xl">
+                  {project.name}
+                </h1>
+                <p className="mt-2 hidden max-w-[68ch] text-sm leading-6 text-muted-foreground sm:block">
+                  {project.short_description ?? "No description recorded yet."}
+                </p>
+                <p className="mt-2 hidden text-xs text-muted-foreground sm:block">
+                  Last updated {formatDateTime(project.updated_at)}
+                </p>
               </div>
             </header>
 
-            <ProjectVerdictBar overview={overview} />
+            <ProjectStatusBar overview={overview} />
 
-            <nav
-              className="mt-5 flex gap-2 overflow-x-auto border-b border-border"
-              aria-label="Project sections"
-            >
-              {tabs.map((tab) => (
-                <button
-                  className={
-                    activeTab === tab
-                      ? "cursor-pointer border-b-2 border-primary px-3 py-2 text-sm font-medium text-foreground"
-                      : "cursor-pointer px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
-                  }
-                  key={tab}
-                  onClick={() => selectTab(tab)}
-                  type="button"
-                >
-                  {tab}
-                </button>
-              ))}
-            </nav>
+            <MobileWorkspaceAction
+              activeTab={activeTab}
+              actionPending={nextActionMutation.isPending}
+              onAction={runAction}
+              onOpenWorkspace={openWorkspace}
+              overview={overview}
+            />
 
-            {activeTab === "Overview" ? (
-              <GuidedOverview
-                actionPending={nextActionMutation.isPending}
-                onAction={runAction}
-                onIntakeFinalized={refreshOverviewAfterIntake}
-                overview={overview}
+            <div className="mt-5 grid gap-5 lg:grid-cols-[270px_minmax(0,1fr)]">
+              <ProjectMap
+                activeTab={activeTab}
+                onSelect={selectTab}
               />
-            ) : activeTab === "Research" ? (
-              <ResearchTab overview={overview} />
-            ) : activeTab === "Evidence" ? (
-              <EvidenceTab projectId={project.id} />
-            ) : activeTab === "Competitors" ? (
-              <CompetitorsTab projectId={project.id} />
-            ) : activeTab === "Assumptions" ? (
-              <AssumptionsTab
-                onOpenExperiments={() => selectTab("Validation")}
-                projectId={project.id}
-              />
-            ) : activeTab === "Validation" ? (
-              <ExperimentsTab projectId={project.id} />
-            ) : (
-              <DecisionsTab projectId={project.id} />
-            )}
+
+              <div className="min-w-0">
+                {activeTab === "Decision" ? (
+                  <GuidedOverview
+                    actionPending={nextActionMutation.isPending}
+                    onAction={runAction}
+                    onIntakeFinalized={refreshOverviewAfterIntake}
+                    overview={overview}
+                  />
+                ) : activeTab === "Intelligence" ? (
+                  <IntelligenceWorkspace
+                    activeAnchor={activeAnchor}
+                    overview={overview}
+                    projectId={project.id}
+                  />
+                ) : activeTab === "Validation" ? (
+                  <ValidationWorkspace
+                    activeAnchor={activeAnchor}
+                    onAction={runAction}
+                    overview={overview}
+                    projectId={project.id}
+                  />
+                ) : (
+                  <RecordWorkspace
+                    activeAnchor={activeAnchor}
+                    onOpenValidation={() => openWorkspace("Validation", "validation-tests")}
+                    overview={overview}
+                    projectId={project.id}
+                  />
+                )}
+                <MobileWorkspaceSwitcher
+                  activeTab={activeTab}
+                  onSelect={selectTab}
+                />
+              </div>
+            </div>
           </>
         ) : null}
       </div>
     </main>
+  );
+}
+
+function ProjectOverviewSkeleton() {
+  return (
+    <div
+      aria-label="Loading project"
+      aria-busy="true"
+      className="mt-6 animate-pulse motion-reduce:animate-none"
+    >
+      <div className="border-b border-border pb-5">
+        <div className="h-5 w-44 rounded bg-muted" />
+        <div className="mt-4 h-8 w-full max-w-xl rounded bg-muted" />
+        <div className="mt-3 h-4 w-full max-w-2xl rounded bg-muted" />
+        <div className="mt-2 h-4 w-72 rounded bg-muted" />
+      </div>
+      <div className="mt-5 rounded-lg border border-border bg-card p-4">
+        <div className="h-4 w-36 rounded bg-muted" />
+        <div className="mt-3 h-5 w-full max-w-3xl rounded bg-muted" />
+        <div className="mt-2 hidden h-4 w-full max-w-4xl rounded bg-muted sm:block" />
+      </div>
+      <div className="mt-5 grid gap-5 lg:grid-cols-[270px_minmax(0,1fr)]">
+        <div className="hidden rounded-lg border border-border bg-card p-4 lg:block">
+          <div className="h-4 w-24 rounded bg-muted" />
+          <div className="mt-5 space-y-3">
+            {[0, 1, 2, 3].map((item) => (
+              <div className="h-12 rounded-md bg-muted" key={item} />
+            ))}
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-5">
+          <div className="h-4 w-32 rounded bg-muted" />
+          <div className="mt-4 h-6 w-full max-w-lg rounded bg-muted" />
+          <div className="mt-3 h-4 w-full max-w-2xl rounded bg-muted" />
+          <div className="mt-6 grid gap-3 sm:grid-cols-3">
+            <div className="h-20 rounded-md bg-muted" />
+            <div className="h-20 rounded-md bg-muted" />
+            <div className="h-20 rounded-md bg-muted" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectMap({
+  activeTab,
+  onSelect,
+}: {
+  activeTab: ProjectTab;
+  onSelect: (tab: ProjectTab) => void;
+}) {
+  return (
+    <aside className="hidden min-w-0 max-w-full self-start overflow-hidden rounded-lg border border-border bg-card p-2 lg:sticky lg:top-5 lg:block lg:p-3">
+      <div className="hidden px-2 py-2 lg:block">
+        <h2 className="text-sm font-semibold">Workspaces</h2>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          Start with the verdict. Open details only when you need the evidence trail.
+        </p>
+      </div>
+      <nav
+        className="grid w-full grid-cols-2 gap-1 sm:grid-cols-4 lg:mt-2 lg:grid-cols-1"
+        aria-label="Project workspace"
+      >
+        {projectSections.map((section) => {
+          const Icon = section.icon;
+          const selected = activeTab === section.tab;
+          return (
+            <button
+              aria-label={`Open ${section.label} workspace: ${section.description}`}
+              aria-current={selected ? "page" : undefined}
+              className={[
+                "flex min-h-12 cursor-pointer flex-col items-center justify-center gap-1 rounded-md px-1.5 py-2 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:min-h-0 lg:w-full lg:flex-row lg:items-start lg:justify-start lg:gap-3 lg:px-2 lg:py-2.5 lg:text-left",
+                selected ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              ].join(" ")}
+              key={section.tab}
+              onClick={() => onSelect(section.tab)}
+              type="button"
+            >
+              <Icon
+                className={selected ? "h-4 w-4 shrink-0 text-primary lg:mt-0.5" : "h-4 w-4 shrink-0 lg:mt-0.5"}
+                aria-hidden="true"
+              />
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-medium lg:text-sm">{section.label}</span>
+                <span
+                  aria-hidden="true"
+                  className="mt-0.5 hidden text-xs leading-5 text-muted-foreground lg:block"
+                >
+                  {section.description}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </nav>
+    </aside>
+  );
+}
+
+function MobileWorkspaceSwitcher({
+  activeTab,
+  onSelect,
+}: {
+  activeTab: ProjectTab;
+  onSelect: (tab: ProjectTab) => void;
+}) {
+  return (
+    <details className="mt-5 rounded-lg border border-border bg-card p-2 lg:hidden">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md px-2 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+        <span>Switch workspace</span>
+        <span className="inline-flex items-center gap-2 text-muted-foreground">
+          <span>{activeTab}</span>
+          <ChevronDown className="h-4 w-4" aria-hidden="true" />
+        </span>
+      </summary>
+      <nav
+        aria-label="Project workspace"
+        className="mt-2 grid grid-cols-2 gap-1 border-t border-border pt-2"
+      >
+        {projectSections.map((section) => {
+          const Icon = section.icon;
+          const selected = activeTab === section.tab;
+          return (
+            <button
+              aria-current={selected ? "page" : undefined}
+              aria-label={`Open ${section.label} workspace: ${section.description}`}
+              className={[
+                "flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-md px-2 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+                selected ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              ].join(" ")}
+              key={section.tab}
+              onClick={() => onSelect(section.tab)}
+              type="button"
+            >
+              <Icon
+                className={selected ? "h-4 w-4 shrink-0 text-primary" : "h-4 w-4 shrink-0"}
+                aria-hidden="true"
+              />
+              <span className="truncate">{section.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+    </details>
+  );
+}
+
+function MobileWorkspaceAction({
+  activeTab,
+  actionPending,
+  onAction,
+  onOpenWorkspace,
+  overview,
+}: {
+  activeTab: ProjectTab;
+  actionPending: boolean;
+  onAction: (action: NextBestAction) => void;
+  onOpenWorkspace: (tab: ProjectTab, anchor?: string | null) => void;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const nextActionLabel = clarifyActionLabel(overview.next_best_action.label);
+  const decisionReady = decisionGradeEvidence(overview).value === "Ready to decide";
+  const config =
+    activeTab === "Decision"
+      ? {
+          action: () => onAction(overview.next_best_action),
+          button: nextActionLabel,
+          description: "Use the next validation move before reading the full decision context.",
+          icon: Target,
+          title: "Next move",
+        }
+      : activeTab === "Intelligence"
+        ? {
+            action: () => onOpenWorkspace("Intelligence", "research-sprint"),
+            button: "Plan evidence review",
+            description: "Open the evidence workbench only when the current basis needs review.",
+            icon: FileSearch,
+            title: "Evidence review",
+          }
+        : activeTab === "Validation"
+          ? {
+              action: () => onOpenWorkspace("Validation", "validation-tests"),
+              button: "Open test bench",
+              description: "Run or log the one validation loop that can change the verdict.",
+              icon: Beaker,
+              title: "Test bench",
+            }
+          : decisionReady
+            ? {
+                action: () => onOpenWorkspace("Record", "record-decision-panel"),
+                button: "Prepare record",
+                description: "Validation is ready enough to draft the durable decision record.",
+                icon: ScrollText,
+                title: "Decision record",
+              }
+            : {
+                action: () => onOpenWorkspace("Validation", "validation-tests"),
+                button: "Log validation result",
+                description: "Record is guarded until validation evidence exists. Complete the proof first.",
+                icon: Beaker,
+                title: "Guardrail",
+              };
+  const Icon = config.icon;
+
+  return (
+    <section className="mt-3 rounded-lg border border-border bg-card p-3 lg:hidden">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 rounded-md bg-primary/10 p-2 text-primary">
+          <Icon className="h-4 w-4" aria-hidden="true" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-semibold">{config.title}</h2>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{config.description}</p>
+          <Button
+            className="mt-3 min-h-11 w-full"
+            disabled={actionPending}
+            onClick={config.action}
+            type="button"
+          >
+            <Icon className="h-4 w-4" aria-hidden="true" />
+            {actionPending ? "Opening..." : config.button}
+          </Button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -272,114 +577,192 @@ function GuidedOverview({
 }) {
   const { current_recommendation, next_best_action } = overview;
   const snapshot = overview.strategic_snapshot;
-  const showIntake =
+  const [recordOpen, setRecordOpen] = useState(false);
+  const showInitialIntake =
     snapshot.current_stage === "draft_idea" ||
     snapshot.current_stage === "structured_intake" ||
-    !snapshot.current_thesis ||
-    !snapshot.target_user ||
-    !snapshot.primary_problem;
+    (!snapshot.current_thesis &&
+      !snapshot.target_user &&
+      !snapshot.primary_problem &&
+      overview.evidence_health.source_count === 0 &&
+      overview.key_assumptions.length === 0);
+  const contextGaps = decisionContextGaps(overview);
+  const missingContextCount = contextGaps.filter((item) => item.status !== "complete").length;
 
   return (
-    <section className="mt-6 space-y-6">
-      <OverviewStatusPanel
-        actionPending={actionPending}
-        currentRecommendation={current_recommendation}
-        nextBestAction={next_best_action}
-        onAction={onAction}
-        overview={overview}
-      />
-
-      {showIntake ? (
-        <StructuredIntakeWizard
-          onFinalized={onIntakeFinalized}
-          project={overview.project}
+    <section className="space-y-4 lg:space-y-6">
+      <div id="next-best-action">
+        <MobileDecisionSpine
+          currentRecommendation={current_recommendation}
+          missingContextCount={missingContextCount}
+          overview={overview}
         />
-      ) : (
-        <details className="rounded-lg border border-border bg-white p-5">
-          <summary className="cursor-pointer list-none">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h2 className="text-base font-semibold">Idea Details</h2>
-              </div>
-              <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-                Collapsed
-              </span>
-            </div>
-          </summary>
-          <div className="mt-4 border-t border-border pt-4">
-            <StructuredIntakeWizard
-              onFinalized={onIntakeFinalized}
-              project={overview.project}
-            />
-          </div>
-        </details>
-      )}
+        <div className="hidden lg:block">
+          <OverviewStatusPanel
+            actionPending={actionPending}
+            currentRecommendation={current_recommendation}
+            nextBestAction={next_best_action}
+            onAction={onAction}
+          />
+        </div>
+      </div>
 
-      <RiskiestAssumptionCard overview={overview} onAction={onAction} />
+      <div className="hidden lg:block">
+        <RiskiestAssumptionCard overview={overview} onAction={onAction} />
+      </div>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="hidden gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_360px]">
         <StageAwareSummary overview={overview} />
         <EvidenceHealthCard health={overview.evidence_health} />
       </div>
 
-      <LifecycleProgressCard overview={overview} />
+      <DecisionContextDrawer
+        contextGaps={contextGaps}
+        missingContextCount={missingContextCount}
+        onIntakeFinalized={onIntakeFinalized}
+        overview={overview}
+        showInitialIntake={showInitialIntake}
+      />
 
-      <TopRisksCard risks={overview.key_risks} />
-
-      <RecentUpdatesCard updates={overview.recent_strategic_updates} />
+      <details
+        className="hidden rounded-lg border border-border bg-card p-5 lg:block"
+        onToggle={(event) => setRecordOpen(event.currentTarget.open)}
+      >
+        <summary className="cursor-pointer list-none">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+                <h2 className="text-base font-semibold">Project history</h2>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Lifecycle status, active risks, and recent decision updates.
+              </p>
+            </div>
+            <DisclosureLabel closedLabel="Show history" open={recordOpen} openLabel="Hide history" />
+          </div>
+        </summary>
+        <div className="mt-5 grid gap-5 border-t border-border pt-5">
+          <LifecycleProgressCard overview={overview} />
+          <TopRisksCard risks={overview.key_risks} />
+          <RecentUpdatesCard updates={overview.recent_strategic_updates} />
+        </div>
+      </details>
     </section>
   );
 }
 
-function ProjectVerdictBar({
+function MobileDecisionSpine({
+  currentRecommendation,
+  missingContextCount,
   overview,
 }: {
+  currentRecommendation: StrategicRecommendation;
+  missingContextCount: number;
   overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
-  const risk = highestRiskLabel(overview);
+  const blocker = riskiestAssumption(overview);
+  const recovery = recoveryGuidance(overview, missingContextCount);
+
   return (
-    <section className="sticky top-0 z-20 mt-4 rounded-lg border border-border bg-card/95 px-4 py-3 text-card-foreground shadow-sm backdrop-blur">
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(13rem,0.34fr)_9rem_10rem_10rem] lg:items-center">
-        <div className="min-w-0">
-          <div className="text-[0.68rem] font-medium uppercase tracking-normal text-muted-foreground">
-            Verdict
-          </div>
-          <div
-            className="mt-1 truncate text-sm font-semibold text-foreground"
-            title={overview.current_recommendation.recommendation}
-          >
-            {overview.current_recommendation.recommendation}
-          </div>
+    <section
+      aria-labelledby="mobile-decision-spine-title"
+      className="rounded-lg border border-border bg-card lg:hidden"
+    >
+      <div className="border-b border-border px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 id="mobile-decision-spine-title" className="text-sm font-semibold">
+            Decision context
+          </h2>
         </div>
-        <div className="min-w-0">
-          <div className="text-[0.68rem] font-medium uppercase tracking-normal text-muted-foreground">
-            Next
-          </div>
-          <div
-            className="mt-1 truncate text-sm font-medium"
-            title={overview.next_best_action.label}
-          >
-            {overview.next_best_action.label}
-          </div>
-        </div>
-        <VerdictBarMetric label="Strategic risk" value={risk} tone={riskTone(risk)} />
-        <VerdictBarMetric
-          label="Idea confidence"
-          value={formatConfidenceValue(overview.current_recommendation.confidence)}
-          tone={overview.current_recommendation.confidence === "high" ? "good" : "warning"}
+      </div>
+
+      <div className="divide-y divide-border">
+        <MobileDecisionSpineRow
+          body={
+            blocker
+              ? decisionBlockerText(blocker)
+              : "No decision blocker has been ranked yet. Structure context or extract assumptions before treating the verdict as durable."
+          }
+          icon={<ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />}
+          label="Blocker"
+          meta={
+            blocker ? (
+              <div className="flex flex-wrap gap-2">
+                <AssumptionCompactSignal
+                  label="Risk"
+                  tone={
+                    blocker.kill_risk ||
+                    blocker.importance === "critical" ||
+                    blocker.importance === "high"
+                      ? "warning"
+                      : "neutral"
+                  }
+                  value={blocker.kill_risk ? "High" : formatLabel(blocker.importance)}
+                />
+                <AssumptionCompactSignal
+                  label="Evidence"
+                  tone={blocker.evidence_links.length > 0 ? "neutral" : "warning"}
+                  value={evidenceReadinessText(blocker)}
+                />
+              </div>
+            ) : null
+          }
+          title={blocker ? assumptionBeliefText(blocker.text) : "Blocker missing"}
         />
-        <VerdictBarMetric
-          label="Stage"
-          value={formatStage(overview.strategic_snapshot.current_stage)}
-          tone="neutral"
+
+        <MobileDecisionSpineRow
+          body={clarifyDecisionNarrative(currentRecommendation.rationale)}
+          icon={<Lightbulb className="h-4 w-4 text-primary" aria-hidden="true" />}
+          label="Rationale"
+          title="Why the decision waits"
+        />
+
+        <MobileDecisionSpineRow
+          body={recovery.detail}
+          icon={<ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />}
+          label="Recovery"
+          meta={<span className={tonePillClass(recovery.tone)}>{recovery.label}</span>}
+          title={recovery.title}
         />
       </div>
     </section>
   );
 }
 
-function VerdictBarMetric({
+function MobileDecisionSpineRow({
+  action,
+  body,
+  icon,
+  label,
+  meta,
+  title,
+}: {
+  action?: ReactNode;
+  body: string;
+  icon: ReactNode;
+  label: string;
+  meta?: ReactNode;
+  title: string;
+}) {
+  return (
+    <section className="px-4 py-4">
+      <div className="flex items-center gap-2">
+        {icon}
+        <h3 className="text-xs font-medium text-muted-foreground">{label}</h3>
+      </div>
+      <MarkdownContent
+        className="mt-2 line-clamp-3 space-y-2 text-base font-semibold leading-6 text-foreground"
+        markdown={title}
+      />
+      <MarkdownContent
+        className="mt-2 line-clamp-4 space-y-2 text-sm leading-6 text-muted-foreground"
+        markdown={body}
+      />
+      {meta ? <div className="mt-3">{meta}</div> : null}
+      {action ? <div className="mt-4 space-y-2">{action}</div> : null}
+    </section>
+  );
+}
+
+function AssumptionCompactSignal({
   label,
   tone,
   value,
@@ -389,53 +772,310 @@ function VerdictBarMetric({
   value: string;
 }) {
   return (
-    <div>
-      <div className="text-[0.68rem] font-medium uppercase tracking-normal text-muted-foreground">
-        {label}
-      </div>
-      <span className={`${tonePillClass(tone)} mt-1 max-w-full truncate`}>{value}</span>
-    </div>
+    <span className={tonePillClass(tone)}>
+      {label}: {value}
+    </span>
   );
 }
 
-function ProjectHeaderStatus({
+function DecisionContextDrawer({
+  contextGaps,
+  missingContextCount,
+  onIntakeFinalized,
+  overview,
+  showInitialIntake,
+}: {
+  contextGaps: DecisionContextItem[];
+  missingContextCount: number;
+  onIntakeFinalized: () => Promise<string | null>;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+  showInitialIntake: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const closedLabel = showInitialIntake
+    ? "Structure context"
+    : missingContextCount > 0
+      ? "Add context"
+      : "Open context";
+
+  return (
+    <details
+      className="rounded-lg border border-border bg-card p-4 lg:p-5"
+      id="structured-intake"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="cursor-pointer list-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />
+              <h2 className="text-base font-semibold">Decision context</h2>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              {missingContextCount > 0
+                ? `${missingContextCount} context item${missingContextCount === 1 ? "" : "s"} still need detail.`
+                : "Thesis, project context, history, and progress stay behind this secondary drawer on mobile."}
+            </p>
+          </div>
+          <DisclosureLabel
+            closedLabel={closedLabel}
+            open={open}
+            openLabel="Hide context"
+          />
+        </div>
+      </summary>
+      <div className="mt-5 border-t border-border pt-5">
+        <ContextGapList items={contextGaps} />
+        <MobileDecisionSupport overview={overview} />
+        <StructuredIntakeWizard
+          onFinalized={onIntakeFinalized}
+          project={overview.project}
+          sectionId="structured-intake-form"
+        />
+      </div>
+    </details>
+  );
+}
+
+function MobileDecisionSupport({
   overview,
 }: {
   overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
-  const health = projectHealth(overview);
+  const focus = stageFocusCopy(overview.strategic_snapshot.current_stage);
+  const rows = lifecycleRows(overview);
+  const health = overview.evidence_health;
+
   return (
-    <div className="rounded-lg border border-border bg-white p-3 sm:w-80">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-          Project status
-        </span>
-        <HealthBadge health={health} />
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
-        <HeaderStatusMetric label="Stage" value={formatStage(overview.strategic_snapshot.current_stage)} />
-        <HeaderStatusMetric label="Workflow progress" value={`${overview.idea_readiness.score}%`} />
-        <HeaderStatusMetric
-          label="Idea confidence"
-          value={formatConfidenceValue(overview.current_recommendation.confidence)}
-        />
-        <HeaderStatusMetric label="Strategic risk" value={highestRiskLabel(overview)} />
-        <HeaderStatusMetric label="Evidence" value={`${overview.evidence_health.source_count} sources`} />
-      </div>
+    <div className="mt-5 space-y-5 lg:hidden">
+      <MobileSupportSection
+        icon={<Lightbulb className="h-4 w-4 text-primary" aria-hidden="true" />}
+        title={focus.title}
+      >
+        <p className="text-sm leading-6 text-muted-foreground">{focus.summary}</p>
+        <div className="mt-4 grid gap-4">
+          <SnapshotField label="Current thesis" value={overview.strategic_snapshot.current_thesis} />
+          <SnapshotField label="Target user" value={overview.strategic_snapshot.target_user} />
+          <SnapshotField label="Primary problem" value={overview.strategic_snapshot.primary_problem} />
+          <SnapshotField label="Possible wedge" value={overview.strategic_snapshot.proposed_wedge} />
+          <SnapshotField label="Main risk" value={overview.strategic_snapshot.main_risk} />
+        </div>
+      </MobileSupportSection>
+
+      <MobileSupportSection
+        icon={<Route className="h-4 w-4 text-primary" aria-hidden="true" />}
+        title="Progress"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+            {overview.idea_readiness.score}% workflow complete
+          </span>
+          <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+            {formatStage(overview.strategic_snapshot.current_stage)}
+          </span>
+        </div>
+        <div className="mt-3 space-y-2">
+          {rows.map((row) => (
+            <div className="border-t border-border py-2 first:border-t-0 first:pt-0" key={row.key}>
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-sm font-semibold">{row.label}</h4>
+                <LifecycleStatusBadge status={row.status} />
+              </div>
+              <p className="mt-1 text-sm leading-5 text-muted-foreground">{row.signal}</p>
+            </div>
+          ))}
+        </div>
+      </MobileSupportSection>
+
+      <MobileSupportSection
+        icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
+        title="Evidence basis"
+      >
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
+          <MobileMetric label="Sources" value={health.source_count} />
+          <MobileMetric label="Competitors" value={health.competitor_count} />
+          <MobileMetric label="Supported findings" value={health.cited_claim_count} />
+          <MobileMetric label="Open questions" value={health.unsupported_claim_count} />
+        </dl>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          Weakest evidence area: {health.weakest_evidence_area}
+        </p>
+      </MobileSupportSection>
+
+      <MobileSupportSection
+        icon={<ScrollText className="h-4 w-4 text-primary" aria-hidden="true" />}
+        title="History"
+      >
+        <MobileHistoryPreview overview={overview} />
+      </MobileSupportSection>
     </div>
   );
 }
 
-function HeaderStatusMetric({ label, value }: { label: string; value: string }) {
+function MobileSupportSection({
+  children,
+  icon,
+  title,
+}: {
+  children: ReactNode;
+  icon: ReactNode;
+  title: string;
+}) {
   return (
-    <div className="min-w-0">
-      <div className="text-[0.68rem] uppercase tracking-normal text-muted-foreground">
-        {label}
+    <section className="border-t border-border pt-5">
+      <div className="flex items-center gap-2">
+        {icon}
+        <h3 className="text-sm font-semibold">{title}</h3>
       </div>
-      <div className="mt-0.5 truncate text-xs font-medium text-foreground" title={value}>
-        {value}
-      </div>
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+function MobileMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 text-lg font-semibold">{value}</dd>
     </div>
+  );
+}
+
+function MobileHistoryPreview({
+  overview,
+}: {
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const topRisk = overview.key_risks[0] ?? null;
+  const updates = overview.recent_strategic_updates.slice(0, 3);
+
+  return (
+    <div className="space-y-4">
+      {topRisk ? (
+        <div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+              {topRisk.severity} risk
+            </span>
+            <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
+              {topRisk.likelihood} likelihood
+            </span>
+          </div>
+          <MarkdownContent
+            className="mt-2 line-clamp-3 space-y-2 text-sm leading-6 text-foreground"
+            markdown={topRisk.text}
+          />
+        </div>
+      ) : (
+        <p className="text-sm leading-6 text-muted-foreground">
+          No risks recorded yet. Run evidence review or extract assumptions to build the history trail.
+        </p>
+      )}
+
+      {updates.length > 0 ? (
+        <div className="divide-y divide-border">
+          {updates.map((update) => (
+            <div className="py-3 first:pt-0" key={update.id}>
+              <h4 className="text-sm font-semibold">{clarifyWorkspaceTerm(update.title)}</h4>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                {truncate(clarifyWorkspaceTerm(update.summary), 180)}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type DecisionContextItem = {
+  detail: string;
+  label: string;
+  status: "complete" | "missing";
+};
+
+function decisionContextGaps(
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>,
+): DecisionContextItem[] {
+  const snapshot = overview.strategic_snapshot;
+  return [
+    {
+      detail: snapshot.target_user ?? "Define who must feel the problem.",
+      label: "Target user",
+      status: snapshot.target_user ? "complete" : "missing",
+    },
+    {
+      detail: snapshot.primary_problem ?? "Name the problem this project is testing.",
+      label: "Primary problem",
+      status: snapshot.primary_problem ? "complete" : "missing",
+    },
+    {
+      detail: snapshot.current_thesis ?? "Capture the current working thesis.",
+      label: "Current thesis",
+      status: snapshot.current_thesis ? "complete" : "missing",
+    },
+    {
+      detail: snapshot.proposed_wedge ?? "Describe why this could win against alternatives.",
+      label: "Possible wedge",
+      status: snapshot.proposed_wedge ? "complete" : "missing",
+    },
+  ];
+}
+
+function ContextGapList({ items }: { items: DecisionContextItem[] }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      {items.map((item) => (
+        <div
+          className={
+            item.status === "complete"
+              ? "rounded-md bg-surface px-3 py-2"
+              : "rounded-md border border-warning-border bg-warning-muted px-3 py-2"
+          }
+          key={item.label}
+        >
+          <div className="flex items-center gap-2">
+            {item.status === "complete" ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-success-foreground" aria-hidden="true" />
+            ) : (
+              <CircleAlert className="h-4 w-4 shrink-0 text-warning-foreground" aria-hidden="true" />
+            )}
+            <h3 className="text-xs font-medium text-muted-foreground">{item.label}</h3>
+          </div>
+          <p className="mt-2 line-clamp-3 text-sm leading-6 text-foreground">{item.detail}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProjectStatusBar({
+  overview,
+}: {
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const status = canonicalProjectStatus(overview);
+  return (
+    <section
+      aria-label="Project status"
+      className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-card-foreground sm:mt-5 sm:px-5 sm:py-3"
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-xs font-medium text-muted-foreground">Status</div>
+          <span className={tonePillClass(status.tone)}>{status.label}</span>
+        </div>
+        <p className="mt-0.5 max-w-[84ch] text-sm font-semibold leading-5 text-foreground sm:hidden">
+          {status.mobileSentence}
+        </p>
+        <p className="mt-1 hidden max-w-[84ch] text-sm font-semibold leading-6 text-foreground sm:block">
+          {status.sentence}
+        </p>
+        <p className="mt-1 hidden max-w-[84ch] text-xs leading-5 text-muted-foreground sm:block">
+          {status.detail}
+        </p>
+      </div>
+    </section>
   );
 }
 
@@ -444,77 +1084,49 @@ function OverviewStatusPanel({
   currentRecommendation,
   nextBestAction,
   onAction,
-  overview,
 }: {
   actionPending: boolean;
   currentRecommendation: StrategicRecommendation;
   nextBestAction: NextBestAction;
   onAction: (action: NextBestAction) => void;
-  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
-  const health = projectHealth(overview);
-  const metrics = [
-    ["Stage", formatStage(overview.strategic_snapshot.current_stage)],
-    ["Idea confidence", formatConfidenceValue(currentRecommendation.confidence)],
-    ["Strategic risk", highestRiskLabel(overview)],
-    ["Evidence", `${overview.evidence_health.source_count} sources`],
-    ["Workflow progress", `${overview.idea_readiness.score}%`],
-  ] as const;
+  const nextActionLabel = clarifyActionLabel(nextBestAction.label);
 
   return (
-    <div className="rounded-lg border border-border bg-white">
+    <div className="rounded-lg border border-border bg-card">
       <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <Lightbulb className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h2 className="text-base font-semibold">Strategic Verdict</h2>
+              <h2 className="text-base font-semibold">Decision basis</h2>
             </div>
-            <HealthBadge health={health} />
-          </div>
-          <h3 className="mt-4 text-xl font-semibold tracking-normal">
-            {currentRecommendation.recommendation}
-          </h3>
-          <p className="mt-4 text-xs font-medium uppercase tracking-normal text-muted-foreground">
-            Why
-          </p>
-          <MarkdownContent
-            className="mt-2 max-w-3xl space-y-2 text-sm leading-6 text-muted-foreground"
-            markdown={currentRecommendation.rationale}
-          />
-          <div className="mt-5 overflow-hidden rounded-md border border-border">
-            <div className="grid divide-y divide-border text-sm sm:grid-cols-5 sm:divide-x sm:divide-y-0">
-              {metrics.map(([label, value]) => (
-                <div className="px-3 py-2" key={label}>
-                  <div className="text-xs text-muted-foreground">{label}</div>
-                  <div className="mt-1 break-words font-medium leading-5 text-foreground">
-                    {value}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <p className="mt-3 text-xs leading-5 text-muted-foreground">
-            {health.detail}
-          </p>
-        </div>
-
-        <aside
-          className="border-t border-border p-5 lg:border-l lg:border-t-0"
-          id="next-best-action"
-        >
-          <div className="flex items-center gap-2">
-            <Route className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-sm font-semibold">Next Best Action</h2>
           </div>
           <h3 className="mt-4 text-lg font-semibold tracking-normal">
-            {nextBestAction.label}
+            {currentRecommendation.recommendation}
+          </h3>
+          <p className="mt-4 text-xs font-medium text-muted-foreground">
+            Rationale
+          </p>
+          <MarkdownContent
+            className="mt-2 max-w-[72ch] space-y-2 text-sm leading-6 text-muted-foreground"
+            markdown={clarifyDecisionNarrative(currentRecommendation.rationale)}
+          />
+        </div>
+
+        <aside className="border-t border-border p-5 lg:border-l lg:border-t-0">
+          <div className="flex items-center gap-2">
+            <Route className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h2 className="text-sm font-semibold">Next step</h2>
+          </div>
+          <h3 className="mt-4 text-lg font-semibold tracking-normal">
+            {nextActionLabel}
           </h3>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            {nextBestAction.description}
+            {clarifyActionText(nextBestAction.description)}
           </p>
-          <p className="mt-3 border-l-2 border-primary/50 pl-3 text-sm leading-6 text-muted-foreground">
-            {nextBestAction.why_it_matters}
+          <p className="mt-3 rounded-md bg-primary/10 px-3 py-2 text-sm leading-6 text-muted-foreground">
+            {clarifyActionText(nextBestAction.why_it_matters)}
           </p>
           <Button
             className="mt-4 w-full"
@@ -523,23 +1135,8 @@ function OverviewStatusPanel({
             type="button"
           >
             <Target className="h-4 w-4" aria-hidden="true" />
-            {actionPending ? "Opening..." : nextBestAction.label}
+            {actionPending ? "Opening step..." : nextActionLabel}
           </Button>
-          {overview.secondary_actions.length > 0 ? (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {overview.secondary_actions.map((action) => (
-                <Button
-                  key={action.action_type}
-                  onClick={() => onAction(action)}
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  {action.label}
-                </Button>
-              ))}
-            </div>
-          ) : null}
         </aside>
       </div>
     </div>
@@ -559,20 +1156,26 @@ function RiskiestAssumptionCard({
   }
 
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <DomainPanel>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="max-w-3xl">
+        <div className="max-w-[72ch]">
           <div className="flex items-center gap-2">
             <ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Riskiest Assumption</h2>
+            <h2 className="text-base font-semibold">Decision Blocker</h2>
           </div>
+          <p className="mt-3 text-xs font-medium text-muted-foreground">
+            Belief to validate
+          </p>
           <MarkdownContent
             className="mt-3 space-y-2 text-lg font-semibold leading-7 text-foreground"
-            markdown={assumption.text}
+            markdown={assumptionBeliefText(assumption.text)}
           />
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            {decisionBlockerText(assumption)}
+          </p>
           {assumption.recommended_test ? (
             <p className="mt-3 text-sm leading-6 text-muted-foreground">
-              Recommended test: {assumption.recommended_test}
+              {nextProofText(assumption)}
             </p>
           ) : null}
         </div>
@@ -599,7 +1202,7 @@ function RiskiestAssumptionCard({
           />
           <AssumptionSignal
             label="Evidence"
-            value={assumption.evidence_links.length > 0 ? "Partial evidence" : "Needs evidence"}
+            value={evidenceReadinessText(assumption)}
             tone={assumption.evidence_links.length > 0 ? "neutral" : "warning"}
           />
         </div>
@@ -611,10 +1214,10 @@ function RiskiestAssumptionCard({
           variant="secondary"
         >
           <Target className="h-4 w-4" aria-hidden="true" />
-          {overview.next_best_action.label}
+          {clarifyActionLabel(overview.next_best_action.label)}
         </Button>
       </div>
-    </div>
+    </DomainPanel>
   );
 }
 
@@ -628,58 +1231,426 @@ function AssumptionSignal({
   value: string;
 }) {
   return (
-    <div className="rounded-md bg-muted px-3 py-2">
+    <div className="border-t border-border py-2 first:border-t-0 lg:first:border-t">
       <div className="text-xs text-muted-foreground">{label}</div>
       <span className={`${tonePillClass(tone)} mt-1`}>{value}</span>
     </div>
   );
 }
 
-function ResearchTab({
+function IntelligenceWorkspace({
+  activeAnchor,
   overview,
+  projectId,
 }: {
+  activeAnchor: string | null;
   overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+  projectId: string;
 }) {
+  const [detailMode, setDetailMode] = useState<IntelligenceDetailMode | null>(null);
+
+  useEffect(() => {
+    if (!activeAnchor) {
+      return;
+    }
+    if (["research", "research-sprint", "research-operations"].includes(activeAnchor)) {
+      setDetailMode("review");
+    } else if (activeAnchor.includes("competitor")) {
+      setDetailMode("competitors");
+    } else if (activeAnchor.includes("brief")) {
+      setDetailMode("brief");
+    } else if (activeAnchor.includes("evidence") || activeAnchor.includes("source")) {
+      setDetailMode("evidence");
+    }
+  }, [activeAnchor]);
+
   return (
-    <section className="mt-6 space-y-6">
-      <PageIntro
-        actionLabel="Run Research"
-        description="Use the research agent to plan the investigation, discover sources and competitors, synthesize a research memo, and decide what to validate next."
-        eyebrow="Research"
-        title="What did the system investigate, and what did it conclude?"
+    <section className="space-y-6">
+      <DomainHeader
+        action={
+          <Button onClick={() => setDetailMode("review")} type="button">
+            <FileSearch className="h-4 w-4" aria-hidden="true" />
+            Plan evidence review
+          </Button>
+        }
+        description="Inspect the sources, competitors, and findings only when the current evidence basis needs review."
+        icon={<FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />}
+        question="Review the evidence basis"
+        title="Intelligence"
       />
 
       <ResearchResultCard overview={overview} />
 
       <ResearchSprintSummary projectId={overview.project.id} />
 
-      <details className="rounded-lg border border-border bg-white p-5">
-        <summary className="cursor-pointer list-none">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="text-sm font-semibold">Inspect research run or start new research</h3>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Review source discovery, competitor discovery, memo approval, trust checks,
-                and research trace details.
-              </p>
-            </div>
-            <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-              Details collapsed
-            </span>
-          </div>
-        </summary>
-        <div className="mt-5 border-t border-border pt-5">
-          <ResearchSprintCard projectId={overview.project.id} />
-        </div>
-      </details>
+      <WorkbenchAccessPanel<IntelligenceDetailMode>
+        activeMode={detailMode}
+        description="Open one advanced evidence surface at a time. The verdict stays readable until you need the deeper table or control surface."
+        options={[
+          {
+            description: "Source coverage, citations, and open questions.",
+            icon: Database,
+            label: "Evidence basis",
+            mode: "evidence",
+          },
+          {
+            description: "Direct competitors, substitutes, and incumbents.",
+            icon: Building2,
+            label: "Competitor map",
+            mode: "competitors",
+          },
+          {
+            description: "Plan, discover, approve, and memo evidence.",
+            icon: FileSearch,
+            label: "Evidence review",
+            mode: "review",
+          },
+          {
+            description: "Longer generated thesis record.",
+            icon: FileText,
+            label: "Opportunity brief",
+            mode: "brief",
+          },
+        ]}
+        title="Advanced evidence work"
+        onSelect={setDetailMode}
+      />
 
-      <details className="rounded-lg border border-border bg-white p-5">
-        <summary className="cursor-pointer text-sm font-semibold">Show opportunity brief</summary>
-        <div className="mt-5 border-t border-border pt-5">
-          <BriefTab projectId={overview.project.id} />
-        </div>
-      </details>
+      {detailMode ? (
+        <ActiveWorkbenchPanel
+          description={intelligenceDetailDescription(detailMode)}
+          id={detailMode === "review" ? "research-sprint" : undefined}
+          onClose={() => setDetailMode(null)}
+          title={intelligenceDetailTitle(detailMode)}
+        >
+          {detailMode === "evidence" ? (
+            <EvidenceTab projectId={projectId} />
+          ) : detailMode === "competitors" ? (
+            <CompetitorsTab projectId={projectId} />
+          ) : detailMode === "review" ? (
+            <ResearchSprintCard projectId={projectId} />
+          ) : (
+            <BriefTab projectId={projectId} />
+          )}
+        </ActiveWorkbenchPanel>
+      ) : null}
     </section>
+  );
+}
+
+function ValidationWorkspace({
+  activeAnchor,
+  onAction,
+  overview,
+  projectId,
+}: {
+  activeAnchor: string | null;
+  onAction: (action: NextBestAction) => void;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+  projectId: string;
+}) {
+  const [detailMode, setDetailMode] = useState<ValidationDetailMode | null>(null);
+
+  useEffect(() => {
+    if (!activeAnchor) {
+      return;
+    }
+    if (
+      activeAnchor.includes("experiment") ||
+      activeAnchor.includes("validation") ||
+      activeAnchor.includes("result")
+    ) {
+      setDetailMode("tests");
+    } else if (activeAnchor.includes("assumption") || activeAnchor.includes("blocker")) {
+      setDetailMode("blockers");
+    }
+  }, [activeAnchor]);
+
+  return (
+    <section className="space-y-6">
+      <DomainHeader
+        action={
+          <Button onClick={() => setDetailMode("tests")} type="button">
+            <Beaker className="h-4 w-4" aria-hidden="true" />
+            Open test bench
+          </Button>
+        }
+        description="Run or log the one blocker test that can change the project decision."
+        icon={<Beaker className="h-4 w-4 text-primary" aria-hidden="true" />}
+        question="Run the blocker test"
+        title="Validation"
+      />
+
+      <RiskiestAssumptionCard overview={overview} onAction={onAction} />
+
+      <WorkbenchAccessPanel<ValidationDetailMode>
+        activeMode={detailMode}
+        description="Keep validation focused on the current blocker. Open one supporting surface only when you are ready to plan, log, or re-rank."
+        options={[
+          {
+            description: "Plan the active test and log real-world results.",
+            icon: Beaker,
+            label: "Test bench",
+            mode: "tests",
+          },
+          {
+            description: "Review and re-rank the beliefs behind the verdict.",
+            icon: ShieldAlert,
+            label: "Decision blockers",
+            mode: "blockers",
+          },
+        ]}
+        title="Validation workbench"
+        onSelect={setDetailMode}
+      />
+
+      {detailMode ? (
+        <ActiveWorkbenchPanel
+          description={detailMode === "tests" ? "Plan or log the one validation loop that can change the verdict." : "Inspect the ranked beliefs only when the active blocker needs review."}
+          id={detailMode === "tests" ? "validation-tests" : undefined}
+          onClose={() => setDetailMode(null)}
+          title={detailMode === "tests" ? "Test bench" : "Decision blockers"}
+        >
+          {detailMode === "tests" ? (
+            <ExperimentsTab projectId={projectId} />
+          ) : (
+            <AssumptionsTab
+              onOpenExperiments={() => {
+                setDetailMode("tests");
+                window.setTimeout(() => {
+                  document.getElementById("log-results-panel")?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                  });
+                }, 50);
+              }}
+              projectId={projectId}
+            />
+          )}
+        </ActiveWorkbenchPanel>
+      ) : null}
+    </section>
+  );
+}
+
+function RecordWorkspace({
+  activeAnchor,
+  onOpenValidation,
+  overview,
+  projectId,
+}: {
+  activeAnchor: string | null;
+  onOpenValidation: () => void;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+  projectId: string;
+}) {
+  const [detailMode, setDetailMode] = useState<RecordDetailMode | null>(null);
+
+  useEffect(() => {
+    if (!activeAnchor) {
+      return;
+    }
+    if (activeAnchor.includes("brief")) {
+      setDetailMode("brief");
+    } else if (activeAnchor.includes("history")) {
+      setDetailMode("history");
+    }
+  }, [activeAnchor]);
+
+  return (
+    <section className="space-y-6">
+      <DecisionsTab
+        activeAnchor={activeAnchor}
+        onOpenValidation={onOpenValidation}
+        projectId={projectId}
+      />
+
+      <WorkbenchAccessPanel<RecordDetailMode>
+        activeMode={detailMode}
+        description="Record the decision first. Open history or the longer brief only when you need provenance."
+        options={[
+          {
+            description: "Lifecycle status, risks, and recent updates.",
+            icon: Route,
+            label: "Project history",
+            mode: "history",
+          },
+          {
+            description: "Generated thesis record and supporting narrative.",
+            icon: FileText,
+            label: "Opportunity brief",
+            mode: "brief",
+          },
+        ]}
+        title="Record context"
+        onSelect={setDetailMode}
+      />
+
+      {detailMode ? (
+        <ActiveWorkbenchPanel
+          description={detailMode === "history" ? "Use history to audit how the project reached its current decision state." : "Use the brief as the longer record after the decision work is clear."}
+          onClose={() => setDetailMode(null)}
+          title={detailMode === "history" ? "Project history" : "Opportunity brief"}
+        >
+          {detailMode === "history" ? (
+            <>
+              <LifecycleProgressCard overview={overview} />
+              <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+                <TopRisksCard risks={overview.key_risks} />
+                <RecentUpdatesCard updates={overview.recent_strategic_updates} />
+              </div>
+            </>
+          ) : (
+            <BriefTab projectId={projectId} />
+          )}
+        </ActiveWorkbenchPanel>
+      ) : null}
+    </section>
+  );
+}
+
+function WorkbenchAccessPanel<TMode extends string>({
+  activeMode,
+  description,
+  options,
+  title,
+  onSelect,
+}: {
+  activeMode: TMode | null;
+  description: string;
+  options: Array<{
+    description: string;
+    icon: LucideIcon;
+    label: string;
+    mode: TMode;
+  }>;
+  title: string;
+  onSelect: (mode: TMode) => void;
+}) {
+  return (
+    <section className="rounded-lg border border-border bg-card p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="text-base font-semibold">{title}</h3>
+          <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+            {description}
+          </p>
+        </div>
+        {activeMode ? (
+          <span className="w-fit rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+            {options.find((option) => option.mode === activeMode)?.label}
+          </span>
+        ) : null}
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {options.map((option) => {
+          const Icon = option.icon;
+          const selected = option.mode === activeMode;
+          return (
+            <button
+              aria-pressed={selected}
+              className={[
+                "min-h-24 rounded-md border px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+                selected
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border bg-surface text-foreground hover:bg-muted",
+              ].join(" ")}
+              key={option.mode}
+              onClick={() => onSelect(option.mode)}
+              type="button"
+            >
+              <div className="flex items-center gap-2">
+                <Icon
+                  className={selected ? "h-4 w-4 text-primary" : "h-4 w-4 text-muted-foreground"}
+                  aria-hidden="true"
+                />
+                <span className="text-sm font-semibold">{option.label}</span>
+              </div>
+              <p className="mt-2 text-sm leading-5 text-muted-foreground">
+                {option.description}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ActiveWorkbenchPanel({
+  children,
+  description,
+  id,
+  onClose,
+  title,
+}: {
+  children: ReactNode;
+  description: string;
+  id?: string;
+  onClose: () => void;
+  title: string;
+}) {
+  return (
+    <section className="border-t border-border pt-5" id={id}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="text-base font-semibold">{title}</h3>
+          <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+            {description}
+          </p>
+        </div>
+        <Button onClick={onClose} size="sm" type="button" variant="secondary">
+          Close details
+        </Button>
+      </div>
+      <div className="mt-5">{children}</div>
+    </section>
+  );
+}
+
+function intelligenceDetailTitle(mode: IntelligenceDetailMode) {
+  if (mode === "evidence") {
+    return "Evidence basis";
+  }
+  if (mode === "competitors") {
+    return "Competitor map";
+  }
+  if (mode === "review") {
+    return "Evidence review controls";
+  }
+  return "Opportunity brief";
+}
+
+function intelligenceDetailDescription(mode: IntelligenceDetailMode) {
+  if (mode === "evidence") {
+    return "Review citations, source coverage, and open questions behind the current verdict.";
+  }
+  if (mode === "competitors") {
+    return "Review direct products, substitutes, incumbents, and manual alternatives behind the wedge.";
+  }
+  if (mode === "review") {
+    return "Plan an evidence review, approve discovered sources, inspect source checks, and review the generated memo.";
+  }
+  return "Review the generated opportunity brief when you need the longer thesis record.";
+}
+
+function DisclosureLabel({
+  closedLabel,
+  open,
+  openLabel,
+}: {
+  closedLabel: string;
+  open: boolean;
+  openLabel: string;
+}) {
+  return (
+    <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+      <ChevronDown
+        className={open ? "h-3.5 w-3.5 rotate-180 transition-transform" : "h-3.5 w-3.5 transition-transform"}
+        aria-hidden="true"
+      />
+      {open ? openLabel : closedLabel}
+    </span>
   );
 }
 
@@ -695,99 +1666,32 @@ function ResearchResultCard({
       : "Competitors still need to be mapped";
 
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <DomainPanel>
       <div className="flex items-center gap-2">
         <FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />
-        <h3 className="text-base font-semibold">Research Result</h3>
+        <h3 className="text-base font-semibold">Evidence basis</h3>
       </div>
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <div className="mt-4 grid gap-x-8 lg:grid-cols-2">
         <ResultBlock title="Verdict" value={overview.current_recommendation.recommendation} />
-        <ResultBlock title="Best Wedge" value={overview.strategic_snapshot.proposed_wedge ?? "Wedge still needs evidence."} />
-        <ResultBlock title="Top Competitors / Substitutes" value={topSubstitute} />
-        <ResultBlock title="Biggest Risk" value={overview.strategic_snapshot.main_risk ?? "The largest risk has not been identified yet."} />
-        <ResultBlock title="Riskiest Assumption" value={assumption?.text ?? "No assumptions ranked yet."} />
-        <ResultBlock title="First Validation Test" value={assumption?.recommended_test ?? overview.next_best_action.description} />
-        <ResultBlock title="What Not To Build Yet" value="Do not expand product scope until the riskiest assumption has real validation evidence." />
-        <ResultBlock title="Recommended Decision" value={overview.current_recommendation.rationale} />
+        <ResultBlock title="Possible wedge" value={overview.strategic_snapshot.proposed_wedge ?? "Wedge still needs evidence."} />
+        <ResultBlock title="Competitive pressure" value={topSubstitute} />
+        <ResultBlock title="Main risk" value={overview.strategic_snapshot.main_risk ?? "The largest risk has not been identified yet."} />
+        <ResultBlock title="Decision Blocker" value={assumption ? decisionBlockerText(assumption) : "No decision blocker ranked yet."} />
+        <ResultBlock title="First test" value={assumption ? nextProofText(assumption) : clarifyActionText(overview.next_best_action.description)} />
+        <ResultBlock title="Scope guardrail" value="Do not expand product scope until the decision blocker has real validation evidence." />
+        <ResultBlock title="Decision rationale" value={clarifyDecisionNarrative(overview.current_recommendation.rationale)} />
       </div>
-    </div>
+    </DomainPanel>
   );
 }
 
 function ResultBlock({ title, value }: { title: string; value: string }) {
   return (
-    <div className="rounded-md bg-muted/50 px-3 py-2">
-      <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+    <div className="border-t border-border py-3">
+      <p className="text-xs font-medium text-muted-foreground">
         {title}
       </p>
-      <MarkdownContent className="mt-1 text-sm leading-6 text-foreground" markdown={value} />
-    </div>
-  );
-}
-
-function PageIntro({
-  actionLabel,
-  description,
-  eyebrow,
-  title,
-}: {
-  actionLabel: string;
-  description: string;
-  eyebrow: string;
-  title: string;
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-white p-5">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-            {eyebrow}
-          </p>
-          <h2 className="mt-2 text-xl font-semibold tracking-normal">{title}</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-            {description}
-          </p>
-        </div>
-        <span className="w-fit rounded-md bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
-          Primary action: {actionLabel}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function LifecycleMiniRail({ currentStage }: { currentStage: ProjectStage }) {
-  const currentIndex = lifecycleStepIndex(currentStage);
-  const steps = ["Idea", "Research", "Evidence", "Assumptions", "Validation", "Decision"];
-
-  return (
-    <div className="grid grid-cols-6 gap-1" aria-label="Idea validation lifecycle">
-      {steps.map((step, index) => {
-        const done = index < currentIndex;
-        const current = index === currentIndex;
-        return (
-          <div key={step}>
-            <div
-              className={
-                done
-                  ? "h-1.5 rounded-full bg-emerald-600"
-                  : current
-                    ? "h-1.5 rounded-full bg-amber-500"
-                    : "h-1.5 rounded-full bg-muted"
-              }
-            />
-            <div
-              className={
-                current
-                  ? "mt-1 truncate text-[0.68rem] font-medium text-foreground"
-                  : "mt-1 truncate text-[0.68rem] text-muted-foreground"
-              }
-            >
-              {step}
-            </div>
-          </div>
-        );
-      })}
+      <MarkdownContent className="mt-1 max-w-[72ch] text-sm leading-6 text-foreground" markdown={value} />
     </div>
   );
 }
@@ -801,40 +1705,40 @@ function ResearchWorkflowTimeline({
 }) {
   const steps = [
     {
-      label: "Planned research",
+      label: "Review plan",
       complete: true,
       detail: `${sprint.plan.research_questions.length} research question${
         sprint.plan.research_questions.length === 1 ? "" : "s"
       }`,
     },
     {
-      label: "Discovered sources",
+      label: "Source discovery",
       complete: (history?.source_candidate_count ?? 0) > 0,
       detail: `${history?.source_candidate_count ?? 0} source${
         (history?.source_candidate_count ?? 0) === 1 ? "" : "s"
       } found`,
     },
     {
-      label: "Found competitors",
+      label: "Competitor discovery",
       complete: (history?.competitor_candidate_count ?? 0) > 0,
       detail: `${history?.competitor_candidate_count ?? 0} competitor${
         (history?.competitor_candidate_count ?? 0) === 1 ? "" : "s"
       } found`,
     },
     {
-      label: "Added evidence",
+      label: "Evidence added",
       complete: (history?.ingested_source_count ?? 0) > 0,
       detail: `${history?.ingested_source_count ?? 0} source${
         (history?.ingested_source_count ?? 0) === 1 ? "" : "s"
       } added`,
     },
     {
-      label: "Generated memo",
+      label: "Evidence memo",
       complete: Boolean(history?.memo_artifact_id),
       detail: history?.memo_artifact_id ? "Memo ready" : "Not generated",
     },
     {
-      label: "Updated recommendation",
+      label: "Decision update",
       complete: history?.memory_update_status === "approved",
       detail: history?.memory_update_status
         ? formatLabel(history.memory_update_status)
@@ -842,26 +1746,68 @@ function ResearchWorkflowTimeline({
     },
   ];
   return (
-    <div className="mt-5 rounded-md border border-border p-4">
+    <div className="mt-5 border-t border-border pt-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h4 className="text-sm font-semibold">Research activity</h4>
+          <h4 className="text-sm font-semibold">Evidence review steps</h4>
           <p className="mt-1 text-xs text-muted-foreground">
-            Inspect the run as plain-language steps before accepting project updates.
+            Review the steps before approving any decision updates.
           </p>
         </div>
         <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-          Details
+          Evidence steps
         </span>
       </div>
-      <div className="mt-4 overflow-x-auto rounded-md border border-border">
+      <div className="mt-4 grid gap-2 sm:hidden">
+        {steps.map((step, index) => (
+          <div className="rounded-md bg-surface px-3 py-3" key={step.label}>
+            <div className="flex items-start gap-3">
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground">
+                {index + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h5 className="text-sm font-semibold">{step.label}</h5>
+                  <span
+                    className={
+                      step.complete
+                        ? "inline-flex items-center gap-1 rounded-md bg-success-muted px-2 py-1 text-xs text-success-foreground"
+                        : "inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
+                    }
+                  >
+                    {step.complete ? (
+                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    ) : (
+                      <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    {step.complete ? "Complete" : "Incomplete"}
+                  </span>
+                </div>
+                <dl className="mt-3 grid gap-2 text-sm">
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Output</dt>
+                    <dd className="mt-1 break-words text-foreground">{step.detail}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Next step</dt>
+                    <dd className="mt-1 text-foreground">
+                      {step.complete ? "Review" : "Continue review"}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 hidden overflow-x-auto sm:block">
         <table className="w-full min-w-[680px] border-collapse text-left text-sm">
           <thead>
-            <tr className="border-b border-border text-xs uppercase tracking-normal text-muted-foreground">
+            <tr className="border-b border-border text-xs  text-muted-foreground">
               <th className="px-3 py-2 font-medium">Step</th>
-              <th className="px-3 py-2 font-medium">Health</th>
+              <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Output</th>
-              <th className="px-3 py-2 font-medium">Action</th>
+              <th className="px-3 py-2 font-medium">Next step</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -879,7 +1825,7 @@ function ResearchWorkflowTimeline({
                   <span
                     className={
                       step.complete
-                        ? "inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-700"
+                        ? "inline-flex items-center gap-1 rounded-md bg-success-muted px-2 py-1 text-xs text-success-foreground"
                         : "inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
                     }
                   >
@@ -888,12 +1834,12 @@ function ResearchWorkflowTimeline({
                     ) : (
                       <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />
                     )}
-                    {step.complete ? "Complete" : "Needs work"}
+                    {step.complete ? "Complete" : "Incomplete"}
                   </span>
                 </td>
                 <td className="px-3 py-3 text-muted-foreground">{step.detail}</td>
                 <td className="px-3 py-3 text-muted-foreground">
-                  {step.complete ? "Review" : "Run sprint"}
+                  {step.complete ? "Review" : "Continue review"}
                 </td>
               </tr>
             ))}
@@ -917,16 +1863,16 @@ function ResearchSprintSummary({ projectId }: { projectId: string }) {
   const latestHistory = historyQuery.data?.sprints[0] ?? null;
 
   if (sprintsQuery.isLoading || historyQuery.isLoading) {
-    return <div className="rounded-lg border border-border bg-white p-5 text-sm text-muted-foreground">Loading latest research...</div>;
+    return <DomainPanel className="text-sm text-muted-foreground">Loading evidence review...</DomainPanel>;
   }
 
   if (!latestSprint) {
     return (
-      <div className="rounded-lg border border-dashed border-border bg-white p-5">
-        <h3 className="text-sm font-semibold">No research sprint yet.</h3>
+      <div className="rounded-lg border border-dashed border-border bg-card p-5">
+        <h3 className="text-sm font-semibold">No evidence review planned yet.</h3>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Run a research sprint to discover sources, identify competitors, gather evidence,
-          and generate a research memo.
+          Plan source review to find sources, identify competitors, gather evidence,
+          and draft an evidence memo.
         </p>
       </div>
     );
@@ -934,19 +1880,19 @@ function ResearchSprintSummary({ projectId }: { projectId: string }) {
 
   const metrics = [
     ["Status", formatLabel(latestSprint.status)],
-    ["Sources discovered", latestHistory?.source_candidate_count ?? 0],
-    ["Sources added", latestHistory?.ingested_source_count ?? 0],
+    ["Sources found", latestHistory?.source_candidate_count ?? 0],
+    ["Sources approved", latestHistory?.ingested_source_count ?? 0],
     ["Competitors found", latestHistory?.competitor_candidate_count ?? 0],
     ["Competitors saved", latestHistory?.merged_competitor_count ?? 0],
-    ["Project update", latestHistory?.memory_update_status ? formatLabel(latestHistory.memory_update_status) : "pending"],
+    ["Decision record", latestHistory?.memory_update_status ? formatLabel(latestHistory.memory_update_status) : "pending"],
   ] as const;
 
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <DomainPanel>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h3 className="text-base font-semibold">Latest Research Sprint</h3>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+          <h3 className="text-base font-semibold">Latest evidence review</h3>
+          <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
             {latestSprint.plan.objective}
           </p>
         </div>
@@ -954,35 +1900,29 @@ function ResearchSprintSummary({ projectId }: { projectId: string }) {
           {formatDateTime(latestSprint.updated_at)}
         </span>
       </div>
-      <div className="mt-4 overflow-x-auto rounded-md border border-border">
-        <table className="w-full min-w-[620px] border-collapse text-left text-sm">
-          <tbody className="divide-y divide-border">
-            {metrics.map(([label, value]) => (
-              <tr key={label}>
-                <th className="w-48 px-3 py-2 text-xs font-medium uppercase tracking-normal text-muted-foreground">
-                  {label}
-                </th>
-                <td className="px-3 py-2 font-semibold">{value}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <dl className="mt-4 grid gap-x-6 gap-y-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-3">
+        {metrics.map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+            <dd className="mt-1 text-sm font-semibold">{value}</dd>
+          </div>
+        ))}
+      </dl>
       {latestHistory?.recommendation_change ? (
-        <div className="mt-4 rounded-md border border-border p-3">
-          <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-            Recommendation change
+        <div className="mt-4 border-t border-border pt-3">
+          <h4 className="text-xs font-medium text-muted-foreground">
+            Decision change
           </h4>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
             {truncate(latestHistory.recommendation_change, 260)}
           </p>
         </div>
       ) : null}
-      <details className="mt-4 rounded-md border border-border p-3">
-        <summary className="cursor-pointer text-sm font-medium">Inspect research steps</summary>
+      <details className="mt-4 border-t border-border pt-3">
+        <summary className="cursor-pointer text-sm font-medium">Show evidence review steps</summary>
         <ResearchWorkflowTimeline sprint={latestSprint} history={latestHistory} />
       </details>
-    </div>
+    </DomainPanel>
   );
 }
 
@@ -1037,7 +1977,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
   const saveMutation = useMutation({
     mutationFn: () => {
       if (!latestSprint || !draft) {
-        throw new Error("No draft research plan to save.");
+        throw new Error("No draft evidence plan to save.");
       }
       return updateResearchPlan(projectId, latestSprint.plan.id, draftToUpdate(draft));
     },
@@ -1049,7 +1989,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
   const approveMutation = useMutation({
     mutationFn: () => {
       if (!latestSprint) {
-        throw new Error("No research sprint to approve.");
+        throw new Error("No evidence review to approve.");
       }
       return approveResearchSprint(
         projectId,
@@ -1066,7 +2006,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
   const rejectMutation = useMutation({
     mutationFn: () => {
       if (!latestSprint) {
-        throw new Error("No research sprint to reject.");
+        throw new Error("No evidence review to reject.");
       }
       return rejectResearchSprint(projectId, latestSprint.id);
     },
@@ -1101,16 +2041,16 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
     ["approved", "running", "needs_review", "completed"].includes(latestSprint.status);
 
   return (
-    <div id="research-sprint" className="rounded-lg border border-border bg-white p-5">
+    <DomainPanel id="research-sprint">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="max-w-2xl">
           <div className="flex items-center gap-2">
             <FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Run Research</h2>
+            <h2 className="text-base font-semibold">Plan evidence review</h2>
           </div>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Ask the system to plan the investigation before it discovers sources or
-            competitors. No research starts until you approve the plan.
+            Create the source-review plan before finding sources or competitors. Nothing is added
+            to the project until you approve the plan.
           </p>
         </div>
         {latestSprint ? (
@@ -1123,7 +2063,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
       {!activePlan ? (
         <div className="mt-5 space-y-3">
           <label className="block">
-            <span className="text-sm font-medium">Research objective</span>
+            <span className="text-sm font-medium">Evidence objective</span>
             <textarea
               className="mt-2 min-h-20 w-full resize-y rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-primary"
               onChange={(event) => setObjective(event.target.value)}
@@ -1134,8 +2074,8 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
           <div className="flex flex-col gap-3">
             {latestSprint?.status === "approved" ? (
               <p className="text-xs leading-5 text-muted-foreground">
-                The latest plan is approved. Discover sources and competitors before generating
-                the research memo.
+                The latest plan is approved. Find sources and competitors before drafting
+                the evidence memo.
               </p>
             ) : latestSprint?.status === "rejected" ? (
               <p className="text-xs leading-5 text-muted-foreground">
@@ -1149,7 +2089,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
               type="button"
             >
               <FileSearch className="h-4 w-4" aria-hidden="true" />
-              {startMutation.isPending ? "Planning..." : "Run Research"}
+              {startMutation.isPending ? "Planning review..." : "Plan evidence review"}
             </Button>
           </div>
         </div>
@@ -1177,7 +2117,10 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
       <ResearchQualityPanel projectId={projectId} />
 
       {error ? (
-        <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div
+          className="mt-4 break-words rounded-md border border-danger-border bg-danger-muted px-3 py-2 text-sm text-danger-foreground"
+          role="alert"
+        >
           {error.message}
         </div>
       ) : null}
@@ -1193,7 +2136,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
 
       {sprintsQuery.data && sprintsQuery.data.length > 1 ? (
         <div className="mt-5 border-t border-border pt-4">
-          <h3 className="text-sm font-semibold">Recent Research Plans</h3>
+          <h3 className="text-sm font-semibold">Recent evidence plans</h3>
           <div className="mt-3 space-y-2">
             {sprintsQuery.data.slice(1, 4).map((sprint) => (
               <div
@@ -1207,7 +2150,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
           </div>
         </div>
       ) : null}
-    </div>
+    </DomainPanel>
   );
 }
 
@@ -1223,15 +2166,15 @@ function ResearchHistoryPanel({ projectId }: { projectId: string }) {
       <summary className="cursor-pointer list-none">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-sm font-semibold">Research History</h3>
+            <h3 className="text-sm font-semibold">Evidence history</h3>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Review what changed across previous sprints.
+              Review what changed across previous evidence reviews.
             </p>
           </div>
           {history ? (
             <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
               <span className="rounded-md bg-muted px-2 py-1">
-                {history.sprint_count} sprint{history.sprint_count === 1 ? "" : "s"}
+                {history.sprint_count} review{history.sprint_count === 1 ? "" : "s"}
               </span>
               <span className="rounded-md bg-muted px-2 py-1">
                 {history.completed_sprint_count} completed
@@ -1244,15 +2187,15 @@ function ResearchHistoryPanel({ projectId }: { projectId: string }) {
       {historyQuery.isLoading ? (
         <p className="mt-3 text-sm text-muted-foreground">Loading research history...</p>
       ) : historyQuery.isError ? (
-        <p className="mt-3 text-sm text-red-700">{(historyQuery.error as Error).message}</p>
+        <p className="mt-3 text-sm text-danger-foreground">{(historyQuery.error as Error).message}</p>
       ) : !history || history.sprints.length === 0 ? (
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          No research sprints yet. Run a research sprint to create a history trail.
+          No evidence reviews yet. Run an evidence review to create a history trail.
         </p>
       ) : (
         <div className="mt-4 space-y-4">
           {history.sprints.slice(0, 3).map((sprintHistory) => (
-            <div className="rounded-md bg-muted p-4" key={sprintHistory.sprint.id}>
+            <div className="border-t border-border pt-4 first:border-t-0 first:pt-0" key={sprintHistory.sprint.id}>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h4 className="text-sm font-semibold">
@@ -1264,34 +2207,34 @@ function ResearchHistoryPanel({ projectId }: { projectId: string }) {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <span className="rounded-md bg-white px-2 py-1">
+                  <span className="rounded-md bg-muted px-2 py-1">
                     {sprintHistory.ingested_source_count}/{sprintHistory.source_candidate_count} sources
                   </span>
-                  <span className="rounded-md bg-white px-2 py-1">
+                  <span className="rounded-md bg-muted px-2 py-1">
                     {sprintHistory.merged_competitor_count}/
                     {sprintHistory.competitor_candidate_count} competitors
                   </span>
                   {sprintHistory.memory_update_status ? (
-                    <span className="rounded-md bg-white px-2 py-1">
+                    <span className="rounded-md bg-muted px-2 py-1">
                       {formatLabel(sprintHistory.memory_update_status)}
                     </span>
                   ) : null}
                 </div>
               </div>
               {sprintHistory.recommendation_change ? (
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                <p className="mt-3 max-w-[72ch] text-sm leading-6 text-muted-foreground">
                   Recommendation: {truncate(sprintHistory.recommendation_change, 220)}
                 </p>
               ) : null}
-              <div className="mt-4 space-y-2">
+              <div className="mt-4 divide-y divide-border">
                 {sprintHistory.events.slice(-5).map((event) => (
-                  <div className="border-l-2 border-border pl-3" key={event.id}>
-                    <p className="text-sm font-medium">{event.title}</p>
+                  <div className="py-2" key={event.id}>
+                    <p className="text-sm font-medium">{clarifyWorkspaceTerm(event.title)}</p>
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      {event.summary}
+                      {clarifyWorkspaceTerm(event.summary)}
                     </p>
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      Why it matters: {event.why_it_matters}
+                      Why it matters: {clarifyWorkspaceTerm(event.why_it_matters)}
                     </p>
                   </div>
                 ))}
@@ -1316,7 +2259,7 @@ function ResearchQualityPanel({ projectId }: { projectId: string }) {
       <summary className="cursor-pointer list-none">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-sm font-semibold">Trust Checks</h3>
+            <h3 className="text-sm font-semibold">Evidence checks</h3>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               View source, citation, traceability, cost, and latency checks.
             </p>
@@ -1325,8 +2268,8 @@ function ResearchQualityPanel({ projectId }: { projectId: string }) {
             <span
               className={
                 evaluation.passed
-                  ? "w-fit rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700"
-                  : "w-fit rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700"
+                  ? "w-fit rounded-md bg-success-muted px-2 py-1 text-xs font-medium text-success-foreground"
+                  : "w-fit rounded-md bg-warning-muted px-2 py-1 text-xs font-medium text-warning-foreground"
               }
             >
               {evaluation.score}/{evaluation.total} checks
@@ -1338,7 +2281,7 @@ function ResearchQualityPanel({ projectId }: { projectId: string }) {
       {evalQuery.isLoading ? (
         <p className="mt-3 text-sm text-muted-foreground">Loading research eval...</p>
       ) : evalQuery.isError ? (
-        <p className="mt-3 text-sm text-red-700">{(evalQuery.error as Error).message}</p>
+        <p className="mt-3 text-sm text-danger-foreground">{(evalQuery.error as Error).message}</p>
       ) : evaluation ? (
         <>
           <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -1346,9 +2289,9 @@ function ResearchQualityPanel({ projectId }: { projectId: string }) {
               <div className="rounded-md bg-muted px-3 py-2" key={metric.key}>
                 <div className="flex items-center gap-2">
                   {metric.passed ? (
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-success-foreground" />
                   ) : (
-                    <CircleAlert className="h-4 w-4 shrink-0 text-amber-600" />
+                    <CircleAlert className="h-4 w-4 shrink-0 text-warning-foreground" />
                   )}
                   <span className="text-sm font-medium">{metric.label}</span>
                 </div>
@@ -1438,13 +2381,13 @@ function ResearchPlanEditor({
       </div>
       <div className="flex flex-wrap gap-2">
         <Button disabled={busy} onClick={onApprove} type="button">
-          Approve Plan
+          Approve evidence plan
         </Button>
         <Button disabled={busy} onClick={onSave} type="button" variant="secondary">
-          Save Draft
+          Save draft
         </Button>
         <Button disabled={busy} onClick={onReject} type="button" variant="secondary">
-          Reject
+          Reject plan
         </Button>
       </div>
     </div>
@@ -1580,6 +2523,7 @@ function ResearchDiscoveryPanel({
       await candidatesQuery.refetch();
     },
   });
+  const [activeReviewId, setActiveReviewId] = useState<string | null>(null);
 
   const sources = sourcesQuery.data ?? [];
   const candidates = candidatesQuery.data ?? [];
@@ -1602,6 +2546,52 @@ function ResearchDiscoveryPanel({
     agenticResearchMutation.data?.evidence_gap_count ?? evidenceGapsFromArtifact(memoArtifact).length;
   const memoryUpdateStatus = memoryUpdateStatusFromArtifact(memoArtifact);
   const memoryUpdateSummary = memoryUpdateSummaryFromArtifact(memoArtifact);
+  const sourceReviewItems = sources.filter(
+    (source) => source.status === "candidate" || source.status === "failed",
+  );
+  const competitorReviewItems = candidates.filter(
+    (candidate) => candidate.status === "candidate",
+  );
+  const memoNeedsReview =
+    Boolean(memoArtifact && memoVersion) &&
+    memoryUpdateStatus !== "approved" &&
+    memoryUpdateStatus !== "rejected";
+  const reviewQueue: EvidenceReviewQueueItem[] = [
+    ...sourceReviewItems.map((source) => ({
+      id: `source:${source.id}`,
+      kind: "source" as const,
+      source,
+    })),
+    ...competitorReviewItems.map((candidate) => ({
+      candidate,
+      id: `competitor:${candidate.id}`,
+      kind: "competitor" as const,
+    })),
+    ...(memoNeedsReview && memoArtifact && memoVersion
+      ? [
+          {
+            artifact: memoArtifact,
+            id: `memo:${memoArtifact.id}:${memoVersion.id}`,
+            kind: "memo" as const,
+            version: memoVersion,
+          },
+        ]
+      : []),
+  ];
+  const reviewQueueKey = reviewQueue.map((item) => item.id).join("|");
+  useEffect(() => {
+    if (reviewQueue.length === 0) {
+      if (activeReviewId !== null) {
+        setActiveReviewId(null);
+      }
+      return;
+    }
+    if (!activeReviewId || !reviewQueue.some((item) => item.id === activeReviewId)) {
+      setActiveReviewId(reviewQueue[0].id);
+    }
+  }, [activeReviewId, reviewQueueKey, reviewQueue.length]);
+  const activeReviewItem =
+    reviewQueue.find((item) => item.id === activeReviewId) ?? reviewQueue[0] ?? null;
   const error =
     discoverSourcesMutation.error ??
     discoverCompetitorsMutation.error ??
@@ -1632,11 +2622,10 @@ function ResearchDiscoveryPanel({
     <div className="mt-6 border-t border-border pt-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h3 className="text-sm font-semibold">Review Findings</h3>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-            Generate sources and competitors from the approved plan. Review items before
-            they are added as evidence or merged into the project competitor set, then synthesize
-            a cited research memo from the project evidence graph.
+          <h3 className="text-sm font-semibold">Evidence review queue</h3>
+          <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+            Decide one evidence item at a time. Add useful sources and competitors, then review
+            the cited memo before it changes the project.
           </p>
         </div>
         <div className="grid w-full grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-2 lg:w-[28rem] xl:w-[40rem]">
@@ -1648,7 +2637,7 @@ function ResearchDiscoveryPanel({
             variant="secondary"
           >
             <Globe2 className="h-4 w-4" aria-hidden="true" />
-            {discoverSourcesMutation.isPending ? "Discovering..." : "Discover Sources"}
+            {discoverSourcesMutation.isPending ? "Finding sources..." : "Find sources"}
           </Button>
           <Button
             className="w-full whitespace-nowrap"
@@ -1659,8 +2648,8 @@ function ResearchDiscoveryPanel({
           >
             <Building2 className="h-4 w-4" aria-hidden="true" />
             {discoverCompetitorsMutation.isPending
-              ? "Discovering..."
-              : "Discover Competitors"}
+              ? "Finding competitors..."
+              : "Find competitors"}
           </Button>
           <Button
             className="w-full whitespace-nowrap"
@@ -1669,77 +2658,602 @@ function ResearchDiscoveryPanel({
             type="button"
           >
             <FileSearch className="h-4 w-4" aria-hidden="true" />
-            {agenticResearchMutation.isPending ? "Synthesizing..." : "Generate Research Memo"}
+            {agenticResearchMutation.isPending ? "Drafting memo..." : "Draft evidence memo"}
           </Button>
         </div>
       </div>
 
       {error ? (
-        <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div
+          className="mt-4 break-words rounded-md border border-danger-border bg-danger-muted px-3 py-2 text-sm text-danger-foreground"
+          role="alert"
+        >
           {error.message}
         </div>
       ) : null}
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-2">
-        <SourceCandidateList
-          busy={busy}
-          onApprove={(sourceId) => approveSourceMutation.mutate(sourceId)}
-          onReject={(sourceId) => rejectSourceMutation.mutate(sourceId)}
-          sources={sources}
-        />
-        <CompetitorCandidateList
-          busy={busy}
-          candidates={candidates}
-          onApprove={(candidateId) => approveCandidateMutation.mutate(candidateId)}
-          onReject={(candidateId) => rejectCandidateMutation.mutate(candidateId)}
-          onSave={(candidateId, input) =>
-            updateCandidateMutation.mutate({ candidateId, input })
-          }
-        />
-      </div>
+      <EvidenceReviewQueue
+        activeItem={activeReviewItem}
+        approveMemoPending={approveMemoMutation.isPending}
+        busy={busy}
+        candidates={candidates}
+        citations={citations}
+        discoverCompetitorsPending={discoverCompetitorsMutation.isPending}
+        discoverSourcesPending={discoverSourcesMutation.isPending}
+        draftMemoPending={agenticResearchMutation.isPending}
+        evidenceGapCount={evidenceGapCount}
+        memoryUpdateStatus={memoryUpdateStatus}
+        memoryUpdateSummary={memoryUpdateSummary}
+        onApproveCandidate={(candidateId) => approveCandidateMutation.mutate(candidateId)}
+        onApproveMemo={() => approveMemoMutation.mutate()}
+        onApproveSource={(sourceId) => approveSourceMutation.mutate(sourceId)}
+        onDraftMemo={() => agenticResearchMutation.mutate()}
+        onFindCompetitors={() => discoverCompetitorsMutation.mutate()}
+        onFindSources={() => discoverSourcesMutation.mutate()}
+        onRejectCandidate={(candidateId) => rejectCandidateMutation.mutate(candidateId)}
+        onRejectMemo={() => rejectMemoMutation.mutate()}
+        onRejectSource={(sourceId) => rejectSourceMutation.mutate(sourceId)}
+        onSelectItem={setActiveReviewId}
+        queue={reviewQueue}
+        rejectMemoPending={rejectMemoMutation.isPending}
+        retrievalToolCallCount={retrievalToolCallCount}
+        sources={sources}
+        unsupportedClaims={unsupportedClaims}
+      />
 
-      {memoArtifact && memoVersion ? (
-        <div className="mt-5 rounded-md border border-border bg-muted p-4">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h4 className="text-sm font-semibold">Research memo ready for review</h4>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                The research agent used {retrievalToolCallCount} retrieval passes, found{" "}
-                {evidenceGapCount} evidence gaps, and paused before updating the project.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="w-fit rounded-md bg-white px-2 py-1 text-xs text-muted-foreground">
-                {formatLabel(memoArtifact.artifact_type)}
-              </span>
-            </div>
-          </div>
-          {memoryUpdateStatus ? (
-            <p className="mt-3 text-xs leading-5 text-muted-foreground">
-              Project update: {formatLabel(memoryUpdateStatus)}.
-            </p>
-          ) : null}
-          {unsupportedClaims.length > 0 ? (
-            <p className="mt-3 text-xs leading-5 text-muted-foreground">
-              Open questions: {unsupportedClaims.slice(0, 2).join("; ")}
-            </p>
-          ) : null}
-          <ResearchMemoReview
-            artifact={memoArtifact}
-            approvalPending={approveMemoMutation.isPending}
-            citations={citations}
-            memoryUpdateStatus={memoryUpdateStatus}
-            memoryUpdateSummary={memoryUpdateSummary}
-            onApprove={() => approveMemoMutation.mutate()}
-            onReject={() => rejectMemoMutation.mutate()}
-            rejectionPending={rejectMemoMutation.isPending}
-            unsupportedClaims={unsupportedClaims}
-            version={memoVersion}
+      <details className="mt-5 border-t border-border pt-4">
+        <summary className="cursor-pointer text-sm font-medium">
+          Open full evidence lists
+        </summary>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          Use the full lists when you need provenance, bulk scanning, or competitor edits.
+        </p>
+        <div className="mt-4 grid gap-5 xl:grid-cols-2">
+          <SourceCandidateList
+            busy={busy}
+            onApprove={(sourceId) => approveSourceMutation.mutate(sourceId)}
+            onReject={(sourceId) => rejectSourceMutation.mutate(sourceId)}
+            sources={sources}
+          />
+          <CompetitorCandidateList
+            busy={busy}
+            candidates={candidates}
+            onApprove={(candidateId) => approveCandidateMutation.mutate(candidateId)}
+            onReject={(candidateId) => rejectCandidateMutation.mutate(candidateId)}
+            onSave={(candidateId, input) =>
+              updateCandidateMutation.mutate({ candidateId, input })
+            }
           />
         </div>
-      ) : null}
+      </details>
     </div>
   );
+}
+
+function EvidenceReviewQueue({
+  activeItem,
+  approveMemoPending,
+  busy,
+  candidates,
+  citations,
+  discoverCompetitorsPending,
+  discoverSourcesPending,
+  draftMemoPending,
+  evidenceGapCount,
+  memoryUpdateStatus,
+  memoryUpdateSummary,
+  onApproveCandidate,
+  onApproveMemo,
+  onApproveSource,
+  onDraftMemo,
+  onFindCompetitors,
+  onFindSources,
+  onRejectCandidate,
+  onRejectMemo,
+  onRejectSource,
+  onSelectItem,
+  queue,
+  rejectMemoPending,
+  retrievalToolCallCount,
+  sources,
+  unsupportedClaims,
+}: {
+  activeItem: EvidenceReviewQueueItem | null;
+  approveMemoPending: boolean;
+  busy: boolean;
+  candidates: CompetitorCandidate[];
+  citations: Citation[];
+  discoverCompetitorsPending: boolean;
+  discoverSourcesPending: boolean;
+  draftMemoPending: boolean;
+  evidenceGapCount: number;
+  memoryUpdateStatus: string | null;
+  memoryUpdateSummary: MemoryUpdateSummary | null;
+  onApproveCandidate: (candidateId: string) => void;
+  onApproveMemo: () => void;
+  onApproveSource: (sourceId: string) => void;
+  onDraftMemo: () => void;
+  onFindCompetitors: () => void;
+  onFindSources: () => void;
+  onRejectCandidate: (candidateId: string) => void;
+  onRejectMemo: () => void;
+  onRejectSource: (sourceId: string) => void;
+  onSelectItem: (itemId: string) => void;
+  queue: EvidenceReviewQueueItem[];
+  rejectMemoPending: boolean;
+  retrievalToolCallCount: number;
+  sources: DiscoveredSource[];
+  unsupportedClaims: string[];
+}) {
+  const addedSourceCount = sources.filter(
+    (source) => source.status === "approved" || source.status === "ingested",
+  ).length;
+  const addedCompetitorCount = candidates.filter(
+    (candidate) => candidate.status === "approved" || candidate.status === "merged",
+  ).length;
+  const rejectedCount =
+    sources.filter((source) => source.status === "rejected").length +
+    candidates.filter((candidate) => candidate.status === "rejected").length;
+
+  return (
+    <section className="mt-5 border-t border-border pt-4" aria-label="Evidence review queue">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h4 className="text-sm font-semibold">Review next item</h4>
+          <p className="mt-1 max-w-[64ch] text-sm leading-6 text-muted-foreground">
+            Work down the queue, one decision at a time. Full candidate lists stay below for audit
+            and edits.
+          </p>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center text-xs text-muted-foreground sm:w-[20rem]">
+          <div className="rounded-md bg-muted px-2 py-2">
+            <div className="text-sm font-semibold text-foreground">{queue.length}</div>
+            <div>to review</div>
+          </div>
+          <div className="rounded-md bg-muted px-2 py-2">
+            <div className="text-sm font-semibold text-foreground">
+              {addedSourceCount + addedCompetitorCount}
+            </div>
+            <div>added</div>
+          </div>
+          <div className="rounded-md bg-muted px-2 py-2">
+            <div className="text-sm font-semibold text-foreground">{rejectedCount}</div>
+            <div>rejected</div>
+          </div>
+        </div>
+      </div>
+
+      {queue.length === 0 ? (
+        <EvidenceReviewEmptyState
+          busy={busy}
+          candidates={candidates}
+          citations={citations}
+          discoverCompetitorsPending={discoverCompetitorsPending}
+          discoverSourcesPending={discoverSourcesPending}
+          draftMemoPending={draftMemoPending}
+          memoryUpdateStatus={memoryUpdateStatus}
+          onDraftMemo={onDraftMemo}
+          onFindCompetitors={onFindCompetitors}
+          onFindSources={onFindSources}
+          sources={sources}
+        />
+      ) : (
+        <div className="mt-4 grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
+          <ol className="space-y-2" aria-label="Evidence items to review">
+            {queue.map((item, index) => (
+              <li key={item.id}>
+                <EvidenceReviewQueueButton
+                  active={item.id === activeItem?.id}
+                  item={item}
+                  number={index + 1}
+                  onSelect={onSelectItem}
+                />
+              </li>
+            ))}
+          </ol>
+          <EvidenceReviewActiveItem
+            activeItem={activeItem}
+            approveMemoPending={approveMemoPending}
+            busy={busy}
+            citations={citations}
+            evidenceGapCount={evidenceGapCount}
+            memoryUpdateStatus={memoryUpdateStatus}
+            memoryUpdateSummary={memoryUpdateSummary}
+            onApproveCandidate={onApproveCandidate}
+            onApproveMemo={onApproveMemo}
+            onApproveSource={onApproveSource}
+            onRejectCandidate={onRejectCandidate}
+            onRejectMemo={onRejectMemo}
+            onRejectSource={onRejectSource}
+            rejectMemoPending={rejectMemoPending}
+            retrievalToolCallCount={retrievalToolCallCount}
+            unsupportedClaims={unsupportedClaims}
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function EvidenceReviewQueueButton({
+  active,
+  item,
+  number,
+  onSelect,
+}: {
+  active: boolean;
+  item: EvidenceReviewQueueItem;
+  number: number;
+  onSelect: (itemId: string) => void;
+}) {
+  return (
+    <button
+      aria-current={active ? "step" : undefined}
+      className={
+        active
+          ? "w-full rounded-md border border-primary bg-surface px-3 py-3 text-left"
+          : "w-full rounded-md border border-border px-3 py-3 text-left hover:border-primary"
+      }
+      onClick={() => onSelect(item.id)}
+      type="button"
+    >
+      <div className="flex items-start gap-3">
+        <span
+          className={
+            active
+              ? "flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground"
+              : "flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground"
+          }
+        >
+          {number}
+        </span>
+        <span className="min-w-0">
+          <span className="block text-xs font-medium text-muted-foreground">
+            {evidenceReviewItemKind(item)}
+          </span>
+          <span className="mt-1 block truncate text-sm font-semibold">
+            {evidenceReviewItemTitle(item)}
+          </span>
+          <span className="mt-1 block truncate text-xs text-muted-foreground">
+            {evidenceReviewItemSignal(item)}
+          </span>
+        </span>
+      </div>
+    </button>
+  );
+}
+
+function EvidenceReviewActiveItem({
+  activeItem,
+  approveMemoPending,
+  busy,
+  citations,
+  evidenceGapCount,
+  memoryUpdateStatus,
+  memoryUpdateSummary,
+  onApproveCandidate,
+  onApproveMemo,
+  onApproveSource,
+  onRejectCandidate,
+  onRejectMemo,
+  onRejectSource,
+  rejectMemoPending,
+  retrievalToolCallCount,
+  unsupportedClaims,
+}: {
+  activeItem: EvidenceReviewQueueItem | null;
+  approveMemoPending: boolean;
+  busy: boolean;
+  citations: Citation[];
+  evidenceGapCount: number;
+  memoryUpdateStatus: string | null;
+  memoryUpdateSummary: MemoryUpdateSummary | null;
+  onApproveCandidate: (candidateId: string) => void;
+  onApproveMemo: () => void;
+  onApproveSource: (sourceId: string) => void;
+  onRejectCandidate: (candidateId: string) => void;
+  onRejectMemo: () => void;
+  onRejectSource: (sourceId: string) => void;
+  rejectMemoPending: boolean;
+  retrievalToolCallCount: number;
+  unsupportedClaims: string[];
+}) {
+  if (!activeItem) {
+    return null;
+  }
+
+  if (activeItem.kind === "source") {
+    const source = activeItem.source;
+    return (
+      <article className="min-w-0 border-t border-border pt-4 lg:border-t-0 lg:pt-0">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap gap-2 text-xs">
+              <EvidenceReviewPill>{formatLabel(source.source_type)}</EvidenceReviewPill>
+              <EvidenceReviewPill>{formatLabel(source.status)}</EvidenceReviewPill>
+              <EvidenceReviewPill>score {formatScore(source.relevance_score)}</EvidenceReviewPill>
+            </div>
+            <h5 className="mt-3 text-base font-semibold">
+              {clarifyWorkspaceTerm(source.title ?? "Untitled source")}
+            </h5>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button
+              disabled={busy}
+              onClick={() => onApproveSource(source.id)}
+              size="sm"
+              type="button"
+            >
+              Add source
+            </Button>
+            <Button
+              disabled={busy}
+              onClick={() => onRejectSource(source.id)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Reject source
+            </Button>
+          </div>
+        </div>
+        <a
+          className="mt-3 block break-all text-xs text-primary hover:underline"
+          href={source.url}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {source.url}
+        </a>
+        {source.snippet ? (
+          <p className="mt-4 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+            {clarifyWorkspaceTerm(source.snippet)}
+          </p>
+        ) : null}
+        <p className="mt-3 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+          <span className="font-medium text-foreground">Why review it:</span>{" "}
+          {clarifyWorkspaceTerm(source.reason_selected)}
+        </p>
+        {source.associated_research_question ? (
+          <p className="mt-3 max-w-[72ch] text-xs leading-5 text-muted-foreground">
+            Research question: {clarifyWorkspaceTerm(source.associated_research_question)}
+          </p>
+        ) : null}
+        {source.ingestion_error ? (
+          <p className="mt-3 text-xs text-danger-foreground">{source.ingestion_error}</p>
+        ) : null}
+      </article>
+    );
+  }
+
+  if (activeItem.kind === "competitor") {
+    const candidate = activeItem.candidate;
+    return (
+      <article className="min-w-0 border-t border-border pt-4 lg:border-t-0 lg:pt-0">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap gap-2 text-xs">
+              <EvidenceReviewPill>{formatLabel(candidate.category)}</EvidenceReviewPill>
+              <EvidenceReviewPill>threat {candidate.threat_level}</EvidenceReviewPill>
+              <EvidenceReviewPill>score {formatScore(candidate.relevance_score)}</EvidenceReviewPill>
+            </div>
+            <h5 className="mt-3 text-base font-semibold">
+              {clarifyWorkspaceTerm(candidate.name)}
+            </h5>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button
+              disabled={busy}
+              onClick={() => onApproveCandidate(candidate.id)}
+              size="sm"
+              type="button"
+            >
+              Add competitor
+            </Button>
+            <Button
+              disabled={busy}
+              onClick={() => onRejectCandidate(candidate.id)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Reject competitor
+            </Button>
+          </div>
+        </div>
+        {candidate.url ? (
+          <a
+            className="mt-3 block break-all text-xs text-primary hover:underline"
+            href={candidate.url}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {candidate.url}
+          </a>
+        ) : null}
+        <p className="mt-4 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+          {clarifyWorkspaceTerm(candidate.positioning ?? "No positioning note yet.")}
+        </p>
+        <p className="mt-3 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+          <span className="font-medium text-foreground">Why it matters:</span>{" "}
+          {clarifyWorkspaceTerm(candidate.why_it_matters)}
+        </p>
+        {candidate.core_features.length > 0 ? (
+          <p className="mt-3 max-w-[72ch] text-xs leading-5 text-muted-foreground">
+            Features: {candidate.core_features.join(", ")}
+          </p>
+        ) : null}
+        <p className="mt-3 text-xs leading-5 text-muted-foreground">
+          Need to rename or recategorize it? Open the full evidence lists below.
+        </p>
+      </article>
+    );
+  }
+
+  return (
+    <article className="min-w-0 border-t border-border pt-4 lg:border-t-0 lg:pt-0">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <EvidenceReviewPill>
+              {clarifyWorkspaceTerm(formatLabel(activeItem.artifact.artifact_type))}
+            </EvidenceReviewPill>
+            <EvidenceReviewPill>Version {activeItem.version.version}</EvidenceReviewPill>
+          </div>
+          <h5 className="mt-3 text-base font-semibold">Review project updates</h5>
+          <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+            The memo used {retrievalToolCallCount} retrieval passes and found {evidenceGapCount}{" "}
+            evidence gap{evidenceGapCount === 1 ? "" : "s"}. Approve only if the summary should
+            update assumptions, risks, and validation actions.
+          </p>
+        </div>
+        {memoryUpdateStatus ? (
+          <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+            {formatLabel(memoryUpdateStatus)}
+          </span>
+        ) : null}
+      </div>
+      {unsupportedClaims.length > 0 ? (
+        <p className="mt-3 max-w-[72ch] text-xs leading-5 text-muted-foreground">
+          First open question: {clarifyWorkspaceTerm(truncate(unsupportedClaims[0], 180))}
+        </p>
+      ) : null}
+      <ResearchMemoReview
+        artifact={activeItem.artifact}
+        approvalPending={approveMemoPending}
+        citations={citations}
+        memoryUpdateStatus={memoryUpdateStatus}
+        memoryUpdateSummary={memoryUpdateSummary}
+        onApprove={onApproveMemo}
+        onReject={onRejectMemo}
+        rejectionPending={rejectMemoPending}
+        unsupportedClaims={unsupportedClaims}
+        version={activeItem.version}
+      />
+    </article>
+  );
+}
+
+function EvidenceReviewEmptyState({
+  busy,
+  candidates,
+  citations,
+  discoverCompetitorsPending,
+  discoverSourcesPending,
+  draftMemoPending,
+  memoryUpdateStatus,
+  onDraftMemo,
+  onFindCompetitors,
+  onFindSources,
+  sources,
+}: {
+  busy: boolean;
+  candidates: CompetitorCandidate[];
+  citations: Citation[];
+  discoverCompetitorsPending: boolean;
+  discoverSourcesPending: boolean;
+  draftMemoPending: boolean;
+  memoryUpdateStatus: string | null;
+  onDraftMemo: () => void;
+  onFindCompetitors: () => void;
+  onFindSources: () => void;
+  sources: DiscoveredSource[];
+}) {
+  const hasSources = sources.length > 0;
+  const hasCompetitors = candidates.length > 0;
+  const memoReviewed = memoryUpdateStatus === "approved" || memoryUpdateStatus === "rejected";
+  const nextAction =
+    !hasSources
+      ? "sources"
+      : !hasCompetitors
+        ? "competitors"
+        : citations.length === 0 && !memoReviewed
+          ? "memo"
+          : null;
+
+  return (
+    <div className="mt-4 border-t border-border pt-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h5 className="text-sm font-semibold">Review queue clear</h5>
+          <p className="mt-2 max-w-[64ch] text-sm leading-6 text-muted-foreground">
+            There are no pending source, competitor, or memo decisions. Generate the next evidence
+            batch when you need more proof.
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {nextAction === "sources" ? (
+            <Button
+              disabled={busy}
+              onClick={onFindSources}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              <Globe2 className="h-4 w-4" aria-hidden="true" />
+              {discoverSourcesPending ? "Finding sources..." : "Find sources"}
+            </Button>
+          ) : null}
+          {nextAction === "competitors" ? (
+            <Button
+              disabled={busy}
+              onClick={onFindCompetitors}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              <Building2 className="h-4 w-4" aria-hidden="true" />
+              {discoverCompetitorsPending ? "Finding competitors..." : "Find competitors"}
+            </Button>
+          ) : null}
+          {nextAction === "memo" ? (
+            <Button disabled={busy} onClick={onDraftMemo} size="sm" type="button">
+              <FileSearch className="h-4 w-4" aria-hidden="true" />
+              {draftMemoPending ? "Drafting memo..." : "Draft evidence memo"}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EvidenceReviewPill({ children }: { children: ReactNode }) {
+  return (
+    <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+      {children}
+    </span>
+  );
+}
+
+function evidenceReviewItemKind(item: EvidenceReviewQueueItem) {
+  if (item.kind === "source") {
+    return "Source candidate";
+  }
+  if (item.kind === "competitor") {
+    return "Competitor candidate";
+  }
+  return "Evidence memo";
+}
+
+function evidenceReviewItemTitle(item: EvidenceReviewQueueItem) {
+  if (item.kind === "source") {
+    return clarifyWorkspaceTerm(item.source.title ?? item.source.url);
+  }
+  if (item.kind === "competitor") {
+    return clarifyWorkspaceTerm(item.candidate.name);
+  }
+  return clarifyWorkspaceTerm(item.artifact.title);
+}
+
+function evidenceReviewItemSignal(item: EvidenceReviewQueueItem) {
+  if (item.kind === "source") {
+    return `${formatLabel(item.source.source_type)} · score ${formatScore(item.source.relevance_score)}`;
+  }
+  if (item.kind === "competitor") {
+    return `${formatLabel(item.candidate.category)} · threat ${item.candidate.threat_level}`;
+  }
+  return `Version ${item.version.version} · approve or reject updates`;
 }
 
 function ResearchMemoReview({
@@ -1782,10 +3296,12 @@ function ResearchMemoReview({
         <div>
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h3 className="text-sm font-semibold">Review memo and project updates</h3>
+            <h3 className="text-sm font-semibold">Approve memo updates</h3>
           </div>
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-            <span className="rounded-md bg-white px-2 py-1">{artifact.title}</span>
+            <span className="rounded-md bg-card px-2 py-1">
+              {clarifyWorkspaceTerm(artifact.title)}
+            </span>
             <span className="rounded-md bg-muted px-2 py-1">Version {version.version}</span>
             <span className="rounded-md bg-muted px-2 py-1">
               {formatDateTime(version.created_at)}
@@ -1796,10 +3312,10 @@ function ResearchMemoReview({
           <span
             className={
               approved
-                ? "w-fit rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700"
+                ? "w-fit rounded-md bg-success-muted px-2 py-1 text-xs font-medium text-success-foreground"
                 : rejected
-                  ? "w-fit rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700"
-                : "w-fit rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700"
+                  ? "w-fit rounded-md bg-danger-muted px-2 py-1 text-xs font-medium text-danger-foreground"
+                : "w-fit rounded-md bg-warning-muted px-2 py-1 text-xs font-medium text-warning-foreground"
             }
           >
           {approved ? "Approved" : rejected ? "Rejected" : "Review pending"}
@@ -1811,7 +3327,7 @@ function ResearchMemoReview({
             type="button"
           >
             <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-            {approved ? "Approved" : approvalPending ? "Approving..." : "Approve Updates"}
+            {approved ? "Approved" : approvalPending ? "Approving updates..." : "Approve decision updates"}
           </Button>
           <Button
             disabled={reviewed || approvalPending || rejectionPending}
@@ -1820,14 +3336,14 @@ function ResearchMemoReview({
             type="button"
             variant="secondary"
           >
-            {rejected ? "Rejected" : rejectionPending ? "Rejecting..." : "Reject Updates"}
+            {rejected ? "Rejected" : rejectionPending ? "Rejecting updates..." : "Reject decision updates"}
           </Button>
         </div>
       </div>
 
       {memoryUpdateSummary ? (
-        <div className="mt-4 rounded-md bg-white px-4 py-3 text-sm leading-6 text-muted-foreground">
-          <span className="font-medium text-foreground">Project updates:</span>{" "}
+        <div className="mt-4 rounded-md bg-card px-4 py-3 text-sm leading-6 text-muted-foreground">
+          <span className="font-medium text-foreground">Decision updates:</span>{" "}
           {memoryUpdateSummary.assumption_ids.length} assumption
           {memoryUpdateSummary.assumption_ids.length === 1 ? "" : "s"},{" "}
           {memoryUpdateSummary.risk_ids.length} risk
@@ -1843,15 +3359,15 @@ function ResearchMemoReview({
       ) : null}
 
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-md bg-white px-3 py-2">
+        <div className="rounded-md bg-card px-3 py-2">
           <div className="text-xs text-muted-foreground">Supported findings</div>
           <div className="mt-1 text-sm font-semibold">{supportedClaims.length}</div>
         </div>
-        <div className="rounded-md bg-white px-3 py-2">
+        <div className="rounded-md bg-card px-3 py-2">
           <div className="text-xs text-muted-foreground">Sources</div>
           <div className="mt-1 text-sm font-semibold">{citations.length}</div>
         </div>
-        <div className="rounded-md bg-white px-3 py-2">
+        <div className="rounded-md bg-card px-3 py-2">
           <div className="text-xs text-muted-foreground">Open questions</div>
           <div className="mt-1 text-sm font-semibold">{displayUnsupported.length}</div>
         </div>
@@ -1863,7 +3379,7 @@ function ResearchMemoReview({
         unsupportedClaims={displayUnsupported}
       />
 
-      <details className="mt-3 rounded-md bg-white p-3">
+      <details className="mt-3 rounded-md bg-card p-3">
         <summary className="cursor-pointer text-sm font-medium">
           Show evidence and open questions
         </summary>
@@ -1916,7 +3432,7 @@ function ResearchMemoReview({
             </div>
             <div className="mt-4 space-y-2">
               {displayUnsupported.length === 0 ? (
-                <p className="text-sm text-muted-foreground">None recorded.</p>
+                <p className="text-sm text-muted-foreground">No open questions recorded.</p>
               ) : (
                 displayUnsupported.map((claim) => (
                   <MarkdownContent
@@ -1947,11 +3463,13 @@ function ResearchMemoReview({
                         rel="noreferrer"
                         target="_blank"
                       >
-                        {citation.title ?? citation.url}
+                        {clarifyWorkspaceTerm(citation.title ?? citation.url)}
                         <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                       </a>
                     ) : (
-                      <p className="text-sm font-medium">{citation.title ?? citation.source_id}</p>
+                      <p className="text-sm font-medium">
+                        {clarifyWorkspaceTerm(citation.title ?? citation.source_id)}
+                      </p>
                     )}
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">
                       {citation.quote
@@ -1982,10 +3500,10 @@ function SourceGroundedMemo({
   const primarySections = preferredMemoSections(sections).slice(0, 4);
 
   return (
-    <div className="mt-4 rounded-md bg-white p-3">
+    <div className="mt-4 border-t border-border pt-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h4 className="text-sm font-semibold">Research memo</h4>
+          <h4 className="text-sm font-semibold">Evidence memo</h4>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             Summary first. Sources, open questions, and full details stay close by.
           </p>
@@ -1999,23 +3517,23 @@ function SourceGroundedMemo({
       </div>
 
       {primarySections.length > 0 ? (
-        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div className="mt-4 grid gap-x-6 lg:grid-cols-2">
           {primarySections.map((section) => (
-            <section className="rounded-md border border-border p-3" key={section.title}>
-              <h5 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-                {section.title}
+            <section className="border-t border-border py-3" key={section.title}>
+              <h5 className="text-xs font-medium text-muted-foreground">
+                {clarifyWorkspaceTerm(section.title)}
               </h5>
               <MarkdownContent
                 className="mt-2 line-clamp-6 space-y-2 text-sm leading-6 text-foreground"
-                markdown={section.body}
+                markdown={clarifyWorkspaceTerm(section.body)}
               />
             </section>
           ))}
         </div>
       ) : null}
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <details className="rounded-md border border-border p-3">
+      <div className="mt-4 grid gap-3 border-t border-border pt-3 lg:grid-cols-2">
+        <details>
           <summary className="cursor-pointer text-sm font-medium">Sources Used</summary>
           <div className="mt-3 max-h-72 space-y-3 overflow-auto border-t border-border pt-3">
             {citations.length === 0 ? (
@@ -2030,11 +3548,13 @@ function SourceGroundedMemo({
                       rel="noreferrer"
                       target="_blank"
                     >
-                      {citation.title ?? citation.url}
+                      {clarifyWorkspaceTerm(citation.title ?? citation.url)}
                       <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                     </a>
                   ) : (
-                    <p className="text-sm font-medium">{citation.title ?? citation.source_id}</p>
+                    <p className="text-sm font-medium">
+                      {clarifyWorkspaceTerm(citation.title ?? citation.source_id)}
+                    </p>
                   )}
                   {citation.quote ? (
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -2047,7 +3567,7 @@ function SourceGroundedMemo({
           </div>
         </details>
 
-        <details className="rounded-md border border-border p-3">
+        <details>
           <summary className="cursor-pointer text-sm font-medium">
             What We Still Do Not Know
           </summary>
@@ -2067,10 +3587,10 @@ function SourceGroundedMemo({
         </details>
       </div>
 
-      <details className="mt-3 rounded-md border border-border p-3">
+      <details className="mt-3 border-t border-border pt-3">
         <summary className="cursor-pointer text-sm font-medium">Full Details</summary>
         <article className="mt-3 max-h-[28rem] min-w-0 overflow-auto border-t border-border pt-3">
-          <MarkdownContent markdown={markdown} />
+          <MarkdownContent markdown={clarifyWorkspaceTerm(markdown)} />
         </article>
       </details>
     </div>
@@ -2091,19 +3611,19 @@ function SourceCandidateList({
   return (
     <div>
       <div className="flex items-center justify-between gap-3">
-        <h4 className="text-sm font-semibold">Sources Found</h4>
+        <h4 className="text-sm font-semibold">Source candidates</h4>
         <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
           {sources.length}
         </span>
       </div>
       {sources.length === 0 ? (
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          No sources found yet. Run source discovery after approving the research plan.
+          No source candidates yet. Find sources after approving the evidence plan.
         </p>
       ) : (
-        <div className="mt-3 space-y-3">
+        <div className="mt-3 divide-y divide-border">
           {sources.map((source) => (
-            <details className="rounded-md border border-border p-3" key={source.id}>
+            <details className="py-3 first:pt-0" key={source.id}>
               <summary className="cursor-pointer list-none">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
@@ -2135,7 +3655,7 @@ function SourceCandidateList({
                         size="sm"
                         type="button"
                       >
-                        Approve
+                        Add source
                       </Button>
                       <Button
                         disabled={busy}
@@ -2148,7 +3668,7 @@ function SourceCandidateList({
                         type="button"
                         variant="secondary"
                       >
-                        Reject
+                        Reject source
                       </Button>
                     </>
                   ) : null}
@@ -2174,7 +3694,7 @@ function SourceCandidateList({
                   Why: {source.reason_selected}
                 </p>
                 {source.ingestion_error ? (
-                  <p className="mt-2 text-xs text-red-700">{source.ingestion_error}</p>
+                  <p className="mt-2 text-xs text-danger-foreground">{source.ingestion_error}</p>
                 ) : null}
                 {source.ingested_at ? (
                   <p className="mt-2 text-xs text-muted-foreground">
@@ -2206,18 +3726,18 @@ function CompetitorCandidateList({
   return (
     <div>
       <div className="flex items-center justify-between gap-3">
-        <h4 className="text-sm font-semibold">Competitors Found</h4>
+        <h4 className="text-sm font-semibold">Competitor candidates</h4>
         <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
           {candidates.length}
         </span>
       </div>
       {candidates.length === 0 ? (
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          No competitors found yet. Run competitor discovery to review direct competitors,
+          No competitor candidates yet. Find competitors to review direct competitors,
           substitutes, and incumbents.
         </p>
       ) : (
-        <div className="mt-3 space-y-3">
+        <div className="mt-3 divide-y divide-border">
           {candidates.map((candidate) => (
             <CompetitorCandidateItem
               busy={busy}
@@ -2263,7 +3783,7 @@ function CompetitorCandidateItem({
 
   const canEdit = candidate.status === "candidate";
   return (
-    <details className="rounded-md border border-border p-3">
+    <details className="border-t border-border py-3 first:border-t-0 first:pt-0">
       <summary className="cursor-pointer list-none">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
@@ -2296,7 +3816,7 @@ function CompetitorCandidateItem({
                 size="sm"
                 type="button"
               >
-                Approve
+                Add competitor
               </Button>
               <Button
                 disabled={busy}
@@ -2309,7 +3829,7 @@ function CompetitorCandidateItem({
                 type="button"
                 variant="secondary"
               >
-                Reject
+                Reject competitor
               </Button>
             </>
           ) : null}
@@ -2346,11 +3866,11 @@ function CompetitorCandidateItem({
           </p>
         ) : null}
         {candidate.ingestion_error ? (
-          <p className="mt-2 text-xs text-red-700">{candidate.ingestion_error}</p>
+          <p className="mt-2 text-xs text-danger-foreground">{candidate.ingestion_error}</p>
         ) : null}
 
       {canEdit ? (
-        <details className="mt-3 rounded-md bg-muted p-3">
+        <details className="mt-3 border-t border-border pt-3">
           <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
             Edit competitor found
           </summary>
@@ -2452,13 +3972,13 @@ function LifecycleProgressCard({
   const rows = lifecycleRows(overview);
 
   return (
-    <details className="rounded-lg border border-border bg-white p-5">
+    <details className="rounded-lg border border-border bg-card p-5">
       <summary className="cursor-pointer list-none">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <Route className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Validation Workflow Progress</h2>
+            <h2 className="text-base font-semibold">Decision progress</h2>
           </div>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {overview.idea_readiness.score}% complete. This is workflow progress, not a score for idea quality.
@@ -2469,10 +3989,30 @@ function LifecycleProgressCard({
         </span>
       </div>
       </summary>
-      <div className="mt-5 overflow-x-auto rounded-md border border-border">
+      <div className="mt-5 grid gap-3 sm:hidden">
+        {rows.map((row) => (
+          <div className="rounded-md bg-surface px-3 py-3" key={row.key}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">{row.label}</h3>
+              <LifecycleStatusBadge status={row.status} />
+            </div>
+            <dl className="mt-3 grid gap-3 text-sm">
+              <div>
+                <dt className="text-xs text-muted-foreground">Signal</dt>
+                <dd className="mt-1 text-foreground">{row.signal}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Next</dt>
+                <dd className="mt-1 text-foreground">{row.next}</dd>
+              </div>
+            </dl>
+          </div>
+        ))}
+      </div>
+      <div className="mt-5 hidden overflow-x-auto sm:block">
         <table className="min-w-[720px] w-full border-collapse text-left text-sm">
           <thead>
-            <tr className="border-b border-border text-xs uppercase tracking-normal text-muted-foreground">
+            <tr className="border-b border-border text-xs  text-muted-foreground">
               <th className="px-3 py-2 font-medium">Stage</th>
               <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Signal</th>
@@ -2499,7 +4039,7 @@ function LifecycleProgressCard({
 
 function IdeaReadinessCard({ readiness }: { readiness: IdeaReadiness }) {
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <div className="rounded-lg border border-border bg-card p-5">
       <div className="flex items-center gap-2">
         <ClipboardCheck className="h-4 w-4 text-primary" aria-hidden="true" />
         <h2 className="text-base font-semibold">Idea Readiness</h2>
@@ -2547,7 +4087,7 @@ function ReadinessList({
 }) {
   return (
     <div>
-      <h3 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+      <h3 className="text-xs font-medium text-muted-foreground">
         {title}
       </h3>
       {items.length === 0 ? (
@@ -2557,9 +4097,9 @@ function ReadinessList({
           {items.map((item) => (
             <div className="flex items-start gap-2 text-sm" key={item.key}>
               {item.status === "complete" ? (
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success-foreground" />
               ) : (
-                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground" />
               )}
               <span className="text-muted-foreground">{item.label}</span>
             </div>
@@ -2576,7 +4116,7 @@ function TopRisksCard({
   risks: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>["key_risks"];
 }) {
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <div className="rounded-lg border border-border bg-card p-5">
       <div className="flex items-center gap-2">
         <Beaker className="h-4 w-4 text-primary" aria-hidden="true" />
         <h2 className="text-base font-semibold">Key Risks</h2>
@@ -2587,9 +4127,9 @@ function TopRisksCard({
           modes and what to test next.
         </p>
       ) : (
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <div className="mt-4 grid gap-x-5 gap-y-4 border-t border-border pt-4 md:grid-cols-3">
           {risks.slice(0, 3).map((risk) => (
-            <div key={risk.id} className="rounded-md border border-border p-4">
+            <div key={risk.id}>
               <div className="flex flex-wrap gap-2 text-xs">
                 <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
                   {risk.severity} risk
@@ -2602,7 +4142,7 @@ function TopRisksCard({
                 className="mt-3 line-clamp-4 space-y-2 text-sm leading-6 text-foreground"
                 markdown={risk.text}
               />
-              <p className="mt-3 text-xs font-medium uppercase tracking-normal text-muted-foreground">
+              <p className="mt-3 text-xs font-medium text-muted-foreground">
                 Recommended action
               </p>
               <MarkdownContent
@@ -2619,18 +4159,18 @@ function TopRisksCard({
 
 function StrategicSnapshotCard({ snapshot }: { snapshot: StrategicSnapshot }) {
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <div className="rounded-lg border border-border bg-card p-5">
       <div className="flex items-center gap-2">
         <ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />
         <h2 className="text-base font-semibold">Strategic Snapshot</h2>
       </div>
       <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <SnapshotField label="Current Thesis" value={snapshot.current_thesis} />
-        <SnapshotField label="Target User" value={snapshot.target_user} />
-        <SnapshotField label="Primary Problem" value={snapshot.primary_problem} />
-        <SnapshotField label="Proposed Wedge" value={snapshot.proposed_wedge} />
-        <SnapshotField label="Main Risk" value={snapshot.main_risk} />
-        <SnapshotField label="Current Confidence" value={formatLabel(snapshot.current_confidence)} />
+        <SnapshotField label="Current thesis" value={snapshot.current_thesis} />
+        <SnapshotField label="Target user" value={snapshot.target_user} />
+        <SnapshotField label="Primary problem" value={snapshot.primary_problem} />
+        <SnapshotField label="Possible wedge" value={snapshot.proposed_wedge} />
+        <SnapshotField label="Main risk" value={snapshot.main_risk} />
+        <SnapshotField label="Current confidence" value={formatLabel(snapshot.current_confidence)} />
       </div>
     </div>
   );
@@ -2641,47 +4181,38 @@ function StageAwareSummary({
 }: {
   overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const stage = overview.strategic_snapshot.current_stage;
-  const title =
-    stage === "validation_plan_created" || stage === "experiment_running"
-      ? "Validation Focus"
-      : stage === "decision_ready" || stage === "proceeding"
-        ? "Decision Focus"
-        : stage === "brief_generated" || stage === "competitors_analyzed"
-          ? "Research Focus"
-          : "Strategic Snapshot";
-  const summary =
-    stage === "validation_plan_created"
-      ? "A validation plan exists. The next useful work is running the test and logging real evidence before making a build decision."
-      : stage === "experiment_running"
-        ? "Validation is active. Preserve the signal by logging results as soon as the test produces evidence."
-        : stage === "decision_ready"
-          ? "Validation results exist. Use the evidence trail to decide whether to continue research, pivot, pause, kill, or proceed narrowly."
-          : stage === "proceeding"
-            ? "A decision has been recorded. Keep the next milestone tied to the evidence and revisit trigger."
-            : stage === "assumptions_identified"
-              ? "The next useful work is converting the riskiest belief into one concrete validation test."
-              : "Use this snapshot to keep the thesis, target user, wedge, and risk in view while research is still forming.";
+  const { summary, title } = stageFocusCopy(stage);
 
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <div className="rounded-lg border border-border bg-card p-5">
       <div className="flex items-center gap-2">
         <ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />
         <h2 className="text-base font-semibold">{title}</h2>
       </div>
-      <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">{summary}</p>
+      <p className="mt-3 max-w-[72ch] text-sm leading-6 text-muted-foreground">{summary}</p>
       <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <SnapshotField label="Target User" value={overview.strategic_snapshot.target_user} />
-        <SnapshotField label="Primary Problem" value={overview.strategic_snapshot.primary_problem} />
-        <SnapshotField label="Best Wedge" value={overview.strategic_snapshot.proposed_wedge} />
-        <SnapshotField label="Main Risk" value={overview.strategic_snapshot.main_risk} />
+        <SnapshotField label="Target user" value={overview.strategic_snapshot.target_user} />
+        <SnapshotField label="Primary problem" value={overview.strategic_snapshot.primary_problem} />
+        <SnapshotField label="Possible wedge" value={overview.strategic_snapshot.proposed_wedge} />
+        <SnapshotField label="Main risk" value={overview.strategic_snapshot.main_risk} />
       </div>
-      <details className="mt-4 border-t border-border pt-4">
-        <summary className="cursor-pointer text-sm font-medium">Show thesis details</summary>
+      <details
+        className="mt-4 border-t border-border pt-4"
+        onToggle={(event) => setDetailsOpen(event.currentTarget.open)}
+      >
+        <summary className="cursor-pointer list-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+          <DisclosureLabel
+            closedLabel="Show thesis details"
+            open={detailsOpen}
+            openLabel="Hide thesis details"
+          />
+        </summary>
         <div className="mt-3 grid gap-4 md:grid-cols-2">
-          <SnapshotField label="Current Thesis" value={overview.strategic_snapshot.current_thesis} />
+          <SnapshotField label="Current thesis" value={overview.strategic_snapshot.current_thesis} />
           <SnapshotField
-            label="Idea Confidence"
+            label="Idea confidence"
             value={formatConfidenceValue(overview.strategic_snapshot.current_confidence)}
           />
         </div>
@@ -2693,7 +4224,7 @@ function StageAwareSummary({
 function SnapshotField({ label, value }: { label: string; value: string | null }) {
   return (
     <div>
-      <h3 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+      <h3 className="text-xs font-medium text-muted-foreground">
         {label}
       </h3>
       {value ? (
@@ -2702,8 +4233,8 @@ function SnapshotField({ label, value }: { label: string; value: string | null }
           markdown={value}
         />
       ) : (
-        <a className="mt-1 block text-sm text-amber-700 hover:underline" href="#structured-intake">
-          Missing - structure idea
+        <a className="mt-1 block text-sm text-warning-foreground hover:underline" href="#structured-intake">
+          Add in project context
         </a>
       )}
     </div>
@@ -2723,25 +4254,25 @@ function EvidenceHealthCard({
     ["Validated assumptions", health.validated_assumption_count],
   ] as const;
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <div className="rounded-lg border border-border bg-card p-5">
       <div className="flex items-center gap-2">
         <Database className="h-4 w-4 text-primary" aria-hidden="true" />
-        <h2 className="text-base font-semibold">Evidence Health</h2>
+        <h2 className="text-base font-semibold">Evidence basis</h2>
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-3">
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4">
         {metrics.map(([label, value]) => (
-          <div className="rounded-md bg-muted px-3 py-2" key={label}>
-            <div className="text-xs text-muted-foreground">{label}</div>
-            <div className="mt-1 text-lg font-semibold">{value}</div>
+          <div key={label}>
+            <dt className="text-xs text-muted-foreground">{label}</dt>
+            <dd className="mt-1 text-lg font-semibold">{value}</dd>
           </div>
         ))}
-      </div>
+      </dl>
       <p className="mt-4 text-sm leading-6 text-muted-foreground">
-        Weakest area: {health.weakest_evidence_area}
+        Weakest evidence area: {health.weakest_evidence_area}
       </p>
       {health.last_evidence_update ? (
         <p className="mt-1 text-xs text-muted-foreground">
-          Last evidence update: {new Date(health.last_evidence_update).toLocaleString()}
+          Last updated: {new Date(health.last_evidence_update).toLocaleString()}
         </p>
       ) : null}
     </div>
@@ -2754,7 +4285,7 @@ function RecentUpdatesCard({
   updates: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>["recent_strategic_updates"];
 }) {
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <div className="rounded-lg border border-border bg-card p-5">
       <div className="flex items-center gap-2">
         <ScrollText className="h-4 w-4 text-primary" aria-hidden="true" />
         <h2 className="text-base font-semibold">Recent Strategic Updates</h2>
@@ -2769,16 +4300,16 @@ function RecentUpdatesCard({
           {updates.slice(0, 6).map((update) => (
             <div className="py-3" key={update.id}>
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                <h3 className="text-sm font-semibold">{update.title}</h3>
+                <h3 className="text-sm font-semibold">{clarifyWorkspaceTerm(update.title)}</h3>
                 <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
                   {formatLabel(update.related_entity_type)}
                 </span>
               </div>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                {truncate(update.summary, 220)}
+                {truncate(clarifyWorkspaceTerm(update.summary), 220)}
               </p>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                Why it matters: {truncate(update.why_it_matters, 180)}
+                Why it matters: {truncate(clarifyWorkspaceTerm(update.why_it_matters), 180)}
               </p>
             </div>
           ))}
@@ -2797,7 +4328,7 @@ function KeyAssumptionsAndRisks({
 }) {
   return (
     <div className="grid gap-5 lg:grid-cols-2">
-      <div className="rounded-lg border border-border bg-white p-5">
+      <div className="rounded-lg border border-border bg-card p-5">
         <div className="flex items-center gap-2">
           <ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />
           <h2 className="text-base font-semibold">Key Assumptions</h2>
@@ -2808,9 +4339,9 @@ function KeyAssumptionsAndRisks({
             this idea to work.
           </p>
         ) : (
-          <div className="mt-4 space-y-3">
+          <div className="mt-4 divide-y divide-border">
             {assumptions.slice(0, 4).map((assumption) => (
-              <div key={assumption.id} className="rounded-md border border-border p-3">
+              <div key={assumption.id} className="py-3 first:pt-0">
                 <div className="flex flex-wrap gap-2 text-xs">
                   <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
                     {assumption.importance}
@@ -2819,14 +4350,14 @@ function KeyAssumptionsAndRisks({
                     uncertainty {assumption.uncertainty}
                   </span>
                   {assumption.kill_risk ? (
-                    <span className="rounded-md bg-red-50 px-2 py-1 text-red-700">
+                    <span className="rounded-md bg-danger-muted px-2 py-1 text-danger-foreground">
                       kill risk
                     </span>
                   ) : null}
                 </div>
                 <MarkdownContent
                   className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
-                  markdown={assumption.text}
+                  markdown={assumptionBeliefText(assumption.text)}
                 />
               </div>
             ))}
@@ -2834,7 +4365,7 @@ function KeyAssumptionsAndRisks({
         )}
       </div>
 
-      <div className="rounded-lg border border-border bg-white p-5">
+      <div className="rounded-lg border border-border bg-card p-5">
         <div className="flex items-center gap-2">
           <Beaker className="h-4 w-4 text-primary" aria-hidden="true" />
           <h2 className="text-base font-semibold">Key Risks</h2>
@@ -2845,9 +4376,9 @@ function KeyAssumptionsAndRisks({
             tested or mitigated.
           </p>
         ) : (
-          <div className="mt-4 space-y-3">
+          <div className="mt-4 divide-y divide-border">
             {risks.slice(0, 4).map((risk) => (
-              <div key={risk.id} className="rounded-md border border-border p-3">
+              <div key={risk.id} className="py-3 first:pt-0">
                 <div className="flex flex-wrap gap-2 text-xs">
                   <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
                     {risk.severity}
@@ -2871,7 +4402,7 @@ function KeyAssumptionsAndRisks({
 
 function tabForAction(action: NextBestAction): ProjectTab {
   const hash = action.target_route?.split("#")[1];
-  return tabFromHash(hash ? `#${hash}` : "") ?? tabForActionType(action.action_type);
+  return tabFromHash(hash ? `#${hash}` : "") ?? tabFromAnchor(hash ?? "") ?? tabForActionType(action.action_type);
 }
 
 function anchorForAction(action: NextBestAction): string | null {
@@ -2886,41 +4417,83 @@ function anchorForAction(action: NextBestAction): string | null {
 }
 
 function tabForActionType(actionType: string): ProjectTab {
-  if (actionType.includes("brief") || actionType.includes("research")) {
-    return "Research";
-  }
-  if (actionType.includes("competitor")) {
-    return "Competitors";
-  }
-  if (actionType.includes("assumption")) {
-    return "Assumptions";
+  if (
+    actionType.includes("brief") ||
+    actionType.includes("research") ||
+    actionType.includes("competitor") ||
+    actionType.includes("evidence") ||
+    actionType.includes("source")
+  ) {
+    return "Intelligence";
   }
   if (
+    actionType.includes("assumption") ||
     actionType.includes("experiment") ||
     actionType.includes("validation") ||
     actionType.includes("result")
   ) {
     return "Validation";
   }
-  if (actionType.includes("decision")) {
-    return "Decisions";
+  if (
+    actionType.includes("decision") ||
+    actionType.includes("record") ||
+    actionType.includes("history")
+  ) {
+    return "Record";
   }
-  if (actionType.includes("evidence")) {
-    return "Evidence";
-  }
-  return "Overview";
+  return "Decision";
 }
 
 function tabFromHash(hash: string): ProjectTab | null {
   const normalized = hash.replace("#", "").toLowerCase();
-  if (normalized === "brief") {
-    return "Research";
+  const aliases: Record<string, ProjectTab> = {
+    assumption: "Validation",
+    assumptions: "Validation",
+    brief: "Intelligence",
+    competitor: "Intelligence",
+    competitors: "Intelligence",
+    decision: "Decision",
+    decisions: "Record",
+    evidence: "Intelligence",
+    experiment: "Validation",
+    experiments: "Validation",
+    history: "Record",
+    intelligence: "Intelligence",
+    market: "Intelligence",
+    overview: "Decision",
+    record: "Record",
+    research: "Intelligence",
+    validation: "Validation",
+  };
+  return aliases[normalized] ?? null;
+}
+
+function tabFromAnchor(anchor: string | null): ProjectTab | null {
+  if (!anchor) {
+    return null;
   }
-  if (normalized === "experiments") {
+  if (
+    anchor.includes("research") ||
+    anchor.includes("evidence") ||
+    anchor.includes("source") ||
+    anchor.includes("competitor") ||
+    anchor.includes("brief")
+  ) {
+    return "Intelligence";
+  }
+  if (
+    anchor.includes("experiment") ||
+    anchor.includes("validation") ||
+    anchor.includes("result") ||
+    anchor.includes("assumption") ||
+    anchor.includes("blocker")
+  ) {
     return "Validation";
   }
-  const match = tabs.find((tab) => tab.toLowerCase() === normalized);
-  return match ?? null;
+  if (anchor.includes("history") || anchor.includes("decision-record")) {
+    return "Record";
+  }
+  return null;
 }
 
 function formatStage(stage: ProjectStage) {
@@ -2930,14 +4503,27 @@ function formatStage(stage: ProjectStage) {
     brief_generated: "Research ready",
     competitors_analyzed: "Competitors mapped",
     assumptions_identified: "Assumptions identified",
-    validation_plan_created: "Validation plan ready",
+    validation_plan_created: "Validation planned",
     experiment_running: "Validation running",
-    decision_ready: "Decision recommended",
+    decision_ready: "Recommendation drafted",
     paused: "Paused",
     killed: "Killed",
     proceeding: "Decision recorded",
   };
   return labels[stage] ?? formatLabel(stage);
+}
+
+function stageBadgeClass(stage: ProjectStage) {
+  if (stage === "proceeding") {
+    return "rounded-md bg-success-muted px-2 py-1 text-xs font-medium text-success-foreground";
+  }
+  if (stage === "decision_ready" || stage === "validation_plan_created" || stage === "experiment_running") {
+    return "rounded-md bg-warning-muted px-2 py-1 text-xs font-medium text-warning-foreground";
+  }
+  if (stage === "paused" || stage === "killed") {
+    return "rounded-md bg-danger-muted px-2 py-1 text-xs font-medium text-danger-foreground";
+  }
+  return "rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground";
 }
 
 function lifecycleStepIndex(stage: ProjectStage) {
@@ -2972,6 +4558,20 @@ type ProjectHealth = {
   detail: string;
 };
 
+type DecisionGradeSignal = {
+  detail: string;
+  tone: HealthTone;
+  value: string;
+};
+
+type CanonicalProjectStatus = {
+  detail: string;
+  label: string;
+  mobileSentence: string;
+  sentence: string;
+  tone: HealthTone;
+};
+
 type LifecycleStatus = "complete" | "current" | "needs_work" | "blocked";
 
 type LifecycleRow = {
@@ -2981,6 +4581,257 @@ type LifecycleRow = {
   signal: string;
   next: string;
 };
+
+function stageFocusCopy(stage: ProjectStage) {
+  if (stage === "validation_plan_created" || stage === "experiment_running") {
+    return {
+      summary:
+        stage === "experiment_running"
+          ? "Validation is active. Preserve the signal by logging results as soon as the test produces evidence."
+          : "A validation plan exists. The next useful work is running the test and logging real evidence before making a build decision.",
+      title: "Validation focus",
+    };
+  }
+
+  if (stage === "decision_ready" || stage === "proceeding") {
+    return {
+      summary:
+        stage === "proceeding"
+          ? "A decision has been recorded. Keep the next milestone tied to the evidence and revisit trigger."
+          : "Validation results exist. Use the evidence trail to decide whether to continue research, pivot, pause, kill, or proceed narrowly.",
+      title: "Decision focus",
+    };
+  }
+
+  if (stage === "brief_generated" || stage === "competitors_analyzed") {
+    return {
+      summary:
+        "Use this snapshot to keep the thesis, target user, wedge, and risk in view while research is still forming.",
+      title: "Research focus",
+    };
+  }
+
+  if (stage === "assumptions_identified") {
+    return {
+      summary:
+        "The next useful work is converting the decision blocker into one concrete validation test.",
+      title: "Strategic snapshot",
+    };
+  }
+
+  return {
+    summary:
+      "Use this snapshot to keep the thesis, target user, wedge, and risk in view while research is still forming.",
+    title: "Strategic snapshot",
+  };
+}
+
+function recoveryGuidance(
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>,
+  missingContextCount: number,
+): {
+  detail: string;
+  label: string;
+  title: string;
+  tone: HealthTone;
+} {
+  const blocker = riskiestAssumption(overview);
+
+  if (missingContextCount > 0) {
+    return {
+      detail: "Fill the missing context before expanding evidence work. A clearer target user, problem, thesis, or wedge will make the next recommendation easier to trust.",
+      label: `${missingContextCount} gap${missingContextCount === 1 ? "" : "s"}`,
+      title: "Recover by closing context gaps",
+      tone: "warning",
+    };
+  }
+
+  if (overview.evidence_health.source_count === 0) {
+    return {
+      detail: "Plan an evidence review before treating the verdict as durable. The workspace needs source coverage before it can support a strategic decision.",
+      label: "No sources",
+      title: "Recover by adding evidence",
+      tone: "warning",
+    };
+  }
+
+  if (blocker && blocker.evidence_links.length === 0) {
+    return {
+      detail: "Run or log the first proof for the decision blocker. Do not broaden scope until the blocker has real validation evidence.",
+      label: "Proof needed",
+      title: "Recover by testing the blocker",
+      tone: "warning",
+    };
+  }
+
+  if (overview.evidence_health.unsupported_claim_count > 0) {
+    return {
+      detail: "Resolve the open questions in the evidence basis before recording a stronger decision. Keep the verdict conditional until unsupported claims are handled.",
+      label: `${overview.evidence_health.unsupported_claim_count} open`,
+      title: "Recover by resolving open questions",
+      tone: "warning",
+    };
+  }
+
+  const health = projectHealth(overview);
+  return {
+    detail: health.detail,
+    label: health.label,
+    title: "Recovery path is clear",
+    tone: health.tone,
+  };
+}
+
+function canonicalProjectStatus(
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>,
+): CanonicalProjectStatus {
+  const stage = overview.strategic_snapshot.current_stage;
+  const risk = highestRiskLabel(overview);
+  const decisionGrade = decisionGradeEvidence(overview);
+  const confidence = formatConfidenceValue(overview.current_recommendation.confidence).toLowerCase();
+  const progress = formatStage(stage).toLowerCase();
+  const nextAction = sentenceFragment(clarifyActionLabel(overview.next_best_action.label));
+  const missingContextCount = decisionContextGaps(overview).filter(
+    (item) => item.status === "missing",
+  ).length;
+  const blocker = riskiestAssumption(overview);
+  const badge = canonicalStatusBadge(overview, {
+    blockerNeedsProof: Boolean(blocker && blocker.evidence_links.length === 0),
+    decisionGrade,
+    missingContextCount,
+    risk,
+  });
+  const evidenceStatus =
+    decisionGrade.value === "Ready to decide"
+      ? "evidence ready to decide"
+      : "evidence needing proof";
+
+  return {
+    detail: `Supporting signals: ${countLabel(overview.evidence_health.source_count, "source")}, ${countLabel(overview.evidence_health.competitor_count, "competitor")}, ${countLabel(overview.evidence_health.validated_assumption_count, "validated assumption")}, ${countLabel(overview.evidence_health.unsupported_claim_count, "open question")}. Full recommendation: ${truncate(clarifyStatusRecommendation(overview.current_recommendation.recommendation), 140)}`,
+    label: badge.label,
+    mobileSentence: `${canonicalVerdictPhrase(overview)}. Next: ${nextAction}.`,
+    sentence: `${canonicalVerdictPhrase(overview)}, with ${risk.toLowerCase()} risk, ${confidence} confidence, ${evidenceStatus}, progress at ${progress}, and the next action is to ${nextAction}.`,
+    tone: badge.tone,
+  };
+}
+
+function canonicalStatusBadge(
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>,
+  {
+    blockerNeedsProof,
+    decisionGrade,
+    missingContextCount,
+    risk,
+  }: {
+    blockerNeedsProof: boolean;
+    decisionGrade: DecisionGradeSignal;
+    missingContextCount: number;
+    risk: string;
+  },
+): { label: string; tone: HealthTone } {
+  const stage = overview.strategic_snapshot.current_stage;
+
+  if (stage === "killed" || overview.project.status === "killed") {
+    return { label: "Stopped", tone: "danger" };
+  }
+
+  if (stage === "paused" || overview.project.status === "paused") {
+    return { label: "Paused", tone: "neutral" };
+  }
+
+  if (stage === "proceeding") {
+    return { label: "Recorded", tone: "good" };
+  }
+
+  const contextIsPrimary =
+    missingContextCount > 0 &&
+    (stage === "draft_idea" ||
+      stage === "structured_intake" ||
+      overview.evidence_health.source_count === 0);
+
+  if (contextIsPrimary) {
+    return { label: "Clarify", tone: "warning" };
+  }
+
+  if (overview.evidence_health.source_count === 0) {
+    return { label: "Needs evidence", tone: "warning" };
+  }
+
+  if (blockerNeedsProof) {
+    return { label: "Proof needed", tone: "warning" };
+  }
+
+  if (decisionGrade.value === "Ready to decide") {
+    return { label: "Ready", tone: "good" };
+  }
+
+  if (risk === "High") {
+    return { label: "Validate risk", tone: "warning" };
+  }
+
+  return { label: "On track", tone: "neutral" };
+}
+
+function canonicalVerdictPhrase(
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>,
+) {
+  const recommendation = overview.current_recommendation.recommendation;
+  const normalized = recommendation.toLowerCase();
+  const stage = overview.strategic_snapshot.current_stage;
+
+  if (stage === "killed" || overview.project.status === "killed") {
+    return "Current verdict is stop the project";
+  }
+
+  if (stage === "paused" || overview.project.status === "paused") {
+    return "Current verdict is pause active work";
+  }
+
+  if (stage === "proceeding") {
+    return "Current verdict is proceed under the recorded decision";
+  }
+
+  if (normalized.includes("do not build") || normalized.includes("don't build")) {
+    return "Current verdict is do not build yet";
+  }
+
+  if (normalized.includes("pivot")) {
+    return "Current verdict is pivot or narrow the wedge";
+  }
+
+  if (normalized.includes("proceed")) {
+    return "Current verdict is proceed narrowly";
+  }
+
+  if (normalized.includes("kill") || normalized.includes("stop")) {
+    return "Current verdict is stop the project";
+  }
+
+  if (normalized.includes("pause")) {
+    return "Current verdict is pause active work";
+  }
+
+  return `Current verdict is ${sentenceFragment(truncate(recommendation, 72))}`;
+}
+
+function sentenceFragment(value: string) {
+  const cleaned = value.trim().replace(/[.!?]+$/u, "");
+  if (!cleaned) {
+    return "continue the current work";
+  }
+  return cleaned.charAt(0).toLowerCase() + cleaned.slice(1);
+}
+
+function clarifyStatusRecommendation(value: string) {
+  return clarifyActionText(value).replace(
+    /\bthe highest-risk validation test\b/gi,
+    "the decision-blocker validation test",
+  );
+}
+
+function countLabel(count: number, singular: string) {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
 
 function projectHealth(
   overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>,
@@ -3033,6 +4884,37 @@ function projectHealth(
   };
 }
 
+function decisionGradeEvidence(
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>,
+): DecisionGradeSignal {
+  const hasSources = overview.evidence_health.source_count > 0;
+  const hasValidatedBlocker = overview.evidence_health.validated_assumption_count > 0;
+  const confidenceIsWeak = overview.current_recommendation.confidence === "low";
+  const highRiskStillOpen = highestRiskLabel(overview) === "High";
+
+  if (hasSources && hasValidatedBlocker && !confidenceIsWeak && !highRiskStillOpen) {
+    return {
+      detail:
+        "Evidence is ready to support a decision: the blocker has validation support, source coverage exists, and the recommendation is not low confidence.",
+      tone: "good",
+      value: "Ready to decide",
+    };
+  }
+
+  const reasons = [
+    !hasSources ? "source coverage is missing" : null,
+    !hasValidatedBlocker ? "the decision blocker has not been validated" : null,
+    confidenceIsWeak ? "recommendation confidence is low" : null,
+    highRiskStillOpen ? "high strategic risk remains" : null,
+  ].filter((reason): reason is string => Boolean(reason));
+
+  return {
+    detail: `Evidence still needs proof because ${reasons.join(", ")}.`,
+    tone: "warning",
+    value: "Needs proof",
+  };
+}
+
 function riskiestAssumption(
   overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>,
 ) {
@@ -3076,28 +4958,15 @@ function highestRiskLabel(
   return "Unknown";
 }
 
-function riskTone(value: string): HealthTone {
-  if (value === "High") {
-    return "warning";
-  }
-  if (value === "Medium") {
-    return "neutral";
-  }
-  if (value === "Unknown") {
-    return "neutral";
-  }
-  return "good";
-}
-
 function tonePillClass(tone: HealthTone) {
   if (tone === "good") {
-    return "inline-flex w-fit rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700";
+    return "inline-flex w-fit rounded-md bg-success-muted px-2 py-1 text-xs font-medium text-success-foreground";
   }
   if (tone === "warning") {
-    return "inline-flex w-fit rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700";
+    return "inline-flex w-fit rounded-md bg-warning-muted px-2 py-1 text-xs font-medium text-warning-foreground";
   }
   if (tone === "danger") {
-    return "inline-flex w-fit rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700";
+    return "inline-flex w-fit rounded-md bg-danger-muted px-2 py-1 text-xs font-medium text-danger-foreground";
   }
   return "inline-flex w-fit rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground";
 }
@@ -3121,41 +4990,6 @@ function assumptionConfidenceLabel(value: string | null) {
 
 function formatConfidenceValue(value: RecommendationConfidence) {
   return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function HealthBadge({ health }: { health: ProjectHealth }) {
-  return (
-    <span className={healthBadgeClass(health.tone)}>
-      <span className={healthDotClass(health.tone)} aria-hidden="true" />
-      {health.label}
-    </span>
-  );
-}
-
-function healthBadgeClass(tone: HealthTone) {
-  if (tone === "good") {
-    return "inline-flex w-fit items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700";
-  }
-  if (tone === "warning") {
-    return "inline-flex w-fit items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700";
-  }
-  if (tone === "danger") {
-    return "inline-flex w-fit items-center gap-1.5 rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700";
-  }
-  return "inline-flex w-fit items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground";
-}
-
-function healthDotClass(tone: HealthTone) {
-  if (tone === "good") {
-    return "h-2 w-2 rounded-full bg-emerald-600";
-  }
-  if (tone === "warning") {
-    return "h-2 w-2 rounded-full bg-amber-500";
-  }
-  if (tone === "danger") {
-    return "h-2 w-2 rounded-full bg-red-600";
-  }
-  return "h-2 w-2 rounded-full bg-muted-foreground";
 }
 
 function lifecycleRows(
@@ -3192,7 +5026,7 @@ function lifecycleRows(
       label: "Research",
       complete: researchComplete,
       signal: `${overview.evidence_health.source_count} sources found`,
-      next: researchComplete ? "Review findings" : "Run a research sprint",
+      next: researchComplete ? "Review findings" : "Plan evidence review",
     },
     {
       key: "evidence",
@@ -3209,7 +5043,7 @@ function lifecycleRows(
       label: "Assumptions",
       complete: overview.key_assumptions.length > 0,
       signal: `${overview.key_assumptions.length} ranked`,
-      next: overview.key_assumptions.length > 0 ? "Validate riskiest item" : "Extract assumptions",
+      next: overview.key_assumptions.length > 0 ? "Validate blocker" : "Extract assumptions",
     },
     {
       key: "validation",
@@ -3222,7 +5056,7 @@ function lifecycleRows(
       key: "decision",
       label: "Decision",
       complete: decisionComplete,
-      signal: decisionComplete ? "Decision recommended or recorded" : "Not decision-grade yet",
+      signal: decisionComplete ? "Recommendation drafted or decision recorded" : "Needs validation signal",
       next: decisionComplete ? "Review decision rationale" : "Wait for validation signal",
     },
   ] as const;
@@ -3236,10 +5070,43 @@ function lifecycleRows(
   }));
 }
 
+function clarifyActionText(value: string) {
+  return clarifyDecisionNarrative(value)
+    .replace(/\bthe highest-risk assumption\b/gi, "the decision blocker")
+    .replace(/\bthe highest risk assumption\b/gi, "the decision blocker")
+    .replace(/\bthe riskiest assumption\b/gi, "the decision blocker")
+    .replace(/\bhighest-risk assumption\b/gi, "decision blocker")
+    .replace(/\bhighest risk assumption\b/gi, "decision blocker")
+    .replace(/\briskiest assumption\b/gi, "decision blocker");
+}
+
+function clarifyActionLabel(value: string) {
+  return value
+    .replace(/^Add Evidence$/i, "Add source")
+    .replace(/^Run Research$/i, "Plan evidence review")
+    .replace(/^Review Research$/i, "Review evidence")
+    .replace(/^View activity trace$/i, "Review activity trace");
+}
+
+function clarifyWorkspaceTerm(value: string) {
+  return value
+    .replace(/\bAgentic Research\b/g, "Evidence review")
+    .replace(/\bResearch Sprint\b/g, "Evidence Review")
+    .replace(/\bResearch sprint\b/g, "Evidence review")
+    .replace(/\bresearch sprint\b/g, "evidence review")
+    .replace(/\bResearch Memo\b/g, "Evidence Memo")
+    .replace(/\bResearch memo\b/g, "Evidence memo")
+    .replace(/\bresearch memo\b/g, "evidence memo")
+    .replace(/\bProject update\b/g, "Decision update")
+    .replace(/\bproject update\b/g, "decision update")
+    .replace(/\bMemory updates\b/g, "Decision updates")
+    .replace(/\bmemory updates\b/g, "decision updates");
+}
+
 function LifecycleStatusBadge({ status }: { status: LifecycleStatus }) {
   if (status === "complete") {
     return (
-      <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+      <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-success-muted px-2 py-1 text-xs font-medium text-success-foreground">
         <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
         Complete
       </span>
@@ -3247,7 +5114,7 @@ function LifecycleStatusBadge({ status }: { status: LifecycleStatus }) {
   }
   if (status === "current") {
     return (
-      <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">
+      <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-warning-muted px-2 py-1 text-xs font-medium text-warning-foreground">
         <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />
         Current
       </span>
@@ -3255,7 +5122,7 @@ function LifecycleStatusBadge({ status }: { status: LifecycleStatus }) {
   }
   if (status === "blocked") {
     return (
-      <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
+      <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-danger-muted px-2 py-1 text-xs font-medium text-danger-foreground">
         <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />
         Blocked
       </span>

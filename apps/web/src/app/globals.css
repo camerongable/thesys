@@ -4,33 +4,33 @@
 
 :root {
   color-scheme: light;
-  --background: 180 7% 97%;
-  --foreground: 210 11% 4%;
+  --background: 210 20% 98%;
+  --foreground: 220 18% 10%;
   --card: 0 0% 100%;
-  --card-foreground: 210 11% 4%;
-  --surface: 210 7% 94%;
-  --muted: 240 2% 90%;
-  --muted-foreground: 220 6% 40%;
-  --border: 215 22% 85%;
+  --card-foreground: 220 18% 10%;
+  --surface: 210 18% 95%;
+  --muted: 210 14% 91%;
+  --muted-foreground: 218 11% 38%;
+  --border: 214 18% 84%;
   --input: 0 0% 100%;
-  --primary: 65 100% 23%;
-  --primary-foreground: 180 7% 97%;
-  --action: 66 58% 43%;
-  --action-foreground: 210 11% 4%;
-  --success: 139 62% 40%;
-  --success-muted: 142 55% 94%;
-  --success-border: 142 40% 82%;
-  --success-foreground: 144 45% 25%;
-  --warning: 36 88% 45%;
-  --warning-muted: 43 96% 94%;
-  --warning-border: 38 92% 78%;
-  --warning-foreground: 32 82% 32%;
-  --danger: 0 80% 63%;
-  --danger-muted: 0 86% 96%;
-  --danger-border: 0 80% 84%;
-  --danger-foreground: 0 70% 40%;
-  --info: 186 98% 40%;
-  --focus: 65 89% 54%;
+  --primary: 92 24% 32%;
+  --primary-foreground: 0 0% 100%;
+  --action: 92 22% 38%;
+  --action-foreground: 0 0% 100%;
+  --success: 146 42% 34%;
+  --success-muted: 146 38% 94%;
+  --success-border: 146 28% 80%;
+  --success-foreground: 147 43% 24%;
+  --warning: 38 76% 44%;
+  --warning-muted: 42 82% 94%;
+  --warning-border: 39 65% 76%;
+  --warning-foreground: 34 75% 30%;
+  --danger: 0 62% 54%;
+  --danger-muted: 0 70% 96%;
+  --danger-border: 0 60% 84%;
+  --danger-foreground: 0 62% 36%;
+  --info: 205 30% 44%;
+  --focus: 92 28% 46%;
   --font-sans: "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "Berkeley Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --radius-default: 6px;
@@ -38,33 +38,33 @@
 
 .dark {
   color-scheme: dark;
-  --background: 210 11% 4%;
-  --foreground: 180 7% 97%;
-  --card: 210 6% 6%;
-  --card-foreground: 180 7% 97%;
-  --surface: 210 4% 9%;
-  --muted: 213 6% 23%;
-  --muted-foreground: 220 6% 57%;
-  --border: 223 9% 15%;
-  --input: 210 4% 9%;
-  --primary: 65 89% 54%;
-  --primary-foreground: 210 11% 4%;
-  --action: 65 89% 54%;
-  --action-foreground: 210 11% 4%;
-  --success: 133 62% 40%;
-  --success-muted: 140 64% 12%;
-  --success-border: 139 55% 24%;
-  --success-foreground: 133 62% 70%;
-  --warning: 45 89% 54%;
-  --warning-muted: 38 65% 13%;
-  --warning-border: 38 55% 26%;
-  --warning-foreground: 45 89% 68%;
-  --danger: 0 80% 63%;
-  --danger-muted: 0 55% 13%;
-  --danger-border: 0 42% 28%;
-  --danger-foreground: 0 80% 73%;
-  --info: 186 98% 48%;
-  --focus: 65 89% 54%;
+  --background: 220 13% 7%;
+  --foreground: 210 16% 94%;
+  --card: 220 11% 9%;
+  --card-foreground: 210 16% 94%;
+  --surface: 218 10% 12%;
+  --muted: 217 9% 18%;
+  --muted-foreground: 216 10% 65%;
+  --border: 216 10% 19%;
+  --input: 218 10% 12%;
+  --primary: 92 22% 62%;
+  --primary-foreground: 220 13% 7%;
+  --action: 92 22% 60%;
+  --action-foreground: 220 13% 7%;
+  --success: 146 38% 50%;
+  --success-muted: 146 35% 14%;
+  --success-border: 146 30% 28%;
+  --success-foreground: 146 45% 72%;
+  --warning: 40 78% 60%;
+  --warning-muted: 38 50% 15%;
+  --warning-border: 38 44% 30%;
+  --warning-foreground: 40 88% 74%;
+  --danger: 0 66% 64%;
+  --danger-muted: 0 42% 15%;
+  --danger-border: 0 34% 30%;
+  --danger-foreground: 0 72% 76%;
+  --info: 206 34% 62%;
+  --focus: 92 26% 62%;
 }
 
 * {
@@ -78,6 +78,13 @@ body {
   font-family: var(--font-sans);
   font-feature-settings: "cv01", "ss03";
   text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }
 
 input,
@@ -103,6 +110,10 @@ option {
 }
 
 @layer utilities {
+  .bg-surface {
+    background-color: hsl(var(--surface));
+  }
+
   .dark .bg-white {
     background-color: hsl(var(--card)) !important;
   }

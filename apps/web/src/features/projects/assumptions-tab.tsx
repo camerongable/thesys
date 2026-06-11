@@ -12,6 +12,13 @@ import { Fragment, ReactNode, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { DomainError, DomainHeader, DomainPanel } from "@/features/projects/decision-room";
+import {
+  assumptionBeliefText,
+  decisionBlockerText,
+  evidenceReadinessText,
+  nextProofText,
+} from "@/features/projects/assumption-copy";
 import {
   Assumption,
   Experiment,
@@ -193,18 +200,8 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
 
   return (
     <section className="mt-6 space-y-6">
-      <div className="rounded-lg border border-border bg-white p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-              Assumptions
-            </p>
-            <h2 className="mt-2 text-xl font-semibold tracking-normal">What must be true?</h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              Turn strategic uncertainty into operational validation priorities. Start with
-              the riskiest assumption, then work down the ranked list.
-            </p>
-          </div>
+      <DomainHeader
+        action={
           <Button
             className="w-full justify-center whitespace-nowrap sm:w-60"
             disabled={extractMutation.isPending}
@@ -212,20 +209,28 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
             type="button"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            {extractMutation.isPending ? "Extracting..." : "Extract Assumptions"}
+            {extractMutation.isPending ? "Ranking blockers..." : "Rank decision blockers"}
           </Button>
-        </div>
-      </div>
+        }
+        description="Rank the beliefs that can change the verdict. The page starts with the blocker most likely to stop a proceed decision, then exposes the full risk map."
+        icon={<ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />}
+        question="What could block the decision?"
+        signals={[
+          { label: "Assumptions", value: rankedAssumptions.length },
+          { label: "High risk", tone: filterCounts.high_risk > 0 ? "danger" : "neutral", value: filterCounts.high_risk },
+          { label: "Needs validation", tone: filterCounts.needs_validation > 0 ? "warning" : "neutral", value: filterCounts.needs_validation },
+          { label: "Validation plans", tone: experiments.length > 0 ? "success" : "neutral", value: experiments.length },
+        ]}
+        title="Assumptions"
+      />
 
       {error ? (
-        <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-          {(error as Error).message}
-        </div>
+        <DomainError message={(error as Error).message} />
       ) : null}
 
       {tracePending || lastWorkflowRunId ? (
-        <details className="rounded-lg border border-border bg-white p-5" open={tracePending}>
-          <summary className="cursor-pointer text-sm font-semibold">View activity trace</summary>
+        <details className="rounded-lg border border-border bg-card p-5" open={tracePending}>
+          <summary className="cursor-pointer text-sm font-semibold">View blocker trace</summary>
           <div className="mt-4 border-t border-border pt-4">
             <WorkflowTrace
               pending={tracePending}
@@ -241,29 +246,32 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
       ) : null}
 
       {riskiestAssumption ? (
-        <div className="rounded-lg border border-border bg-white p-5">
+        <DomainPanel>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="flex items-center gap-2">
                 <ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h3 className="text-base font-semibold">Riskiest Assumption</h3>
+                <h3 className="text-base font-semibold">Decision blocker</h3>
               </div>
+              <p className="mt-3 text-xs font-medium text-muted-foreground">
+                Belief to validate
+              </p>
               <MarkdownContent
-                className="mt-3 max-w-3xl space-y-2 text-sm leading-6 text-foreground"
-                markdown={riskiestAssumption.text}
+                className="mt-2 max-w-[72ch] space-y-2 text-sm leading-6 text-foreground"
+                markdown={assumptionBeliefText(riskiestAssumption.text)}
               />
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                {decisionBlockerText(riskiestAssumption)}
+              </p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 <Badge>{riskLabel(riskiestAssumption)}</Badge>
                 <Badge>{formatConfidence(riskiestAssumption.confidence_score)}</Badge>
-                <Badge>{evidenceStrength(riskiestAssumption.evidence_links.length)}</Badge>
+                <Badge>{evidenceReadinessText(riskiestAssumption)}</Badge>
                 <Badge>{formatLabel(riskiestAssumption.status)}</Badge>
               </div>
-              {riskiestAssumption.recommended_test ? (
-                <MarkdownContent
-                  className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground"
-                  markdown={riskiestAssumption.recommended_test}
-                />
-              ) : null}
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                {nextProofText(riskiestAssumption)}
+              </p>
             </div>
             <Button
               className="w-full justify-center whitespace-nowrap sm:w-60"
@@ -283,7 +291,7 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
               )}
             </Button>
           </div>
-        </div>
+        </DomainPanel>
       ) : null}
 
       {topValidationPriorities.length > 0 ? (
@@ -308,11 +316,11 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
       ) : null}
 
       <div className="grid gap-5">
-        <div className="rounded-lg border border-border bg-white p-5">
+        <DomainPanel>
           <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h3 className="text-sm font-semibold">Ranked Assumptions</h3>
+              <h3 className="text-sm font-semibold">Ranked blockers</h3>
             </div>
             <div className="flex flex-col gap-2 sm:items-end">
               <div className="flex flex-wrap gap-2 sm:justify-end">
@@ -325,7 +333,7 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                         "inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium transition",
                         isSelected
                           ? "border-action bg-action text-action-foreground"
-                          : "border-border bg-white text-muted-foreground hover:border-primary/60 hover:text-foreground",
+                          : "border-border bg-card text-muted-foreground hover:border-primary/60 hover:text-foreground",
                       ].join(" ")}
                       key={option}
                       onClick={() => selectFilter(option)}
@@ -356,12 +364,11 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
           {assumptionsQuery.isLoading ? (
             <p className="mt-4 text-sm text-muted-foreground">Loading assumptions...</p>
           ) : assumptions.length === 0 ? (
-            <div className="mt-4 rounded-md border border-dashed border-border p-4">
-              <h4 className="text-sm font-semibold">No assumptions identified yet.</h4>
+            <div className="mt-4 border-t border-dashed border-border pt-4">
+              <h4 className="text-sm font-semibold">No blockers ranked yet.</h4>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Assumptions are the beliefs that must be true for this idea to work. The
-                system will help rank them by risk and turn them into validation
-                experiments.
+                Blockers are the beliefs that must be true for this idea to work. Rank them by
+                risk, then turn the riskiest one into a validation test.
               </p>
               <Button
                 className="mt-3"
@@ -372,13 +379,13 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                 variant="secondary"
               >
                 <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                {extractMutation.isPending ? "Extracting..." : "Extract Assumptions"}
+                {extractMutation.isPending ? "Ranking blockers..." : "Rank decision blockers"}
               </Button>
             </div>
           ) : (
             <div className="mt-4 space-y-3">
               {visibleAssumptions.length === 0 ? (
-                <div className="rounded-md border border-dashed border-border p-4">
+                <div className="border-t border-dashed border-border pt-4">
                   <h4 className="text-sm font-semibold">
                     No {filterLabel(filter).toLowerCase()} assumptions found.
                   </h4>
@@ -393,7 +400,7 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                     type="button"
                     variant="secondary"
                   >
-                    Show All
+                    Show all blockers
                   </Button>
                 </div>
               ) : null}
@@ -401,16 +408,16 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
               {visibleAssumptions.length > 0 ? (
                 <div className="space-y-3">
                   <div className="min-w-0 space-y-3">
-                    <div className="hidden overflow-hidden rounded-md border border-border lg:block">
+                    <div className="hidden overflow-x-auto lg:block">
                       <table className="w-full table-fixed border-collapse text-left text-sm">
                         <thead>
-                          <tr className="border-b border-border text-xs uppercase tracking-normal text-muted-foreground">
-                            <th className="w-[42%] px-3 py-3 font-medium">Assumption</th>
+                          <tr className="border-b border-border text-xs text-muted-foreground">
+                            <th className="w-[42%] px-3 py-3 font-medium">Belief</th>
                             <th className="w-[8%] px-3 py-3 font-medium">Risk</th>
                             <th className="w-[12%] px-3 py-3 font-medium">Confidence</th>
                             <th className="w-[9%] px-3 py-3 font-medium">Evidence</th>
                             <th className="w-[15%] px-3 py-3 font-medium">Status</th>
-                            <th className="w-[14%] px-3 py-3 font-medium">Action</th>
+                            <th className="w-[14%] px-3 py-3 font-medium">Next step</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
@@ -431,12 +438,12 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                                   onClick={() => setSelectedAssumptionId(assumption.id)}
                                 >
                                   <td className="px-3 py-4">
-                                    <div className="line-clamp-3 text-foreground">{assumption.text}</div>
-                                    {assumption.recommended_test ? (
-                                      <div className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                                        {assumption.recommended_test}
-                                      </div>
-                                    ) : null}
+                                    <div className="line-clamp-3 text-foreground">
+                                      {assumptionBeliefText(assumption.text)}
+                                    </div>
+                                    <div className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                                      {nextProofText(assumption)}
+                                    </div>
                                   </td>
                                   <td className="px-3 py-4">
                                     <Badge>{compactRiskLabel(assumption)}</Badge>
@@ -449,7 +456,7 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                                   </td>
                                   <td className="px-3 py-4">
                                     <select
-                                      className="w-full rounded-md border border-border bg-white px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                                      className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary"
                                       disabled={statusMutation.isPending}
                                       onClick={(event) => event.stopPropagation()}
                                       onChange={(event) =>
@@ -528,10 +535,7 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                           : experimentsByAssumption.get(assumption.id) ?? [];
 
                         return (
-                          <article
-                            className="rounded-md border border-border p-4"
-                            key={assumption.id}
-                          >
+                          <article className="border-t border-border py-4 first:border-t-0 first:pt-0" key={assumption.id}>
                             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
                               <div className="min-w-0">
                                 <div className="flex items-start gap-3">
@@ -539,12 +543,12 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                                     {index + 1}
                                   </span>
                                   <div className="min-w-0 flex-1">
-                                    <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-                                      Assumption
+                                    <p className="text-xs font-medium text-muted-foreground">
+                                      Belief
                                     </p>
                                     <MarkdownContent
-                                      className="mt-2 max-w-3xl space-y-2 text-sm leading-6 text-foreground"
-                                      markdown={assumption.text}
+                                      className="mt-2 max-w-[72ch] space-y-2 text-sm leading-6 text-foreground"
+                                      markdown={assumptionBeliefText(assumption.text)}
                                     />
                                     <div className="mt-3 flex flex-wrap gap-2 text-xs">
                                       <Badge>{riskLabel(assumption)}</Badge>
@@ -556,10 +560,9 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                                         <summary className="cursor-pointer text-xs font-medium text-primary">
                                           Show validation method
                                         </summary>
-                                        <MarkdownContent
-                                          className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
-                                          markdown={assumption.recommended_test}
-                                        />
+                                        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                                          {nextProofText(assumption)}
+                                        </p>
                                       </details>
                                     ) : null}
                                   </div>
@@ -571,15 +574,15 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                                 />
                               </div>
 
-                              <div className="rounded-md bg-muted/50 p-3">
+                              <div className="border-t border-border pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
                                 <label
-                                  className="text-xs font-medium uppercase tracking-normal text-muted-foreground"
+                                  className="text-xs font-medium text-muted-foreground"
                                   htmlFor={`assumption-status-${assumption.id}`}
                                 >
                                   Status
                                 </label>
                                 <select
-                                  className="mt-2 w-full rounded-md border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                                  className="mt-2 w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
                                   disabled={statusMutation.isPending}
                                   id={`assumption-status-${assumption.id}`}
                                   onChange={(event) =>
@@ -626,7 +629,7 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                   type="button"
                   variant="secondary"
                 >
-                  Show {hiddenAssumptionCount} more assumptions
+                  Show {hiddenAssumptionCount} more blockers
                 </Button>
               ) : showAllAssumptions && visibleAssumptions.length > 5 ? (
                 <Button
@@ -635,14 +638,14 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
                   type="button"
                   variant="secondary"
                 >
-                  Show fewer assumptions
+                  Show fewer blockers
                 </Button>
               ) : null}
             </div>
           )}
-        </div>
+        </DomainPanel>
 
-        <details className="rounded-lg border border-border bg-white p-5">
+        <details className="rounded-lg border border-border bg-card p-5">
           <summary className="cursor-pointer list-none">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -654,17 +657,17 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
               </span>
             </div>
           </summary>
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-4 grid gap-x-5 gap-y-3 md:grid-cols-2 xl:grid-cols-3">
             {risksQuery.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading risks...</p>
             ) : risks.length === 0 ? (
               <p className="text-sm leading-6 text-muted-foreground">
-                No risks recorded yet. Extract assumptions to surface likely failure modes and
+                No risks recorded yet. Rank decision blockers to surface likely failure modes and
                 mitigation paths.
               </p>
             ) : (
               risks.map((risk) => (
-                <div key={risk.id} className="rounded-md border border-border p-3">
+                <div key={risk.id} className="border-t border-border py-3 first:border-t-0 first:pt-0">
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
                       {risk.severity}
@@ -747,7 +750,7 @@ function AssumptionPriorityMatrix({
   ];
 
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <DomainPanel>
       <div className="flex flex-col gap-2 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -755,7 +758,7 @@ function AssumptionPriorityMatrix({
             <h3 className="text-sm font-semibold">Risk / Confidence Matrix</h3>
           </div>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Use this view to spot the assumptions that deserve validation before more build work.
+            Use this view to spot the decision blockers that deserve validation before more build work.
           </p>
         </div>
         <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
@@ -768,8 +771,8 @@ function AssumptionPriorityMatrix({
           <div
             className={
               quadrant.key === "validate-first"
-                ? "rounded-md border border-action/50 bg-action/10 p-3"
-                : "rounded-md border border-border bg-muted/30 p-3"
+                ? "border-t-2 border-action bg-action/10 py-3"
+                : "border-t border-border py-3"
             }
             key={quadrant.key}
           >
@@ -788,21 +791,21 @@ function AssumptionPriorityMatrix({
                 return (
                   <button
                     className={[
-                      "w-full rounded-md border px-2 py-2 text-left text-xs leading-5 transition",
+                      "w-full rounded-md px-2 py-2 text-left text-xs leading-5 transition",
                       selected
-                        ? "border-action bg-action/15 text-foreground"
-                        : "border-border bg-muted/40 text-muted-foreground hover:border-primary/60 hover:text-foreground",
+                        ? "bg-action/15 text-foreground"
+                        : "bg-muted/40 text-muted-foreground hover:text-foreground",
                     ].join(" ")}
                     key={assumption.id}
                     onClick={() => onSelect(assumption)}
                     type="button"
                   >
-                    <span className="line-clamp-2">{assumption.text}</span>
+                    <span className="line-clamp-2">{assumptionBeliefText(assumption.text)}</span>
                   </button>
                 );
               })}
               {quadrant.items.length === 0 ? (
-                <p className="rounded-md border border-dashed border-border px-2 py-2 text-xs text-muted-foreground">
+                <p className="border-t border-dashed border-border px-2 py-2 text-xs text-muted-foreground">
                   No assumptions here.
                 </p>
               ) : null}
@@ -810,7 +813,7 @@ function AssumptionPriorityMatrix({
           </div>
         ))}
       </div>
-    </div>
+    </DomainPanel>
   );
 }
 
@@ -828,7 +831,7 @@ function TopValidationPriorities({
   pendingAssumptionId: string | null;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <DomainPanel>
       <div className="flex flex-col gap-2 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -844,12 +847,12 @@ function TopValidationPriorities({
           top {assumptions.length}
         </span>
       </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+      <div className="mt-4 grid gap-x-5 gap-y-4 lg:grid-cols-3">
         {assumptions.map((assumption, index) => {
           const planExperiments = experimentsByAssumption.get(assumption.id) ?? [];
           const isPending = pending && pendingAssumptionId === assumption.id;
           return (
-            <article className="rounded-md border border-border p-4" key={assumption.id}>
+            <article className="border-t border-border pt-4 first:border-t-0 first:pt-0" key={assumption.id}>
               <div className="flex items-start gap-3">
                 <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground">
                   {index + 1}
@@ -857,7 +860,7 @@ function TopValidationPriorities({
                 <div className="min-w-0">
                   <MarkdownContent
                     className="line-clamp-4 space-y-2 text-sm font-semibold leading-6 text-foreground"
-                    markdown={assumption.text}
+                    markdown={assumptionBeliefText(assumption.text)}
                   />
                   <div className="mt-3 flex flex-wrap gap-2 text-xs">
                     <Badge>{compactRiskLabel(assumption)}</Badge>
@@ -866,12 +869,9 @@ function TopValidationPriorities({
                   </div>
                 </div>
               </div>
-              {assumption.recommended_test ? (
-                <MarkdownContent
-                  className="mt-3 line-clamp-3 space-y-2 text-sm leading-6 text-muted-foreground"
-                  markdown={assumption.recommended_test}
-                />
-              ) : null}
+              <p className="mt-3 line-clamp-3 text-sm leading-6 text-muted-foreground">
+                {nextProofText(assumption)}
+              </p>
               <Button
                 aria-busy={isPending}
                 className="mt-4 w-full"
@@ -888,7 +888,7 @@ function TopValidationPriorities({
           );
         })}
       </div>
-    </div>
+    </DomainPanel>
   );
 }
 
@@ -908,26 +908,27 @@ function AssumptionDetailPanel({
   onOpenExperiments?: () => void;
 }) {
   return (
-    <div className="rounded-md border border-border bg-background/60 p-4">
+    <div>
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-              Assumption detail
+            <p className="text-xs font-medium text-muted-foreground">
+              Decision blocker detail
             </p>
             <Badge>{formatLabel(assumption.status)}</Badge>
           </div>
-          <h4 className="mt-2 max-w-4xl text-sm font-semibold leading-6">{assumption.text}</h4>
+          <h4 className="mt-2 max-w-4xl text-sm font-semibold leading-6">
+            {assumptionBeliefText(assumption.text)}
+          </h4>
 
           {assumption.recommended_test ? (
             <div className="mt-4 border-t border-border pt-4">
-              <h5 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+              <h5 className="text-xs font-medium text-muted-foreground">
                 Recommended validation
               </h5>
-              <MarkdownContent
-                className="mt-2 max-w-4xl space-y-2 text-sm leading-6 text-muted-foreground"
-                markdown={assumption.recommended_test}
-              />
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">
+                {nextProofText(assumption)}
+              </p>
             </div>
           ) : null}
         </div>
@@ -993,14 +994,14 @@ function ValidationPlanSummary({
   const hiddenCount = experiments.length - shownExperiments.length;
 
   return (
-    <div className="mt-4 border-l-2 border-emerald-600 bg-emerald-50 px-4 py-3">
+    <div className="mt-4 rounded-md border border-success-border bg-success-muted px-4 py-3">
       <details>
         <summary className="cursor-pointer list-none">
-          <div className="flex items-center gap-2 text-sm font-medium text-emerald-900">
+          <div className="flex items-center gap-2 text-sm font-medium text-success-foreground">
             <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
             {isFresh ? "Validation plan created" : "Validation plan available"}
           </div>
-          <p className="mt-1 text-sm leading-6 text-emerald-900/80">
+          <p className="mt-1 text-sm leading-6 text-success-foreground">
             {experiments.length} experiment{experiments.length === 1 ? "" : "s"}{" "}
             {isFresh ? "written" : "linked"} for this assumption.
           </p>
@@ -1017,7 +1018,7 @@ function ValidationPlanSummary({
             <GeneratedExperimentSummary experiment={experiment} key={experiment.id} />
           ))}
           {hiddenCount > 0 ? (
-            <p className="border-t border-emerald-200 pt-3 text-sm text-emerald-950/80">
+            <p className="border-t border-success-border pt-3 text-sm text-success-foreground">
               {hiddenCount} more experiment{hiddenCount === 1 ? "" : "s"} available in Validation.
             </p>
           ) : null}
@@ -1029,18 +1030,18 @@ function ValidationPlanSummary({
 
 function GeneratedExperimentSummary({ experiment }: { experiment: Experiment }) {
   return (
-    <div className="border-t border-emerald-200 pt-3">
+    <div className="border-t border-success-border pt-3">
       <div className="flex flex-wrap items-center gap-2">
-        <h4 className="text-sm font-medium text-emerald-950">{experiment.name}</h4>
+        <h4 className="text-sm font-medium text-success-foreground">{experiment.name}</h4>
         {experiment.method ? (
-          <span className="rounded-md bg-white/70 px-2 py-1 text-xs text-emerald-900">
+          <span className="rounded-md bg-success-muted px-2 py-1 text-xs text-success-foreground">
             {formatLabel(experiment.method)}
           </span>
         ) : null}
       </div>
       {experiment.plan ? (
         <MarkdownContent
-          className="mt-2 space-y-2 text-sm leading-6 text-emerald-950/80"
+          className="mt-2 space-y-2 text-sm leading-6 text-success-foreground"
           markdown={experiment.plan}
         />
       ) : null}
@@ -1058,10 +1059,10 @@ function GeneratedExperimentBlock({ title, value }: { title: string; value: stri
   }
   return (
     <div>
-      <h5 className="text-xs font-medium uppercase tracking-normal text-emerald-900/70">
+      <h5 className="text-xs font-medium text-success-foreground">
         {title}
       </h5>
-      <MarkdownContent className="mt-1 text-sm leading-6 text-emerald-950/80" markdown={value} />
+      <MarkdownContent className="mt-1 text-sm leading-6 text-success-foreground" markdown={value} />
     </div>
   );
 }
@@ -1194,7 +1195,7 @@ function filterDescription(filter: AssumptionFilter) {
   if (filter === "invalidated") {
     return "Status is invalidated";
   }
-  return "All ranked assumptions";
+  return "All ranked blockers";
 }
 
 function riskLabel(assumption: Assumption) {
@@ -1231,18 +1232,18 @@ function isLowConfidence(assumption: Assumption) {
 
 function assumptionCtaLabel(experiments: Experiment[], pending: boolean) {
   if (pending) {
-    return "Creating...";
+    return "Creating plan...";
   }
   if (experiments.length === 0) {
-    return "Create Plan";
+    return "Create test plan";
   }
   if (experiments.some((experiment) => experiment.results.length > 0)) {
-    return "Review Evidence";
+    return "Review evidence";
   }
   if (experiments.some((experiment) => experiment.status === "running")) {
-    return "Log Results";
+    return "Log results";
   }
-  return "Open Plan";
+  return "Open test plan";
 }
 
 function evidenceStrength(linkCount: number) {

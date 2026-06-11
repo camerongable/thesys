@@ -194,6 +194,9 @@ pnpm-debug.log*
 # Local app output
 .DS_Store
 .codex/
+.agents/
+.claude/
+.cursor/
 *.tsbuildinfo
 dist/
 tmp/
@@ -233,3 +236,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Impeccable
+.impeccable/

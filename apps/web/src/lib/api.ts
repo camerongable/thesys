@@ -1043,25 +1043,52 @@ export type AIStatus = {
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+export class ApiError extends Error {
+  retryable: boolean;
+  status: number | null;
+
+  constructor(
+    message: string,
+    { retryable = false, status = null }: { retryable?: boolean; status?: number | null } = {},
+  ) {
+    super(message);
+    this.name = "ApiError";
+    this.retryable = retryable;
+    this.status = status;
+  }
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      ...(isFormData ? {} : { "Content-Type": "application/json" }),
-      ...(init?.headers ?? {}),
-    },
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: {
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch {
+    throw new ApiError(
+      "Thesys could not reach the API. Check that the local services are running, then retry.",
+      { retryable: true },
+    );
+  }
 
   if (!response.ok) {
-    let message = `Request failed with ${response.status}`;
+    let message = statusFallbackMessage(response.status);
     try {
       const body = (await response.json()) as { detail?: unknown; message?: unknown };
       message = formatApiError(body, message);
     } catch {
       // Preserve the status-based fallback when the response is not JSON.
     }
-    throw new Error(message);
+    throw new ApiError(message, {
+      retryable: isRetryableStatus(response.status),
+      status: response.status,
+    });
   }
 
   if (response.status === 204) {
@@ -1069,6 +1096,44 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+function statusFallbackMessage(status: number) {
+  if (status === 400) {
+    return "Thesys could not use that input. Review the highlighted fields and try again.";
+  }
+  if (status === 401) {
+    return "Your session is not authorized. Sign in again, then retry.";
+  }
+  if (status === 403) {
+    return "You do not have permission to perform this action.";
+  }
+  if (status === 404) {
+    return "Thesys could not find that project or record.";
+  }
+  if (status === 408) {
+    return "The request timed out. Retry when the service is responsive.";
+  }
+  if (status === 409) {
+    return "The record changed before this action finished. Refresh and try again.";
+  }
+  if (status === 413) {
+    return "That input is too large. Shorten it and try again.";
+  }
+  if (status === 422) {
+    return "Some input is invalid. Review the fields and try again.";
+  }
+  if (status === 429) {
+    return "Thesys is rate limited right now. Wait a moment, then retry.";
+  }
+  if (status >= 500) {
+    return "The Thesys API hit a server error. Retry, or check the service logs if it repeats.";
+  }
+  return `Request failed with ${status}`;
+}
+
+function isRetryableStatus(status: number) {
+  return status === 408 || status === 429 || status >= 500;
 }
 
 function formatApiError(body: { detail?: unknown; message?: unknown }, fallback: string) {

@@ -5,6 +5,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { DomainError, DomainHeader, DomainPanel } from "@/features/projects/decision-room";
+import { assumptionBeliefText } from "@/features/projects/assumption-copy";
 import {
   Experiment,
   ExperimentOutcome,
@@ -61,6 +63,10 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
   const assumptionById = new Map(assumptions.map((assumption) => [assumption.id, assumption]));
   const hasExperiments = experiments.length > 0;
   const hasLoggedResults = experiments.some((experiment) => experiment.results.length > 0);
+  const resultCount = experiments.reduce(
+    (count, experiment) => count + experiment.results.length,
+    0,
+  );
   const primaryActionLabel = validationPrimaryActionLabel(hasExperiments, hasLoggedResults);
   const error =
     experimentsQuery.error ??
@@ -86,20 +92,8 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
 
   return (
     <section className="mt-6 space-y-6">
-      <div className="rounded-lg border border-border bg-white p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-              Validation
-            </p>
-            <h2 className="mt-2 text-xl font-semibold tracking-normal">
-              What should I test next?
-            </h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              Turn the riskiest assumption into a concrete test with success criteria,
-              failure criteria, assets, result logging, and interpretation.
-            </p>
-          </div>
+      <DomainHeader
+        action={
           <Button
             className="w-full justify-center whitespace-nowrap sm:w-60"
             disabled={generateMutation.isPending || (!hasExperiments && assumptions.length === 0)}
@@ -107,20 +101,32 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
             type="button"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            {generateMutation.isPending ? "Generating..." : primaryActionLabel}
+            {generateMutation.isPending ? "Creating test plan..." : primaryActionLabel}
           </Button>
-        </div>
-      </div>
+        }
+        description="Convert the top decision blocker into a test with success criteria, failure criteria, assets, result logging, and interpretation."
+        icon={<Beaker className="h-4 w-4 text-primary" aria-hidden="true" />}
+        question="What should we test before deciding?"
+        signals={[
+          { label: "Experiments", value: experiments.length },
+          { label: "Assumptions", value: assumptions.length },
+          { label: "Logged results", tone: resultCount > 0 ? "success" : "warning", value: resultCount },
+          {
+            label: "Next move",
+            tone: hasLoggedResults ? "success" : hasExperiments ? "warning" : "neutral",
+            value: primaryActionLabel,
+          },
+        ]}
+        title="Validation"
+      />
 
       {error ? (
-        <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-          {(error as Error).message}
-        </div>
+        <DomainError message={(error as Error).message} />
       ) : null}
 
       {generateMutation.isPending || generateMutation.data?.ai_run_id ? (
-        <details className="rounded-lg border border-border bg-white p-5" open={generateMutation.isPending}>
-          <summary className="cursor-pointer text-sm font-semibold">View activity trace</summary>
+        <details className="rounded-lg border border-border bg-card p-5" open={generateMutation.isPending}>
+          <summary className="cursor-pointer text-sm font-semibold">View validation trace</summary>
           <div className="mt-4 border-t border-border pt-4">
             <WorkflowTrace
               pending={generateMutation.isPending}
@@ -132,16 +138,16 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
       ) : null}
 
       {experimentsQuery.isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading experiments...</p>
+        <p className="text-sm text-muted-foreground">Loading validation tests...</p>
       ) : experiments.length === 0 ? (
-        <div className="rounded-lg border border-border bg-white p-5">
+        <DomainPanel>
           <div className="flex items-center gap-2">
             <Beaker className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h3 className="text-sm font-semibold">No validation experiments yet.</h3>
+              <h3 className="text-sm font-semibold">No validation tests yet.</h3>
           </div>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             Experiments help you reduce uncertainty before building. Start by testing the
-            riskiest assumption with a clear method, success criteria, and failure
+            top decision blocker with a clear method, success criteria, and failure
             threshold.
           </p>
           <Button
@@ -154,16 +160,16 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
             {assumptions.length === 0
-              ? "Review Assumptions First"
+              ? "Rank blockers first"
               : generateMutation.isPending
-                ? "Creating..."
-                : "Create Validation Plan"}
+                ? "Creating test plan..."
+                : "Create test plan"}
           </Button>
-        </div>
+        </DomainPanel>
       ) : (
         <>
         <RecommendedValidationPlan
-          artifactTitle={validationPlanArtifact?.title ?? "Recommended Validation Plan"}
+          artifactTitle={validationPlanArtifact?.title ?? "Recommended validation plan"}
           experiments={experiments}
           hasLoggedResults={hasLoggedResults}
         />
@@ -179,7 +185,7 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
               <ExperimentCard
                 assumptionText={
                   experiment.assumption_id
-                    ? assumptionById.get(experiment.assumption_id)?.text ?? null
+                    ? assumptionBeliefText(assumptionById.get(experiment.assumption_id)?.text ?? "") || null
                     : null
                 }
                 experiment={experiment}
@@ -191,11 +197,11 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
           </div>
 
           {validationPlanVersion ? (
-            <aside className="rounded-lg border border-border bg-white p-5">
+            <aside className="rounded-lg border border-border bg-card p-5">
               <div className="flex items-center gap-2 border-b border-border pb-4">
                 <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
                 <h3 className="text-sm font-semibold">
-                  {validationPlanArtifact?.title ?? "Validation Plan"}
+                  {validationPlanArtifact?.title ?? "Validation plan"}
                 </h3>
                 <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
                   Version {validationPlanVersion.version}
@@ -233,11 +239,11 @@ function RecommendedValidationPlan({
     return null;
   }
   return (
-    <div className="rounded-lg border border-border bg-white p-5">
+    <DomainPanel>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-            Your Next Test
+          <p className="text-sm font-medium text-muted-foreground">
+            Next test
           </p>
           <h3 className="mt-2 text-lg font-semibold">{recommended.name}</h3>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -248,51 +254,51 @@ function RecommendedValidationPlan({
           {hasLoggedResults ? "results logged" : recommended.status}
         </span>
       </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
         <Block title="Goal" value={recommended.name} />
         <Block title="Run" value={recommended.plan} />
         <Block title="Success" value={recommended.success_criteria} />
         <Block title="Failure" value={recommended.failure_threshold} />
       </div>
-      <div className="mt-4 rounded-md border border-border bg-muted/40 p-3">
+      <div className="mt-4 border-t border-border pt-3">
         <Block
           title="Next after results"
           value="Update confidence and review whether the evidence supports continuing research, pivoting, pausing, killing, or proceeding narrowly."
         />
       </div>
       <ValidationAssetGrid experiment={recommended} />
-    </div>
+    </DomainPanel>
   );
 }
 
 function ValidationAssetGrid({ experiment }: { experiment: Experiment }) {
   const assets = [
     {
-      title: "Interview Script",
+      title: "Interview script",
       value: experiment.plan,
     },
     {
-      title: "Screener Questions",
+      title: "Screener questions",
       value: "1. Have you recently tried to solve this problem?\n2. What did you use instead?\n3. How painful was the workaround?\n4. Did you spend money or serious time on it?",
     },
     {
-      title: "Survey Questions",
+      title: "Survey questions",
       value: experiment.success_criteria
         ? `Questions should test the same success signal:\n\n${experiment.success_criteria}`
         : null,
     },
     {
-      title: "Outreach Message",
+      title: "Outreach message",
       value: experiment.plan
         ? `I'm researching ${experiment.name.toLowerCase()} and looking for quick feedback from people who recently faced this situation. Would you be open to a short conversation?`
         : null,
     },
     {
-      title: "Landing Page Copy",
+      title: "Landing page copy",
       value: `Validate demand for ${experiment.name.toLowerCase()} before building. Ask visitors to describe their current workaround and whether they would try a dedicated solution.`,
     },
     {
-      title: "Results Rubric",
+      title: "Results rubric",
       value: [
         experiment.success_criteria ? `Success: ${experiment.success_criteria}` : null,
         experiment.failure_threshold ? `Failure: ${experiment.failure_threshold}` : null,
@@ -305,14 +311,14 @@ function ValidationAssetGrid({ experiment }: { experiment: Experiment }) {
   return (
     <div className="mt-5 border-t border-border pt-5">
       <div className="flex items-center justify-between gap-3">
-        <h4 className="text-sm font-semibold">Generated Assets</h4>
+        <h4 className="text-sm font-semibold">Test assets</h4>
         <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-          Copyable
+          Ready to copy
         </span>
       </div>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
+      <div className="mt-3 grid gap-x-6 gap-y-3 md:grid-cols-2">
         {assets.map((asset, index) => (
-          <details className="rounded-md border border-border p-3" key={asset.title} open={index === 0}>
+          <details className="border-t border-border py-3 first:border-t-0 first:pt-0" key={asset.title} open={index === 0}>
             <summary className="cursor-pointer text-sm font-medium">{asset.title}</summary>
             <div className="mt-3 border-t border-border pt-3">
               <Block title={asset.title} value={asset.value || "Not generated yet"} />
@@ -336,7 +342,7 @@ function ExperimentCard({
   projectId: string;
 }) {
   return (
-    <article className="rounded-lg border border-border bg-white p-5">
+    <DomainPanel>
       <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -359,26 +365,26 @@ function ExperimentCard({
         </span>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-4">
-          <div className="rounded-md bg-muted/50 p-3">
-            <Block title="Step-by-Step Test Plan" value={experiment.plan} />
+      <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(24rem,1fr)_360px]">
+        <div className="min-w-0 space-y-4">
+          <div>
+            <Block title="Step-by-step test plan" value={experiment.plan} />
             <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <Block title="Success Criteria" value={experiment.success_criteria} />
-              <Block title="Failure Criteria" value={experiment.failure_threshold} />
+              <Block title="Success criteria" value={experiment.success_criteria} />
+              <Block title="Failure criteria" value={experiment.failure_threshold} />
             </div>
           </div>
           <ResultInterpretation experiment={experiment} />
-          <details className="rounded-md border border-border p-3">
+          <details className="border-t border-border pt-3">
             <summary className="cursor-pointer text-sm font-medium">
               Show logged results
             </summary>
-            <div className="mt-3 space-y-3 border-t border-border pt-3">
+            <div className="mt-3 divide-y divide-border border-t border-border pt-3">
               {experiment.results.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No results logged yet.</p>
               ) : (
                 experiment.results.map((result) => (
-                  <div key={result.id} className="rounded-md border border-border p-3">
+                  <div key={result.id} className="py-3 first:pt-0">
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
                         {formatLabel(result.outcome)}
@@ -400,7 +406,7 @@ function ExperimentCard({
         </div>
         <ResultForm experiment={experiment} onSaved={onSaved} projectId={projectId} />
       </div>
-    </article>
+    </DomainPanel>
   );
 }
 
@@ -411,9 +417,9 @@ function ResultInterpretation({ experiment }: { experiment: Experiment }) {
 
   if (!latestResult) {
     return (
-      <div className="rounded-md border border-border p-3">
-        <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-          Result Interpretation
+      <div className="border-t border-border pt-3">
+        <h4 className="text-xs font-medium text-muted-foreground">
+          Result interpretation
         </h4>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           No result has been logged. Run the test, then record the outcome before making a
@@ -425,9 +431,9 @@ function ResultInterpretation({ experiment }: { experiment: Experiment }) {
 
   const interpretation = resultInterpretation(latestResult.outcome);
   return (
-    <div className="rounded-md border border-border p-3">
-      <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-        Result Interpretation
+    <div className="border-t border-border pt-3">
+      <h4 className="text-xs font-medium text-muted-foreground">
+        Result interpretation
       </h4>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
         {interpretation}
@@ -478,7 +484,7 @@ function ResultForm({
 
   return (
     <form
-      className="rounded-md border border-border p-4"
+      className="border-t border-border pt-4 2xl:border-l 2xl:border-t-0 2xl:pl-4 2xl:pt-0"
       id={experiment.results.length === 0 ? "log-results-panel" : undefined}
       onSubmit={(event) => {
         event.preventDefault();
@@ -487,15 +493,13 @@ function ResultForm({
     >
       <div className="flex items-center gap-2">
         <CheckCircle2 className="h-4 w-4 text-primary" aria-hidden="true" />
-        <h4 className="text-sm font-semibold">Log Results</h4>
+        <h4 className="text-sm font-semibold">Log test result</h4>
       </div>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
         The validation loop is not complete until real-world results are logged.
       </p>
       {mutation.error ? (
-        <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-          {(mutation.error as Error).message}
-        </div>
+        <DomainError message={(mutation.error as Error).message} />
       ) : null}
       <label className="mt-4 block">
         <span className="text-sm font-medium">Outcome</span>
@@ -573,7 +577,7 @@ function ResultForm({
         type="submit"
       >
         <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-        {mutation.isPending ? "Logging..." : "Log Result"}
+        {mutation.isPending ? "Logging result..." : "Log result"}
       </Button>
     </form>
   );
@@ -581,25 +585,25 @@ function ResultForm({
 
 function resultInterpretation(outcome: ExperimentOutcome) {
   if (outcome === "positive") {
-    return "This strengthens the tested assumption. Revisit the decision after checking whether the signal is strong enough to justify the next build step.";
+    return "This strengthens the tested belief. Review whether the result meets the decision threshold before changing the verdict.";
   }
   if (outcome === "negative") {
-    return "This weakens the tested assumption. Consider pivoting, narrowing the wedge, or pausing before building more.";
+    return "This weakens the tested belief. Consider pivoting, narrowing the wedge, or pausing before building more.";
   }
   if (outcome === "mixed") {
-    return "This is a partial signal. Run a tighter follow-up test before treating the assumption as validated.";
+    return "This is a partial signal. Run a tighter follow-up test before treating the belief as validated.";
   }
-  return "This is not decision-grade evidence yet. Clarify the respondent profile or test design and run another validation pass.";
+  return "This is not strong enough proof yet. Clarify the respondent profile or test design and run another validation pass.";
 }
 
 function validationPrimaryActionLabel(hasExperiments: boolean, hasLoggedResults: boolean) {
   if (!hasExperiments) {
-    return "Create Validation Plan";
+    return "Create test plan";
   }
   if (hasLoggedResults) {
-    return "Review Decision";
+    return "Review decision";
   }
-  return "Log Results";
+  return "Log results";
 }
 
 function resultNotes({
@@ -639,14 +643,14 @@ function Block({ title, value }: { title: string; value: string | null }) {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between gap-2">
-        <h4 className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+    <div className="min-w-0">
+      <div className="flex items-start justify-between gap-3">
+        <h4 className="min-w-0 text-xs font-medium text-muted-foreground">
           {title}
         </h4>
         {value ? (
           <button
-            className="text-xs font-medium text-primary hover:underline"
+            className="shrink-0 text-xs font-medium text-primary hover:underline"
             onClick={() => void handleCopy()}
             type="button"
           >
@@ -655,7 +659,7 @@ function Block({ title, value }: { title: string; value: string | null }) {
         ) : null}
       </div>
       <MarkdownContent
-        className="mt-1 space-y-2 text-sm leading-6 text-muted-foreground"
+        className="mt-1 min-w-0 space-y-2 break-words text-sm leading-6 text-muted-foreground"
         markdown={value ?? "Not recorded"}
       />
     </div>

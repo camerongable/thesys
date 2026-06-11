@@ -1,5 +1,7 @@
 .git
 .codex
+.cursor
+.claude
 .venv
 node_modules
 apps/web/node_modules
