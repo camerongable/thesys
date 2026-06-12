@@ -417,10 +417,12 @@ def approve_agentic_research_memo(
     sprint_id: uuid.UUID,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> AgenticResearchApprovalRead:
     result = agentic_research_service.approve_research_memo(
         db,
         auth,
+        settings,
         project_id,
         sprint_id,
     )
@@ -442,10 +444,12 @@ def reject_agentic_research_memo(
     sprint_id: uuid.UUID,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> AgenticResearchApprovalRead:
     result = agentic_research_service.reject_research_memo(
         db,
         auth,
+        settings,
         project_id,
         sprint_id,
     )

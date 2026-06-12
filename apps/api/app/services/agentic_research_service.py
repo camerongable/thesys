@@ -48,7 +48,12 @@ from app.schemas.research import (
     ResearchFindingDraft,
     ResearchRiskDraft,
 )
-from app.services import ai_run_service, project_service, retrieval_service
+from app.services import (
+    ai_run_service,
+    langsmith_observability_service,
+    project_service,
+    retrieval_service,
+)
 
 
 class AgenticResearchWorkflowError(RuntimeError):
@@ -154,6 +159,17 @@ def run_agentic_research(
         model_provider="stub" if settings.should_use_llm_stub else "litellm",
         model_name=settings.litellm_model,
     )
+    trace = langsmith_observability_service.ensure_research_sprint_trace(
+        db,
+        auth,
+        settings,
+        project,
+        sprint,
+        workflow_version=AGENTIC_RESEARCH_PROMPT_VERSION,
+        model_provider=run.model_provider,
+        model_name=run.model_name,
+        run=run,
+    )
     completion_holder: dict[str, LLMCompletion] = {}
 
     def load_context(_: AgenticResearchState) -> AgenticResearchState:
@@ -164,6 +180,9 @@ def run_agentic_research(
                 "load_research_context",
                 {"project_id": str(project_id), "research_sprint_id": str(sprint_id)},
                 lambda: _research_context(db, auth, project, sprint),
+                settings=settings,
+                trace=trace,
+                span_name="load_project_context",
             )
         }
 
@@ -177,6 +196,9 @@ def run_agentic_research(
                 "research_question_count": len(sprint.plan.research_questions),
             },
             lambda: _plan_subquestions(sprint),
+            settings=settings,
+            trace=trace,
+            span_name="research_plan_generation",
         )
         return {"subquestions": subquestions}
 
@@ -187,6 +209,9 @@ def run_agentic_research(
             "retrieval_strategy_selector",
             {"subquestions": state["subquestions"]},
             lambda: _select_tool_calls(sprint, state["subquestions"]),
+            settings=settings,
+            trace=trace,
+            span_name="retrieval_strategy_selection",
         )
         return {"tool_calls": tool_calls}
 
@@ -204,6 +229,9 @@ def run_agentic_research(
                 state["project_context"],
                 state["tool_calls"],
             ),
+            settings=settings,
+            trace=trace,
+            span_name="retrieval",
         )
         return {
             "tool_calls": results["tool_calls"],
@@ -217,6 +245,9 @@ def run_agentic_research(
             "evidence_selector",
             {"retrieval_result_count": len(state["retrieval_results"])},
             lambda: _select_evidence(state["retrieval_results"]),
+            settings=settings,
+            trace=trace,
+            span_name="evidence_ingestion_summary",
         )
         return {"selected_evidence": selected}
 
@@ -230,6 +261,9 @@ def run_agentic_research(
                 "selected_evidence_count": len(state["selected_evidence"]),
             },
             lambda: _detect_gaps(state["subquestions"], state["selected_evidence"]),
+            settings=settings,
+            trace=trace,
+            span_name="evidence_gap_detection",
         )
         return {"gaps": gaps}
 
@@ -240,6 +274,9 @@ def run_agentic_research(
             "follow_up_retriever",
             {"gaps": state["gaps"]},
             lambda: _follow_up_retrieval(db, auth, settings, project_id, state["gaps"]),
+            settings=settings,
+            trace=trace,
+            span_name="retrieval",
         )
         selected = _select_evidence([*state["selected_evidence"], *follow_up])
         return {"follow_up_results": follow_up, "selected_evidence": selected}
@@ -253,6 +290,7 @@ def run_agentic_research(
             state["subquestions"],
             state["selected_evidence"],
             state["gaps"],
+            trace,
         )
         completion_holder["completion"] = completion
         return {"memo": memo}
@@ -267,6 +305,9 @@ def run_agentic_research(
                 "selected_evidence_count": len(state["selected_evidence"]),
             },
             lambda: _critic_review(state["memo"], state["selected_evidence"], state["gaps"]),
+            settings=settings,
+            trace=trace,
+            span_name="critique",
         )
         return {"memo": audited, "critic": critique}
 
@@ -274,6 +315,7 @@ def run_agentic_research(
         write_result = _write_research_memo_step(
             db,
             auth,
+            settings,
             run,
             project,
             sprint,
@@ -284,6 +326,7 @@ def run_agentic_research(
             state["selected_evidence"],
             state["gaps"],
             state["critic"],
+            trace,
         )
         return write_result
 
@@ -310,6 +353,16 @@ def run_agentic_research(
             latency_ms=int((perf_counter() - started) * 1000),
             tokens=None,
             cost=Decimal("0"),
+        )
+        langsmith_observability_service.record_step_span(
+            db,
+            settings,
+            run=run,
+            step=final_step,
+            trace=trace,
+            span_name="memory_update_proposal",
+            input_json=step.input_json,
+            output_json=final_step.output_json,
         )
         sprint.status = "needs_review"
         db.commit()
@@ -350,11 +403,17 @@ def run_agentic_research(
         sprint.status = "failed"
         db.commit()
         ai_run_service.fail_run(db, run, error="Agentic research failed.")
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            error="Agentic research failed.",
+        )
         raise
     except Exception as exc:
         sprint.status = "failed"
         db.commit()
         ai_run_service.fail_run(db, run, error=str(exc))
+        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
         raise AgenticResearchWorkflowError("Agentic research failed.") from exc
 
     completion = completion_holder.get("completion")
@@ -370,6 +429,8 @@ def run_agentic_research(
         model_provider=completion.model_provider,
         model_name=completion.model_name,
     )
+    langsmith_observability_service.attach_run_trace(db, run, trace.trace_id, trace.trace_url)
+    db.commit()
     return AgenticResearchResult(
         run=run,
         step=state["final_step"],
@@ -396,6 +457,7 @@ def run_agentic_research(
 def approve_research_memo(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> AgenticResearchApprovalResult:
@@ -409,6 +471,7 @@ def approve_research_memo(
     artifact = _research_memo_for_sprint(db, auth, project_id, sprint_id)
     version = _current_artifact_version(db, artifact)
     run = _memo_ai_run(db, auth, project_id, version)
+    trace = _trace_from_sprint(settings, sprint, run)
     step = ai_run_service.start_step(
         db,
         run,
@@ -449,6 +512,16 @@ def approve_research_memo(
         tokens=None,
         cost=Decimal("0"),
     )
+    langsmith_observability_service.record_step_span(
+        db,
+        settings,
+        run=run,
+        step=completed_step,
+        trace=trace,
+        span_name="assumption_extraction",
+        input_json=step.input_json,
+        output_json=completed_step.output_json,
+    )
     run = ai_run_service.complete_run(
         db,
         run,
@@ -457,6 +530,16 @@ def approve_research_memo(
         total_cost=run.total_cost,
         model_provider=run.model_provider or "unknown",
         model_name=run.model_name or "unknown",
+    )
+    langsmith_observability_service.attach_run_trace(db, run, trace.trace_id, trace.trace_url)
+    langsmith_observability_service.complete_trace(
+        settings,
+        trace,
+        output_summary="Research memo approved and memory updates written.",
+        metrics={
+            "assumptions_written": len(memory_summary.get("assumption_ids", [])),
+            "risks_written": len(memory_summary.get("risk_ids", [])),
+        },
     )
     db.refresh(sprint)
     version = _load_version(db, version.id)
@@ -473,6 +556,7 @@ def approve_research_memo(
 def reject_research_memo(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> AgenticResearchApprovalResult:
@@ -486,6 +570,7 @@ def reject_research_memo(
     artifact = _research_memo_for_sprint(db, auth, project_id, sprint_id)
     version = _current_artifact_version(db, artifact)
     run = _memo_ai_run(db, auth, project_id, version)
+    trace = _trace_from_sprint(settings, sprint, run)
     step = ai_run_service.start_step(
         db,
         run,
@@ -522,6 +607,16 @@ def reject_research_memo(
         tokens=None,
         cost=Decimal("0"),
     )
+    langsmith_observability_service.record_step_span(
+        db,
+        settings,
+        run=run,
+        step=completed_step,
+        trace=trace,
+        span_name="memory_update_proposal",
+        input_json=step.input_json,
+        output_json=completed_step.output_json,
+    )
     run = ai_run_service.complete_run(
         db,
         run,
@@ -530,6 +625,13 @@ def reject_research_memo(
         total_cost=run.total_cost,
         model_provider=run.model_provider or "unknown",
         model_name=run.model_name or "unknown",
+    )
+    langsmith_observability_service.attach_run_trace(db, run, trace.trace_id, trace.trace_url)
+    langsmith_observability_service.complete_trace(
+        settings,
+        trace,
+        output_summary="Research memo memory updates rejected by human reviewer.",
+        metrics={"memory_updates_written": 0},
     )
     db.refresh(sprint)
     version = _load_version(db, version.id)
@@ -776,20 +878,35 @@ def _step(
     step_name: str,
     input_json: dict[str, Any],
     operation,
+    *,
+    settings: Settings | None = None,
+    trace: langsmith_observability_service.TraceContext | None = None,
+    span_name: str | None = None,
 ):
     step = ai_run_service.start_step(db, run, step_name=step_name, input_json=input_json)
     started = perf_counter()
     try:
         result = operation()
     except Exception as exc:
-        ai_run_service.fail_step(
+        failed_step = ai_run_service.fail_step(
             db,
             step,
             error=str(exc),
             latency_ms=int((perf_counter() - started) * 1000),
         )
+        if settings is not None and trace is not None:
+            langsmith_observability_service.record_step_span(
+                db,
+                settings,
+                run=run,
+                step=failed_step,
+                trace=trace,
+                span_name=span_name or step_name,
+                input_json=input_json,
+                error=str(exc),
+            )
         raise
-    ai_run_service.complete_step(
+    completed_step = ai_run_service.complete_step(
         db,
         step,
         output_json=_json_safe(result),
@@ -797,6 +914,17 @@ def _step(
         tokens=None,
         cost=Decimal("0"),
     )
+    if settings is not None and trace is not None:
+        langsmith_observability_service.record_step_span(
+            db,
+            settings,
+            run=run,
+            step=completed_step,
+            trace=trace,
+            span_name=span_name or step_name,
+            input_json=input_json,
+            output_json=completed_step.output_json,
+        )
     return result
 
 
@@ -821,6 +949,36 @@ def _get_sprint(
             detail="Research sprint not found.",
         )
     return sprint
+
+
+def _trace_from_sprint(
+    settings: Settings,
+    sprint: ResearchSprint,
+    run: AIRun,
+) -> langsmith_observability_service.TraceContext:
+    trace_id = sprint.langsmith_trace_id or run.langsmith_trace_id or str(uuid.uuid4())
+    trace_url = (
+        sprint.langsmith_trace_url
+        or run.langsmith_trace_url
+        or f"{settings.langsmith_public_url_base.rstrip('/')}/o/default/projects/p/"
+        f"{settings.langsmith_project}/r/{trace_id}"
+    )
+    metadata = {
+        "project_id": str(sprint.project_id),
+        "research_sprint_id": str(sprint.id),
+        "project_stage": "research",
+        "workflow_version": AGENTIC_RESEARCH_PROMPT_VERSION,
+        "user_id": str(run.created_by) if run.created_by else None,
+        "model_provider": run.model_provider,
+        "model_name": run.model_name,
+        "started_at": (sprint.started_at or run.started_at or datetime.now(UTC)).isoformat(),
+    }
+    return langsmith_observability_service.TraceContext(
+        trace_id=trace_id,
+        trace_url=trace_url,
+        enabled=bool(settings.langsmith_tracing and settings.langsmith_api_key),
+        metadata=metadata,
+    )
 
 
 def _research_context(
@@ -1132,6 +1290,7 @@ def _generate_memo(
     subquestions: list[str],
     selected_evidence: list[EvidenceRetrievalResultRead],
     gaps: list[str],
+    trace: langsmith_observability_service.TraceContext,
 ) -> tuple[AgenticResearchMemoDraft, LLMCompletion]:
     messages = _memo_messages(project_context, subquestions, selected_evidence, gaps)
     step = ai_run_service.start_step(
@@ -1174,20 +1333,42 @@ def _generate_memo(
                 memo = _fallback_memo(project_context, subquestions, selected_evidence, gaps)
                 completion = _fallback_completion(settings, messages, memo, "emergency", exc)
     except Exception as exc:
-        ai_run_service.fail_step(
+        failed_step = ai_run_service.fail_step(
             db,
             step,
             error=str(exc),
             latency_ms=int((perf_counter() - started) * 1000),
         )
+        langsmith_observability_service.record_step_span(
+            db,
+            settings,
+            run=run,
+            step=failed_step,
+            trace=trace,
+            span_name="synthesis",
+            input_json=step.input_json,
+            error=str(exc),
+            run_type="llm",
+        )
         raise
-    ai_run_service.complete_step(
+    completed_step = ai_run_service.complete_step(
         db,
         step,
         output_json=memo.model_dump(mode="json"),
         latency_ms=int((perf_counter() - started) * 1000),
         tokens=completion.total_tokens,
         cost=completion.total_cost,
+    )
+    langsmith_observability_service.record_step_span(
+        db,
+        settings,
+        run=run,
+        step=completed_step,
+        trace=trace,
+        span_name="synthesis",
+        input_json=step.input_json,
+        output_json=completed_step.output_json,
+        run_type="llm" if completion.model_provider != "stub" else "chain",
     )
     return memo, completion
 
@@ -1267,6 +1448,7 @@ def _critic_review(
 def _write_research_memo_step(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     run: AIRun,
     project: Project,
     sprint: ResearchSprint,
@@ -1277,6 +1459,7 @@ def _write_research_memo_step(
     selected_evidence: list[EvidenceRetrievalResultRead],
     gaps: list[str],
     critic: dict[str, Any],
+    trace: langsmith_observability_service.TraceContext,
 ) -> AgenticResearchState:
     step = ai_run_service.start_step(
         db,
@@ -1300,6 +1483,8 @@ def _write_research_memo_step(
             structured_content={
                 "research_sprint_id": str(sprint.id),
                 "research_plan_id": str(sprint.plan.id),
+                "langsmith_trace_id": trace.trace_id,
+                "langsmith_trace_url": trace.trace_url,
                 "memo": memo.model_dump(mode="json"),
                 "project_context": project_context,
                 "subquestions": subquestions,
@@ -1313,6 +1498,8 @@ def _write_research_memo_step(
                 "memory_update_preview": _memory_update_preview(memo),
             },
             generated_by_ai_run_id=run.id,
+            langsmith_trace_id=trace.trace_id,
+            langsmith_trace_url=trace.trace_url,
             created_by=auth.user_id,
         )
         db.add(version)
@@ -1326,11 +1513,21 @@ def _write_research_memo_step(
         claims = _load_claims_for_version(db, version.id)
     except Exception as exc:
         db.rollback()
-        ai_run_service.fail_step(
+        failed_step = ai_run_service.fail_step(
             db,
             step,
             error=str(exc),
             latency_ms=int((perf_counter() - started) * 1000),
+        )
+        langsmith_observability_service.record_step_span(
+            db,
+            run=run,
+            settings=settings,
+            step=failed_step,
+            trace=trace,
+            span_name="research_memo_generation",
+            input_json=step.input_json,
+            error=str(exc),
         )
         raise
     completed_step = ai_run_service.complete_step(
@@ -1346,6 +1543,16 @@ def _write_research_memo_step(
         latency_ms=int((perf_counter() - started) * 1000),
         tokens=None,
         cost=Decimal("0"),
+    )
+    langsmith_observability_service.record_step_span(
+        db,
+        settings,
+        run=run,
+        step=completed_step,
+        trace=trace,
+        span_name="research_memo_generation",
+        input_json=step.input_json,
+        output_json=completed_step.output_json,
     )
     return {
         "artifact": artifact,

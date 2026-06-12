@@ -73,6 +73,17 @@ class Settings(BaseSettings):
         validation_alias="EMBEDDING_MODEL",
     )
     embedding_dimension: int = Field(default=1536, validation_alias="EMBEDDING_DIMENSION")
+    langsmith_tracing: bool = Field(default=False, validation_alias="LANGSMITH_TRACING")
+    langsmith_api_key: str | None = Field(default=None, validation_alias="LANGSMITH_API_KEY")
+    langsmith_endpoint: str = Field(
+        default="https://api.smith.langchain.com",
+        validation_alias="LANGSMITH_ENDPOINT",
+    )
+    langsmith_project: str = Field(default="thesys-local", validation_alias="LANGSMITH_PROJECT")
+    langsmith_public_url_base: str = Field(
+        default="https://smith.langchain.com",
+        validation_alias="LANGSMITH_PUBLIC_URL_BASE",
+    )
 
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000"],

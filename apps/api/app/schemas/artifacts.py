@@ -158,6 +158,8 @@ class ArtifactVersionRead(BaseModel):
     markdown_content: str
     structured_content: dict[str, object]
     generated_by_ai_run_id: uuid.UUID | None
+    langsmith_trace_id: str | None = None
+    langsmith_trace_url: str | None = None
     created_at: datetime
     claims: list[ClaimRead] = Field(default_factory=list)
 

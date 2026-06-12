@@ -443,10 +443,12 @@ LITELLM_API_KEY=your_key_here
 # Embeddings
 EMBEDDING_MODEL=text-embedding-3-small
 
-# Optional
-LANGFUSE_PUBLIC_KEY=
-LANGFUSE_SECRET_KEY=
-LANGFUSE_HOST=
+# Optional LangSmith observability
+LANGSMITH_TRACING=false
+LANGSMITH_API_KEY=
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_PROJECT=thesys-local
+LANGSMITH_PUBLIC_URL_BASE=https://smith.langchain.com
 ```
 
 ---
@@ -462,10 +464,18 @@ docker compose up -d
 ### 4. Install Backend Dependencies
 
 ```bash
-cd backend
-python -m venv .venv
+cd apps/api
+uv sync
+```
+
+If you are not using `uv`, create a virtual environment and install from the
+project metadata:
+
+```bash
+cd apps/api
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ---
@@ -473,6 +483,7 @@ pip install -r requirements.txt
 ### 5. Run Backend
 
 ```bash
+cd apps/api
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -481,8 +492,7 @@ uvicorn app.main:app --reload --port 8000
 ### 6. Install Frontend Dependencies
 
 ```bash
-cd frontend
-npm install
+pnpm install
 ```
 
 ---
@@ -490,13 +500,44 @@ npm install
 ### 7. Run Frontend
 
 ```bash
-npm run dev
+pnpm --filter thesys-web dev
 ```
 
 Open:
 
 ```text
 http://localhost:3000
+```
+
+---
+
+## Observability and Evals
+
+Thesys stores local trace IDs for research sprints, AI runs, workflow steps, and
+major generated artifact versions even when external tracing is disabled. To
+send traces to LangSmith, set:
+
+```bash
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=your_langsmith_key
+LANGSMITH_PROJECT=thesys-local
+```
+
+The research workflow records spans for planning, source discovery, competitor
+discovery, retrieval, synthesis, critique, memo generation, assumption updates,
+and validation-plan generation. Trace links are exposed in workflow details,
+research history, memo review, and research quality checks.
+
+Run the local research eval dataset checks from the repo root:
+
+```bash
+pnpm eval:research
+```
+
+To include live project metrics from a running API:
+
+```bash
+python3 scripts/eval_research_sprints.py --project-id <project-id>
 ```
 
 ---

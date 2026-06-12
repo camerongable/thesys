@@ -88,6 +88,11 @@ services:
       URL_FETCH_TIMEOUT_SECONDS: ${URL_FETCH_TIMEOUT_SECONDS:-15}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-deterministic-hash-embedding-1536}
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1536}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-thesys-local}
+      LANGSMITH_PUBLIC_URL_BASE: ${LANGSMITH_PUBLIC_URL_BASE:-https://smith.langchain.com}
       CORS_ORIGINS: http://localhost:3000
     ports:
       - "8000:8000"

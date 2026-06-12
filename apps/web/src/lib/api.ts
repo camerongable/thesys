@@ -269,6 +269,8 @@ export type ArtifactVersion = {
   markdown_content: string;
   structured_content: Record<string, unknown>;
   generated_by_ai_run_id: string | null;
+  langsmith_trace_id: string | null;
+  langsmith_trace_url: string | null;
   created_at: string;
   claims: Claim[];
 };
@@ -566,6 +568,9 @@ export type WorkflowStep = {
   latency_ms: number | null;
   tokens: number | null;
   cost: string | null;
+  langsmith_trace_id: string | null;
+  langsmith_run_id: string | null;
+  langsmith_trace_url: string | null;
   error: string | null;
   created_at: string;
 };
@@ -582,6 +587,8 @@ export type WorkflowRun = {
   output_summary: string | null;
   total_tokens: number | null;
   total_cost: string | null;
+  langsmith_trace_id: string | null;
+  langsmith_trace_url: string | null;
   error: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -648,6 +655,8 @@ export type ResearchSprint = {
   status: ResearchSprintStatus;
   started_at: string | null;
   completed_at: string | null;
+  langsmith_trace_id: string | null;
+  langsmith_trace_url: string | null;
   created_at: string;
   updated_at: string;
   plan: ResearchPlan;
@@ -886,8 +895,11 @@ export type ResearchEvalCase = {
   id: string;
   idea_type: string;
   idea: string;
-  expected_outputs: string[];
-  unacceptable_failures: string[];
+  expected_competitor_types: string[];
+  expected_risky_assumptions: string[];
+  required_output_sections: string[];
+  unacceptable_claims: string[];
+  expected_next_action_type: string;
   demo_ready: boolean;
 };
 

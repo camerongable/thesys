@@ -33,6 +33,7 @@ from app.services import (
     ai_run_service,
     competitor_service,
     evidence_service,
+    langsmith_observability_service,
     project_service,
     source_discovery_service,
 )
@@ -64,6 +65,7 @@ def discover_competitors(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> CompetitorDiscoveryResult:
+    project = project_service.get_project(db, auth, project_id)
     sprint = _get_sprint(db, auth, project_id, sprint_id)
     if sprint.status not in {"approved", "running", "needs_review"}:
         raise HTTPException(
@@ -80,6 +82,17 @@ def discover_competitors(
         project_id=project_id,
         model_provider="stub" if settings.should_use_llm_stub else "litellm",
         model_name=settings.litellm_model,
+    )
+    trace = langsmith_observability_service.ensure_research_sprint_trace(
+        db,
+        auth,
+        settings,
+        project,
+        sprint,
+        workflow_version=COMPETITOR_DISCOVERY_PROMPT_VERSION,
+        model_provider=run.model_provider,
+        model_name=run.model_name,
+        run=run,
     )
     sources = _list_sources(db, auth, project_id, sprint_id)
     messages = _competitor_discovery_messages(sprint, sources)
@@ -152,6 +165,17 @@ def discover_competitors(
             tokens=completion.total_tokens,
             cost=completion.total_cost,
         )
+        langsmith_observability_service.record_step_span(
+            db,
+            settings,
+            run=run,
+            step=step,
+            trace=trace,
+            span_name="competitor_discovery",
+            input_json=step.input_json,
+            output_json=step.output_json,
+            run_type="llm" if completion.model_provider != "stub" else "chain",
+        )
         run = ai_run_service.complete_run(
             db,
             run,
@@ -175,6 +199,16 @@ def discover_competitors(
             step,
             error=str(exc),
             latency_ms=int((perf_counter() - started) * 1000),
+        )
+        langsmith_observability_service.record_step_span(
+            db,
+            settings,
+            run=run,
+            step=step,
+            trace=trace,
+            span_name="competitor_discovery",
+            input_json=step.input_json,
+            error=str(exc),
         )
         ai_run_service.fail_run(db, run, error=str(exc))
         raise

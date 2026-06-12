@@ -2,14 +2,12 @@
 
 ## Current Phase
 
-V1 Sprint 13 started. The brief now defines the UX/Product Activation Refactor
-around a verdict-first product promise: rough idea to evidence-backed validation
-plan in one session. The first implementation slice added the Sprint 13 UX
-audit, persistent project Verdict Bar, a sharper Strategic Verdict overview
-surface, a riskiest-assumption overview card, project-list strategic state
-cards, and a more activation-oriented new-project flow. Watchlists, monitoring,
-collaboration, portfolio dashboards, integrations, and multi-segment workflow
-packs remain V2 scope.
+V1 Sprint 14 implemented LangSmith observability and local research eval
+hardening. Research sprints, agentic research runs, major child steps, research
+memos, and validation plans now persist local trace IDs and expose trace links
+in the API/UI. External LangSmith upload remains opt-in by environment
+configuration. Watchlists, monitoring, collaboration, portfolio dashboards,
+integrations, and multi-segment workflow packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -791,7 +789,54 @@ Checks run:
   - evidence implication/open-question format and consistent counts
   - validation state-aware CTA and decision handoff
 
+## V1 Sprint 14 Scope
+
+- [x] Add opt-in LangSmith configuration to API settings, Docker Compose, and
+  `.env.example`.
+- [x] Add LangSmith dependency and a best-effort observability service that
+  creates local trace IDs when external tracing is disabled.
+- [x] Persist trace IDs/URLs on `ResearchSprint`, `AIRun`, `AIStep`, and
+  `ArtifactVersion`.
+- [x] Add Alembic migration for trace columns and indexes.
+- [x] Trace research sprint planning, source discovery, competitor discovery,
+  agentic research planning/retrieval/synthesis/critique/memo-writing,
+  assumption extraction, memory-update approval/rejection, and validation-plan
+  generation.
+- [x] Expose trace fields through workflow, artifact, and research schemas.
+- [x] Show trace links in workflow details, research history, memo review, and
+  research quality panels.
+- [x] Expand the research eval dataset to 10 Sprint 14 cases with competitor,
+  risky-assumption, output-section, unsafe-claim, next-action, and demo-ready
+  fields.
+- [x] Add V1 research eval metrics for memo completeness, trace ID persistence,
+  span coverage, and secret redaction.
+- [x] Add local `pnpm eval:research` command.
+- [x] Document LangSmith observability and local eval usage in README.
+
+## V1 Sprint 14 Verification
+
+Checks run:
+
+- [ ] `cd apps/api && uv lock` was attempted but `uv` is not installed in this
+  shell; `apps/api/uv.lock` already contains `langsmith==0.8.5`.
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_langsmith_observability.py app/tests/test_agentic_research.py app/tests/test_research_history_eval.py app/tests/test_validation.py -q`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `PATH=... node_modules/.bin/next typegen` from `apps/web`
+- [x] `PATH=... node_modules/.bin/tsc --noEmit` from `apps/web`
+- [x] `python3 scripts/eval_research_sprints.py`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose config`
+- [x] `git diff --check -- . ':(exclude)IMPLEMENTATION_BRIEF.md'`
+- [ ] Full `git diff --check` is blocked by trailing whitespace in the
+  user-updated `IMPLEMENTATION_BRIEF.md`.
+- [ ] Browser smoke check is blocked because `http://localhost:3000/projects`
+  timed out in the in-app browser.
+- [ ] Container restart is blocked because `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+  hung with no output and had to be terminated.
+
 ## Next Work
 
-Sprint 13 implementation is complete. V2 should not start until the user has
-tested the refactored V1 flow in the running containers.
+Resolve the local Docker/localhost availability issue, then restart API/web and
+run a browser smoke check against the observability-enabled V1 flow before
+starting V2.

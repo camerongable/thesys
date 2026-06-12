@@ -110,6 +110,8 @@ class ResearchSprintRead(BaseModel):
     status: ResearchSprintStatus
     started_at: datetime | None
     completed_at: datetime | None
+    langsmith_trace_id: str | None = None
+    langsmith_trace_url: str | None = None
     created_at: datetime
     updated_at: datetime
     plan: ResearchPlanRead

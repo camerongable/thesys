@@ -43,7 +43,7 @@ from app.schemas.validation import (
     ValidationPlanGenerateCreate,
     ValidationPlanSetDraft,
 )
-from app.services import ai_run_service, project_service
+from app.services import ai_run_service, langsmith_observability_service, project_service
 
 
 class ValidationWorkflowError(RuntimeError):
@@ -157,6 +157,18 @@ def extract_assumptions_and_risks(
         model_provider="stub" if settings.should_use_llm_stub else "litellm",
         model_name=settings.litellm_model,
     )
+    trace = langsmith_observability_service.ensure_run_trace(
+        db,
+        settings,
+        run,
+        metadata={
+            "project_id": str(project.id),
+            "workflow_version": ASSUMPTION_EXTRACTION_PROMPT_VERSION,
+            "user_id": str(auth.user_id) if auth.user_id else None,
+            "model_provider": run.model_provider,
+            "model_name": run.model_name,
+        },
+    )
     step: AIStep | None = None
     try:
         step = ai_run_service.start_step(
@@ -212,15 +224,48 @@ def extract_assumptions_and_risks(
             tokens=completion.total_tokens,
             cost=completion.total_cost,
         )
+        langsmith_observability_service.record_step_span(
+            db,
+            settings,
+            run=run,
+            step=completed_step,
+            trace=trace,
+            span_name="assumption_extraction",
+            input_json=step.input_json,
+            output_json=completed_step.output_json,
+            run_type="llm" if completion.model_provider != "stub" else "chain",
+        )
     except (StructuredOutputError, RuntimeError, HTTPException) as exc:
         if step is not None:
-            ai_run_service.fail_step(db, step, error=str(exc))
+            failed_step = ai_run_service.fail_step(db, step, error=str(exc))
+            langsmith_observability_service.record_step_span(
+                db,
+                settings,
+                run=run,
+                step=failed_step,
+                trace=trace,
+                span_name="assumption_extraction",
+                input_json=step.input_json,
+                error=str(exc),
+            )
         ai_run_service.fail_run(db, run, error=str(exc))
+        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
         raise
     except Exception as exc:
         if step is not None:
-            ai_run_service.fail_step(db, step, error=str(exc))
+            failed_step = ai_run_service.fail_step(db, step, error=str(exc))
+            langsmith_observability_service.record_step_span(
+                db,
+                settings,
+                run=run,
+                step=failed_step,
+                trace=trace,
+                span_name="assumption_extraction",
+                input_json=step.input_json,
+                error=str(exc),
+            )
         ai_run_service.fail_run(db, run, error=str(exc))
+        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
         raise ValidationWorkflowError("Assumption extraction failed.") from exc
 
     run = ai_run_service.complete_run(
@@ -232,6 +277,14 @@ def extract_assumptions_and_risks(
         model_provider=completion.model_provider,
         model_name=completion.model_name,
     )
+    langsmith_observability_service.attach_run_trace(db, run, trace.trace_id, trace.trace_url)
+    langsmith_observability_service.complete_trace(
+        settings,
+        trace,
+        output_summary=f"Created or updated {len(assumptions)} assumptions and {len(risks)} risks.",
+        metrics={"assumption_count": len(assumptions), "risk_count": len(risks)},
+    )
+    db.commit()
     return AssumptionExtractionResult(
         run=run,
         step=completed_step,
@@ -304,6 +357,18 @@ def generate_validation_plan(
         model_provider="stub" if settings.should_use_llm_stub else "litellm",
         model_name=settings.litellm_model,
     )
+    trace = langsmith_observability_service.ensure_run_trace(
+        db,
+        settings,
+        run,
+        metadata={
+            "project_id": str(project.id),
+            "workflow_version": VALIDATION_PLAN_PROMPT_VERSION,
+            "user_id": str(auth.user_id) if auth.user_id else None,
+            "model_provider": run.model_provider,
+            "model_name": run.model_name,
+        },
+    )
     step: AIStep | None = None
     try:
         step = ai_run_service.start_step(
@@ -347,7 +412,7 @@ def generate_validation_plan(
                     "validation_plan_emergency",
                     exc,
                 )
-        artifact = _write_validation_plan_artifact(db, auth, run, project, draft)
+        artifact = _write_validation_plan_artifact(db, auth, run, project, draft, trace)
         experiments = _write_experiments(db, auth, project, assumptions, draft)
         db.flush()
         completed_step = ai_run_service.complete_step(
@@ -361,15 +426,48 @@ def generate_validation_plan(
             tokens=completion.total_tokens,
             cost=completion.total_cost,
         )
+        langsmith_observability_service.record_step_span(
+            db,
+            settings,
+            run=run,
+            step=completed_step,
+            trace=trace,
+            span_name="validation_plan_generation",
+            input_json=step.input_json,
+            output_json=completed_step.output_json,
+            run_type="llm" if completion.model_provider != "stub" else "chain",
+        )
     except (StructuredOutputError, RuntimeError, HTTPException) as exc:
         if step is not None:
-            ai_run_service.fail_step(db, step, error=str(exc))
+            failed_step = ai_run_service.fail_step(db, step, error=str(exc))
+            langsmith_observability_service.record_step_span(
+                db,
+                settings,
+                run=run,
+                step=failed_step,
+                trace=trace,
+                span_name="validation_plan_generation",
+                input_json=step.input_json,
+                error=str(exc),
+            )
         ai_run_service.fail_run(db, run, error=str(exc))
+        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
         raise
     except Exception as exc:
         if step is not None:
-            ai_run_service.fail_step(db, step, error=str(exc))
+            failed_step = ai_run_service.fail_step(db, step, error=str(exc))
+            langsmith_observability_service.record_step_span(
+                db,
+                settings,
+                run=run,
+                step=failed_step,
+                trace=trace,
+                span_name="validation_plan_generation",
+                input_json=step.input_json,
+                error=str(exc),
+            )
         ai_run_service.fail_run(db, run, error=str(exc))
+        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
         raise ValidationWorkflowError("Validation plan generation failed.") from exc
 
     run = ai_run_service.complete_run(
@@ -381,6 +479,14 @@ def generate_validation_plan(
         model_provider=completion.model_provider,
         model_name=completion.model_name,
     )
+    langsmith_observability_service.attach_run_trace(db, run, trace.trace_id, trace.trace_url)
+    langsmith_observability_service.complete_trace(
+        settings,
+        trace,
+        output_summary=draft.summary[:1000],
+        metrics={"experiment_count": len(experiments)},
+    )
+    db.commit()
     artifact = _get_artifact(db, auth, project.id, artifact.id)
     experiments = [
         get_experiment(db, auth, project.id, experiment.id) for experiment in experiments
@@ -904,6 +1010,7 @@ def _write_validation_plan_artifact(
     run: AIRun,
     project: Project,
     draft: ValidationPlanSetDraft,
+    trace: langsmith_observability_service.TraceContext,
 ) -> Artifact:
     artifact = db.scalar(
         select(Artifact).where(
@@ -929,6 +1036,8 @@ def _write_validation_plan_artifact(
         markdown_content=_render_validation_plan_markdown(project, draft),
         structured_content=draft.model_dump(mode="json"),
         generated_by_ai_run_id=run.id,
+        langsmith_trace_id=trace.trace_id,
+        langsmith_trace_url=trace.trace_url,
         created_by=auth.user_id,
     )
     db.add(version)

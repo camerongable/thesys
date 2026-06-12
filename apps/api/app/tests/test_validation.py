@@ -10,6 +10,7 @@ from app.db.models import (
     AIRun,
     AIStep,
     Artifact,
+    ArtifactVersion,
     Decision,
     DecisionLink,
     Experiment,
@@ -42,9 +43,14 @@ def test_extract_assumptions_and_risks(client: TestClient, db_session: Session) 
     assert run is not None
     assert run.workflow_type == "assumption_extraction"
     assert run.status == "succeeded"
+    assert run.langsmith_trace_id
+    assert run.langsmith_trace_url
     step = db_session.scalar(select(AIStep).where(AIStep.ai_run_id == run.id))
     assert step is not None
     assert step.step_name == "extract_assumptions_risks"
+    assert step.langsmith_trace_id == run.langsmith_trace_id
+    assert step.langsmith_run_id
+    assert step.langsmith_trace_url == run.langsmith_trace_url
 
     assumption_id = body["assumptions"][0]["id"]
     update_response = client.patch(
@@ -133,6 +139,8 @@ def test_generate_validation_plan_and_log_result_updates_confidence(
     assert plan_body["used_stub"] is True
     assert plan_body["artifact"]["artifact_type"] == "validation_plan"
     assert plan_body["artifact"]["current_version"]["version"] == 1
+    assert plan_body["artifact"]["current_version"]["langsmith_trace_id"]
+    assert plan_body["artifact"]["current_version"]["langsmith_trace_url"]
     plan_structured = plan_body["artifact"]["current_version"]["structured_content"]["plans"][0]
     assert plan_structured["screener_questions"]
     assert plan_structured["landing_page_copy"]
@@ -149,6 +157,12 @@ def test_generate_validation_plan_and_log_result_updates_confidence(
         select(Artifact).where(Artifact.artifact_type == "validation_plan")
     )
     assert artifact is not None
+    version = db_session.scalar(
+        select(ArtifactVersion).where(ArtifactVersion.id == artifact.current_version_id)
+    )
+    assert version is not None
+    assert version.langsmith_trace_id
+    assert version.langsmith_trace_url
     persisted_experiment = db_session.scalar(select(Experiment))
     assert persisted_experiment is not None
 

@@ -23,8 +23,11 @@ class ResearchEvalCaseRead(BaseModel):
     id: str
     idea_type: str
     idea: str
-    expected_outputs: list[str]
-    unacceptable_failures: list[str]
+    expected_competitor_types: list[str]
+    expected_risky_assumptions: list[str]
+    required_output_sections: list[str]
+    unacceptable_claims: list[str]
+    expected_next_action_type: str
     demo_ready: bool = False
 
 

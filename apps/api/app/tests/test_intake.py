@@ -249,7 +249,7 @@ def test_structured_intake_finalize_persists_project_state(
     assert overview_response.status_code == 200
     overview = overview_response.json()
     assert overview["strategic_snapshot"]["current_stage"] == "structured_intake"
-    assert overview["next_best_action"]["label"] == "Generate Opportunity Brief"
+    assert overview["next_best_action"]["label"] == "Run first research pass"
 
 
 def test_structured_intake_endpoints_are_workspace_scoped(client: TestClient) -> None:

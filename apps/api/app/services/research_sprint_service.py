@@ -36,7 +36,7 @@ from app.schemas.research import (
     ResearchPlanUpdate,
     ResearchSprintPlanCreate,
 )
-from app.services import ai_run_service, project_service
+from app.services import ai_run_service, langsmith_observability_service, project_service
 
 
 class ResearchSprintWorkflowError(RuntimeError):
@@ -215,6 +215,30 @@ def start_research_sprint_plan(
     step = step_holder["step"]
     if step is None:
         raise ResearchSprintWorkflowError("Research sprint planning did not record a step.")
+    sprint = _get_sprint(db, auth, state["result"]["sprint"].id)
+    trace = langsmith_observability_service.ensure_research_sprint_trace(
+        db,
+        auth,
+        settings,
+        project,
+        sprint,
+        workflow_version=RESEARCH_SPRINT_PLANNING_PROMPT_VERSION,
+        model_provider=completion.model_provider,
+        model_name=completion.model_name,
+        run=run,
+    )
+    langsmith_observability_service.record_step_span(
+        db,
+        settings,
+        run=run,
+        step=step,
+        trace=trace,
+        span_name="research_plan_generation",
+        input_json=step.input_json,
+        output_json=step.output_json,
+        run_type="llm" if completion.model_provider != "stub" else "chain",
+    )
+    db.commit()
     return ResearchPlanRunResult(
         run=run,
         step=step,

@@ -1,82 +1,112 @@
 [
   {
-    "id": "consumer-app",
-    "idea_type": "consumer app",
-    "idea": "A habit coaching app for new parents that adapts routines around fragmented sleep and childcare schedules.",
-    "expected_outputs": ["source discovery", "substitute behavior analysis", "validation assets"],
-    "unacceptable_failures": ["claims no competitors exist", "omits willingness-to-pay uncertainty"],
-    "demo_ready": true
-  },
-  {
     "id": "b2b-saas",
     "idea_type": "B2B SaaS",
     "idea": "An AI workspace that turns customer success call notes into churn-risk actions for small SaaS teams.",
-    "expected_outputs": ["competitor discovery", "cited research memo", "risk ranking"],
-    "unacceptable_failures": ["ignores existing CS platforms", "recommends building before validation"],
+    "expected_competitor_types": ["direct_competitor", "incumbent_platform", "adjacent_solution"],
+    "expected_risky_assumptions": ["customer success teams trust AI risk summaries", "small SaaS teams will pay for a focused workspace"],
+    "required_output_sections": ["Executive Verdict", "Competitor Landscape", "Riskiest Assumptions", "Recommended Validation Actions"],
+    "unacceptable_claims": ["no competitors exist", "build before validating willingness to pay"],
+    "expected_next_action_type": "customer_interview",
+    "demo_ready": true
+  },
+  {
+    "id": "consumer-app",
+    "idea_type": "consumer app",
+    "idea": "A habit coaching app for new parents that adapts routines around fragmented sleep and childcare schedules.",
+    "expected_competitor_types": ["direct_competitor", "substitute_behavior", "adjacent_solution"],
+    "expected_risky_assumptions": ["new parents have bandwidth for another app", "behavior change remains valuable during fragmented sleep"],
+    "required_output_sections": ["Executive Verdict", "Substitute Behaviors", "What We Still Do Not Know", "Decision Recommendation"],
+    "unacceptable_claims": ["parents have predictable schedules", "no substitute behaviors exist"],
+    "expected_next_action_type": "problem_interview",
     "demo_ready": true
   },
   {
     "id": "developer-tool",
     "idea_type": "developer tool",
     "idea": "A CI assistant that explains flaky tests, suggests fixes, and tracks recurring failure patterns.",
-    "expected_outputs": ["developer workflow substitutes", "technical feasibility risks", "validation script"],
-    "unacceptable_failures": ["treats GitHub Actions as irrelevant", "omits trust and permissions risks"],
+    "expected_competitor_types": ["incumbent_platform", "direct_competitor", "substitute_behavior"],
+    "expected_risky_assumptions": ["developers will trust suggested fixes", "teams will grant CI and code access"],
+    "required_output_sections": ["Executive Verdict", "Market Landscape", "Key Risks", "Evidence Summary"],
+    "unacceptable_claims": ["GitHub Actions is irrelevant", "permissions are not a risk"],
+    "expected_next_action_type": "technical_discovery",
     "demo_ready": true
+  },
+  {
+    "id": "fitness-health",
+    "idea_type": "fitness/health",
+    "idea": "An AI platform for independent fitness coaches that turns client check-ins into adaptive recommendations.",
+    "expected_competitor_types": ["direct_competitor", "incumbent_platform", "substitute_behavior"],
+    "expected_risky_assumptions": ["coaches will trust AI-assisted recommendations", "coaches spend enough time on check-ins to pay"],
+    "required_output_sections": ["Executive Verdict", "Customer Pain Signals", "Pricing / Business Model Signals", "Riskiest Assumptions"],
+    "unacceptable_claims": ["autonomous coaching should replace the coach", "willingness to pay is proven"],
+    "expected_next_action_type": "willingness_to_pay_interview",
+    "demo_ready": true
+  },
+  {
+    "id": "local-services",
+    "idea_type": "local services",
+    "idea": "A scheduling and quote follow-up assistant for independent home service contractors.",
+    "expected_competitor_types": ["incumbent_platform", "substitute_behavior", "adjacent_solution"],
+    "expected_risky_assumptions": ["contractors will adopt software for follow-up", "text and phone workflows can be improved without disrupting jobs"],
+    "required_output_sections": ["Executive Verdict", "Substitute Behaviors", "Customer Pain Signals", "Recommended Validation Actions"],
+    "unacceptable_claims": ["enterprise CRM behavior applies directly", "contractors primarily work in dashboards"],
+    "expected_next_action_type": "workflow_observation",
+    "demo_ready": false
   },
   {
     "id": "marketplace",
     "idea_type": "marketplace",
     "idea": "A managed marketplace connecting boutique accounting firms with startups that need cleanup bookkeeping.",
-    "expected_outputs": ["two-sided market risks", "incumbent alternatives", "first-side validation plan"],
-    "unacceptable_failures": ["ignores supply-side acquisition", "overstates marketplace defensibility"],
+    "expected_competitor_types": ["incumbent_platform", "substitute_behavior", "adjacent_solution"],
+    "expected_risky_assumptions": ["both sides can be acquired cheaply", "quality control is manageable in a managed marketplace"],
+    "required_output_sections": ["Executive Verdict", "Key Risks", "What We Still Do Not Know", "Decision Recommendation"],
+    "unacceptable_claims": ["marketplace defensibility is guaranteed", "supply-side acquisition is easy"],
+    "expected_next_action_type": "supply_demand_validation",
     "demo_ready": false
   },
   {
-    "id": "health-fitness",
-    "idea_type": "health/fitness product",
-    "idea": "An AI platform for independent fitness coaches that turns client check-ins into adaptive recommendations.",
-    "expected_outputs": ["fitness coach competitors", "trust assumptions", "interview assets"],
-    "unacceptable_failures": ["recommends autonomous coaching without human control", "omits coach willingness to pay"],
-    "demo_ready": true
-  },
-  {
-    "id": "local-services",
-    "idea_type": "local services product",
-    "idea": "A scheduling and quote follow-up assistant for independent home service contractors.",
-    "expected_outputs": ["local service substitutes", "buyer pain evidence", "manual workflow validation"],
-    "unacceptable_failures": ["assumes enterprise CRM behavior", "ignores phone/text workflow"],
-    "demo_ready": false
-  },
-  {
-    "id": "ai-workflow",
-    "idea_type": "AI workflow product",
+    "id": "ai-workflow-tool",
+    "idea_type": "AI workflow tool",
     "idea": "A strategic research workspace that investigates startup ideas and recommends validation experiments.",
-    "expected_outputs": ["AI research competitors", "differentiation risks", "source-backed memo"],
-    "unacceptable_failures": ["sounds like generic ChatGPT wrapper", "omits citation quality"],
+    "expected_competitor_types": ["direct_competitor", "incumbent_platform", "adjacent_solution"],
+    "expected_risky_assumptions": ["stateful memory is valuable enough to switch from chat", "citations increase trust enough to pay"],
+    "required_output_sections": ["Executive Verdict", "Best Wedge", "Competitor Landscape", "Unsupported Claims / Open Questions"],
+    "unacceptable_claims": ["generic ChatGPT wrapper is differentiated", "citations are optional"],
+    "expected_next_action_type": "positioning_test",
     "demo_ready": true
-  },
-  {
-    "id": "creator-economy",
-    "idea_type": "creator economy product",
-    "idea": "A sponsorship pipeline assistant for niche newsletter creators.",
-    "expected_outputs": ["creator monetization alternatives", "sponsor discovery risks", "outreach validation assets"],
-    "unacceptable_failures": ["ignores existing newsletter platforms", "omits creator willingness to pay"],
-    "demo_ready": false
   },
   {
     "id": "productivity-tool",
     "idea_type": "productivity tool",
     "idea": "A personal operating system that turns meeting notes, tasks, and calendar events into weekly priorities.",
-    "expected_outputs": ["productivity incumbents", "retention assumptions", "behavior-change risks"],
-    "unacceptable_failures": ["ignores calendar/task incumbents", "overstates daily usage likelihood"],
+    "expected_competitor_types": ["incumbent_platform", "direct_competitor", "substitute_behavior"],
+    "expected_risky_assumptions": ["users will change weekly planning habits", "calendar and task incumbents leave a clear wedge"],
+    "required_output_sections": ["Executive Verdict", "Market Landscape", "Substitute Behaviors", "Riskiest Assumptions"],
+    "unacceptable_claims": ["daily usage is guaranteed", "calendar and task incumbents are irrelevant"],
+    "expected_next_action_type": "retention_risk_interview",
+    "demo_ready": false
+  },
+  {
+    "id": "creator-consultant-workflow",
+    "idea_type": "creator/consultant workflow",
+    "idea": "A sponsorship pipeline assistant for niche newsletter creators and solo consultants.",
+    "expected_competitor_types": ["adjacent_solution", "incumbent_platform", "substitute_behavior"],
+    "expected_risky_assumptions": ["creators will pay before sponsorship revenue is predictable", "pipeline automation beats spreadsheets and inbox workflows"],
+    "required_output_sections": ["Executive Verdict", "Pricing / Business Model Signals", "Customer Pain Signals", "Recommended Validation Actions"],
+    "unacceptable_claims": ["existing newsletter platforms do not matter", "sponsor discovery is solved automatically"],
+    "expected_next_action_type": "concierge_validation",
     "demo_ready": false
   },
   {
     "id": "ecommerce-affiliate",
-    "idea_type": "ecommerce or affiliate idea",
+    "idea_type": "ecommerce/affiliate idea",
     "idea": "A shopping research assistant for runners choosing shoes based on injury history and training volume.",
-    "expected_outputs": ["commerce substitutes", "trust and affiliate bias risks", "validation survey"],
-    "unacceptable_failures": ["omits medical-advice risk", "ignores retailer and review-site substitutes"],
+    "expected_competitor_types": ["direct_competitor", "incumbent_platform", "substitute_behavior"],
+    "expected_risky_assumptions": ["users trust recommendations despite affiliate incentives", "medical-adjacent guidance can be framed safely"],
+    "required_output_sections": ["Executive Verdict", "Key Risks", "Evidence Summary", "Decision Recommendation"],
+    "unacceptable_claims": ["medical advice risk is irrelevant", "affiliate bias does not affect trust"],
+    "expected_next_action_type": "trust_validation_survey",
     "demo_ready": false
   }
 ]

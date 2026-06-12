@@ -48,6 +48,8 @@ class AIRun(UUIDPrimaryKeyMixin, Base):
     output_summary: Mapped[str | None] = mapped_column(Text)
     total_tokens: Mapped[int | None] = mapped_column(Integer)
     total_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    langsmith_trace_id: Mapped[str | None] = mapped_column(String(100), index=True)
+    langsmith_trace_url: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -81,6 +83,9 @@ class AIStep(UUIDPrimaryKeyMixin, Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     tokens: Mapped[int | None] = mapped_column(Integer)
     cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    langsmith_trace_id: Mapped[str | None] = mapped_column(String(100), index=True)
+    langsmith_run_id: Mapped[str | None] = mapped_column(String(100), index=True)
+    langsmith_trace_url: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

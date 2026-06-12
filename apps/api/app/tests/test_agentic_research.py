@@ -8,6 +8,7 @@ from app.db.models import (
     AIRun,
     AIStep,
     Artifact,
+    ArtifactVersion,
     Assumption,
     AssumptionEvidenceLink,
     Claim,
@@ -110,6 +111,11 @@ def test_agentic_research_runs_multi_step_rag_and_writes_reviewable_memo(
     assert body["version"]["structured_content"]["memory_update_status"] == (
         "pending_human_approval"
     )
+    assert body["version"]["langsmith_trace_id"]
+    assert body["version"]["langsmith_trace_url"]
+    assert body["version"]["structured_content"]["langsmith_trace_id"] == (
+        body["version"]["langsmith_trace_id"]
+    )
     assert body["claims"]
     assert body["citations"]
 
@@ -117,13 +123,15 @@ def test_agentic_research_runs_multi_step_rag_and_writes_reviewable_memo(
     assert run is not None
     assert run.workflow_type == "agentic_research"
     assert run.status == "waiting_for_human"
+    assert run.langsmith_trace_id == body["version"]["langsmith_trace_id"]
+    assert run.langsmith_trace_url == body["version"]["langsmith_trace_url"]
 
-    step_names = [
-        step.step_name
-        for step in db_session.scalars(
+    steps = list(
+        db_session.scalars(
             select(AIStep).where(AIStep.ai_run_id == run.id).order_by(AIStep.created_at)
         )
-    ]
+    )
+    step_names = [step.step_name for step in steps]
     assert step_names == [
         "load_research_context",
         "research_planner",
@@ -137,18 +145,29 @@ def test_agentic_research_runs_multi_step_rag_and_writes_reviewable_memo(
         "final_memo_writer",
         "human_approval_interrupt",
     ]
+    assert all(step.langsmith_trace_id == run.langsmith_trace_id for step in steps)
+    assert all(step.langsmith_run_id for step in steps)
+    assert all(step.langsmith_trace_url == run.langsmith_trace_url for step in steps)
 
     sprint = db_session.scalar(
         select(ResearchSprint).where(ResearchSprint.id == uuid.UUID(sprint_id))
     )
     assert sprint is not None
     assert sprint.status == "needs_review"
+    assert sprint.langsmith_trace_id == run.langsmith_trace_id
+    assert sprint.langsmith_trace_url == run.langsmith_trace_url
 
     artifact = db_session.scalar(
         select(Artifact).where(Artifact.id == uuid.UUID(body["artifact"]["id"]))
     )
     assert artifact is not None
     assert artifact.current_version_id == uuid.UUID(body["version"]["id"])
+    version = db_session.scalar(
+        select(ArtifactVersion).where(ArtifactVersion.id == artifact.current_version_id)
+    )
+    assert version is not None
+    assert version.langsmith_trace_id == run.langsmith_trace_id
+    assert version.langsmith_trace_url == run.langsmith_trace_url
     assert db_session.scalar(
         select(Claim).where(Claim.artifact_version_id == artifact.current_version_id)
     )
@@ -190,6 +209,8 @@ def test_agentic_research_memo_can_be_approved_after_review(
     assert run is not None
     assert run.status == "succeeded"
     assert run.completed_at is not None
+    assert run.langsmith_trace_id == body["version"]["langsmith_trace_id"]
+    assert body["sprint"]["langsmith_trace_id"] == run.langsmith_trace_id
 
     step_names = [
         step.step_name

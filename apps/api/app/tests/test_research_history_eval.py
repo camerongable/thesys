@@ -28,6 +28,8 @@ def test_research_history_tracks_approved_memory_updates(
     assert body["completed_sprint_count"] == 1
     history = body["sprints"][0]
     assert history["sprint"]["id"] == sprint_id
+    assert history["sprint"]["langsmith_trace_id"]
+    assert history["sprint"]["langsmith_trace_url"]
     assert history["ingested_source_count"] >= 1
     assert history["merged_competitor_count"] >= 1
     assert history["memory_update_status"] == "approved"
@@ -92,3 +94,8 @@ def test_v1_research_eval_passes_for_completed_research_sprint(
     assert body["score"] == body["total"]
     assert body["dataset_case_count"] == 10
     assert body["demo_ready_case_count"] >= 5
+    metrics = {metric["key"]: metric for metric in body["metrics"]}
+    assert metrics["research_memo_completeness"]["passed"] is True
+    assert metrics["langsmith_trace_ids"]["passed"] is True
+    assert metrics["langsmith_span_coverage"]["passed"] is True
+    assert metrics["secret_redaction"]["passed"] is True

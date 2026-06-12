@@ -34,7 +34,7 @@ from app.schemas.evals import (
     V1ResearchEvalMetricRead,
     V1ResearchEvalRead,
 )
-from app.services import project_service
+from app.services import langsmith_observability_service, project_service
 
 REQUIRED_BRIEF_SECTIONS = (
     "Executive Summary",
@@ -194,6 +194,7 @@ def run_v1_research_eval(
     )
     tool_calls = structured.get("tool_calls") if isinstance(structured, dict) else []
     gaps = structured.get("evidence_gaps") if isinstance(structured, dict) else []
+    markdown = latest_memo.markdown_content if latest_memo else ""
     dataset_cases = _research_eval_cases()
     demo_ready_count = sum(1 for case in dataset_cases if case.demo_ready)
 
@@ -248,6 +249,13 @@ def run_v1_research_eval(
             "research memo with at least 1 cited claim",
         ),
         _ResearchMetric(
+            "research_memo_completeness",
+            "Research memo completeness",
+            _contains_research_memo_sections(markdown),
+            _research_memo_section_coverage(markdown),
+            "required V1/Sprint 14 memo sections",
+        ),
+        _ResearchMetric(
             "unsupported_claims",
             "Unsupported claims tracked",
             isinstance(unsupported, list) and len(unsupported) >= 1,
@@ -298,6 +306,33 @@ def run_v1_research_eval(
                 f"{counts['steps_with_latency']} steps with latency"
             ),
             "workflow cost and step latency are visible",
+        ),
+        _ResearchMetric(
+            "langsmith_trace_ids",
+            "LangSmith trace IDs",
+            counts["research_sprints_with_trace"] >= 1
+            and counts["agentic_runs_with_trace"] >= 1
+            and counts["research_memo_versions_with_trace"] >= 1,
+            (
+                f"{counts['research_sprints_with_trace']} sprints, "
+                f"{counts['agentic_runs_with_trace']} runs, "
+                f"{counts['research_memo_versions_with_trace']} memo versions"
+            ),
+            "trace IDs persisted on sprint, run, and research memo version",
+        ),
+        _ResearchMetric(
+            "langsmith_span_coverage",
+            "LangSmith span coverage",
+            counts["agentic_steps_with_trace"] >= 10,
+            counts["agentic_steps_with_trace"],
+            "10+ traced agentic research child steps",
+        ),
+        _ResearchMetric(
+            "secret_redaction",
+            "Sensitive value redaction",
+            _secret_redaction_check(),
+            True,
+            "observability sanitizer redacts API keys and tokens",
         ),
     ]
     score = sum(1 for metric in metrics if metric.passed)
@@ -500,6 +535,51 @@ def _v1_research_counts(db: Session, auth: AuthContext, project_id: uuid.UUID) -
                 AIStep.latency_ms.is_not(None),
             ),
         ),
+        "research_sprints_with_trace": _count(
+            db,
+            select(func.count())
+            .select_from(ResearchSprint)
+            .where(
+                ResearchSprint.workspace_id == auth.workspace_id,
+                ResearchSprint.project_id == project_id,
+                ResearchSprint.langsmith_trace_id.is_not(None),
+            ),
+        ),
+        "agentic_runs_with_trace": _count(
+            db,
+            select(func.count())
+            .select_from(AIRun)
+            .where(
+                AIRun.workspace_id == auth.workspace_id,
+                AIRun.project_id == project_id,
+                AIRun.workflow_type == "agentic_research",
+                AIRun.langsmith_trace_id.is_not(None),
+            ),
+        ),
+        "agentic_steps_with_trace": _count(
+            db,
+            select(func.count())
+            .select_from(AIStep)
+            .join(AIRun, AIStep.ai_run_id == AIRun.id)
+            .where(
+                AIRun.workspace_id == auth.workspace_id,
+                AIRun.project_id == project_id,
+                AIRun.workflow_type == "agentic_research",
+                AIStep.langsmith_trace_id.is_not(None),
+            ),
+        ),
+        "research_memo_versions_with_trace": _count(
+            db,
+            select(func.count())
+            .select_from(ArtifactVersion)
+            .join(Artifact, ArtifactVersion.artifact_id == Artifact.id)
+            .where(
+                Artifact.workspace_id == auth.workspace_id,
+                Artifact.project_id == project_id,
+                Artifact.artifact_type == "research_memo",
+                ArtifactVersion.langsmith_trace_id.is_not(None),
+            ),
+        ),
     }
 
 
@@ -582,3 +662,45 @@ def _section_coverage(markdown: str) -> str:
         1 for section in REQUIRED_BRIEF_SECTIONS if section.casefold() in markdown.casefold()
     )
     return f"{covered}/{len(REQUIRED_BRIEF_SECTIONS)}"
+
+
+REQUIRED_RESEARCH_MEMO_SECTIONS = (
+    "Executive Verdict",
+    "Best Wedge",
+    "Market Landscape",
+    "Competitor Landscape",
+    "Riskiest Assumptions",
+    "Recommended Validation Actions",
+    "Decision Recommendation",
+    "Unsupported Claims / Open Questions",
+)
+
+
+def _contains_research_memo_sections(markdown: str) -> bool:
+    return all(
+        section.casefold() in markdown.casefold()
+        for section in REQUIRED_RESEARCH_MEMO_SECTIONS
+    )
+
+
+def _research_memo_section_coverage(markdown: str) -> str:
+    covered = sum(
+        1
+        for section in REQUIRED_RESEARCH_MEMO_SECTIONS
+        if section.casefold() in markdown.casefold()
+    )
+    return f"{covered}/{len(REQUIRED_RESEARCH_MEMO_SECTIONS)}"
+
+
+def _secret_redaction_check() -> bool:
+    sanitized = langsmith_observability_service.sanitize_for_observability(
+        {
+            "LANGSMITH_API_KEY": "lsv2-secret",
+            "nested": {"authorization": "Bearer secret-token", "safe": "visible"},
+        }
+    )
+    return (
+        sanitized["LANGSMITH_API_KEY"] == "[redacted]"
+        and sanitized["nested"]["authorization"] == "[redacted]"
+        and sanitized["nested"]["safe"] == "visible"
+    )

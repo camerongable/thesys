@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Circle, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, Circle, ExternalLink, Loader2, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { getWorkflowEventsUrl, WorkflowRun, WorkflowStep } from "@/lib/api";
@@ -117,6 +117,17 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
           <span className="rounded-md bg-muted px-2 py-1">
             Cost: {formatCost(run.total_cost)}
           </span>
+          {run.langsmith_trace_url ? (
+            <a
+              className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-primary hover:underline"
+              href={run.langsmith_trace_url}
+              rel="noreferrer"
+              target="_blank"
+            >
+              <ExternalLink className="h-3 w-3" aria-hidden="true" />
+              View trace
+            </a>
+          ) : null}
         </div>
       ) : null}
 

@@ -125,6 +125,8 @@ class ResearchSprint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="planned", index=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    langsmith_trace_id: Mapped[str | None] = mapped_column(String(100), index=True)
+    langsmith_trace_url: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
 
     plan: Mapped[ResearchPlan] = relationship(back_populates="sprints")

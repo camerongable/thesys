@@ -26,6 +26,9 @@ class WorkflowStepRead(BaseModel):
     latency_ms: int | None
     tokens: int | None
     cost: Decimal | None
+    langsmith_trace_id: str | None = None
+    langsmith_run_id: str | None = None
+    langsmith_trace_url: str | None = None
     error: str | None
     created_at: datetime
 
@@ -45,6 +48,8 @@ class WorkflowRunRead(BaseModel):
     output_summary: str | None
     total_tokens: int | None
     total_cost: Decimal | None
+    langsmith_trace_id: str | None = None
+    langsmith_trace_url: str | None = None
     error: str | None
     started_at: datetime | None
     completed_at: datetime | None

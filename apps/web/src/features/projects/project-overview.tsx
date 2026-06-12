@@ -2219,6 +2219,17 @@ function ResearchHistoryPanel({ projectId }: { projectId: string }) {
                       {formatLabel(sprintHistory.memory_update_status)}
                     </span>
                   ) : null}
+                  {sprintHistory.sprint.langsmith_trace_url ? (
+                    <a
+                      className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-primary hover:underline"
+                      href={sprintHistory.sprint.langsmith_trace_url}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                      View trace
+                    </a>
+                  ) : null}
                 </div>
               </div>
               {sprintHistory.recommendation_change ? (
@@ -2253,6 +2264,8 @@ function ResearchQualityPanel({ projectId }: { projectId: string }) {
     queryFn: () => getV1ResearchEval(projectId),
   });
   const evaluation = evalQuery.data;
+  const traceMetric = evaluation?.metrics.find((metric) => metric.key === "langsmith_trace_ids");
+  const spanMetric = evaluation?.metrics.find((metric) => metric.key === "langsmith_span_coverage");
 
   return (
     <details className="mt-6 border-t border-border pt-5">
@@ -2304,6 +2317,12 @@ function ResearchQualityPanel({ projectId }: { projectId: string }) {
           <p className="mt-4 text-xs leading-5 text-muted-foreground">
             Eval dataset: {evaluation.dataset_case_count} idea categories,{" "}
             {evaluation.demo_ready_case_count} demo-ready cases.
+            {traceMetric && spanMetric ? (
+              <span>
+                {" "}
+                Traceability: {String(traceMetric.observed)}, {String(spanMetric.observed)} traced steps.
+              </span>
+            ) : null}
           </p>
         </>
       ) : null}
@@ -3306,6 +3325,17 @@ function ResearchMemoReview({
             <span className="rounded-md bg-muted px-2 py-1">
               {formatDateTime(version.created_at)}
             </span>
+            {version.langsmith_trace_url ? (
+              <a
+                className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-primary hover:underline"
+                href={version.langsmith_trace_url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                View trace
+              </a>
+            ) : null}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
