@@ -52,6 +52,7 @@ import {
   listCompetitorCandidates,
   listDiscoveredSources,
   listResearchSprints,
+  listToolInvocations,
   NextBestAction,
   ProjectStage,
   rejectCompetitorCandidate,
@@ -66,6 +67,7 @@ import {
   StrategicSnapshot,
   StrategicRecommendation,
   startResearchSprintPlan,
+  ToolInvocation,
   updateCompetitorCandidate,
   updateResearchPlan,
 } from "@/lib/api";
@@ -2458,12 +2460,17 @@ function ResearchDiscoveryPanel({
     queryKey: ["projects", projectId, "artifacts", "research_memo"],
     queryFn: () => listArtifacts(projectId, "research_memo"),
   });
+  const toolInvocationsQuery = useQuery({
+    queryKey: ["projects", projectId, "tool-invocations", sprint.id],
+    queryFn: () => listToolInvocations(projectId, sprint.id),
+  });
 
   const discoverSourcesMutation = useMutation({
     mutationFn: () => discoverSources(projectId, sprint.id),
     onSuccess: async (result) => {
       onRunTrace(result.ai_run_id);
       await sourcesQuery.refetch();
+      await toolInvocationsQuery.refetch();
     },
   });
   const discoverCompetitorsMutation = useMutation({
@@ -2471,6 +2478,7 @@ function ResearchDiscoveryPanel({
     onSuccess: async (result) => {
       onRunTrace(result.ai_run_id);
       await candidatesQuery.refetch();
+      await toolInvocationsQuery.refetch();
     },
   });
   const agenticResearchMutation = useMutation({
@@ -2478,6 +2486,7 @@ function ResearchDiscoveryPanel({
     onSuccess: async (result) => {
       onRunTrace(result.ai_run_id);
       await researchMemosQuery.refetch();
+      await toolInvocationsQuery.refetch();
       await onSprintUpdated();
     },
   });
@@ -2492,6 +2501,7 @@ function ResearchDiscoveryPanel({
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "research-history"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "v1-research"] });
+      await toolInvocationsQuery.refetch();
       await onSprintUpdated();
     },
   });
@@ -2503,6 +2513,7 @@ function ResearchDiscoveryPanel({
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "research-history"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "v1-research"] });
+      await toolInvocationsQuery.refetch();
       await onSprintUpdated();
     },
   });
@@ -2624,7 +2635,8 @@ function ResearchDiscoveryPanel({
     rejectCandidateMutation.error ??
     (researchMemosQuery.error as Error | null) ??
     (sourcesQuery.error as Error | null) ??
-    (candidatesQuery.error as Error | null);
+    (candidatesQuery.error as Error | null) ??
+    (toolInvocationsQuery.error as Error | null);
   const busy =
     discoverSourcesMutation.isPending ||
     discoverCompetitorsMutation.isPending ||
@@ -2720,6 +2732,12 @@ function ResearchDiscoveryPanel({
         unsupportedClaims={unsupportedClaims}
       />
 
+      <ToolActivityPanel
+        error={toolInvocationsQuery.error as Error | null}
+        invocations={toolInvocationsQuery.data ?? []}
+        isLoading={toolInvocationsQuery.isLoading}
+      />
+
       <details className="mt-5 border-t border-border pt-4">
         <summary className="cursor-pointer text-sm font-medium">
           Open full evidence lists
@@ -2746,6 +2764,90 @@ function ResearchDiscoveryPanel({
         </div>
       </details>
     </div>
+  );
+}
+
+function ToolActivityPanel({
+  error,
+  invocations,
+  isLoading,
+}: {
+  error: Error | null;
+  invocations: ToolInvocation[];
+  isLoading: boolean;
+}) {
+  const recent = invocations.slice(0, 12);
+  const pendingProposalCount = invocations.filter(
+    (invocation) => invocation.access_mode === "proposal" && invocation.status === "requested",
+  ).length;
+
+  return (
+    <details className="mt-5 border-t border-border pt-4">
+      <summary className="cursor-pointer list-none">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h4 className="text-sm font-semibold">Tool activity</h4>
+            <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+              Inspect the bounded tools the agent used to read project context, search
+              evidence, and propose updates.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <span className="rounded-md bg-muted px-2 py-1">
+              {invocations.length} call{invocations.length === 1 ? "" : "s"}
+            </span>
+            {pendingProposalCount > 0 ? (
+              <span className="rounded-md bg-warning-muted px-2 py-1 text-warning-foreground">
+                {pendingProposalCount} pending proposal
+                {pendingProposalCount === 1 ? "" : "s"}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </summary>
+
+      {isLoading ? (
+        <p className="mt-3 text-sm text-muted-foreground">Loading tool activity...</p>
+      ) : error ? (
+        <p className="mt-3 text-sm text-danger-foreground">{error.message}</p>
+      ) : recent.length === 0 ? (
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          No tool activity has been recorded for this evidence review yet.
+        </p>
+      ) : (
+        <ol className="mt-4 space-y-2" aria-label="Tool activity">
+          {recent.map((invocation) => (
+            <li className="rounded-md border border-border px-3 py-3" key={invocation.id}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <EvidenceReviewPill>{formatLabel(invocation.access_mode)}</EvidenceReviewPill>
+                    <span className={toolRiskClass(invocation.risk_level)}>
+                      {formatLabel(invocation.risk_level)} risk
+                    </span>
+                    <EvidenceReviewPill>{formatLabel(invocation.status)}</EvidenceReviewPill>
+                  </div>
+                  <h5 className="mt-2 text-sm font-semibold">
+                    {toolActivityTitle(invocation)}
+                  </h5>
+                  <p className="mt-1 max-w-[72ch] text-xs leading-5 text-muted-foreground">
+                    Tool: <span className="font-mono">{invocation.tool_name}</span>
+                  </p>
+                  {invocation.output_summary ? (
+                    <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+                      {clarifyWorkspaceTerm(invocation.output_summary)}
+                    </p>
+                  ) : null}
+                </div>
+                <time className="shrink-0 text-xs text-muted-foreground">
+                  {formatDateTime(invocation.executed_at ?? invocation.created_at)}
+                </time>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </details>
   );
 }
 
@@ -3243,6 +3345,31 @@ function EvidenceReviewPill({ children }: { children: ReactNode }) {
       {children}
     </span>
   );
+}
+
+function toolRiskClass(riskLevel: ToolInvocation["risk_level"]) {
+  if (riskLevel === "high") {
+    return "w-fit rounded-md bg-danger-muted px-2 py-1 text-xs text-danger-foreground";
+  }
+  if (riskLevel === "medium") {
+    return "w-fit rounded-md bg-warning-muted px-2 py-1 text-xs text-warning-foreground";
+  }
+  return "w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground";
+}
+
+function toolActivityTitle(invocation: ToolInvocation) {
+  const query = typeof invocation.input_json.query === "string" ? invocation.input_json.query : "";
+  const summary = invocation.output_summary;
+  if (invocation.tool_name === "search_project_evidence" && query) {
+    return `Searched project evidence for "${truncate(query, 80)}"`;
+  }
+  if (invocation.access_mode === "proposal") {
+    return summary ? truncate(summary, 110) : "Project update proposed";
+  }
+  if (summary) {
+    return truncate(summary, 110);
+  }
+  return formatLabel(invocation.tool_name);
 }
 
 function evidenceReviewItemKind(item: EvidenceReviewQueueItem) {

@@ -857,6 +857,41 @@ export type ProjectResearchHistory = {
   sprints: ResearchSprintHistory[];
 };
 
+export type ToolRiskLevel = "low" | "medium" | "high";
+export type ToolAccessMode = "read" | "write" | "proposal";
+export type ToolApprovalPolicy = "never_required" | "required_for_write" | "always_required";
+export type ToolInvocationStatus = "requested" | "approved" | "rejected" | "executed" | "failed";
+
+export type AgentToolDefinition = {
+  name: string;
+  title: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+  output_schema: Record<string, unknown>;
+  access_mode: ToolAccessMode;
+  risk_level: ToolRiskLevel;
+  approval_policy: ToolApprovalPolicy;
+  allowed_project_roles: string[];
+};
+
+export type ToolInvocation = {
+  id: string;
+  project_id: string;
+  research_sprint_id: string | null;
+  tool_name: string;
+  access_mode: ToolAccessMode;
+  risk_level: ToolRiskLevel;
+  input_json: Record<string, unknown>;
+  output_json: Record<string, unknown> | null;
+  output_summary: string | null;
+  status: ToolInvocationStatus;
+  requested_by: "agent" | "user" | "system";
+  approved_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+  executed_at: string | null;
+};
+
 export type DemoSeedResult = {
   project: Project;
   created: boolean;
@@ -1615,6 +1650,37 @@ export function rejectAgenticResearchMemo(projectId: string, sprintId: string) {
 
 export function getProjectResearchHistory(projectId: string) {
   return apiFetch<ProjectResearchHistory>(`/api/projects/${projectId}/research-history`);
+}
+
+export async function listAgentTools() {
+  const response = await apiFetch<{ tools: AgentToolDefinition[] }>("/api/tools");
+  return response.tools;
+}
+
+export async function listToolInvocations(projectId: string, researchSprintId?: string) {
+  const params = researchSprintId
+    ? `?research_sprint_id=${encodeURIComponent(researchSprintId)}`
+    : "";
+  const response = await apiFetch<{ invocations: ToolInvocation[] }>(
+    `/api/projects/${projectId}/tool-invocations${params}`,
+  );
+  return response.invocations;
+}
+
+export async function approveToolInvocation(projectId: string, invocationId: string) {
+  const response = await apiFetch<{ invocation: ToolInvocation }>(
+    `/api/projects/${projectId}/tool-invocations/${invocationId}/approve`,
+    { method: "POST" },
+  );
+  return response.invocation;
+}
+
+export async function rejectToolInvocation(projectId: string, invocationId: string) {
+  const response = await apiFetch<{ invocation: ToolInvocation }>(
+    `/api/projects/${projectId}/tool-invocations/${invocationId}/reject`,
+    { method: "POST" },
+  );
+  return response.invocation;
 }
 
 export function getWorkflowEventsUrl(runId: string) {

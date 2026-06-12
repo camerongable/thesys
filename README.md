@@ -663,6 +663,26 @@ Potential capabilities:
 - advanced evals
 - workflow packs for consultants, PMs, investors, and innovation teams
 
+## MCP / Tool Boundary
+
+Thesys exposes project capabilities through explicit tool contracts. Tools define
+input/output schemas, access modes, risk levels, and approval policies.
+
+Read tools allow agents to inspect project context. Proposal tools allow agents
+to suggest changes, but final state mutation requires human approval. This
+creates a safer boundary between model reasoning and application state.
+
+The local API exposes:
+
+```bash
+curl http://localhost:8000/api/tools
+curl http://localhost:8000/api/projects/<project_id>/tool-invocations
+curl http://localhost:8000/api/projects/<project_id>/tool-invocations?research_sprint_id=<sprint_id>
+```
+
+Project pages also include a secondary Tool Activity panel in the evidence
+review workspace.
+
 ---
 
 ## Lessons Learned

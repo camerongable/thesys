@@ -19,6 +19,7 @@ from app.db.models.research import (
     ResearchPlan,
     ResearchSprint,
 )
+from app.db.models.tool import ToolInvocation
 from app.db.models.validation import Decision, DecisionLink, Experiment, ExperimentResult
 
 __all__ = [
@@ -50,6 +51,7 @@ __all__ = [
     "ResearchSprint",
     "Risk",
     "TimestampMixin",
+    "ToolInvocation",
     "UUIDPrimaryKeyMixin",
     "User",
     "Workspace",

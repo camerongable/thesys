@@ -36,7 +36,12 @@ from app.schemas.research import (
     ResearchPlanUpdate,
     ResearchSprintPlanCreate,
 )
-from app.services import ai_run_service, langsmith_observability_service, project_service
+from app.services import (
+    ai_run_service,
+    langsmith_observability_service,
+    project_service,
+    tool_service,
+)
 
 
 class ResearchSprintWorkflowError(RuntimeError):
@@ -181,6 +186,26 @@ def start_research_sprint_plan(
             created_by=auth.user_id,
         )
         db.add(sprint)
+        db.flush()
+        tool_service.create_proposal(
+            db,
+            auth,
+            project.id,
+            "propose_research_plan",
+            {
+                "summary": "Research plan proposed for user approval.",
+                "research_plan_id": str(research_plan.id),
+                "research_sprint_id": str(sprint.id),
+                "objective": research_plan.objective,
+                "research_questions": research_plan.research_questions,
+                "competitor_queries": research_plan.competitor_queries,
+                "market_queries": research_plan.market_queries,
+                "expected_outputs": research_plan.expected_outputs,
+            },
+            research_sprint_id=sprint.id,
+            requested_by="agent",
+            input_json={"objective": research_plan.objective},
+        )
         db.commit()
         db.refresh(research_plan)
         db.refresh(sprint)
@@ -284,6 +309,13 @@ def approve_research_sprint(
             detail="Only planned research sprints with draft plans can be approved.",
         )
     _apply_plan_update(sprint.plan, payload)
+    tool_service.approve_pending_proposals_for_sprint(
+        db,
+        auth,
+        project_id,
+        sprint.id,
+        {"propose_research_plan"},
+    )
     sprint.plan.status = "approved"
     sprint.plan.approved_at = datetime.now(UTC)
     sprint.status = "approved"
@@ -332,6 +364,13 @@ def reject_research_sprint(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only planned research sprints with draft plans can be rejected.",
         )
+    tool_service.reject_pending_proposals_for_sprint(
+        db,
+        auth,
+        project_id,
+        sprint.id,
+        {"propose_research_plan"},
+    )
     sprint.plan.status = "rejected"
     sprint.plan.rejected_at = datetime.now(UTC)
     sprint.status = "rejected"

@@ -52,7 +52,7 @@ from app.services import (
     ai_run_service,
     langsmith_observability_service,
     project_service,
-    retrieval_service,
+    tool_service,
 )
 
 
@@ -179,7 +179,7 @@ def run_agentic_research(
                 run,
                 "load_research_context",
                 {"project_id": str(project_id), "research_sprint_id": str(sprint_id)},
-                lambda: _research_context(db, auth, project, sprint),
+                lambda: _research_context(db, auth, settings, project, sprint),
                 settings=settings,
                 trace=trace,
                 span_name="load_project_context",
@@ -226,6 +226,7 @@ def run_agentic_research(
                 auth,
                 settings,
                 project_id,
+                sprint_id,
                 state["project_context"],
                 state["tool_calls"],
             ),
@@ -273,7 +274,14 @@ def run_agentic_research(
             run,
             "follow_up_retriever",
             {"gaps": state["gaps"]},
-            lambda: _follow_up_retrieval(db, auth, settings, project_id, state["gaps"]),
+            lambda: _follow_up_retrieval(
+                db,
+                auth,
+                settings,
+                project_id,
+                sprint_id,
+                state["gaps"],
+            ),
             settings=settings,
             trace=trace,
             span_name="retrieval",
@@ -486,12 +494,22 @@ def approve_research_memo(
 
     project = project_service.get_project(db, auth, project_id)
     memory_summary = _write_approved_memory_updates(db, auth, project, sprint, version)
+    approved_tool_invocations = tool_service.approve_pending_proposals_for_sprint(
+        db,
+        auth,
+        project_id,
+        sprint.id,
+        {"propose_memory_update", "propose_validation_plan", "propose_decision"},
+    )
     content = dict(version.structured_content)
     content["memory_update_status"] = "approved"
     content["memory_update_approved_at"] = datetime.now(UTC).isoformat()
     content["memory_update_approved_by"] = str(auth.user_id)
     content["memory_updates_written"] = True
     content["memory_update_summary"] = memory_summary
+    content["approved_tool_invocation_ids"] = [
+        str(invocation.id) for invocation in approved_tool_invocations
+    ]
     version.structured_content = content
     flag_modified(version, "structured_content")
 
@@ -584,10 +602,20 @@ def reject_research_memo(
     started = perf_counter()
 
     content = dict(version.structured_content)
+    rejected_tool_invocations = tool_service.reject_pending_proposals_for_sprint(
+        db,
+        auth,
+        project_id,
+        sprint.id,
+        {"propose_memory_update", "propose_validation_plan", "propose_decision"},
+    )
     content["memory_update_status"] = "rejected"
     content["memory_update_rejected_at"] = datetime.now(UTC).isoformat()
     content["memory_update_rejected_by"] = str(auth.user_id)
     content["memory_updates_written"] = False
+    content["rejected_tool_invocation_ids"] = [
+        str(invocation.id) for invocation in rejected_tool_invocations
+    ]
     version.structured_content = content
     flag_modified(version, "structured_content")
 
@@ -984,24 +1012,83 @@ def _trace_from_sprint(
 def _research_context(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project: Project,
     sprint: ResearchSprint,
 ) -> dict[str, Any]:
-    thesis = project_service.current_thesis(project)
-    sources = _research_sources(db, auth, project.id, sprint.id)
-    competitors = _project_competitors(db, auth, project.id)
-    candidates = _competitor_candidates(db, auth, project.id, sprint.id)
-    artifacts = _project_artifacts(db, auth, project.id)
-    assumptions = _project_assumptions(db, auth, project.id)
+    project_summary = tool_service.execute_tool(
+        db,
+        auth,
+        settings,
+        project.id,
+        "get_project_summary",
+        {},
+        research_sprint_id=sprint.id,
+        requested_by="agent",
+    ).output
+    source_summary = tool_service.execute_tool(
+        db,
+        auth,
+        settings,
+        project.id,
+        "list_project_sources",
+        {},
+        research_sprint_id=sprint.id,
+        requested_by="agent",
+    ).output
+    competitor_summary = tool_service.execute_tool(
+        db,
+        auth,
+        settings,
+        project.id,
+        "list_competitors",
+        {},
+        research_sprint_id=sprint.id,
+        requested_by="agent",
+    ).output
+    assumption_summary = tool_service.execute_tool(
+        db,
+        auth,
+        settings,
+        project.id,
+        "list_assumptions",
+        {},
+        research_sprint_id=sprint.id,
+        requested_by="agent",
+    ).output
+    validation_summary = tool_service.execute_tool(
+        db,
+        auth,
+        settings,
+        project.id,
+        "list_validation_plans",
+        {},
+        research_sprint_id=sprint.id,
+        requested_by="agent",
+    ).output
+    decision_summary = tool_service.execute_tool(
+        db,
+        auth,
+        settings,
+        project.id,
+        "list_decisions",
+        {},
+        research_sprint_id=sprint.id,
+        requested_by="agent",
+    ).output
+    memo_summary = tool_service.execute_tool(
+        db,
+        auth,
+        settings,
+        project.id,
+        "get_research_memo",
+        {"research_sprint_id": str(sprint.id)},
+        research_sprint_id=sprint.id,
+        requested_by="agent",
+    ).output
+    project_payload = project_summary.get("project") or {}
     return {
-        "project": {
-            "id": str(project.id),
-            "name": project.name,
-            "short_description": project.short_description,
-            "current_thesis": thesis.thesis_text if thesis else None,
-            "customer_segments": [segment.name for segment in project.customer_segments],
-            "problem_hypotheses": [problem.description for problem in project.problems],
-        },
+        "project": project_payload,
         "research_plan": {
             "id": str(sprint.plan.id),
             "objective": sprint.plan.objective,
@@ -1013,58 +1100,16 @@ def _research_context(
             "assumptions_to_test": sprint.plan.assumptions_to_test,
             "expected_outputs": sprint.plan.expected_outputs,
         },
-        "research_sources": [
-            {
-                "id": str(source.id),
-                "evidence_source_id": str(source.evidence_source_id)
-                if source.evidence_source_id
-                else None,
-                "title": source.title,
-                "url": source.url,
-                "source_type": source.source_type,
-                "status": source.status,
-                "associated_research_question": source.associated_research_question,
-            }
-            for source in sources
-        ],
-        "competitors": [
-            {
-                "id": str(competitor.id),
-                "name": competitor.name,
-                "category": competitor.category,
-                "positioning": competitor.positioning,
-                "threat_level": competitor.threat_level,
-            }
-            for competitor in competitors
-        ],
-        "competitor_candidates": [
-            {
-                "id": str(candidate.id),
-                "name": candidate.name,
-                "category": candidate.category,
-                "status": candidate.status,
-                "why_it_matters": candidate.why_it_matters,
-            }
-            for candidate in candidates
-        ],
-        "artifacts": [
-            {
-                "id": str(artifact.id),
-                "artifact_type": artifact.artifact_type,
-                "title": artifact.title,
-            }
-            for artifact in artifacts
-        ],
-        "assumptions": [
-            {
-                "id": str(assumption.id),
-                "text": assumption.text,
-                "importance": assumption.importance,
-                "uncertainty": assumption.uncertainty,
-                "kill_risk": assumption.kill_risk,
-            }
-            for assumption in assumptions
-        ],
+        "research_sources": source_summary.get("research_sources", []),
+        "evidence_sources": source_summary.get("sources", []),
+        "competitors": competitor_summary.get("competitors", []),
+        "competitor_candidates": competitor_summary.get("competitor_candidates", []),
+        "artifacts": validation_summary.get("artifacts", []),
+        "assumptions": assumption_summary.get("assumptions", []),
+        "risks": assumption_summary.get("risks", []),
+        "validation_plans": validation_summary,
+        "decisions": decision_summary.get("decisions", []),
+        "latest_research_memo": memo_summary.get("memo"),
     }
 
 
@@ -1140,6 +1185,7 @@ def _execute_tool_calls(
     auth: AuthContext,
     settings: Settings,
     project_id: uuid.UUID,
+    sprint_id: uuid.UUID,
     project_context: dict[str, Any],
     tool_calls: list[ResearchToolCall],
 ) -> dict[str, Any]:
@@ -1148,28 +1194,68 @@ def _execute_tool_calls(
     for call in tool_calls:
         tool = call["tool"]
         if tool in {"semantic_search", "keyword_search"}:
-            payload = EvidenceRetrieveCreate(
-                query=call["query"],
-                mode=call["mode"],
-                top_k=int(call.get("top_k") or INITIAL_TOP_K),
-            )
-            results = retrieval_service.retrieve_evidence_results(
+            tool_result = tool_service.execute_tool(
                 db,
                 auth,
                 settings,
                 project_id,
-                payload,
+                "search_project_evidence",
+                {
+                    "query": call["query"],
+                    "mode": call["mode"],
+                    "top_k": int(call.get("top_k") or INITIAL_TOP_K),
+                },
+                research_sprint_id=sprint_id,
+                requested_by="agent",
             )
+            results = [
+                EvidenceRetrievalResultRead.model_validate(result)
+                for result in tool_result.output.get("results", [])
+            ]
             retrieval_results.extend(results)
             completed_calls.append({**call, "result_count": len(results)})
         elif tool == "source_reader":
+            tool_service.execute_tool(
+                db,
+                auth,
+                settings,
+                project_id,
+                "list_project_sources",
+                {"reason": call.get("reason")},
+                research_sprint_id=sprint_id,
+                requested_by="agent",
+            )
             source_results = _source_reader_results(db, auth, project_id)
             retrieval_results.extend(source_results)
             completed_calls.append({**call, "result_count": len(source_results)})
         else:
+            lookup_tool_name = _lookup_tool_name(tool)
+            if lookup_tool_name is not None:
+                tool_service.execute_tool(
+                    db,
+                    auth,
+                    settings,
+                    project_id,
+                    lookup_tool_name,
+                    {"query": call.get("query"), "reason": call.get("reason")},
+                    research_sprint_id=sprint_id,
+                    requested_by="agent",
+                )
             lookup_count = len(_lookup_tool_payload(project_context, tool))
             completed_calls.append({**call, "result_count": lookup_count})
     return {"tool_calls": completed_calls, "retrieval_results": retrieval_results}
+
+
+def _lookup_tool_name(tool: ResearchTool) -> str | None:
+    if tool == "competitor_lookup":
+        return "list_competitors"
+    if tool == "artifact_lookup":
+        return "get_research_memo"
+    if tool == "assumption_lookup":
+        return "list_assumptions"
+    if tool == "project_memory_lookup":
+        return "get_project_summary"
+    return None
 
 
 def _lookup_tool_payload(
@@ -1265,6 +1351,7 @@ def _follow_up_retrieval(
     auth: AuthContext,
     settings: Settings,
     project_id: uuid.UUID,
+    sprint_id: uuid.UUID,
     gaps: list[str],
 ) -> list[EvidenceRetrievalResultRead]:
     if not gaps:
@@ -1276,8 +1363,19 @@ def _follow_up_retrieval(
             mode="hybrid",
             top_k=FOLLOW_UP_TOP_K,
         )
+        tool_result = tool_service.execute_tool(
+            db,
+            auth,
+            settings,
+            project_id,
+            "search_project_evidence",
+            payload.model_dump(mode="json"),
+            research_sprint_id=sprint_id,
+            requested_by="agent",
+        )
         results.extend(
-            retrieval_service.retrieve_evidence_results(db, auth, settings, project_id, payload)
+            EvidenceRetrievalResultRead.model_validate(result)
+            for result in tool_result.output.get("results", [])
         )
     return results
 
@@ -1506,6 +1604,70 @@ def _write_research_memo_step(
         db.flush()
         artifact.current_version_id = version.id
         claims = _write_claims(db, auth, project, version, memo.claims)
+        memory_update_invocation = tool_service.create_proposal(
+            db,
+            auth,
+            project.id,
+            "propose_memory_update",
+            {
+                "summary": (
+                    "Research memo proposes assumption, risk, and validation "
+                    "priority updates."
+                ),
+                "research_sprint_id": str(sprint.id),
+                "artifact_version_id": str(version.id),
+                "assumptions": [
+                    draft.model_dump(mode="json") for draft in memo.riskiest_assumptions
+                ],
+                "risks": [draft.model_dump(mode="json") for draft in memo.key_risks],
+                "recommended_validation_actions": memo.recommended_validation_actions,
+                "decision_recommendation": memo.decision_recommendation,
+            },
+            research_sprint_id=sprint.id,
+            requested_by="agent",
+            input_json={"artifact_version_id": str(version.id)},
+        )
+        validation_invocation = tool_service.create_proposal(
+            db,
+            auth,
+            project.id,
+            "propose_validation_plan",
+            {
+                "summary": (
+                    "Research memo proposes validation actions for the riskiest "
+                    "assumptions."
+                ),
+                "research_sprint_id": str(sprint.id),
+                "artifact_version_id": str(version.id),
+                "actions": memo.recommended_validation_actions,
+            },
+            research_sprint_id=sprint.id,
+            requested_by="agent",
+            input_json={"action_count": len(memo.recommended_validation_actions)},
+        )
+        decision_invocation = tool_service.create_proposal(
+            db,
+            auth,
+            project.id,
+            "propose_decision",
+            {
+                "summary": "Research memo proposes a decision recommendation for review.",
+                "research_sprint_id": str(sprint.id),
+                "artifact_version_id": str(version.id),
+                "decision_recommendation": memo.decision_recommendation,
+            },
+            research_sprint_id=sprint.id,
+            requested_by="agent",
+            input_json={"artifact_version_id": str(version.id)},
+        )
+        content = dict(version.structured_content)
+        content["proposal_tool_invocation_ids"] = [
+            str(memory_update_invocation.id),
+            str(validation_invocation.id),
+            str(decision_invocation.id),
+        ]
+        version.structured_content = content
+        flag_modified(version, "structured_content")
         sprint.status = "needs_review"
         db.commit()
         artifact = _load_artifact(db, auth, project.id, artifact.id)

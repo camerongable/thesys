@@ -2,12 +2,11 @@
 
 ## Current Phase
 
-V1 Sprint 14 implemented LangSmith observability and local research eval
-hardening. Research sprints, agentic research runs, major child steps, research
-memos, and validation plans now persist local trace IDs and expose trace links
-in the API/UI. External LangSmith upload remains opt-in by environment
-configuration. Watchlists, monitoring, collaboration, portfolio dashboards,
-integrations, and multi-segment workflow packs remain V2 scope.
+V1 Sprint 15 implemented the MCP-style tool boundary. Project reads, evidence
+searches, research-plan proposals, and research-memo memory/validation/decision
+proposals now flow through audited tool contracts with human approval before
+final state mutation. Watchlists, monitoring, collaboration, portfolio
+dashboards, integrations, and multi-segment workflow packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -835,8 +834,58 @@ Checks run:
 - [ ] Container restart is blocked because `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
   hung with no output and had to be terminated.
 
+## V1 Sprint 15 Scope
+
+- [x] Add MCP-compatible internal tool definitions with names, descriptions,
+  input/output schemas, access modes, risk levels, approval policies, and
+  allowed project roles.
+- [x] Add `tool_invocations` audit persistence with project and research sprint
+  scope, requested-by attribution, redacted input/output payloads, status,
+  risk, access mode, and approval metadata.
+- [x] Add API endpoints for:
+  - `GET /api/tools`
+  - `GET /api/projects/{project_id}/tool-invocations`
+  - `POST /api/projects/{project_id}/tool-invocations/{invocation_id}/approve`
+  - `POST /api/projects/{project_id}/tool-invocations/{invocation_id}/reject`
+- [x] Register at least 8 read tools:
+  - `get_project_summary`
+  - `search_project_evidence`
+  - `list_project_sources`
+  - `list_competitors`
+  - `list_assumptions`
+  - `list_validation_plans`
+  - `list_decisions`
+  - `get_research_memo`
+- [x] Register proposal tools:
+  - `propose_research_plan`
+  - `propose_memory_update`
+  - `propose_validation_plan`
+  - `propose_decision`
+- [x] Route agentic research project context reads, evidence searches, lookup
+  calls, and memory/validation/decision proposals through the tool layer.
+- [x] Gate research-plan and research-memo proposal approvals before final
+  project state mutation.
+- [x] Add a secondary Tool Activity panel to the project evidence review UI.
+- [x] Document the MCP / Tool Boundary in README.
+
+## V1 Sprint 15 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app/tests/test_tool_boundary.py app/services/tool_service.py app/routers/tools.py app/services/agentic_research_service.py app/services/research_sprint_service.py`
+- [x] `cd apps/api && .venv/bin/python -m pytest app/tests/test_tool_boundary.py app/tests/test_agentic_research.py -q`
+- [x] `cd apps/api && .venv/bin/python -m pytest -q`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/Users/cgable/Repos/thesys/apps/web/node_modules/.bin:$PATH tsc --noEmit` from `apps/web`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Post-restart browser smoke check against
+  `/projects/386742ee-948b-49d4-9beb-e646d09b8e41#research-sprint`: Tool Activity
+  panel rendered one approved `propose_research_plan` invocation and browser
+  console reported no errors.
+
 ## Next Work
 
-Resolve the local Docker/localhost availability issue, then restart API/web and
-run a browser smoke check against the observability-enabled V1 flow before
-starting V2.
+V1 Sprint 16: Security, Governance, and Human Approval Hardening.
