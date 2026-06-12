@@ -892,6 +892,48 @@ export type ToolInvocation = {
   executed_at: string | null;
 };
 
+export type ApprovalRequestType =
+  | "research_plan"
+  | "memory_update"
+  | "tool_invocation"
+  | "validation_plan"
+  | "decision";
+export type ApprovalRequestStatus = "pending" | "approved" | "rejected" | "expired";
+export type ApprovalRequestedBy = "agent" | "user" | "system";
+
+export type ApprovalRequest = {
+  id: string;
+  project_id: string | null;
+  request_type: ApprovalRequestType;
+  status: ApprovalRequestStatus;
+  requested_by: ApprovalRequestedBy;
+  approved_by_user_id: string | null;
+  risk_level: ToolRiskLevel;
+  summary: string;
+  proposed_change: Record<string, unknown> | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+};
+
+export type AuditActorType = "user" | "agent" | "system";
+
+export type AuditEvent = {
+  id: string;
+  project_id: string | null;
+  user_id: string | null;
+  event_type: string;
+  actor_type: AuditActorType;
+  entity_type: string | null;
+  entity_id: string | null;
+  summary: string | null;
+  risk_level: ToolRiskLevel | null;
+  event_metadata: Record<string, unknown>;
+  created_at: string;
+};
+
 export type DemoSeedResult = {
   project: Project;
   created: boolean;
@@ -1681,6 +1723,43 @@ export async function rejectToolInvocation(projectId: string, invocationId: stri
     { method: "POST" },
   );
   return response.invocation;
+}
+
+export async function listApprovalRequests(
+  projectId: string,
+  statusFilter: ApprovalRequestStatus | "all" = "pending",
+) {
+  const params =
+    statusFilter === "all"
+      ? ""
+      : `?status_filter=${encodeURIComponent(statusFilter)}`;
+  const response = await apiFetch<{ approvals: ApprovalRequest[] }>(
+    `/api/projects/${projectId}/approvals${params}`,
+  );
+  return response.approvals;
+}
+
+export async function approveApprovalRequest(projectId: string, approvalId: string) {
+  const response = await apiFetch<{ approval: ApprovalRequest }>(
+    `/api/projects/${projectId}/approvals/${approvalId}/approve`,
+    { method: "POST" },
+  );
+  return response.approval;
+}
+
+export async function rejectApprovalRequest(projectId: string, approvalId: string) {
+  const response = await apiFetch<{ approval: ApprovalRequest }>(
+    `/api/projects/${projectId}/approvals/${approvalId}/reject`,
+    { method: "POST" },
+  );
+  return response.approval;
+}
+
+export async function listAuditEvents(projectId: string) {
+  const response = await apiFetch<{ events: AuditEvent[] }>(
+    `/api/projects/${projectId}/audit-events`,
+  );
+  return response.events;
 }
 
 export function getWorkflowEventsUrl(runId: string) {

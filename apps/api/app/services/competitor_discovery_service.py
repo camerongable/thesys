@@ -14,9 +14,12 @@ from app.ai.fallback_policy import (
     should_use_fallback_without_model,
 )
 from app.ai.litellm_client import ChatMessage, LLMCompletion
-from app.ai.prompts import COMPETITOR_DISCOVERY_PROMPT_VERSION
+from app.ai.prompts import (
+    COMPETITOR_DISCOVERY_PROMPT_VERSION,
+    UNTRUSTED_RETRIEVED_CONTENT_RULE,
+)
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
-from app.core.auth import AuthContext
+from app.core.auth import AuthContext, require_permission
 from app.core.config import Settings
 from app.db.models import (
     AIRun,
@@ -65,6 +68,7 @@ def discover_competitors(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> CompetitorDiscoveryResult:
+    require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
     sprint = _get_sprint(db, auth, project_id, sprint_id)
     if sprint.status not in {"approved", "running", "needs_review"}:
@@ -222,6 +226,7 @@ def update_competitor_candidate(
     candidate_id: uuid.UUID,
     payload: CompetitorCandidateUpdate,
 ) -> CompetitorCandidate:
+    require_permission(auth, "run_research")
     candidate = _get_candidate(db, auth, project_id, sprint_id, candidate_id)
     if candidate.status != "candidate":
         raise HTTPException(
@@ -253,6 +258,7 @@ def approve_competitor_candidate(
     sprint_id: uuid.UUID,
     candidate_id: uuid.UUID,
 ) -> CompetitorCandidate:
+    require_permission(auth, "run_research")
     candidate = _get_candidate(db, auth, project_id, sprint_id, candidate_id)
     if candidate.status != "candidate":
         raise HTTPException(
@@ -302,6 +308,7 @@ def reject_competitor_candidate(
     sprint_id: uuid.UUID,
     candidate_id: uuid.UUID,
 ) -> CompetitorCandidate:
+    require_permission(auth, "run_research")
     candidate = _get_candidate(db, auth, project_id, sprint_id, candidate_id)
     if candidate.status not in {"candidate", "approved"}:
         raise HTTPException(
@@ -443,6 +450,9 @@ def _competitor_discovery_messages(
         "research_questions": plan.research_questions,
         "competitor_queries": plan.competitor_queries,
         "substitute_queries": plan.substitute_queries,
+        "max_candidates": 8,
+    }
+    source_payload = {
         "approved_or_candidate_sources": [
             {
                 "id": str(source.id),
@@ -455,8 +465,9 @@ def _competitor_discovery_messages(
             }
             for source in sources[:10]
         ],
-        "max_candidates": 8,
     }
+    payload_json = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+    source_json = json.dumps(source_payload, ensure_ascii=True, separators=(",", ":"))
     return [
         ChatMessage(
             role="system",
@@ -467,7 +478,8 @@ def _competitor_discovery_messages(
                 "competitors, substitutes, incumbent platforms, and adjacent solutions. "
                 "Do not claim that you browsed the web. Prefer well-known, verifiable "
                 "companies or clearly labeled substitute behaviors over obscure guesses. "
-                "Only include source_ids from the provided source list."
+                "Only include source_ids from the provided source list. "
+                f"{UNTRUSTED_RETRIEVED_CONTENT_RULE}"
             ),
         ),
         ChatMessage(
@@ -475,7 +487,10 @@ def _competitor_discovery_messages(
             content=(
                 "Create a ranked competitor candidate list from this approved research "
                 "plan. Return only the structured JSON.\n\n"
-                f"{json.dumps(payload, ensure_ascii=True, separators=(',', ':'))}"
+                f"{payload_json}"
+                "\n\n<untrusted_retrieved_content>\n"
+                f"{source_json}"
+                "\n</untrusted_retrieved_content>"
             ),
         ),
     ]

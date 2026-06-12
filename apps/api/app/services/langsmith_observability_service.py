@@ -9,23 +9,10 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
 from app.core.config import Settings
+from app.core.redaction import redact_payload
 from app.db.models import AIRun, AIStep, ArtifactVersion, Project, ResearchSprint
 
 logger = logging.getLogger(__name__)
-
-SENSITIVE_KEY_PARTS = (
-    "api_key",
-    "apikey",
-    "authorization",
-    "cookie",
-    "password",
-    "secret",
-    "token",
-    "master_key",
-    "access_key",
-)
-MAX_STRING_LENGTH = 2000
-
 
 @dataclass(frozen=True)
 class TraceContext:
@@ -254,32 +241,4 @@ def _safe_create_run(
 
 
 def _sanitize(value: Any, *, key: str | None = None) -> Any:
-    if key and _is_sensitive_key(key):
-        return "[redacted]"
-    if isinstance(value, dict):
-        return {
-            str(item_key): _sanitize(item_value, key=str(item_key))
-            for item_key, item_value in value.items()
-        }
-    if isinstance(value, list):
-        return [_sanitize(item) for item in value[:100]]
-    if isinstance(value, (tuple, set)):
-        return [_sanitize(item) for item in list(value)[:100]]
-    if isinstance(value, uuid.UUID):
-        return str(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, str):
-        return value if len(value) <= MAX_STRING_LENGTH else f"{value[:MAX_STRING_LENGTH]}..."
-    if isinstance(value, (int, float, bool)) or value is None:
-        return value
-    if hasattr(value, "model_dump"):
-        return _sanitize(value.model_dump(mode="json"))
-    return str(value)[:MAX_STRING_LENGTH]
-
-
-def _is_sensitive_key(key: str) -> bool:
-    normalized = key.casefold().replace("-", "_")
-    return any(part in normalized for part in SENSITIVE_KEY_PARTS)
+    return redact_payload(value, key=key, redact_emails=True, max_string_length=2000)

@@ -2,11 +2,13 @@
 
 ## Current Phase
 
-V1 Sprint 15 implemented the MCP-style tool boundary. Project reads, evidence
-searches, research-plan proposals, and research-memo memory/validation/decision
-proposals now flow through audited tool contracts with human approval before
-final state mutation. Watchlists, monitoring, collaboration, portfolio
-dashboards, integrations, and multi-segment workflow packs remain V2 scope.
+V1 Sprint 16 implemented security, governance, and human approval hardening.
+Project roles now use owner/admin/editor/viewer permissions, governed actions
+write audit events, high-risk and memory-update proposals create approval
+requests, retrieved evidence is framed as untrusted prompt context, and the
+project workspace exposes a governance approval queue. Watchlists, monitoring,
+collaboration, portfolio dashboards, integrations, and multi-segment workflow
+packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -886,6 +888,56 @@ Checks run:
   panel rendered one approved `propose_research_plan` invocation and browser
   console reported no errors.
 
+## V1 Sprint 16 Scope
+
+- [x] Replace the legacy member role with owner/admin/editor/viewer permission
+  checks for project viewing, research execution, memory approval, high-risk
+  tool approval, decision recording, project writes, and owner-only deletion.
+- [x] Add `audit_events` and `approval_requests` persistence with Alembic
+  migration, Pydantic schemas, governance service helpers, and project-scoped
+  API routes.
+- [x] Enforce tool authorization by role, access mode, risk, and approval
+  policy; deny safely and audit tool denials.
+- [x] Create approval requests for research plans, memory updates, validation
+  plans, tool proposals, and high-risk decisions.
+- [x] Record governance events for research sprint start/approval, tool
+  requests/executions/denials, memory proposals/approvals/rejections,
+  validation-plan creation, decision recording, and high-risk requests.
+- [x] Add shared redaction for API keys, bearer/JWT-like tokens, sensitive key
+  names, secret values, and emails across audit, tool, workflow, LangSmith, and
+  UI-facing error surfaces.
+- [x] Add prompt-injection hardening: agent prompts state retrieved content is
+  evidence, not instruction, and retrieved evidence/snippets are wrapped in
+  `<untrusted_retrieved_content>` blocks.
+- [x] Add the project governance approval queue UI with summary, risk, why it
+  matters, proposed state changes, approve/reject controls, and recent audit
+  events.
+- [x] Document Security and Governance in README.
+
+## V1 Sprint 16 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/python -m pytest app/tests/test_security_governance.py app/tests/test_tool_boundary.py -q`
+- [x] `cd apps/api && .venv/bin/python -m pytest app/tests/test_langsmith_observability.py app/tests/test_security_governance.py -q`
+- [x] `cd apps/api && .venv/bin/python -m pytest app/tests/test_competitors.py app/tests/test_security_governance.py -q`
+- [x] `cd apps/api && .venv/bin/python -m pytest -q`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/Users/cgable/Repos/thesys/apps/web/node_modules/.bin:$PATH next typegen` from `apps/web`
+- [x] `PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/Users/cgable/Repos/thesys/apps/web/node_modules/.bin:$PATH tsc --noEmit` from `apps/web`
+- [x] `git diff --check -- . ':(exclude)IMPLEMENTATION_BRIEF.md'`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Browser QA against
+  `/projects/103c6571-aee6-46a0-b0f5-af6be2b409de#research-sprint`: the
+  governance approval queue rendered one pending research-plan approval, showed
+  proposed change JSON and audit events, the Approve button resolved the queue
+  to zero pending approvals, and the browser console reported no errors.
+- [ ] `pnpm --dir apps/web typecheck` was attempted but `pnpm` is not installed
+  in this shell; local `next typegen` and `tsc --noEmit` both passed.
+
 ## Next Work
 
-V1 Sprint 16: Security, Governance, and Human Approval Hardening.
+V1 Sprint 17: Temporal Durable Research Sprint Orchestration.

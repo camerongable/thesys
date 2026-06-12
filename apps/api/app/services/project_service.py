@@ -4,7 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.auth import AuthContext
+from app.core.auth import AuthContext, require_permission
 from app.db.models import Project, ProjectThesis
 from app.schemas.projects import ProjectCreate, ProjectUpdate
 
@@ -40,6 +40,7 @@ def get_project(db: Session, auth: AuthContext, project_id: uuid.UUID) -> Projec
 
 
 def create_project(db: Session, auth: AuthContext, payload: ProjectCreate) -> Project:
+    require_permission(auth, "write_project")
     project = Project(
         workspace_id=auth.workspace_id,
         name=payload.name.strip(),
@@ -72,6 +73,7 @@ def update_project(
     project_id: uuid.UUID,
     payload: ProjectUpdate,
 ) -> Project:
+    require_permission(auth, "write_project")
     project = get_project(db, auth, project_id)
     update_data = payload.model_dump(exclude_unset=True)
 
@@ -87,6 +89,7 @@ def update_project(
 
 
 def delete_project(db: Session, auth: AuthContext, project_id: uuid.UUID) -> None:
+    require_permission(auth, "delete_project")
     project = get_project(db, auth, project_id)
     db.delete(project)
     db.commit()

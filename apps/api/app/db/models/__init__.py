@@ -11,6 +11,7 @@ from app.db.models.artifact import (
 from app.db.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.db.models.competitor import Competitor, CompetitorEvidenceLink
 from app.db.models.evidence import EvidenceChunk, EvidenceSource
+from app.db.models.governance import ApprovalRequest, AuditEvent
 from app.db.models.identity import User, Workspace, WorkspaceMember
 from app.db.models.project import CustomerSegment, Problem, Project, ProjectIntake, ProjectThesis
 from app.db.models.research import (
@@ -29,6 +30,8 @@ __all__ = [
     "ArtifactVersion",
     "Assumption",
     "AssumptionEvidenceLink",
+    "ApprovalRequest",
+    "AuditEvent",
     "Base",
     "Claim",
     "ClaimEvidenceLink",

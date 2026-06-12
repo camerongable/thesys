@@ -16,9 +16,12 @@ from app.ai.fallback_policy import (
     should_use_fallback_without_model,
 )
 from app.ai.litellm_client import ChatMessage, LLMCompletion
-from app.ai.prompts import RESEARCH_SPRINT_PLANNING_PROMPT_VERSION
+from app.ai.prompts import (
+    RESEARCH_SPRINT_PLANNING_PROMPT_VERSION,
+    UNTRUSTED_RETRIEVED_CONTENT_RULE,
+)
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
-from app.core.auth import AuthContext
+from app.core.auth import AuthContext, require_permission
 from app.core.config import Settings
 from app.db.models import (
     AIRun,
@@ -38,6 +41,7 @@ from app.schemas.research import (
 )
 from app.services import (
     ai_run_service,
+    governance_service,
     langsmith_observability_service,
     project_service,
     tool_service,
@@ -93,6 +97,7 @@ def start_research_sprint_plan(
     project_id: uuid.UUID,
     payload: ResearchSprintPlanCreate,
 ) -> ResearchPlanRunResult:
+    require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
     input_summary = payload.objective or _default_objective(project)
     run = ai_run_service.start_run(
@@ -206,6 +211,21 @@ def start_research_sprint_plan(
             requested_by="agent",
             input_json={"objective": research_plan.objective},
         )
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="research_sprint_started",
+            actor_type="user",
+            project_id=project.id,
+            entity_type="research_sprint",
+            entity_id=sprint.id,
+            risk_level="medium",
+            summary="Research sprint plan generated and queued for approval.",
+            metadata={
+                "research_plan_id": str(research_plan.id),
+                "objective": research_plan.objective,
+            },
+        )
         db.commit()
         db.refresh(research_plan)
         db.refresh(sprint)
@@ -283,6 +303,7 @@ def update_research_plan(
     plan_id: uuid.UUID,
     payload: ResearchPlanUpdate,
 ) -> ResearchPlan:
+    require_permission(auth, "run_research")
     plan = _get_plan(db, auth, project_id, plan_id)
     if plan.status != "draft":
         raise HTTPException(
@@ -302,6 +323,7 @@ def approve_research_sprint(
     sprint_id: uuid.UUID,
     payload: ResearchPlanUpdate,
 ) -> ResearchSprint:
+    require_permission(auth, "approve_memory_updates")
     sprint = _get_sprint(db, auth, sprint_id, project_id)
     if sprint.status not in {"planned", "needs_review"} or sprint.plan.status != "draft":
         raise HTTPException(
@@ -348,6 +370,27 @@ def approve_research_sprint(
                 model_provider=run.model_provider or "internal",
                 model_name=run.model_name or "research-sprint-planner",
             )
+    governance_service.resolve_pending_approvals_for_entity(
+        db,
+        auth,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=sprint.id,
+        status_value="approved",
+        request_types={"research_plan"},
+    )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="research_plan_approved",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=sprint.id,
+        risk_level="medium",
+        summary="Approved research sprint plan.",
+        metadata={"research_plan_id": str(sprint.plan.id)},
+    )
     db.commit()
     return _get_sprint(db, auth, sprint.id, project_id)
 
@@ -358,6 +401,7 @@ def reject_research_sprint(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> ResearchSprint:
+    require_permission(auth, "approve_memory_updates")
     sprint = _get_sprint(db, auth, sprint_id, project_id)
     if sprint.status not in {"planned", "needs_review"} or sprint.plan.status != "draft":
         raise HTTPException(
@@ -393,6 +437,27 @@ def reject_research_sprint(
                 cost=None,
             )
             ai_run_service.cancel_run(db, run, output_summary="Research plan rejected by user.")
+    governance_service.resolve_pending_approvals_for_entity(
+        db,
+        auth,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=sprint.id,
+        status_value="rejected",
+        request_types={"research_plan"},
+    )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="research_plan_rejected",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=sprint.id,
+        risk_level="medium",
+        summary="Rejected research sprint plan.",
+        metadata={"research_plan_id": str(sprint.plan.id)},
+    )
     db.commit()
     return _get_sprint(db, auth, sprint.id, project_id)
 
@@ -529,7 +594,8 @@ def _planning_messages(
                 "specific, approval-ready research plan. Do not browse, claim sources were "
                 "found, or perform research. The plan should identify what to investigate, "
                 "which sources to inspect later, which competitors/substitutes to look for, "
-                "and which assumptions the research should test."
+                "and which assumptions the research should test. "
+                f"{UNTRUSTED_RETRIEVED_CONTENT_RULE}"
             ),
         ),
         ChatMessage(

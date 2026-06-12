@@ -215,6 +215,45 @@ This project demonstrates several modern AI engineering patterns:
 
 ---
 
+## Security and Governance
+
+Thesys uses a project role model to keep autonomous research bounded:
+`owner`, `admin`, `editor`, and `viewer`.
+
+- View project: owner, admin, editor, viewer
+- Run research: owner, admin, editor
+- Approve memory updates: owner, admin, editor
+- Approve high-risk tools: owner, admin
+- Record decisions: owner, admin, editor
+- Delete project: owner only
+
+Tool calls are classified as read, proposal, or write actions with low, medium,
+or high risk. High-risk proposals and project memory updates require human
+approval before project state is accepted. Denied tool actions fail closed and
+are written to the audit log.
+
+Tool schemas are enforced at runtime. Guard checks validate the requesting
+actor, accepted input fields, bounded payload sizes, output shape, and
+research-sprint scope before any tool logic runs.
+
+The API persists governance events and generic approval requests for research
+plans, memory updates, tool invocations, validation plans, and decisions. The
+project workspace includes a governance approval queue with pending summaries,
+risk level, proposed state changes, approve/reject actions, and recent audit
+events.
+
+All retrieved content in agent prompts is treated as untrusted evidence, not
+instruction. Retrieved evidence is wrapped in
+`<untrusted_retrieved_content>` blocks before synthesis prompts consume it.
+Audit logs, tool payloads, workflow records, LangSmith metadata, and UI-facing
+errors pass through secret redaction for API keys, bearer tokens, JWT-like
+tokens, sensitive key names, secret values, and emails.
+
+In local dev auth, `X-Dev-User-Role` can be set to one of `owner`, `admin`,
+`editor`, or `viewer` to exercise governance behavior.
+
+---
+
 ## Architecture Overview
 
 ```text

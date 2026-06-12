@@ -14,9 +14,13 @@ from app.ai.fallback_policy import (
     should_use_fallback_without_model,
 )
 from app.ai.litellm_client import ChatMessage, LLMCompletion
-from app.ai.prompts import ASSUMPTION_EXTRACTION_PROMPT_VERSION, VALIDATION_PLAN_PROMPT_VERSION
+from app.ai.prompts import (
+    ASSUMPTION_EXTRACTION_PROMPT_VERSION,
+    UNTRUSTED_RETRIEVED_CONTENT_RULE,
+    VALIDATION_PLAN_PROMPT_VERSION,
+)
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
-from app.core.auth import AuthContext
+from app.core.auth import AuthContext, require_permission
 from app.core.config import Settings
 from app.db.models import (
     AIRun,
@@ -43,7 +47,12 @@ from app.schemas.validation import (
     ValidationPlanGenerateCreate,
     ValidationPlanSetDraft,
 )
-from app.services import ai_run_service, langsmith_observability_service, project_service
+from app.services import (
+    ai_run_service,
+    governance_service,
+    langsmith_observability_service,
+    project_service,
+)
 
 
 class ValidationWorkflowError(RuntimeError):
@@ -146,6 +155,7 @@ def extract_assumptions_and_risks(
     settings: Settings,
     project_id: uuid.UUID,
 ) -> AssumptionExtractionResult:
+    require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
     run = ai_run_service.start_run(
         db,
@@ -340,6 +350,7 @@ def generate_validation_plan(
     project_id: uuid.UUID,
     payload: ValidationPlanGenerateCreate,
 ) -> ValidationPlanResult:
+    require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
     assumptions = _selected_assumptions(db, auth, project_id, payload)
     if not assumptions:
@@ -486,6 +497,21 @@ def generate_validation_plan(
         output_summary=draft.summary[:1000],
         metrics={"experiment_count": len(experiments)},
     )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="validation_plan_created",
+        actor_type="user",
+        project_id=project.id,
+        entity_type="artifact",
+        entity_id=artifact.id,
+        risk_level="medium",
+        summary="Validation plan generated and experiments created.",
+        metadata={
+            "artifact_id": str(artifact.id),
+            "experiment_ids": [str(item.id) for item in experiments],
+        },
+    )
     db.commit()
     artifact = _get_artifact(db, auth, project.id, artifact.id)
     experiments = [
@@ -511,6 +537,7 @@ def log_experiment_result(
     experiment_id: uuid.UUID,
     payload: ExperimentResultCreate,
 ) -> ExperimentResultLogResult:
+    require_permission(auth, "run_research")
     experiment = get_experiment(db, auth, project_id, experiment_id)
     delta = _result_delta(payload)
     result = ExperimentResult(
@@ -532,6 +559,22 @@ def log_experiment_result(
         assumption.confidence_score = _clamp_decimal(current_score + delta)
         assumption.status = _assumption_status_for_outcome(payload.outcome)
     project_confidence = _recalculate_project_confidence(db, auth, project_id)
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="experiment_result_logged",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="experiment",
+        entity_id=experiment.id,
+        risk_level="low",
+        summary="Experiment result logged and confidence updated.",
+        metadata={
+            "experiment_result_id": str(result.id),
+            "outcome": payload.outcome,
+            "confidence_delta": str(delta),
+        },
+    )
     db.commit()
     return ExperimentResultLogResult(
         result=result,
@@ -579,6 +622,7 @@ def create_decision(
     project_id: uuid.UUID,
     payload: DecisionCreate,
 ) -> Decision:
+    require_permission(auth, "record_decision")
     project_service.get_project(db, auth, project_id)
     links = _validated_decision_links(db, auth, project_id, payload)
     decision = Decision(
@@ -595,6 +639,21 @@ def create_decision(
     db.flush()
     for linked_type, linked_id in links:
         db.add(DecisionLink(decision_id=decision.id, linked_type=linked_type, linked_id=linked_id))
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="decision_recorded",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="decision",
+        entity_id=decision.id,
+        risk_level="medium",
+        summary=f"Decision recorded: {decision.title}",
+        metadata={
+            "decision_type": decision.decision_type,
+            "linked_count": len(links),
+        },
+    )
     db.commit()
     return get_decision(db, auth, project_id, decision.id)
 
@@ -629,7 +688,8 @@ def _assumption_messages(project: Project, project_state: dict[str, Any]) -> lis
             content=(
                 "Extract concrete, testable founder assumptions and risks. Prioritize "
                 "kill-risk assumptions, uncertainty, and validation usefulness. Avoid vague "
-                "startup advice."
+                "startup advice. "
+                f"{UNTRUSTED_RETRIEVED_CONTENT_RULE}"
             ),
         ),
         ChatMessage(
@@ -674,7 +734,8 @@ def _validation_plan_messages(
                 "failure threshold, and expected signal strength. Make the first test specific "
                 "enough to run this week. Prefer willingness-to-pay or switching-behavior tests "
                 "when the business risk is unclear. State what should not be built until the "
-                "test result is known."
+                "test result is known. "
+                f"{UNTRUSTED_RETRIEVED_CONTENT_RULE}"
             ),
         ),
         ChatMessage(

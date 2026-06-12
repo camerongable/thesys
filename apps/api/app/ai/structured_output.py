@@ -396,7 +396,7 @@ def _fake_structured_project_intake(subject: str) -> dict[str, Any]:
 
 
 def _fake_opportunity_brief(subject: str) -> dict[str, Any]:
-    request_payload = _extract_json_payload(subject)
+    request_payload = _extract_prompt_payload(subject)
     project_state = request_payload.get("project_state") or {}
     evidence_bundles = request_payload.get("evidence_bundles") or []
     project_name = str(project_state.get("name") or "Founder project")
@@ -540,7 +540,7 @@ def _first_evidence_bundle(evidence_bundles: Any) -> dict[str, Any] | None:
 
 
 def _fake_competitor_analysis(subject: str) -> dict[str, Any]:
-    request_payload = _extract_json_payload(subject)
+    request_payload = _extract_prompt_payload(subject)
     seed_competitors = request_payload.get("seed_competitors") or []
     evidence_bundles = request_payload.get("evidence_bundles") or []
     project_state = request_payload.get("project_state") or {}
@@ -963,6 +963,23 @@ def _extract_json_payload(content: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _extract_prompt_payload(content: str) -> dict[str, Any]:
+    payload = _extract_json_payload(content)
+    untrusted_payload = _extract_untrusted_json_payload(content)
+    return {**payload, **untrusted_payload}
+
+
+def _extract_untrusted_json_payload(content: str) -> dict[str, Any]:
+    start_tag = "<untrusted_retrieved_content>"
+    end_tag = "</untrusted_retrieved_content>"
+    start = content.find(start_tag)
+    end = content.find(end_tag)
+    if start == -1 or end == -1 or end <= start:
+        return {}
+    block = content[start + len(start_tag) : end]
+    return _extract_json_payload(block)
 
 
 def _clarifying_questions(questions: list[str], answers: Any) -> list[str]:

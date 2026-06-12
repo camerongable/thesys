@@ -32,9 +32,11 @@ import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   approveAgenticResearchMemo,
+  approveApprovalRequest,
   approveCompetitorCandidate,
   approveDiscoveredSource,
   approveResearchSprint,
+  ApprovalRequest,
   Artifact,
   ArtifactVersion,
   Citation,
@@ -48,13 +50,16 @@ import {
   getProjectOverview,
   getV1ResearchEval,
   IdeaReadiness,
+  listApprovalRequests,
   listArtifacts,
+  listAuditEvents,
   listCompetitorCandidates,
   listDiscoveredSources,
   listResearchSprints,
   listToolInvocations,
   NextBestAction,
   ProjectStage,
+  rejectApprovalRequest,
   rejectCompetitorCandidate,
   rejectDiscoveredSource,
   rejectAgenticResearchMemo,
@@ -1946,7 +1951,31 @@ type MemoryUpdateSummary = {
   recommended_validation_actions: string[];
 };
 
+async function invalidateGovernanceQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  projectId: string,
+) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["projects", projectId, "approvals"] }),
+    queryClient.invalidateQueries({ queryKey: ["projects", projectId, "audit-events"] }),
+    queryClient.invalidateQueries({ queryKey: ["projects", projectId, "tool-invocations"] }),
+  ]);
+}
+
+async function refreshAfterGovernanceAction(
+  queryClient: ReturnType<typeof useQueryClient>,
+  projectId: string,
+) {
+  await Promise.all([
+    invalidateGovernanceQueries(queryClient, projectId),
+    queryClient.invalidateQueries({ queryKey: ["projects", projectId, "research-sprints"] }),
+    queryClient.invalidateQueries({ queryKey: ["projects", projectId, "research-history"] }),
+    queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] }),
+  ]);
+}
+
 function ResearchSprintCard({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient();
   const [objective, setObjective] = useState("");
   const [draft, setDraft] = useState<ResearchPlanDraftState | null>(null);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
@@ -1973,6 +2002,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
       setObjective("");
       setDraft(planToDraftState(result.sprint.plan));
       setLastRunId(result.ai_run_id);
+      await invalidateGovernanceQueries(queryClient, projectId);
       await sprintsQuery.refetch();
     },
   });
@@ -1985,6 +2015,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
     },
     onSuccess: async (plan) => {
       setDraft(planToDraftState(plan));
+      await invalidateGovernanceQueries(queryClient, projectId);
       await sprintsQuery.refetch();
     },
   });
@@ -2002,6 +2033,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
     onSuccess: async (result) => {
       setDraft(planToDraftState(result.sprint.plan));
       setLastRunId(result.ai_run_id);
+      await invalidateGovernanceQueries(queryClient, projectId);
       await sprintsQuery.refetch();
     },
   });
@@ -2014,6 +2046,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
     },
     onSuccess: async (result) => {
       setLastRunId(result.ai_run_id);
+      await invalidateGovernanceQueries(queryClient, projectId);
       await sprintsQuery.refetch();
     },
   });
@@ -2115,6 +2148,7 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
         />
       ) : null}
 
+      <GovernanceApprovalPanel projectId={projectId} />
       <ResearchHistoryPanel projectId={projectId} />
       <ResearchQualityPanel projectId={projectId} />
 
@@ -2153,6 +2187,159 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
         </div>
       ) : null}
     </DomainPanel>
+  );
+}
+
+function GovernanceApprovalPanel({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient();
+  const approvalsQuery = useQuery({
+    queryKey: ["projects", projectId, "approvals", "pending"],
+    queryFn: () => listApprovalRequests(projectId, "pending"),
+  });
+  const auditEventsQuery = useQuery({
+    queryKey: ["projects", projectId, "audit-events"],
+    queryFn: () => listAuditEvents(projectId),
+  });
+  const approveMutation = useMutation({
+    mutationFn: (approvalId: string) => approveApprovalRequest(projectId, approvalId),
+    onSuccess: () => refreshAfterGovernanceAction(queryClient, projectId),
+  });
+  const rejectMutation = useMutation({
+    mutationFn: (approvalId: string) => rejectApprovalRequest(projectId, approvalId),
+    onSuccess: () => refreshAfterGovernanceAction(queryClient, projectId),
+  });
+
+  const approvals = approvalsQuery.data ?? [];
+  const events = auditEventsQuery.data ?? [];
+  const busy = approveMutation.isPending || rejectMutation.isPending;
+  const error =
+    approveMutation.error ??
+    rejectMutation.error ??
+    (approvalsQuery.error as Error | null) ??
+    (auditEventsQuery.error as Error | null);
+
+  return (
+    <details className="mt-6 border-t border-border pt-5">
+      <summary className="cursor-pointer list-none">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
+              <h3 className="text-sm font-semibold">Governance approvals</h3>
+            </div>
+            <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+              Review human gates for research plans, project memory updates, tool proposals,
+              validation plans, and decision records.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <span className="rounded-md bg-muted px-2 py-1">
+              {approvals.length} pending
+            </span>
+            <span className="rounded-md bg-muted px-2 py-1">
+              {events.length} audit event{events.length === 1 ? "" : "s"}
+            </span>
+          </div>
+        </div>
+      </summary>
+
+      {error ? (
+        <p className="mt-3 text-sm text-danger-foreground">{error.message}</p>
+      ) : approvalsQuery.isLoading ? (
+        <p className="mt-3 text-sm text-muted-foreground">Loading approvals...</p>
+      ) : approvals.length === 0 ? (
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          No pending approvals. Recent audit events remain available below.
+        </p>
+      ) : (
+        <ol className="mt-4 space-y-3" aria-label="Pending governance approvals">
+          {approvals.map((approval) => (
+            <li className="rounded-md border border-border px-3 py-3" key={approval.id}>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <EvidenceReviewPill>{formatLabel(approval.request_type)}</EvidenceReviewPill>
+                    <span className={toolRiskClass(approval.risk_level)}>
+                      {formatLabel(approval.risk_level)} risk
+                    </span>
+                    <EvidenceReviewPill>
+                      Requested by {formatLabel(approval.requested_by)}
+                    </EvidenceReviewPill>
+                  </div>
+                  <h4 className="mt-2 text-sm font-semibold">
+                    {clarifyWorkspaceTerm(approval.summary)}
+                  </h4>
+                  <p className="mt-2 max-w-[72ch] text-xs leading-5 text-muted-foreground">
+                    {approvalWhyItMatters(approval)}
+                  </p>
+                  {approval.proposed_change ? (
+                    <pre className="mt-3 max-h-48 overflow-auto rounded-md bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">
+                      {formatJsonPreview(approval.proposed_change)}
+                    </pre>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button
+                    disabled={busy}
+                    onClick={() => approveMutation.mutate(approval.id)}
+                    size="sm"
+                    type="button"
+                  >
+                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                    Approve
+                  </Button>
+                  <Button
+                    disabled={busy}
+                    onClick={() => rejectMutation.mutate(approval.id)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    <CircleAlert className="h-4 w-4" aria-hidden="true" />
+                    Reject
+                  </Button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <div className="mt-5 border-t border-border pt-4">
+        <h4 className="text-sm font-semibold">Recent audit events</h4>
+        {auditEventsQuery.isLoading ? (
+          <p className="mt-3 text-sm text-muted-foreground">Loading audit events...</p>
+        ) : events.length === 0 ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            No governance events have been recorded for this project yet.
+          </p>
+        ) : (
+          <ol className="mt-3 space-y-2" aria-label="Recent audit events">
+            {events.slice(0, 8).map((event) => (
+              <li className="rounded-md bg-muted px-3 py-2" key={event.id}>
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <span>{formatLabel(event.event_type)}</span>
+                      {event.risk_level ? <span>{formatLabel(event.risk_level)} risk</span> : null}
+                      <span>{formatLabel(event.actor_type)}</span>
+                    </div>
+                    {event.summary ? (
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                        {clarifyWorkspaceTerm(event.summary)}
+                      </p>
+                    ) : null}
+                  </div>
+                  <time className="shrink-0 text-xs text-muted-foreground">
+                    {formatDateTime(event.created_at)}
+                  </time>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -2469,6 +2656,7 @@ function ResearchDiscoveryPanel({
     mutationFn: () => discoverSources(projectId, sprint.id),
     onSuccess: async (result) => {
       onRunTrace(result.ai_run_id);
+      await invalidateGovernanceQueries(queryClient, projectId);
       await sourcesQuery.refetch();
       await toolInvocationsQuery.refetch();
     },
@@ -2477,6 +2665,7 @@ function ResearchDiscoveryPanel({
     mutationFn: () => discoverCompetitorCandidates(projectId, sprint.id),
     onSuccess: async (result) => {
       onRunTrace(result.ai_run_id);
+      await invalidateGovernanceQueries(queryClient, projectId);
       await candidatesQuery.refetch();
       await toolInvocationsQuery.refetch();
     },
@@ -2485,6 +2674,7 @@ function ResearchDiscoveryPanel({
     mutationFn: () => runAgenticResearch(projectId, sprint.id),
     onSuccess: async (result) => {
       onRunTrace(result.ai_run_id);
+      await invalidateGovernanceQueries(queryClient, projectId);
       await researchMemosQuery.refetch();
       await toolInvocationsQuery.refetch();
       await onSprintUpdated();
@@ -2494,6 +2684,7 @@ function ResearchDiscoveryPanel({
     mutationFn: () => approveAgenticResearchMemo(projectId, sprint.id),
     onSuccess: async (result) => {
       onRunTrace(result.ai_run_id);
+      await invalidateGovernanceQueries(queryClient, projectId);
       await researchMemosQuery.refetch();
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "assumptions"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "risks"] });
@@ -2509,6 +2700,7 @@ function ResearchDiscoveryPanel({
     mutationFn: () => rejectAgenticResearchMemo(projectId, sprint.id),
     onSuccess: async (result) => {
       onRunTrace(result.ai_run_id);
+      await invalidateGovernanceQueries(queryClient, projectId);
       await researchMemosQuery.refetch();
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "research-history"] });
@@ -3370,6 +3562,27 @@ function toolActivityTitle(invocation: ToolInvocation) {
     return truncate(summary, 110);
   }
   return formatLabel(invocation.tool_name);
+}
+
+function approvalWhyItMatters(approval: ApprovalRequest) {
+  const entityLabel = approval.entity_type ? formatLabel(approval.entity_type) : "project state";
+  if (approval.request_type === "research_plan") {
+    return `Approving this gate controls whether the evidence review plan can advance. Entity: ${entityLabel}.`;
+  }
+  if (approval.request_type === "memory_update") {
+    return `Approving this gate controls changes to project memory, assumptions, risks, and recommendations. Entity: ${entityLabel}.`;
+  }
+  if (approval.request_type === "tool_invocation") {
+    return `Approving this gate controls whether a proposed tool action is accepted. Entity: ${entityLabel}.`;
+  }
+  if (approval.request_type === "validation_plan") {
+    return `Approving this gate controls validation experiments and related project evidence. Entity: ${entityLabel}.`;
+  }
+  return `Approving this gate controls a recorded project decision. Entity: ${entityLabel}.`;
+}
+
+function formatJsonPreview(value: Record<string, unknown>) {
+  return truncate(JSON.stringify(value, null, 2), 1600);
 }
 
 function evidenceReviewItemKind(item: EvidenceReviewQueueItem) {

@@ -16,9 +16,12 @@ from app.ai.fallback_policy import (
     should_use_fallback_without_model,
 )
 from app.ai.litellm_client import ChatMessage, LLMCompletion
-from app.ai.prompts import SOURCE_DISCOVERY_PROMPT_VERSION
+from app.ai.prompts import (
+    SOURCE_DISCOVERY_PROMPT_VERSION,
+    UNTRUSTED_RETRIEVED_CONTENT_RULE,
+)
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
-from app.core.auth import AuthContext
+from app.core.auth import AuthContext, require_permission
 from app.core.config import Settings
 from app.db.models import AIRun, AIStep, DiscoveredSource, ResearchSprint
 from app.schemas.research import SourceDiscoveryDraft
@@ -56,6 +59,7 @@ def discover_sources(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> SourceDiscoveryResult:
+    require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
     sprint = _get_sprint(db, auth, project_id, sprint_id)
     if sprint.status not in {"approved", "running", "needs_review"}:
@@ -208,6 +212,7 @@ def approve_source_candidate(
     sprint_id: uuid.UUID,
     source_id: uuid.UUID,
 ) -> DiscoveredSource:
+    require_permission(auth, "run_research")
     return ingest_source_candidate(db, auth, settings, project_id, sprint_id, source_id)
 
 
@@ -219,6 +224,7 @@ def ingest_source_candidate(
     sprint_id: uuid.UUID,
     source_id: uuid.UUID,
 ) -> DiscoveredSource:
+    require_permission(auth, "run_research")
     sprint = _get_sprint(db, auth, project_id, sprint_id)
     source = _get_source(db, auth, project_id, sprint_id, source_id)
     if source.status == "ingested":
@@ -267,6 +273,7 @@ def reject_source_candidate(
     sprint_id: uuid.UUID,
     source_id: uuid.UUID,
 ) -> DiscoveredSource:
+    require_permission(auth, "run_research")
     source = _get_source(db, auth, project_id, sprint_id, source_id)
     if source.status not in {"candidate", "approved", "failed"}:
         raise HTTPException(
@@ -397,7 +404,8 @@ def _source_discovery_messages(sprint: ResearchSprint) -> list[ChatMessage]:
                 "Do not claim that you browsed the web. Prefer high-signal primary pages, "
                 "pricing pages, review directories, forums, market reports, and specific "
                 "search-result URLs when a concrete source is uncertain. Each candidate must "
-                "explain why it is worth reviewing and which research question it supports."
+                "explain why it is worth reviewing and which research question it supports. "
+                f"{UNTRUSTED_RETRIEVED_CONTENT_RULE}"
             ),
         ),
         ChatMessage(
