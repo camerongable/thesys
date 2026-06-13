@@ -15,7 +15,7 @@ from app.schemas.guide import (
     GuideResponseRead,
 )
 from app.schemas.overview import NextBestActionRead, ProjectOverviewRead
-from app.services import project_overview_service
+from app.services import project_overview_service, thesis_service
 
 
 class GuideActionNotFoundError(ValueError):
@@ -202,6 +202,26 @@ def chat(
         )
         return _chat_response(answer, context, [_action_by_id(context, "show_evidence")])
 
+    if any(
+        term in normalized
+        for term in ("changed", "evolved", "evolution", "rejected", "directions", "history")
+    ):
+        detail = thesis_service.get_thesis_canvas(db, auth, project_id)
+        rejected = _join_list(detail.canvas.rejected_directions) or "No rejected directions yet."
+        latest = detail.evolution[-1] if detail.evolution else None
+        latest_summary = latest.change_summary if latest else detail.canvas.current_thesis
+        answer = (
+            f"The idea started as: {detail.canvas.original_idea} "
+            f"The current thesis is: {detail.canvas.current_thesis} "
+            f"Latest change: {latest_summary} "
+            f"Rejected directions: {rejected}"
+        )
+        return _chat_response(
+            answer,
+            context,
+            [_action_by_id(context, "show_evolution"), _action_by_id(context, "update_thesis")],
+        )
+
     if any(term in normalized for term in ("thesis", "improve", "sharper", "shape")):
         thesis = context.current_thesis or "No thesis has been structured yet."
         answer = (
@@ -353,9 +373,21 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
             why_it_matters=(
                 "A sharper thesis makes research, validation, and decisions more useful."
             ),
-            target_route=f"/projects/{project_id}#structured-intake",
-            target_modal="structured-intake",
+            target_route=f"/projects/{project_id}#thesis-canvas",
+            target_modal="thesis-canvas",
             risk_level="medium",
+            requires_confirmation=False,
+        ),
+        GuideActionRead(
+            id="show_evolution",
+            type="navigate",
+            label="Show evolution",
+            description="Open the thesis timeline and rejected directions.",
+            why_it_matters=(
+                "The idea is easier to trust when you can see what changed and why."
+            ),
+            target_route=f"/projects/{project_id}#thesis-evolution",
+            risk_level="low",
             requires_confirmation=False,
         ),
     ]
@@ -528,6 +560,7 @@ def _suggested_questions(context: GuideContextRead) -> list[str]:
         "draft_idea": [
             "What context is missing?",
             "How should I sharpen the thesis?",
+            "How has this idea changed?",
             "What should I do next?",
         ],
         "structured_intake": [
@@ -567,7 +600,11 @@ def _is_in_scope(message: str) -> bool:
         "experiment",
         "focus",
         "idea",
+        "changed",
+        "directions",
         "interview",
+        "evolution",
+        "evolved",
         "missing",
         "next",
         "notes",
@@ -575,6 +612,7 @@ def _is_in_scope(message: str) -> bool:
         "pivot",
         "proceed",
         "proof",
+        "rejected",
         "research",
         "result",
         "risk",

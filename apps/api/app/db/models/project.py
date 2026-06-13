@@ -69,6 +69,16 @@ class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="EvidenceSource.created_at.desc()",
     )
+    thesis_canvas: Mapped["ThesisCanvas | None"] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    thesis_evolution_events: Mapped[list["ThesisEvolutionEvent"]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="ThesisEvolutionEvent.created_at",
+    )
 
 
 class ProjectThesis(UUIDPrimaryKeyMixin, Base):
@@ -150,6 +160,83 @@ class ProjectIntake(UUIDPrimaryKeyMixin, Base):
     )
 
     project: Mapped[Project] = relationship(back_populates="intakes")
+
+
+class ThesisCanvas(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "thesis_canvases"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    original_idea: Mapped[str] = mapped_column(Text, nullable=False)
+    current_thesis: Mapped[str] = mapped_column(Text, nullable=False)
+    target_user: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    problem: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    current_workaround: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    proposed_solution: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    wedge: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    biggest_unknown: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    proof_needed: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    rejected_directions: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    open_questions: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
+
+    project: Mapped[Project] = relationship(back_populates="thesis_canvas")
+
+
+class ThesisEvolutionEvent(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "thesis_evolution_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type in ("
+            "'original_idea','structured_thesis','research_update','wedge_change',"
+            "'validation_blocker','decision','manual_update'"
+            ")",
+            name="ck_thesis_evolution_events_event_type",
+        ),
+        CheckConstraint(
+            "origin in ('user','agent','system')",
+            name="ck_thesis_evolution_events_origin",
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    change_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    source_entity_type: Mapped[str | None] = mapped_column(String(40))
+    source_entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True))
+    origin: Mapped[str] = mapped_column(String(20), nullable=False, default="system")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    project: Mapped[Project] = relationship(back_populates="thesis_evolution_events")
 
 
 class CustomerSegment(UUIDPrimaryKeyMixin, TimestampMixin, Base):

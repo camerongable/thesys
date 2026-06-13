@@ -13,6 +13,7 @@ import {
   ExternalLink,
   FileSearch,
   FileText,
+  GitBranch,
   Globe2,
   Lightbulb,
   ListChecks,
@@ -98,10 +99,12 @@ import { ExperimentsTab } from "@/features/projects/experiments-tab";
 import { GuidePanel } from "@/features/projects/guide-panel";
 import { MarkdownContent } from "@/features/projects/markdown-content";
 import { StructuredIntakeWizard } from "@/features/projects/structured-intake-wizard";
+import { ThesisTab } from "@/features/projects/thesis-tab";
 import { WorkflowTrace } from "@/features/projects/workflow-trace";
 
 const tabs = [
   "Decision",
+  "Thesis",
   "Intelligence",
   "Validation",
   "Record",
@@ -127,6 +130,12 @@ const projectSections: {
     label: "Decision",
     description: "Verdict and next step",
     icon: Lightbulb,
+  },
+  {
+    tab: "Thesis",
+    label: "Thesis",
+    description: "Idea and evolution",
+    icon: GitBranch,
   },
   {
     tab: "Intelligence",
@@ -330,6 +339,8 @@ export function ProjectOverview() {
                     onIntakeFinalized={refreshOverviewAfterIntake}
                     overview={overview}
                   />
+                ) : activeTab === "Thesis" ? (
+                  <ThesisTab activeAnchor={activeAnchor} projectId={project.id} />
                 ) : activeTab === "Intelligence" ? (
                   <IntelligenceWorkspace
                     activeAnchor={activeAnchor}
@@ -539,6 +550,14 @@ function MobileWorkspaceAction({
           icon: Target,
           title: "Next move",
         }
+      : activeTab === "Thesis"
+        ? {
+            action: () => onOpenWorkspace("Thesis", "thesis-canvas"),
+            button: "Open thesis",
+            description: "Review the current thesis, rejected directions, and evolution trail.",
+            icon: GitBranch,
+            title: "Idea shape",
+          }
       : activeTab === "Intelligence"
         ? {
             action: () => onOpenWorkspace("Intelligence", "research-sprint"),
@@ -4986,6 +5005,13 @@ function anchorForAction(action: NextBestAction): string | null {
 
 function tabForActionType(actionType: string): ProjectTab {
   if (
+    actionType.includes("thesis") ||
+    actionType.includes("wedge") ||
+    actionType.includes("evolution")
+  ) {
+    return "Thesis";
+  }
+  if (
     actionType.includes("brief") ||
     actionType.includes("research") ||
     actionType.includes("competitor") ||
@@ -5013,6 +5039,13 @@ function tabForActionType(actionType: string): ProjectTab {
 }
 
 function tabForGuideAction(action: GuideAction): ProjectTab {
+  if (
+    action.type === "update_thesis" ||
+    action.id.includes("thesis") ||
+    action.id.includes("evolution")
+  ) {
+    return "Thesis";
+  }
   if (action.type === "compare_wedges" || action.id.includes("evidence")) {
     return "Intelligence";
   }
@@ -5044,6 +5077,7 @@ function tabFromHash(hash: string): ProjectTab | null {
     overview: "Decision",
     record: "Record",
     research: "Intelligence",
+    thesis: "Thesis",
     validation: "Validation",
   };
   return aliases[normalized] ?? null;
@@ -5052,6 +5086,13 @@ function tabFromHash(hash: string): ProjectTab | null {
 function tabFromAnchor(anchor: string | null): ProjectTab | null {
   if (!anchor) {
     return null;
+  }
+  if (
+    anchor.includes("thesis") ||
+    anchor.includes("evolution") ||
+    anchor.includes("wedge")
+  ) {
+    return "Thesis";
   }
   if (
     anchor.includes("research") ||

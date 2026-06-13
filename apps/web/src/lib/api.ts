@@ -62,6 +62,70 @@ export type Project = {
   problems: Problem[];
 };
 
+export type ThesisEvolutionEventType =
+  | "original_idea"
+  | "structured_thesis"
+  | "research_update"
+  | "wedge_change"
+  | "validation_blocker"
+  | "decision"
+  | "manual_update";
+export type ThesisEvolutionOrigin = "user" | "agent" | "system";
+
+export type ThesisCanvas = {
+  id: string;
+  project_id: string;
+  original_idea: string;
+  current_thesis: string;
+  target_user: string;
+  problem: string;
+  current_workaround: string;
+  proposed_solution: string;
+  wedge: string;
+  biggest_unknown: string;
+  proof_needed: string;
+  rejected_directions: string[];
+  open_questions: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type ThesisEvolutionEvent = {
+  id: string;
+  project_id: string;
+  event_type: ThesisEvolutionEventType;
+  title: string;
+  change_summary: string;
+  reason: string;
+  source_entity_type: string | null;
+  source_entity_id: string | null;
+  origin: ThesisEvolutionOrigin;
+  created_at: string;
+};
+
+export type ThesisCanvasDetail = {
+  canvas: ThesisCanvas;
+  evolution: ThesisEvolutionEvent[];
+};
+
+export type UpdateThesisCanvasInput = Partial<
+  Pick<
+    ThesisCanvas,
+    | "current_thesis"
+    | "target_user"
+    | "problem"
+    | "current_workaround"
+    | "proposed_solution"
+    | "wedge"
+    | "biggest_unknown"
+    | "proof_needed"
+    | "rejected_directions"
+    | "open_questions"
+  >
+> & {
+  change_reason?: string;
+};
+
 export type Me = {
   user: {
     id: string;
@@ -1444,6 +1508,21 @@ export function previewInvestigation(input: PreviewInvestigationInput) {
 
 export function getProject(projectId: string) {
   return apiFetch<Project>(`/api/projects/${projectId}`);
+}
+
+export function getThesisCanvas(projectId: string) {
+  return apiFetch<ThesisCanvasDetail>(`/api/projects/${projectId}/thesis-canvas`);
+}
+
+export function updateThesisCanvas(projectId: string, input: UpdateThesisCanvasInput) {
+  return apiFetch<ThesisCanvasDetail>(`/api/projects/${projectId}/thesis-canvas`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getThesisEvolution(projectId: string) {
+  return apiFetch<ThesisEvolutionEvent[]>(`/api/projects/${projectId}/thesis-evolution`);
 }
 
 export function getProjectOverview(projectId: string) {

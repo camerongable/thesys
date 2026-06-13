@@ -21,7 +21,12 @@ from app.schemas.overview import (
     StrategicUpdateRead,
 )
 from app.schemas.projects import ProjectCreate, ProjectListRead, ProjectRead, ProjectUpdate
-from app.services import guide_service, project_overview_service, project_service
+from app.schemas.thesis import (
+    ThesisCanvasDetailRead,
+    ThesisCanvasUpdate,
+    ThesisEvolutionEventRead,
+)
+from app.services import guide_service, project_overview_service, project_service, thesis_service
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -110,6 +115,34 @@ def get_project_guide_context(
     auth: AuthContextDep,
 ) -> GuideContextRead:
     return guide_service.get_guide_context(db, auth, project_id)
+
+
+@router.get("/{project_id}/thesis-canvas", response_model=ThesisCanvasDetailRead)
+def get_project_thesis_canvas(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> ThesisCanvasDetailRead:
+    return thesis_service.get_thesis_canvas(db, auth, project_id)
+
+
+@router.patch("/{project_id}/thesis-canvas", response_model=ThesisCanvasDetailRead)
+def update_project_thesis_canvas(
+    project_id: uuid.UUID,
+    payload: ThesisCanvasUpdate,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> ThesisCanvasDetailRead:
+    return thesis_service.update_thesis_canvas(db, auth, project_id, payload)
+
+
+@router.get("/{project_id}/thesis-evolution", response_model=list[ThesisEvolutionEventRead])
+def get_project_thesis_evolution(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> list[ThesisEvolutionEventRead]:
+    return thesis_service.list_thesis_evolution(db, auth, project_id)
 
 
 @router.post("/{project_id}/guide/recommend", response_model=GuideResponseRead)

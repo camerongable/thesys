@@ -2,14 +2,13 @@
 
 ## Current Phase
 
-V1 Sprints 18 and 19 add the first Guide Layer on top of the existing
-workspace and trace layers. Thesys now has a project-scoped guide engine that
-interprets current state, explains what matters, recommends the next action,
-and exposes action cards with app deep links. Project pages also include a
-persistent Guide panel with constrained Ask Thesys chat so users do not have to
-infer the next step from records and tabs alone. Watchlists, monitoring,
-collaboration, portfolio dashboards, integrations, and multi-segment workflow
-packs remain V2 scope.
+V1 Sprint 21 adds the Thesis Canvas and Idea Evolution layer on top of the
+workspace, trace, and guide layers. Thesys now keeps a project-scoped canvas for
+the original idea, current thesis, target user, problem, workaround, wedge,
+unknowns, proof needs, rejected directions, and open questions, plus an
+evolution timeline that explains how research, validation, and decisions changed
+the idea. Watchlists, monitoring, collaboration, portfolio dashboards,
+integrations, and multi-segment workflow packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -1117,6 +1116,55 @@ Checks run:
   Captured screenshots in `/private/tmp/thesys-sprint20-qa`; the run reported
   no failed HTTP responses and no browser console errors.
 
+## V1 Sprint 21 Scope
+
+- [x] Add `ThesisCanvas` and `ThesisEvolutionEvent` persistence with project and
+  workspace scoping.
+- [x] Add Alembic migration for the thesis canvas and evolution timeline tables.
+- [x] Add project APIs:
+  - `GET /api/projects/{project_id}/thesis-canvas`
+  - `PATCH /api/projects/{project_id}/thesis-canvas`
+  - `GET /api/projects/{project_id}/thesis-evolution`
+- [x] Seed thesis canvases from existing project descriptions, current theses,
+  structured intake, assumptions, problems, and validation state.
+- [x] Record thesis edits as manual evolution events and create a new project
+  thesis version when the current thesis changes.
+- [x] Add derived evolution events for research artifacts, validation blockers,
+  experiment results, and decisions.
+- [x] Teach Ask Thesys to answer how an idea changed and expose `Show evolution`
+  and thesis editing actions.
+- [x] Add the frontend Thesis tab with editable canvas fields and a chronological
+  evolution timeline.
+
+## V1 Sprint 21 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_thesis_canvas.py app/tests/test_guide.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `cd apps/web && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/Users/cgable/Repos/thesys/node_modules/.bin:$PATH ./node_modules/.bin/next typegen && ./node_modules/.bin/tsc --noEmit`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose config`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Runtime check: `POST /api/demo/seed`, then
+  `GET /api/projects/244d865c-b270-4df7-83ff-746a90912b39/thesis-canvas`
+  returned a seeded thesis canvas with original idea, current thesis, target
+  user, problem, workaround, wedge, biggest unknown, proof needed, and evolution
+  events derived from assumptions, research, validation, and decisions.
+- [x] Runtime check: created a disposable project, loaded its thesis canvas,
+  patched the canvas, confirmed one manual evolution event and thesis version 2,
+  then deleted the disposable project.
+- [x] Browser QA in the Codex in-app browser: opened the demo project at
+  `#thesis`, verified the Thesis workspace rendered seeded canvas fields,
+  derived evolution events, and the `Show evolution` guide action; opened a
+  disposable project, edited and saved the thesis canvas through the UI,
+  confirmed rejected direction/open question counts, manual timeline event, and
+  thesis version 2, then deleted the disposable project. Browser console
+  reported no errors.
+
 ## Next Work
 
-Begin V1 Sprint 21.
+Begin V1 Sprint 22.
