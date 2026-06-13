@@ -1070,6 +1070,53 @@ Checks run:
   returned a project-scoped answer with action cards and related entities; the
   browser console reported no errors.
 
+## V1 Sprint 20 Scope
+
+- [x] Add a standalone conversational investigation preview API:
+  - `POST /api/intake/investigation/preview`
+- [x] Add Sprint 20 response contracts for thesis drafts, investigation modes,
+  missing context, assumptions made, clarifying questions, and first next
+  action.
+- [x] Keep the existing project-bound structured intake APIs intact.
+- [x] Add backend preview generation that asks only 2-4 clarifying questions,
+  supports continuing with assumptions, and returns a first testable thesis.
+- [x] Rebuild the new investigation UI around a guided flow:
+  - paste rough idea
+  - shape idea
+  - answer or skip clarifying questions
+  - review first testable thesis
+  - choose Quick Orientation, Evidence Review, or Validation Sprint
+  - create and finalize the structured project
+- [x] Route new projects to the recommended investigation path after creation.
+
+## V1 Sprint 20 Verification
+
+Checks run:
+
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_intake.py`
+- [x] `apps/api/.venv/bin/pytest`
+- [x] `apps/api/.venv/bin/ruff check apps/api/app`
+- [x] `/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node node_modules/next/dist/bin/next typegen`
+  from `apps/web`
+- [x] `/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node node_modules/typescript/bin/tsc --noEmit`
+  from `apps/web`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects/new`
+- [x] Runtime check:
+  `POST /api/intake/investigation/preview` returned a live LLM thesis draft,
+  2-4 clarifying questions, investigation modes, and a recommended path.
+- [x] Runtime check:
+  preview -> create project -> finalize structured intake -> overview returned
+  project `b4706caa-f785-4bd3-9f64-11af9e60f3f5` at stage
+  `structured_intake` with next action `Run first research pass`.
+- [x] Browser QA: opened `/projects/new`, pasted a rough idea, clicked
+  `Shape idea`, verified the first testable thesis appeared, used `Continue
+  with assumptions`, created the investigation, and confirmed the project
+  opened at `/projects/c1c642a5-f52b-4722-a9f4-25d483c13ccf#research`.
+  Captured screenshots in `/private/tmp/thesys-sprint20-qa`; the run reported
+  no failed HTTP responses and no browser console errors.
+
 ## Next Work
 
-V1 Sprint 20 begins the conversational investigation intake work.
+Begin V1 Sprint 21.

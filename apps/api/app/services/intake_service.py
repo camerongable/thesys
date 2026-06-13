@@ -16,6 +16,7 @@ from app.ai.fallback_policy import (
 )
 from app.ai.litellm_client import ChatMessage, LLMCompletion
 from app.ai.prompts import (
+    CONVERSATIONAL_INVESTIGATION_PROMPT_VERSION,
     STRUCTURED_INTAKE_FINALIZE_PROMPT_VERSION,
     STRUCTURED_INTAKE_PROMPT_VERSION,
 )
@@ -32,10 +33,13 @@ from app.db.models import (
     ProjectThesis,
 )
 from app.schemas.intake import (
+    ConversationalInvestigationPreviewCreate,
+    InvestigationModeOption,
     StructuredIntakeAnalyzeCreate,
     StructuredIntakeAnswerCreate,
     StructuredIntakeFinalizeCreate,
     StructuredProjectIntake,
+    ThesisDraft,
 )
 from app.services import ai_run_service, project_service
 
@@ -82,6 +86,176 @@ class FinalizedIntakeResult:
     intake_record: ProjectIntake
     customer_segments: list[CustomerSegment]
     problems: list[Problem]
+
+
+@dataclass(frozen=True)
+class ConversationalInvestigationPreviewResult:
+    run: AIRun
+    step: AIStep
+    structured_intake: StructuredProjectIntake
+    thesis_draft: ThesisDraft
+    missing_context: list[str]
+    clarifying_questions: list[str]
+    assumptions_made: list[str]
+    recommended_mode: InvestigationModeOption
+    modes: list[InvestigationModeOption]
+    ready_to_create: bool
+    next_action_label: str
+    next_action_description: str
+    model_provider: str
+    model_name: str
+    used_stub: bool
+    total_tokens: int | None
+    total_cost: Decimal | None
+
+
+def preview_investigation(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    payload: ConversationalInvestigationPreviewCreate,
+) -> ConversationalInvestigationPreviewResult:
+    answers = [answer.model_dump() for answer in payload.answers]
+    input_summary = payload.raw_idea
+    if answers:
+        input_summary = f"{payload.raw_idea}\nAnswers: {_compact_json(answers)}"
+    if payload.continue_with_assumptions:
+        input_summary = f"{input_summary}\nContinue with assumptions."
+
+    run = ai_run_service.start_run(
+        db,
+        auth,
+        workflow_type="conversational_investigation_intake",
+        prompt_version=CONVERSATIONAL_INVESTIGATION_PROMPT_VERSION,
+        input_summary=input_summary[:500],
+        project_id=None,
+        model_provider="stub" if settings.should_use_llm_stub else "litellm",
+        model_name=settings.litellm_model,
+    )
+    messages = _generation_messages(
+        project_context={
+            "project_id": None,
+            "name": "New investigation",
+            "short_description": None,
+            "current_thesis": None,
+            "mode_preference": payload.mode_preference,
+            "continue_with_assumptions": payload.continue_with_assumptions,
+        },
+        raw_idea=payload.raw_idea,
+        user_background=None,
+        target_market_guess=None,
+        constraints=(
+            "Ask only 2 to 4 clarifying questions. Create a first testable thesis draft. "
+            "If context is missing, keep open questions visible instead of blocking progress."
+        ),
+        initial_intake=None,
+        answers=answers,
+    )
+    step = ai_run_service.start_step(
+        db,
+        run,
+        step_name="shape_investigation",
+        input_json={
+            "schema": StructuredProjectIntake.__name__,
+            "messages": [message.model_dump() for message in messages],
+            "continue_with_assumptions": payload.continue_with_assumptions,
+            "mode_preference": payload.mode_preference,
+        },
+    )
+
+    started = perf_counter()
+    try:
+        if should_use_fallback_without_model(settings):
+            intake = _fallback_intake(
+                {
+                    "raw_idea": payload.raw_idea,
+                    "project_context": {"name": "New investigation"},
+                    "answers": answers,
+                }
+            )
+            completion = _fallback_completion(
+                settings,
+                messages,
+                intake,
+                "conversational_investigation_policy_always",
+            )
+        else:
+            result = generate_structured_output(
+                settings,
+                StructuredProjectIntake,
+                messages,
+                model=settings.litellm_model,
+                temperature=0.0,
+            )
+            intake = StructuredProjectIntake.model_validate(result.parsed)
+            completion = result.completion
+    except (StructuredOutputError, RuntimeError) as exc:
+        if not should_use_fallback_after_error(settings):
+            latency_ms = int((perf_counter() - started) * 1000)
+            ai_run_service.fail_step(db, step, error=str(exc), latency_ms=latency_ms)
+            ai_run_service.fail_run(db, run, error=str(exc))
+            raise IntakeWorkflowError("Conversational investigation preview failed.") from exc
+        intake = _fallback_intake(
+            {
+                "raw_idea": payload.raw_idea,
+                "project_context": {"name": "New investigation"},
+                "answers": answers,
+            }
+        )
+        completion = _fallback_completion(
+            settings,
+            messages,
+            intake,
+            "conversational_investigation_emergency",
+            exc,
+        )
+
+    preview = _build_investigation_preview(payload, intake)
+    latency_ms = int((perf_counter() - started) * 1000)
+    step = ai_run_service.complete_step(
+        db,
+        step,
+        output_json={
+            "structured_intake": intake.model_dump(mode="json"),
+            "thesis_draft": preview["thesis_draft"].model_dump(mode="json"),
+            "missing_context": preview["missing_context"],
+            "clarifying_questions": preview["clarifying_questions"],
+            "recommended_mode": preview["recommended_mode"].model_dump(mode="json"),
+            "ready_to_create": preview["ready_to_create"],
+        },
+        latency_ms=latency_ms,
+        tokens=completion.total_tokens,
+        cost=completion.total_cost,
+    )
+    run = ai_run_service.complete_run(
+        db,
+        run,
+        output_summary=preview["thesis_draft"].problem,
+        total_tokens=completion.total_tokens,
+        total_cost=completion.total_cost,
+        model_provider=completion.model_provider,
+        model_name=completion.model_name,
+    )
+
+    return ConversationalInvestigationPreviewResult(
+        run=run,
+        step=step,
+        structured_intake=intake,
+        thesis_draft=preview["thesis_draft"],
+        missing_context=preview["missing_context"],
+        clarifying_questions=preview["clarifying_questions"],
+        assumptions_made=preview["assumptions_made"],
+        recommended_mode=preview["recommended_mode"],
+        modes=preview["modes"],
+        ready_to_create=preview["ready_to_create"],
+        next_action_label=preview["next_action_label"],
+        next_action_description=preview["next_action_description"],
+        model_provider=completion.model_provider,
+        model_name=completion.model_name,
+        used_stub=completion.used_stub,
+        total_tokens=completion.total_tokens,
+        total_cost=completion.total_cost,
+    )
 
 
 def analyze_intake(
@@ -546,6 +720,257 @@ def _fallback_answer_intake(state: IntakeGenerationState) -> StructuredProjectIn
             "clarifying_questions": [],
         }
     )
+
+
+def _build_investigation_preview(
+    payload: ConversationalInvestigationPreviewCreate,
+    intake: StructuredProjectIntake,
+) -> dict[str, Any]:
+    thesis_draft = _thesis_draft_from_intake(payload.raw_idea, intake)
+    missing_context = _missing_investigation_context(thesis_draft, intake)
+    raw_questions = _clean_list(intake.clarifying_questions)[:4]
+    if len(raw_questions) < 2 and missing_context and not payload.answers:
+        raw_questions = _clean_list(
+            raw_questions + [_question_for_missing_context(key) for key in missing_context]
+        )[:4]
+    clarifying_questions = [] if payload.continue_with_assumptions else raw_questions[:4]
+    assumptions_made = _assumptions_from_missing_context(
+        missing_context,
+        raw_questions,
+        payload.continue_with_assumptions,
+    )
+    modes = _investigation_mode_options()
+    recommended_mode = _recommended_investigation_mode(
+        payload,
+        thesis_draft,
+        missing_context,
+        modes,
+    )
+    ready_to_create = (
+        payload.continue_with_assumptions
+        or bool(payload.answers)
+        or not raw_questions
+    )
+    next_label, next_description = _next_action_for_mode(recommended_mode.mode, ready_to_create)
+    return {
+        "thesis_draft": thesis_draft,
+        "missing_context": missing_context,
+        "clarifying_questions": clarifying_questions,
+        "assumptions_made": assumptions_made,
+        "recommended_mode": recommended_mode,
+        "modes": modes,
+        "ready_to_create": ready_to_create,
+        "next_action_label": next_label,
+        "next_action_description": next_description,
+    }
+
+
+def _thesis_draft_from_intake(raw_idea: str, intake: StructuredProjectIntake) -> ThesisDraft:
+    target_user = _first_or_default(intake.target_users, "Target user needs clarification")
+    problem = _first_or_default(
+        intake.problem_hypotheses,
+        "The painful moment still needs to be named.",
+    )
+    current_workaround = _current_workaround(raw_idea, intake)
+    proposed_solution = intake.proposed_solution.strip() or "The solution shape needs refinement."
+    possible_wedge = _possible_wedge(proposed_solution, target_user)
+    biggest_unknown = _first_or_default(
+        intake.key_uncertainties,
+        "Which proof would make this worth another week?",
+    )
+    proof_needed = _proof_needed(target_user, biggest_unknown)
+    open_questions = _clean_list([*intake.clarifying_questions, *intake.key_uncertainties])[:8]
+    return ThesisDraft(
+        target_user=target_user,
+        problem=problem,
+        current_workaround=current_workaround,
+        proposed_solution=proposed_solution,
+        possible_wedge=possible_wedge,
+        biggest_unknown=biggest_unknown,
+        proof_needed=proof_needed,
+        open_questions=open_questions,
+    )
+
+
+def _missing_investigation_context(
+    thesis: ThesisDraft,
+    intake: StructuredProjectIntake,
+) -> list[str]:
+    missing: list[str] = []
+    if _is_generic(thesis.target_user, {"initial target users", "target user needs clarification"}):
+        missing.append("target_user")
+    if _is_generic(thesis.problem, {"the painful moment still needs to be named."}):
+        missing.append("problem")
+    if _is_generic(
+        thesis.current_workaround,
+        {"current workaround needs confirmation.", "manual workflow"},
+    ):
+        missing.append("current_workaround")
+    if intake.buyer_type == "unknown":
+        missing.append("buyer_or_budget")
+    if _is_generic(thesis.biggest_unknown, {"which proof would make this worth another week?"}):
+        missing.append("proof_needed")
+    return missing
+
+
+def _assumptions_from_missing_context(
+    missing_context: list[str],
+    questions: list[str],
+    continue_with_assumptions: bool,
+) -> list[str]:
+    if not continue_with_assumptions:
+        return []
+    labels = {
+        "target_user": "Assume the first target user can be refined after project creation.",
+        "problem": "Assume the painful moment is still an open question.",
+        "current_workaround": "Assume the current workaround needs confirmation.",
+        "buyer_or_budget": "Assume buyer type and budget are unknown until validation.",
+        "proof_needed": "Assume the first proof should be chosen after reviewing the thesis.",
+    }
+    assumptions = [labels[key] for key in missing_context if key in labels]
+    assumptions.extend(f"Treat as open question: {question}" for question in questions)
+    return _clean_list(assumptions)[:8]
+
+
+def _recommended_investigation_mode(
+    payload: ConversationalInvestigationPreviewCreate,
+    thesis: ThesisDraft,
+    missing_context: list[str],
+    modes: list[InvestigationModeOption],
+) -> InvestigationModeOption:
+    mode_by_id = {mode.mode: mode for mode in modes}
+    if payload.mode_preference:
+        return mode_by_id[payload.mode_preference]
+    combined = " ".join(
+        [
+            payload.raw_idea,
+            thesis.biggest_unknown,
+            thesis.proof_needed,
+            thesis.problem,
+        ]
+    ).casefold()
+    if any(term in combined for term in ["pay", "pricing", "interview", "pilot", "validate"]):
+        return mode_by_id["validation_sprint"]
+    if len(missing_context) >= 3:
+        return mode_by_id["quick_orientation"]
+    return mode_by_id["evidence_review"]
+
+
+def _investigation_mode_options() -> list[InvestigationModeOption]:
+    return [
+        InvestigationModeOption(
+            mode="quick_orientation",
+            label="Quick Orientation",
+            description=(
+                "Structure the idea, identify missing context, and recommend the first next step."
+            ),
+            why_recommended="Best when the idea still has missing target-user or problem context.",
+        ),
+        InvestigationModeOption(
+            mode="evidence_review",
+            label="Evidence Review",
+            description=(
+                "Discover sources, map competitors, identify the blocker, and produce a first "
+                "evidence-backed verdict."
+            ),
+            why_recommended="Best when the thesis is clear enough to pressure-test with research.",
+        ),
+        InvestigationModeOption(
+            mode="validation_sprint",
+            label="Validation Sprint",
+            description=(
+                "Start from the biggest unknown and create a concrete test plan."
+            ),
+            why_recommended="Best when the riskiest proof is already visible.",
+        ),
+    ]
+
+
+def _next_action_for_mode(mode: str, ready_to_create: bool) -> tuple[str, str]:
+    if not ready_to_create:
+        return (
+            "Answer or skip the questions",
+            "Clarify only the missing context, or continue with assumptions and keep "
+            "open questions visible.",
+        )
+    if mode == "quick_orientation":
+        return (
+            "Create investigation and review the thesis",
+            "Start with the structured thesis so the first project room has a clear foundation.",
+        )
+    if mode == "validation_sprint":
+        return (
+            "Create investigation and plan the first test",
+            "Use the biggest unknown to create a concrete validation path before more research.",
+        )
+    return (
+        "Create investigation and start evidence review",
+        "Use the thesis to discover sources, competitors, and the first decision blocker.",
+    )
+
+
+def _question_for_missing_context(key: str) -> str:
+    questions = {
+        "target_user": "Who is the first target user?",
+        "problem": "What specific moment hurts for that user?",
+        "current_workaround": "What do they use or do today?",
+        "buyer_or_budget": "Who would pay for this, and what budget signal would matter?",
+        "proof_needed": "What would prove this is worth another week?",
+    }
+    return questions.get(key, "What context would make this idea easier to test?")
+
+
+def _current_workaround(raw_idea: str, intake: StructuredProjectIntake) -> str:
+    combined = raw_idea.casefold()
+    if "spreadsheet" in combined:
+        return "Spreadsheets and manual tracking"
+    if "dm" in combined or "message" in combined:
+        return "Messages and manual follow-up"
+    if "email" in combined:
+        return "Email and manual coordination"
+    competitors = [
+        value
+        for value in _clean_list(intake.suspected_competitors)
+        if "generic ai" not in value.casefold()
+    ]
+    if competitors:
+        return ", ".join(competitors[:2])
+    return "Current workaround needs confirmation."
+
+
+def _possible_wedge(proposed_solution: str, target_user: str) -> str:
+    first_sentence = proposed_solution.split(".")[0].strip()
+    if first_sentence:
+        return _truncate(first_sentence, 280)
+    return f"A focused workflow for {target_user}"
+
+
+def _proof_needed(target_user: str, biggest_unknown: str) -> str:
+    unknown = biggest_unknown.casefold()
+    if "pay" in unknown or "pricing" in unknown or "budget" in unknown:
+        return (
+            f"Interview 5 {target_user} about current spend, switching pain, and "
+            "willingness to pay."
+        )
+    if "trust" in unknown:
+        return (
+            f"Show 5 {target_user} a realistic workflow and test whether they would "
+            "trust the output."
+        )
+    return (
+        f"Talk to 5 {target_user} and look for recent, repeated pain tied to the "
+        "biggest unknown."
+    )
+
+
+def _first_or_default(values: list[str], default: str) -> str:
+    cleaned = _clean_list(values)
+    return cleaned[0] if cleaned else default
+
+
+def _is_generic(value: str, generic_values: set[str]) -> bool:
+    normalized = _normalize_key(value)
+    return normalized in {_normalize_key(item) for item in generic_values}
 
 
 def _fallback_completion(

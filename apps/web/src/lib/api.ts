@@ -123,6 +123,55 @@ export type FinalizeIntakeInput = {
   answers?: ClarifyingAnswer[];
 };
 
+export type InvestigationMode = "quick_orientation" | "evidence_review" | "validation_sprint";
+
+export type ThesisDraft = {
+  target_user: string;
+  problem: string;
+  current_workaround: string;
+  proposed_solution: string;
+  possible_wedge: string;
+  biggest_unknown: string;
+  proof_needed: string;
+  open_questions: string[];
+};
+
+export type InvestigationModeOption = {
+  mode: InvestigationMode;
+  label: string;
+  description: string;
+  why_recommended: string | null;
+};
+
+export type PreviewInvestigationInput = {
+  raw_idea: string;
+  answers?: ClarifyingAnswer[];
+  continue_with_assumptions?: boolean;
+  mode_preference?: InvestigationMode;
+};
+
+export type ConversationalInvestigationPreview = {
+  ai_run_id: string;
+  ai_step_id: string;
+  prompt_version: string;
+  model_provider: string;
+  model_name: string;
+  used_stub: boolean;
+  total_tokens: number | null;
+  total_cost: string | null;
+  raw_idea: string;
+  structured_intake: StructuredProjectIntake;
+  thesis_draft: ThesisDraft;
+  missing_context: string[];
+  clarifying_questions: string[];
+  assumptions_made: string[];
+  recommended_mode: InvestigationModeOption;
+  modes: InvestigationModeOption[];
+  ready_to_create: boolean;
+  next_action_label: string;
+  next_action_description: string;
+};
+
 export type StructuredIntakeRun = {
   ai_run_id: string;
   ai_step_id: string;
@@ -1381,6 +1430,13 @@ export async function listProjects() {
 
 export function createProject(input: CreateProjectInput) {
   return apiFetch<Project>("/api/projects", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function previewInvestigation(input: PreviewInvestigationInput) {
+  return apiFetch<ConversationalInvestigationPreview>("/api/intake/investigation/preview", {
     method: "POST",
     body: JSON.stringify(input),
   });
