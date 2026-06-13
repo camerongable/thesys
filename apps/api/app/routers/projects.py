@@ -1,12 +1,19 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContextDep
 from app.db.models import Project
 from app.db.session import get_db
+from app.schemas.guide import (
+    GuideActionRead,
+    GuideChatRequest,
+    GuideChatResponseRead,
+    GuideContextRead,
+    GuideResponseRead,
+)
 from app.schemas.overview import (
     IdeaReadinessRead,
     NextBestActionRead,
@@ -14,7 +21,7 @@ from app.schemas.overview import (
     StrategicUpdateRead,
 )
 from app.schemas.projects import ProjectCreate, ProjectListRead, ProjectRead, ProjectUpdate
-from app.services import project_overview_service, project_service
+from app.services import guide_service, project_overview_service, project_service
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -94,6 +101,50 @@ def execute_project_next_action(
     auth: AuthContextDep,
 ) -> NextBestActionRead:
     return project_overview_service.execute_next_action(db, auth, project_id)
+
+
+@router.get("/{project_id}/guide/context", response_model=GuideContextRead)
+def get_project_guide_context(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> GuideContextRead:
+    return guide_service.get_guide_context(db, auth, project_id)
+
+
+@router.post("/{project_id}/guide/recommend", response_model=GuideResponseRead)
+def recommend_project_guide_action(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> GuideResponseRead:
+    return guide_service.recommend(db, auth, project_id)
+
+
+@router.post("/{project_id}/guide/actions/{action_id}/execute", response_model=GuideActionRead)
+def execute_project_guide_action(
+    project_id: uuid.UUID,
+    action_id: str,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> GuideActionRead:
+    try:
+        return guide_service.execute_action(db, auth, project_id, action_id)
+    except guide_service.GuideActionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Guide action not found.",
+        ) from exc
+
+
+@router.post("/{project_id}/guide/chat", response_model=GuideChatResponseRead)
+def chat_with_project_guide(
+    project_id: uuid.UUID,
+    payload: GuideChatRequest,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> GuideChatResponseRead:
+    return guide_service.chat(db, auth, project_id, payload.message)
 
 
 @router.patch("/{project_id}", response_model=ProjectRead)

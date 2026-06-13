@@ -47,6 +47,7 @@ import {
   discoverSources,
   DiscoveredSource,
   executeNextAction,
+  GuideAction,
   getDurableResearchStatus,
   getProjectResearchHistory,
   getProjectOverview,
@@ -94,6 +95,7 @@ import { DecisionsTab } from "@/features/projects/decisions-tab";
 import { DomainError, DomainHeader, DomainPanel } from "@/features/projects/decision-room";
 import { EvidenceTab } from "@/features/projects/evidence-tab";
 import { ExperimentsTab } from "@/features/projects/experiments-tab";
+import { GuidePanel } from "@/features/projects/guide-panel";
 import { MarkdownContent } from "@/features/projects/markdown-content";
 import { StructuredIntakeWizard } from "@/features/projects/structured-intake-wizard";
 import { WorkflowTrace } from "@/features/projects/workflow-trace";
@@ -194,6 +196,13 @@ export function ProjectOverview() {
     if (action.primary) {
       nextActionMutation.mutate();
     }
+  }
+
+  function runGuideAction(action: GuideAction) {
+    const hash = action.target_route?.split("#")[1] ?? null;
+    const tab = tabFromHash(hash ? `#${hash}` : "") ?? tabFromAnchor(hash) ?? tabForGuideAction(action);
+    const anchor = hash && !tabFromHash(`#${hash}`) ? hash : action.target_modal;
+    openWorkspace(tab, anchor ?? null);
   }
 
   function activateAction(action: NextBestAction) {
@@ -301,10 +310,16 @@ export function ProjectOverview() {
               overview={overview}
             />
 
-            <div className="mt-5 grid gap-5 lg:grid-cols-[270px_minmax(0,1fr)]">
+            <div className="mt-5 grid gap-5 lg:grid-cols-[270px_minmax(0,1fr)_340px] xl:grid-cols-[270px_minmax(0,1fr)_360px]">
               <ProjectMap
                 activeTab={activeTab}
                 onSelect={selectTab}
+              />
+
+              <GuidePanel
+                className="lg:hidden"
+                onAction={runGuideAction}
+                projectId={project.id}
               />
 
               <div className="min-w-0">
@@ -341,6 +356,12 @@ export function ProjectOverview() {
                   onSelect={selectTab}
                 />
               </div>
+
+              <GuidePanel
+                className="hidden lg:block"
+                onAction={runGuideAction}
+                projectId={project.id}
+              />
             </div>
           </>
         ) : null}
@@ -4991,6 +5012,19 @@ function tabForActionType(actionType: string): ProjectTab {
   return "Decision";
 }
 
+function tabForGuideAction(action: GuideAction): ProjectTab {
+  if (action.type === "compare_wedges" || action.id.includes("evidence")) {
+    return "Intelligence";
+  }
+  if (action.type === "log_result" || action.id.includes("validation")) {
+    return "Validation";
+  }
+  if (action.type === "record_decision") {
+    return "Record";
+  }
+  return tabForActionType(action.id);
+}
+
 function tabFromHash(hash: string): ProjectTab | null {
   const normalized = hash.replace("#", "").toLowerCase();
   const aliases: Record<string, ProjectTab> = {
@@ -5037,7 +5071,7 @@ function tabFromAnchor(anchor: string | null): ProjectTab | null {
   ) {
     return "Validation";
   }
-  if (anchor.includes("history") || anchor.includes("decision-record")) {
+  if (anchor.includes("history") || anchor.includes("decision-record") || anchor.includes("record-decision")) {
     return "Record";
   }
   return null;

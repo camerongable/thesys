@@ -2,14 +2,14 @@
 
 ## Current Phase
 
-V1 Sprint 17 implements Temporal durable research sprint orchestration.
-Temporal now owns the long-running research sprint business workflow boundary:
-durable execution metadata, approval waits, retry/cancel controls, worker
-execution, and local Docker orchestration. LangGraph remains responsible for
-agent reasoning and synthesis, LangSmith remains the observability/eval layer,
-and MCP/tool services remain the governed capability boundary. Watchlists,
-monitoring, collaboration, portfolio dashboards, integrations, and multi-segment
-workflow packs remain V2 scope.
+V1 Sprints 18 and 19 add the first Guide Layer on top of the existing
+workspace and trace layers. Thesys now has a project-scoped guide engine that
+interprets current state, explains what matters, recommends the next action,
+and exposes action cards with app deep links. Project pages also include a
+persistent Guide panel with constrained Ask Thesys chat so users do not have to
+infer the next step from records and tabs alone. Watchlists, monitoring,
+collaboration, portfolio dashboards, integrations, and multi-segment workflow
+packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -998,6 +998,78 @@ Notes:
   sprint, and the web service bind-mounts `apps/web`, so the existing web image
   was restarted and served the updated source successfully.
 
+## V1 Sprint 18 Scope
+
+- [x] Add guide schema contracts for context, action cards, recommendation
+  responses, chat requests, chat responses, and related project entities.
+- [x] Add `GuideService` that loads project overview state, derives current
+  focus, missing context, biggest unknown, confidence/risk, evidence summary,
+  and stage-aware next actions.
+- [x] Add guide API routes for:
+  - `GET /api/projects/{project_id}/guide/context`
+  - `POST /api/projects/{project_id}/guide/recommend`
+  - `POST /api/projects/{project_id}/guide/actions/{action_id}/execute`
+- [x] Map guide actions to existing project tabs/forms through stable deep
+  links and action metadata.
+- [x] Cover guide output across at least five project stages.
+
+## V1 Sprint 18 Verification
+
+Checks run:
+
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_guide.py`
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_guide.py apps/api/app/tests/test_project_overview.py`
+- [x] `apps/api/.venv/bin/ruff check apps/api/app/services/guide_service.py apps/api/app/schemas/guide.py apps/api/app/routers/projects.py apps/api/app/tests/test_guide.py`
+- [x] `apps/api/.venv/bin/pytest`
+- [x] Runtime check:
+  `GET /api/projects/53002617-c8bc-4335-bc4d-9ac43a338390/guide/context`
+  returned stage-aware context with missing evidence, assumptions, validation,
+  and decision context.
+- [x] Runtime check:
+  `POST /api/projects/53002617-c8bc-4335-bc4d-9ac43a338390/guide/recommend`
+  returned the expected current focus, recommended action, secondary actions,
+  and suggested questions.
+- [x] Runtime check:
+  `POST /api/projects/53002617-c8bc-4335-bc4d-9ac43a338390/guide/actions/generate_brief/execute`
+  returned the executable action and target route.
+
+## V1 Sprint 19 Scope
+
+- [x] Add a persistent `GuidePanel` to project pages in both mobile and desktop
+  layouts.
+- [x] Render current focus, why it matters, the primary recommended action,
+  secondary actions, suggested questions, and constrained Ask Thesys responses.
+- [x] Wire guide panel actions to existing project navigation and workspace
+  affordances.
+- [x] Add frontend API client types and calls for guide context,
+  recommendations, action execution, and guide chat.
+- [x] Add backend guide chat that stays constrained to thesis, evidence,
+  blockers, validation, and decisions.
+
+## V1 Sprint 19 Verification
+
+Checks run:
+
+- [x] `PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/usr/bin:/bin node_modules/.bin/next typegen`
+  from `apps/web`
+- [x] `PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/usr/bin:/bin node_modules/.bin/tsc --noEmit`
+  from `apps/web`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Runtime check:
+  `POST /api/projects/53002617-c8bc-4335-bc4d-9ac43a338390/guide/chat`
+  returned a project-scoped answer, action cards, and related thesis/research
+  entities.
+- [x] Browser QA in the Codex in-app browser against
+  `/projects/53002617-c8bc-4335-bc4d-9ac43a338390#intelligence`: the Guide
+  rendered current focus, why it matters, primary action, secondary actions,
+  suggested questions, and Ask Thesys; the Guide stayed visible across
+  Decision, Intelligence/Evidence, Validation, and Record workspaces; the
+  Improve thesis action opened the structured project context form; Ask Thesys
+  returned a project-scoped answer with action cards and related entities; the
+  browser console reported no errors.
+
 ## Next Work
 
-V2 planning, unless another V1 hardening sprint is added to the brief.
+V1 Sprint 20 begins the conversational investigation intake work.

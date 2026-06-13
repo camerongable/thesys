@@ -1116,6 +1116,81 @@ export type ProjectOverview = {
   key_risks: Risk[];
 };
 
+export type GuideRiskLevel = "none" | "low" | "medium" | "high";
+export type GuideConfidenceLevel = "unknown" | "low" | "medium" | "high";
+export type GuideActionType =
+  | "navigate"
+  | "open_form"
+  | "run_workflow"
+  | "generate_draft"
+  | "explain"
+  | "compare_wedges"
+  | "update_thesis"
+  | "log_result"
+  | "record_decision";
+
+export type GuideAction = {
+  id: string;
+  type: GuideActionType;
+  label: string;
+  description: string;
+  why_it_matters: string;
+  target_route: string | null;
+  target_modal: string | null;
+  payload: Record<string, unknown> | null;
+  risk_level: "low" | "medium" | "high";
+  requires_confirmation: boolean;
+};
+
+export type GuideEvidenceSummary = {
+  sources: number;
+  competitors: number;
+  supported_findings: number;
+  open_questions: number;
+  validated_assumptions: number;
+};
+
+export type GuideContext = {
+  project_id: string;
+  project_name: string;
+  stage: string;
+  verdict: string;
+  next_action: string;
+  risk_level: GuideRiskLevel;
+  confidence_level: GuideConfidenceLevel;
+  current_thesis: string | null;
+  target_user: string | null;
+  primary_problem: string | null;
+  current_wedge: string | null;
+  biggest_unknown: string | null;
+  active_validation_plan_id: string | null;
+  latest_research_sprint_id: string | null;
+  evidence_summary: GuideEvidenceSummary;
+  missing_context: string[];
+  available_actions: GuideAction[];
+};
+
+export type GuideResponse = {
+  summary: string;
+  current_focus: string;
+  why_this_matters: string;
+  recommended_action: GuideAction;
+  secondary_actions: GuideAction[];
+  suggested_questions: string[];
+};
+
+export type GuideRelatedEntity = {
+  type: "evidence" | "assumption" | "validation_plan" | "decision" | "research" | "thesis";
+  id: string;
+  label: string;
+};
+
+export type GuideChatResponse = {
+  answer: string;
+  action_cards: GuideAction[];
+  related_entities: GuideRelatedEntity[];
+};
+
 export type AIProviderKeyStatus = {
   openai: boolean;
   anthropic: boolean;
@@ -1330,6 +1405,29 @@ export function getStrategicUpdates(projectId: string) {
 export function executeNextAction(projectId: string) {
   return apiFetch<NextBestAction>(`/api/projects/${projectId}/next-action`, {
     method: "POST",
+  });
+}
+
+export function getGuideContext(projectId: string) {
+  return apiFetch<GuideContext>(`/api/projects/${projectId}/guide/context`);
+}
+
+export function getGuideRecommendation(projectId: string) {
+  return apiFetch<GuideResponse>(`/api/projects/${projectId}/guide/recommend`, {
+    method: "POST",
+  });
+}
+
+export function executeGuideAction(projectId: string, actionId: string) {
+  return apiFetch<GuideAction>(`/api/projects/${projectId}/guide/actions/${actionId}/execute`, {
+    method: "POST",
+  });
+}
+
+export function askProjectGuide(projectId: string, message: string) {
+  return apiFetch<GuideChatResponse>(`/api/projects/${projectId}/guide/chat`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
   });
 }
 
