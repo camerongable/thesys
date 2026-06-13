@@ -15,7 +15,7 @@ from app.schemas.guide import (
     GuideResponseRead,
 )
 from app.schemas.overview import NextBestActionRead, ProjectOverviewRead
-from app.services import project_overview_service, thesis_service
+from app.services import project_overview_service, thesis_service, wedge_service
 
 
 class GuideActionNotFoundError(ValueError):
@@ -232,12 +232,29 @@ def chat(
         return _chat_response(answer, context, [_action_by_id(context, "update_thesis")])
 
     if any(term in normalized for term in ("wedge", "compare", "alternative")):
-        wedge = context.current_wedge or "No clear wedge has been selected yet."
-        answer = (
-            f"Current wedge: {wedge} "
-            "The best wedge is usually the narrowest direction with strong pain, reachable "
-            "users, and lower competitor pressure."
+        wedges = wedge_service.list_wedge_options(db, auth, project_id)
+        recommended = next(
+            (
+                wedge
+                for wedge in wedges.wedges
+                if str(wedge.id) == str(wedges.recommended_wedge_id)
+            ),
+            None,
         )
+        if recommended:
+            answer = (
+                f"Recommended wedge: {recommended.name}. "
+                f"Why it might work: {recommended.why_it_might_work} "
+                f"Main risk: {recommended.main_risk} "
+                f"First test: {recommended.validation_test}"
+            )
+        else:
+            wedge = context.current_wedge or "No clear wedge has been selected yet."
+            answer = (
+                f"Current wedge: {wedge} "
+                "Open Wedge Explorer to compare possible directions before committing "
+                "to a validation path."
+            )
         return _chat_response(answer, context, [_action_by_id(context, "compare_wedges")])
 
     if any(term in normalized for term in ("outreach", "draft", "interview", "message")):
@@ -392,20 +409,24 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
         ),
     ]
     if stage in {
+        "structured_intake",
         "brief_generated",
         "competitors_analyzed",
         "assumptions_identified",
         "validation_plan_created",
         "experiment_running",
+        "decision_ready",
+        "proceeding",
     }:
         actions.append(
             GuideActionRead(
                 id="compare_wedges",
                 type="compare_wedges",
                 label="Compare wedges",
-                description="Review competitors, substitutes, and the current positioning gap.",
+                description="Compare possible strategic directions before choosing a test.",
                 why_it_matters="A narrow wedge is easier to validate than a broad product idea.",
-                target_route=f"/projects/{project_id}#competitors",
+                target_route=f"/projects/{project_id}#wedge-explorer",
+                target_modal="wedge-explorer",
                 risk_level="medium",
                 requires_confirmation=False,
             )

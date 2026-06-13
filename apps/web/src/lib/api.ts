@@ -108,6 +108,44 @@ export type ThesisCanvasDetail = {
   evolution: ThesisEvolutionEvent[];
 };
 
+export type CompetitorPressure = "low" | "medium" | "high";
+export type EvidenceStrength = "none" | "weak" | "partial" | "strong";
+export type WedgeRecommendation =
+  | "recommended"
+  | "promising"
+  | "research_later"
+  | "avoid_for_now"
+  | "rejected";
+
+export type WedgeOption = {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  target_user: string;
+  problem_focus: string;
+  why_it_might_work: string;
+  main_risk: string;
+  competitor_pressure: CompetitorPressure;
+  evidence_strength: EvidenceStrength;
+  validation_test: string;
+  recommendation: WedgeRecommendation;
+  source_ids: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type WedgeOptionList = {
+  wedges: WedgeOption[];
+  recommended_wedge_id: string | null;
+  recommendation_summary: string;
+};
+
+export type WedgeAction = {
+  wedge: WedgeOption;
+  message: string;
+};
+
 export type UpdateThesisCanvasInput = Partial<
   Pick<
     ThesisCanvas,
@@ -1523,6 +1561,40 @@ export function updateThesisCanvas(projectId: string, input: UpdateThesisCanvasI
 
 export function getThesisEvolution(projectId: string) {
   return apiFetch<ThesisEvolutionEvent[]>(`/api/projects/${projectId}/thesis-evolution`);
+}
+
+export function listWedgeOptions(projectId: string) {
+  return apiFetch<WedgeOptionList>(`/api/projects/${projectId}/wedges`);
+}
+
+export function generateWedgeOptions(projectId: string) {
+  return apiFetch<WedgeOptionList>(`/api/projects/${projectId}/wedges/generate`, {
+    method: "POST",
+  });
+}
+
+export function selectWedgeOption(projectId: string, wedgeId: string) {
+  return apiFetch<WedgeAction>(`/api/projects/${projectId}/wedges/${wedgeId}/select`, {
+    method: "POST",
+  });
+}
+
+export function rejectWedgeOption(projectId: string, wedgeId: string) {
+  return apiFetch<WedgeAction>(`/api/projects/${projectId}/wedges/${wedgeId}/reject`, {
+    method: "POST",
+  });
+}
+
+export function testWedgeOption(projectId: string, wedgeId: string) {
+  return apiFetch<WedgeAction>(`/api/projects/${projectId}/wedges/${wedgeId}/test`, {
+    method: "POST",
+  });
+}
+
+export function researchWedgeOptionLater(projectId: string, wedgeId: string) {
+  return apiFetch<WedgeAction>(`/api/projects/${projectId}/wedges/${wedgeId}/research-more`, {
+    method: "POST",
+  });
 }
 
 export function getProjectOverview(projectId: string) {

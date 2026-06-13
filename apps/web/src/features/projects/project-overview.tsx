@@ -5041,12 +5041,14 @@ function tabForActionType(actionType: string): ProjectTab {
 function tabForGuideAction(action: GuideAction): ProjectTab {
   if (
     action.type === "update_thesis" ||
+    action.type === "compare_wedges" ||
     action.id.includes("thesis") ||
-    action.id.includes("evolution")
+    action.id.includes("evolution") ||
+    action.id.includes("wedge")
   ) {
     return "Thesis";
   }
-  if (action.type === "compare_wedges" || action.id.includes("evidence")) {
+  if (action.id.includes("evidence")) {
     return "Intelligence";
   }
   if (action.type === "log_result" || action.id.includes("validation")) {
@@ -5079,6 +5081,8 @@ function tabFromHash(hash: string): ProjectTab | null {
     research: "Intelligence",
     thesis: "Thesis",
     validation: "Validation",
+    wedge: "Thesis",
+    wedges: "Thesis",
   };
   return aliases[normalized] ?? null;
 }

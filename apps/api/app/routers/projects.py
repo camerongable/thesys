@@ -26,7 +26,14 @@ from app.schemas.thesis import (
     ThesisCanvasUpdate,
     ThesisEvolutionEventRead,
 )
-from app.services import guide_service, project_overview_service, project_service, thesis_service
+from app.schemas.wedges import WedgeActionRead, WedgeOptionListRead
+from app.services import (
+    guide_service,
+    project_overview_service,
+    project_service,
+    thesis_service,
+    wedge_service,
+)
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -143,6 +150,88 @@ def get_project_thesis_evolution(
     auth: AuthContextDep,
 ) -> list[ThesisEvolutionEventRead]:
     return thesis_service.list_thesis_evolution(db, auth, project_id)
+
+
+@router.get("/{project_id}/wedges", response_model=WedgeOptionListRead)
+def list_project_wedges(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> WedgeOptionListRead:
+    return wedge_service.list_wedge_options(db, auth, project_id)
+
+
+@router.post("/{project_id}/wedges/generate", response_model=WedgeOptionListRead)
+def generate_project_wedges(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> WedgeOptionListRead:
+    return wedge_service.generate_wedge_options(db, auth, project_id)
+
+
+@router.post("/{project_id}/wedges/{wedge_id}/select", response_model=WedgeActionRead)
+def select_project_wedge(
+    project_id: uuid.UUID,
+    wedge_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> WedgeActionRead:
+    try:
+        return wedge_service.select_wedge(db, auth, project_id, wedge_id)
+    except wedge_service.WedgeOptionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Wedge option not found.",
+        ) from exc
+
+
+@router.post("/{project_id}/wedges/{wedge_id}/reject", response_model=WedgeActionRead)
+def reject_project_wedge(
+    project_id: uuid.UUID,
+    wedge_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> WedgeActionRead:
+    try:
+        return wedge_service.reject_wedge(db, auth, project_id, wedge_id)
+    except wedge_service.WedgeOptionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Wedge option not found.",
+        ) from exc
+
+
+@router.post("/{project_id}/wedges/{wedge_id}/test", response_model=WedgeActionRead)
+def test_project_wedge(
+    project_id: uuid.UUID,
+    wedge_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> WedgeActionRead:
+    try:
+        return wedge_service.test_wedge(db, auth, project_id, wedge_id)
+    except wedge_service.WedgeOptionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Wedge option not found.",
+        ) from exc
+
+
+@router.post("/{project_id}/wedges/{wedge_id}/research-more", response_model=WedgeActionRead)
+def research_project_wedge_later(
+    project_id: uuid.UUID,
+    wedge_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> WedgeActionRead:
+    try:
+        return wedge_service.mark_research_later(db, auth, project_id, wedge_id)
+    except wedge_service.WedgeOptionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Wedge option not found.",
+        ) from exc
 
 
 @router.post("/{project_id}/guide/recommend", response_model=GuideResponseRead)

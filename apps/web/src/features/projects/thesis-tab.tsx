@@ -1,16 +1,23 @@
 "use client";
 
-import { Check, Edit3, GitBranch, Lightbulb, Save, X } from "lucide-react";
+import { Check, Compass, Edit3, GitBranch, Lightbulb, Save, Search, Target, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import {
   getThesisCanvas,
+  generateWedgeOptions,
+  listWedgeOptions,
+  rejectWedgeOption,
+  researchWedgeOptionLater,
+  selectWedgeOption,
   ThesisCanvas,
   ThesisEvolutionEvent,
+  testWedgeOption,
   updateThesisCanvas,
   UpdateThesisCanvasInput,
+  WedgeOption,
 } from "@/lib/api";
 import { DomainError, DomainHeader, DomainPanel } from "@/features/projects/decision-room";
 import { MarkdownContent } from "@/features/projects/markdown-content";
@@ -283,6 +290,8 @@ export function ThesisTab({ activeAnchor, projectId }: ThesisTabProps) {
         </div>
       </DomainPanel>
 
+      <WedgeExplorer projectId={projectId} />
+
       <DomainPanel id="thesis-evolution">
         <div className="flex items-center gap-2">
           <GitBranch className="h-4 w-4 text-primary" aria-hidden="true" />
@@ -296,6 +305,218 @@ export function ThesisTab({ activeAnchor, projectId }: ThesisTabProps) {
         </div>
       </DomainPanel>
     </section>
+  );
+}
+
+function WedgeExplorer({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient();
+  const [notice, setNotice] = useState<string | null>(null);
+  const query = useQuery({
+    queryKey: ["projects", projectId, "wedges"],
+    queryFn: () => listWedgeOptions(projectId),
+  });
+  const generateMutation = useMutation({
+    mutationFn: () => generateWedgeOptions(projectId),
+    onSuccess: async () => {
+      setNotice("Wedge options refreshed from the current thesis, research, and validation context.");
+      await invalidateWedgeState(queryClient, projectId);
+    },
+  });
+  const actionMutation = useMutation({
+    mutationFn: ({ action, wedgeId }: { action: WedgeActionKind; wedgeId: string }) => {
+      if (action === "select") {
+        return selectWedgeOption(projectId, wedgeId);
+      }
+      if (action === "test") {
+        return testWedgeOption(projectId, wedgeId);
+      }
+      if (action === "research") {
+        return researchWedgeOptionLater(projectId, wedgeId);
+      }
+      return rejectWedgeOption(projectId, wedgeId);
+    },
+    onSuccess: async (result) => {
+      setNotice(result.message);
+      await invalidateWedgeState(queryClient, projectId);
+    },
+  });
+
+  const wedges = query.data?.wedges ?? [];
+  const recommended = wedges.find((wedge) => wedge.id === query.data?.recommended_wedge_id);
+
+  return (
+    <DomainPanel id="wedge-explorer">
+      <div className="flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Compass className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h2 className="text-base font-semibold">Wedge Explorer</h2>
+          </div>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+            Compare possible directions before committing the thesis to a validation path.
+          </p>
+        </div>
+        <Button
+          disabled={generateMutation.isPending || actionMutation.isPending}
+          onClick={() => generateMutation.mutate()}
+          size="sm"
+          type="button"
+        >
+          <Compass className="h-4 w-4" aria-hidden="true" />
+          {wedges.length > 0 ? "Refresh wedges" : "Generate wedges"}
+        </Button>
+      </div>
+
+      {query.isLoading ? (
+        <div className="mt-5 grid gap-3">
+          <div className="h-20 animate-pulse rounded-md bg-muted motion-reduce:animate-none" />
+          <div className="h-20 animate-pulse rounded-md bg-muted motion-reduce:animate-none" />
+        </div>
+      ) : query.isError ? (
+        <div className="mt-5">
+          <DomainError
+            action={
+              <Button onClick={() => void query.refetch()} size="sm" type="button" variant="secondary">
+                Retry wedges
+              </Button>
+            }
+            message={(query.error as Error).message}
+          />
+        </div>
+      ) : wedges.length === 0 ? (
+        <div className="mt-5 rounded-md bg-surface px-3 py-3">
+          <p className="text-sm font-medium">No wedge options yet.</p>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Generate options to compare the current thesis against narrower, easier-to-test directions.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-5 space-y-4">
+          {recommended ? (
+            <div className="rounded-md border border-success-border bg-success-muted px-3 py-3">
+              <p className="text-xs font-medium uppercase tracking-normal text-success-foreground">
+                Recommended wedge
+              </p>
+              <h3 className="mt-2 text-base font-semibold text-foreground">{recommended.name}</h3>
+              <p className="mt-2 text-sm leading-6 text-success-foreground">
+                {recommended.why_it_might_work}
+              </p>
+            </div>
+          ) : null}
+
+          <div className="divide-y divide-border rounded-md border border-border">
+            {wedges.map((wedge) => (
+              <WedgeRow
+                disabled={actionMutation.isPending || generateMutation.isPending}
+                key={wedge.id}
+                onAction={(action) => actionMutation.mutate({ action, wedgeId: wedge.id })}
+                wedge={wedge}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {notice ? (
+        <p className="mt-4 rounded-md bg-primary/10 px-3 py-2 text-sm leading-6 text-foreground">
+          {notice}
+        </p>
+      ) : null}
+      {generateMutation.error || actionMutation.error ? (
+        <div className="mt-4">
+          <DomainError
+            message={((generateMutation.error || actionMutation.error) as Error).message}
+          />
+        </div>
+      ) : null}
+    </DomainPanel>
+  );
+}
+
+type WedgeActionKind = "select" | "test" | "research" | "reject";
+
+function WedgeRow({
+  disabled,
+  onAction,
+  wedge,
+}: {
+  disabled: boolean;
+  onAction: (action: WedgeActionKind) => void;
+  wedge: WedgeOption;
+}) {
+  return (
+    <article className="grid gap-4 px-3 py-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold">{wedge.name}</h3>
+          <span className={recommendationPillClass(wedge.recommendation)}>
+            {formatRecommendation(wedge.recommendation)}
+          </span>
+        </div>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">{wedge.description}</p>
+        <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+          <WedgeFact label="Why it might work" value={wedge.why_it_might_work} />
+          <WedgeFact label="Main risk" value={wedge.main_risk} />
+          <WedgeFact label="First test" value={wedge.validation_test} />
+          <WedgeFact
+            label="Pressure / evidence"
+            value={`${formatLabel(wedge.competitor_pressure)} pressure · ${formatLabel(
+              wedge.evidence_strength,
+            )} evidence`}
+          />
+        </dl>
+      </div>
+      <div className="grid content-start gap-2 sm:grid-cols-2 lg:grid-cols-1">
+        <Button
+          disabled={disabled || wedge.recommendation === "rejected"}
+          onClick={() => onAction("select")}
+          size="sm"
+          type="button"
+        >
+          <Check className="h-4 w-4" aria-hidden="true" />
+          Select wedge
+        </Button>
+        <Button
+          disabled={disabled || wedge.recommendation === "rejected"}
+          onClick={() => onAction("test")}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          <Target className="h-4 w-4" aria-hidden="true" />
+          Test this
+        </Button>
+        <Button
+          disabled={disabled || wedge.recommendation === "rejected"}
+          onClick={() => onAction("research")}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          <Search className="h-4 w-4" aria-hidden="true" />
+          Research more
+        </Button>
+        <Button
+          disabled={disabled || wedge.recommendation === "rejected"}
+          onClick={() => onAction("reject")}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+          Reject
+        </Button>
+      </div>
+    </article>
+  );
+}
+
+function WedgeFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="mt-1 leading-6 text-foreground">{value}</dd>
+    </div>
   );
 }
 
@@ -484,6 +705,37 @@ function formatLabel(value: string) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function formatRecommendation(value: string) {
+  return formatLabel(value).replace("For Now", "for now");
+}
+
+function recommendationPillClass(value: string) {
+  const base = "rounded-md px-2 py-1 text-xs font-medium";
+  if (value === "recommended") {
+    return `${base} bg-success-muted text-success-foreground`;
+  }
+  if (value === "avoid_for_now" || value === "rejected") {
+    return `${base} bg-danger-muted text-danger-foreground`;
+  }
+  if (value === "research_later") {
+    return `${base} bg-warning-muted text-warning-foreground`;
+  }
+  return `${base} bg-muted text-muted-foreground`;
+}
+
+async function invalidateWedgeState(
+  queryClient: ReturnType<typeof useQueryClient>,
+  projectId: string,
+) {
+  await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "wedges"] });
+  await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "thesis-canvas"] });
+  await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
+  await queryClient.invalidateQueries({
+    queryKey: ["projects", projectId, "guide"],
+    refetchType: "active",
+  });
 }
 
 function formatDateTime(value: string) {

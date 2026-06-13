@@ -79,6 +79,11 @@ class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="ThesisEvolutionEvent.created_at",
     )
+    wedge_options: Mapped[list["WedgeOption"]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="WedgeOption.created_at",
+    )
 
 
 class ProjectThesis(UUIDPrimaryKeyMixin, Base):
@@ -237,6 +242,53 @@ class ThesisEvolutionEvent(UUIDPrimaryKeyMixin, Base):
     )
 
     project: Mapped[Project] = relationship(back_populates="thesis_evolution_events")
+
+
+class WedgeOption(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "wedge_options"
+    __table_args__ = (
+        CheckConstraint(
+            "competitor_pressure in ('low','medium','high')",
+            name="ck_wedge_options_competitor_pressure",
+        ),
+        CheckConstraint(
+            "evidence_strength in ('none','weak','partial','strong')",
+            name="ck_wedge_options_evidence_strength",
+        ),
+        CheckConstraint(
+            "recommendation in ("
+            "'recommended','promising','research_later','avoid_for_now','rejected'"
+            ")",
+            name="ck_wedge_options_recommendation",
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    target_user: Mapped[str] = mapped_column(Text, nullable=False)
+    problem_focus: Mapped[str] = mapped_column(Text, nullable=False)
+    why_it_might_work: Mapped[str] = mapped_column(Text, nullable=False)
+    main_risk: Mapped[str] = mapped_column(Text, nullable=False)
+    competitor_pressure: Mapped[str] = mapped_column(String(20), nullable=False)
+    evidence_strength: Mapped[str] = mapped_column(String(20), nullable=False)
+    validation_test: Mapped[str] = mapped_column(Text, nullable=False)
+    recommendation: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    source_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
+
+    project: Mapped[Project] = relationship(back_populates="wedge_options")
 
 
 class CustomerSegment(UUIDPrimaryKeyMixin, TimestampMixin, Base):

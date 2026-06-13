@@ -2,13 +2,12 @@
 
 ## Current Phase
 
-V1 Sprint 21 adds the Thesis Canvas and Idea Evolution layer on top of the
-workspace, trace, and guide layers. Thesys now keeps a project-scoped canvas for
-the original idea, current thesis, target user, problem, workaround, wedge,
-unknowns, proof needs, rejected directions, and open questions, plus an
-evolution timeline that explains how research, validation, and decisions changed
-the idea. Watchlists, monitoring, collaboration, portfolio dashboards,
-integrations, and multi-segment workflow packs remain V2 scope.
+V1 Sprint 22 adds the Wedge Explorer on top of the Thesis Canvas and Guide
+layers. Thesys can now generate 3-5 possible strategic directions from project
+state, compare pressure/evidence/risk, select or reject a wedge, move a wedge
+into validation, and preserve those choices in the thesis evolution trail.
+Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
+multi-segment workflow packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -1165,6 +1164,49 @@ Checks run:
   thesis version 2, then deleted the disposable project. Browser console
   reported no errors.
 
+## V1 Sprint 22 Scope
+
+- [x] Add `WedgeOption` persistence with project/workspace scoping.
+- [x] Add Alembic migration for the `wedge_options` table.
+- [x] Add project APIs:
+  - `GET /api/projects/{project_id}/wedges`
+  - `POST /api/projects/{project_id}/wedges/generate`
+  - `POST /api/projects/{project_id}/wedges/{wedge_id}/select`
+  - `POST /api/projects/{project_id}/wedges/{wedge_id}/test`
+  - `POST /api/projects/{project_id}/wedges/{wedge_id}/research-more`
+  - `POST /api/projects/{project_id}/wedges/{wedge_id}/reject`
+- [x] Generate wedge options from the current Thesis Canvas, evidence source
+  count, supported claims, competitors, and top assumptions.
+- [x] Support `Select wedge`, `Test this wedge`, `Research more`, and `Reject`
+  actions.
+- [x] Update the Thesis Canvas and create `wedge_change` evolution events when
+  a wedge is selected, moved to validation, or rejected.
+- [x] Preserve rejected wedges in the Thesis Canvas rejected directions.
+- [x] Add a focused Wedge Explorer comparison panel inside the Thesis workspace.
+- [x] Update Guide actions and Ask Thesys wedge answers to point to the Wedge
+  Explorer instead of the competitor map.
+
+## V1 Sprint 22 Verification
+
+Checks run:
+
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_wedge_explorer.py -q`
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_wedge_explorer.py apps/api/app/tests/test_guide.py apps/api/app/tests/test_thesis_canvas.py -q`
+- [x] `apps/api/.venv/bin/pytest`
+- [x] `apps/api/.venv/bin/ruff check apps/api/app`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `cd apps/web && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/next typegen && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/tsc --noEmit`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Browser QA in the Codex in-app browser after restarting containers:
+  created a disposable QA project, opened `#thesis`, generated wedges, selected
+  `Manual workaround replacement`, confirmed it became the single recommended
+  wedge, moved it to validation, rejected the broad concept wedge, and confirmed
+  Ask Thesys answered the wedge question with the recommended wedge, why it
+  might work, main risk, and first test. Browser logs reported no app warnings
+  or errors.
+
 ## Next Work
 
-Begin V1 Sprint 22.
+Begin V1 Sprint 23.

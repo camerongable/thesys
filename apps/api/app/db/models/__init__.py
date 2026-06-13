@@ -21,6 +21,7 @@ from app.db.models.project import (
     ProjectThesis,
     ThesisCanvas,
     ThesisEvolutionEvent,
+    WedgeOption,
 )
 from app.db.models.research import (
     CompetitorCandidate,
@@ -67,6 +68,7 @@ __all__ = [
     "ToolInvocation",
     "UUIDPrimaryKeyMixin",
     "User",
+    "WedgeOption",
     "Workspace",
     "WorkspaceMember",
 ]
