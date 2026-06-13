@@ -44,6 +44,7 @@ from app.services import (
     governance_service,
     langsmith_observability_service,
     project_service,
+    temporal_research_service,
     tool_service,
 )
 
@@ -284,10 +285,19 @@ def start_research_sprint_plan(
         run_type="llm" if completion.model_provider != "stub" else "chain",
     )
     db.commit()
+    sprint = _get_sprint(db, auth, state["result"]["sprint"].id)
+    if settings.temporal_enabled:
+        sprint = temporal_research_service.start_research_sprint_workflow(
+            db,
+            auth,
+            settings,
+            project.id,
+            sprint.id,
+        )
     return ResearchPlanRunResult(
         run=run,
         step=step,
-        sprint=_get_sprint(db, auth, state["result"]["sprint"].id),
+        sprint=sprint,
         model_provider=completion.model_provider,
         model_name=completion.model_name,
         used_stub=completion.used_stub,
@@ -319,13 +329,17 @@ def update_research_plan(
 def approve_research_sprint(
     db: Session,
     auth: AuthContext,
+    settings: Settings | None,
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
     payload: ResearchPlanUpdate,
 ) -> ResearchSprint:
     require_permission(auth, "approve_memory_updates")
     sprint = _get_sprint(db, auth, sprint_id, project_id)
-    if sprint.status not in {"planned", "needs_review"} or sprint.plan.status != "draft":
+    if (
+        sprint.status not in {"planned", "waiting_for_approval", "needs_review"}
+        or sprint.plan.status != "draft"
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only planned research sprints with draft plans can be approved.",
@@ -392,18 +406,30 @@ def approve_research_sprint(
         metadata={"research_plan_id": str(sprint.plan.id)},
     )
     db.commit()
+    if settings is not None:
+        temporal_research_service.signal_research_plan_approved(
+            db,
+            auth,
+            settings,
+            project_id,
+            sprint.id,
+        )
     return _get_sprint(db, auth, sprint.id, project_id)
 
 
 def reject_research_sprint(
     db: Session,
     auth: AuthContext,
+    settings: Settings | None,
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> ResearchSprint:
     require_permission(auth, "approve_memory_updates")
     sprint = _get_sprint(db, auth, sprint_id, project_id)
-    if sprint.status not in {"planned", "needs_review"} or sprint.plan.status != "draft":
+    if (
+        sprint.status not in {"planned", "waiting_for_approval", "needs_review"}
+        or sprint.plan.status != "draft"
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only planned research sprints with draft plans can be rejected.",
@@ -459,6 +485,17 @@ def reject_research_sprint(
         metadata={"research_plan_id": str(sprint.plan.id)},
     )
     db.commit()
+    if settings is not None and sprint.temporal_workflow_id:
+        try:
+            temporal_research_service.signal_research_sprint_cancelled(
+                db,
+                auth,
+                settings,
+                project_id,
+                sprint.id,
+            )
+        except temporal_research_service.TemporalResearchWorkflowError:
+            raise
     return _get_sprint(db, auth, sprint.id, project_id)
 
 

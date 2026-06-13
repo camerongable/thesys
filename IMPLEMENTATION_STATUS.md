@@ -2,13 +2,14 @@
 
 ## Current Phase
 
-V1 Sprint 16 implemented security, governance, and human approval hardening.
-Project roles now use owner/admin/editor/viewer permissions, governed actions
-write audit events, high-risk and memory-update proposals create approval
-requests, retrieved evidence is framed as untrusted prompt context, and the
-project workspace exposes a governance approval queue. Watchlists, monitoring,
-collaboration, portfolio dashboards, integrations, and multi-segment workflow
-packs remain V2 scope.
+V1 Sprint 17 implements Temporal durable research sprint orchestration.
+Temporal now owns the long-running research sprint business workflow boundary:
+durable execution metadata, approval waits, retry/cancel controls, worker
+execution, and local Docker orchestration. LangGraph remains responsible for
+agent reasoning and synthesis, LangSmith remains the observability/eval layer,
+and MCP/tool services remain the governed capability boundary. Watchlists,
+monitoring, collaboration, portfolio dashboards, integrations, and multi-segment
+workflow packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -938,6 +939,65 @@ Checks run:
 - [ ] `pnpm --dir apps/web typecheck` was attempted but `pnpm` is not installed
   in this shell; local `next typegen` and `tsc --noEmit` both passed.
 
+## V1 Sprint 17 Scope
+
+- [x] Add Temporal SDK dependency, settings, local Docker service, and dedicated
+  `temporal-worker` process.
+- [x] Add Temporal execution metadata to `research_sprints`: workflow ID, run ID,
+  current step, failed step, and failure message.
+- [x] Add Alembic migration for durable execution metadata and expanded sprint
+  statuses.
+- [x] Implement `ResearchSprintWorkflow` as the deterministic Temporal business
+  workflow.
+- [x] Implement side-effecting Temporal activities for source discovery,
+  competitor discovery, ingestion, embedding boundary, LangGraph research
+  synthesis, eval checks, memory-update proposal handling, persistence, and
+  finalization.
+- [x] Keep LangGraph-owned reasoning inside `run_langgraph_research_activity`.
+- [x] Add durable workflow API routes for status, start, retry, and cancel.
+- [x] Signal the Temporal workflow from research-plan and memory-update approval
+  endpoints.
+- [x] Add project UI durable workflow status panel with current step, action
+  required, retry, and cancel controls.
+- [x] Add unit tests for Temporal metadata, approval signaling, retry, cancel,
+  and disabled-mode status behavior.
+- [x] Document Durable Workflow Orchestration in README.
+
+## V1 Sprint 17 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_temporal_research_orchestration.py app/tests/test_research_sprints.py app/tests/test_agentic_research.py`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/Users/cgable/Repos/thesys/apps/web/node_modules/.bin:$PATH tsc --noEmit` from `apps/web`
+- [x] `git diff --check -- . ':(exclude)IMPLEMENTATION_BRIEF.md'`
+- [x] `PATH=/Applications/Docker.app/Contents/Resources/bin:$PATH docker compose up -d --build temporal api temporal-worker`
+- [x] `PATH=/Applications/Docker.app/Contents/Resources/bin:$PATH docker compose restart web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] `PATH=/Applications/Docker.app/Contents/Resources/bin:$PATH docker compose exec -T api alembic current`
+  reported `0018_temporal_research (head)`.
+- [x] `PATH=/Applications/Docker.app/Contents/Resources/bin:$PATH docker compose ps`
+  confirmed `temporal`, `temporal-worker`, `api`, and `web` were running.
+- [x] Browser QA against
+  `/projects/244d865c-b270-4df7-83ff-746a90912b39#research-sprint`: generated
+  a Temporal-backed sprint, confirmed the durable workflow panel rendered
+  `Temporal enabled`, `waiting for approval`, current step
+  `wait for research plan approval`, workflow ID, and action required
+  `Approve research plan`; then clicked `Cancel workflow` and confirmed the
+  panel and API durable status changed to `cancelled` with no browser console
+  errors.
+
+Notes:
+
+- [x] A full web image rebuild was attempted with `docker compose up -d --build
+  temporal api temporal-worker web`, but the Docker build exhausted npm
+  registry retries with `ECONNRESET`. No frontend dependencies changed in this
+  sprint, and the web service bind-mounts `apps/web`, so the existing web image
+  was restarted and served the updated source successfully.
+
 ## Next Work
 
-V1 Sprint 17: Temporal Durable Research Sprint Orchestration.
+V2 planning, unless another V1 hardening sprint is added to the brief.

@@ -8430,3 +8430,1708 @@ This milestone is complete when:
 The desired interview story after this milestone:
 
 > Thesys began as an agentic RAG product. I then hardened it like an internal enterprise AI platform: observability and evals with LangSmith, explicit MCP-style tools, security controls and audit logs, human approval gates, and Temporal-backed durable orchestration for long-running research workflows.
+
+# V1 Sprint 18+ — Conversational Guidance and Idea Growth Layer
+
+## Purpose
+
+Thesys is now functionally impressive, but the UX still asks users to understand too much of the system model.
+
+The app currently has strong building blocks:
+
+- idea intake
+- research / evidence review
+- competitor mapping
+- decision blockers
+- validation planning
+- project record / history
+- verdicts and next steps
+
+However, the experience still feels like a set of workspaces and records. The next evolution is to make Thesys feel like an active guide that helps the user grow the idea.
+
+The product should feel like:
+
+> Give me a messy idea. I’ll help shape it, investigate it, find the blocker, and walk you through the proof.
+
+The user should no longer need to infer what to do from the UI. Thesys should actively guide them.
+
+---
+
+## Product Direction
+
+The app should evolve from:
+
+```text
+workspace with structured records
+```
+
+to:
+
+```text
+guided strategic copilot with structured records underneath
+```
+
+The three UX layers should be:
+
+```text
+1. Guide Layer
+   - tells the user what matters and what to do next
+
+2. Workspace Layer
+   - structured places for thesis, research, evidence, validation, decisions
+
+3. Trace Layer
+   - inspectable evidence, history, citations, research steps, audit trail
+```
+
+The current app mostly has layers 2 and 3. These sprints add layer 1.
+
+---
+
+## North Star User Journey
+
+By the end of these sprints, the ideal flow should be:
+
+```text
+1. User enters rough idea.
+2. Thesys asks clarifying questions or continues with assumptions.
+3. Thesys drafts a structured thesis.
+4. Thesys proposes possible wedges.
+5. Thesys investigates market/evidence/competitors.
+6. Thesys recommends the strongest wedge.
+7. Thesys identifies the biggest unknown / decision blocker.
+8. Thesys creates a validation mission.
+9. User runs test and logs results.
+10. Thesys interprets results.
+11. Thesys recommends proceed / pivot / pause / kill / continue research.
+12. Thesys records the decision and explains how the idea evolved.
+```
+
+---
+
+## Terminology Shift
+
+Prefer user-native terms over abstract system terms.
+
+| Current / Avoid | Preferred |
+|---|---|
+| Workspaces | Playbook / Steps |
+| Decision Blocker | Biggest Unknown / Must Be True |
+| Validation workbench | Validation Mission / Test Plan |
+| Intelligence | Research |
+| Record | Decision Log |
+| Evidence basis | Evidence |
+| Project memory | Project history / Decision trail |
+| Workflow | Research step / activity |
+| Artifact | Memo / plan / record |
+| Tool call | Research action |
+| Memory update | Project update |
+
+---
+
+## Non-Goals
+
+Do not build V2 features in this phase.
+
+Do not add:
+
+- recurring monitoring
+- collaboration
+- billing
+- enterprise workspaces
+- multi-segment workflow packs
+- external integrations beyond what already exists
+- complex mobile support
+- investor / consultant / PM variants
+
+This phase is about making V1 more intuitive, more conversational, and more useful.
+
+---
+
+# V1 Sprint 18: Guide Engine and Action Contract
+
+## Goal
+
+Create the backend and frontend contract for a contextual AI Guide that can understand the current project state and recommend specific next actions.
+
+This sprint does not need to build the final chat UI yet. It creates the guide brain and action model.
+
+---
+
+## Why This Matters
+
+The current app has verdicts, stages, evidence, validation, and decisions, but users still have to interpret them.
+
+The Guide Engine should answer:
+
+```text
+Where is this idea?
+What matters now?
+What is blocked?
+What should the user do next?
+Which form or screen should open?
+Why does this action matter?
+```
+
+---
+
+## Core Concept
+
+The Guide is not a generic chatbot.
+
+It is a structured advisor that returns:
+
+- explanation
+- current focus
+- next action
+- action cards
+- deep links
+- optional generated drafts
+- suggested user prompts
+
+---
+
+## Required Data Model
+
+Add a guide context model.
+
+```ts
+type GuideContext = {
+  project_id: string;
+  project_name: string;
+  stage: string;
+  verdict: string;
+  next_action: string;
+  risk_level: "none" | "low" | "medium" | "high";
+  confidence_level: "unknown" | "low" | "medium" | "high";
+  current_thesis?: string;
+  target_user?: string;
+  primary_problem?: string;
+  current_wedge?: string;
+  biggest_unknown?: string;
+  active_validation_plan_id?: string;
+  latest_research_sprint_id?: string;
+  evidence_summary: {
+    sources: number;
+    competitors: number;
+    supported_findings: number;
+    open_questions: number;
+    validated_assumptions: number;
+  };
+  missing_context: string[];
+  available_actions: GuideAction[];
+};
+```
+
+Add guide action model.
+
+```ts
+type GuideActionType =
+  | "navigate"
+  | "open_form"
+  | "run_workflow"
+  | "generate_draft"
+  | "explain"
+  | "compare_wedges"
+  | "update_thesis"
+  | "log_result"
+  | "record_decision";
+
+type GuideAction = {
+  id: string;
+  type: GuideActionType;
+  label: string;
+  description: string;
+  why_it_matters: string;
+  target_route?: string;
+  target_modal?: string;
+  payload?: Record<string, unknown>;
+  risk_level: "low" | "medium" | "high";
+  requires_confirmation: boolean;
+};
+```
+
+Add guide response model.
+
+```ts
+type GuideResponse = {
+  summary: string;
+  current_focus: string;
+  why_this_matters: string;
+  recommended_action: GuideAction;
+  secondary_actions: GuideAction[];
+  suggested_questions: string[];
+};
+```
+
+---
+
+## Required Service
+
+Create:
+
+```text
+GuideService
+```
+
+Responsibilities:
+
+- load project state
+- determine current focus
+- identify biggest unknown
+- identify missing context
+- generate next action
+- return guide response
+- create action cards
+- provide deep links into the app
+
+---
+
+## Required API
+
+```http
+GET /projects/{project_id}/guide/context
+```
+
+Returns `GuideContext`.
+
+```http
+POST /projects/{project_id}/guide/recommend
+```
+
+Returns `GuideResponse`.
+
+```http
+POST /projects/{project_id}/guide/actions/{action_id}/execute
+```
+
+Executes or routes the action.
+
+---
+
+## Stage-to-Guide Logic
+
+Guide recommendations should be stage-aware.
+
+```text
+draft_idea:
+  focus: clarify target user, problem, current workaround
+  action: open idea structure form
+
+structured_intake:
+  focus: run first research pass
+  action: plan evidence review
+
+research_complete:
+  focus: choose wedge and blocker
+  action: compare wedges or create validation plan
+
+validation_planned:
+  focus: run blocker test
+  action: open test plan / log results
+
+validation_running:
+  focus: log real evidence
+  action: open result form
+
+results_logged:
+  focus: interpret results
+  action: analyze result signal
+
+decision_recommended:
+  focus: decide
+  action: open decision record
+
+decision_recorded:
+  focus: next milestone
+  action: set revisit trigger or plan next proof
+```
+
+---
+
+## Acceptance Criteria
+
+- `GuideService` exists.
+- Guide context can be loaded for any project.
+- Guide response includes current focus, why it matters, recommended action, and secondary actions.
+- Actions can deep-link to existing project screens/forms.
+- Guide logic is stage-aware.
+- No final chat UI required yet.
+- Unit tests cover guide output for at least 5 project stages.
+
+---
+
+# V1 Sprint 19: Persistent AI Guide Panel
+
+## Goal
+
+Add a persistent contextual AI Guide panel to project pages.
+
+The Guide should make the app feel conversational and supportive without becoming a generic chat app.
+
+---
+
+## UX Requirement
+
+Add a right-side or collapsible panel on project pages:
+
+```text
+Guide
+Current focus:
+Run the blocker test.
+
+Why:
+You have a validation plan, but no real-world proof yet.
+
+Recommended next move:
+Log interview results from 5 target users.
+
+Actions:
+[Open test bench]
+[Draft outreach]
+[Explain blocker]
+[Show evidence]
+```
+
+The panel should be available across:
+
+- Decision
+- Research
+- Evidence
+- Validation
+- Record
+
+---
+
+## Guide Panel Sections
+
+### 1. Current Focus
+
+Plain English description of what matters right now.
+
+Example:
+
+```text
+Current focus:
+You need real validation evidence before making a build decision.
+```
+
+### 2. Why This Matters
+
+Explain the reasoning.
+
+Example:
+
+```text
+The system has research and a validation plan, but confidence should only change after real user evidence is logged.
+```
+
+### 3. Recommended Action
+
+One clear primary action.
+
+Example:
+
+```text
+Log validation results
+```
+
+### 4. Action Cards
+
+Show 2–5 secondary actions.
+
+Examples:
+
+```text
+Open test bench
+Draft outreach
+Explain blocker
+Review evidence
+Update thesis
+Compare wedges
+```
+
+### 5. Ask Thesys
+
+A small conversational input.
+
+Placeholder:
+
+```text
+Ask what to do next, why this is blocked, or how to improve the thesis...
+```
+
+---
+
+## Chat Behavior
+
+The Guide chat should not be open-ended general chat.
+
+It should be constrained to project strategy and app actions.
+
+Supported intents:
+
+```text
+what_next
+explain_blocker
+show_missing_context
+improve_thesis
+compare_wedges
+summarize_evidence
+draft_outreach
+interpret_notes
+open_relevant_form
+explain_stage
+```
+
+If the user asks out-of-scope questions, respond:
+
+```text
+I can help with this idea’s thesis, evidence, blockers, validation, and decisions. Try asking what to validate next or why the current verdict is blocked.
+```
+
+---
+
+## Response Format
+
+Guide responses should include:
+
+```ts
+type GuideChatResponse = {
+  answer: string;
+  action_cards: GuideAction[];
+  related_entities: {
+    type: "evidence" | "assumption" | "validation_plan" | "decision" | "research" | "thesis";
+    id: string;
+    label: string;
+  }[];
+};
+```
+
+---
+
+## Example Responses
+
+### User asks: “What should I do next?”
+
+```text
+You should run the blocker test and log results.
+
+The current blocker is whether target users will pay enough to justify building. Research exists, but no real validation result has been logged yet.
+
+Recommended action:
+[Open test bench]
+
+Other helpful actions:
+[Draft outreach]
+[Review blocker]
+[Show supporting evidence]
+```
+
+### User asks: “Why is this blocked?”
+
+```text
+The idea is blocked because the strongest remaining uncertainty is willingness to pay.
+
+The evidence suggests users may have workflow pain, but it does not yet prove they will switch from existing free or manual tools.
+
+To unblock this:
+Run the validation test and log results from at least 5 target users.
+```
+
+---
+
+## Acceptance Criteria
+
+- Guide panel appears on all project pages.
+- Guide panel uses `GuideService`.
+- Guide always shows current focus and primary action.
+- Chat responses return action cards.
+- Action cards deep-link into the app.
+- Guide does not answer unrelated generic questions.
+- User can open the correct form from the Guide.
+
+---
+
+# V1 Sprint 20: Conversational Investigation Intake
+
+## Goal
+
+Make starting a new investigation feel conversational and guided.
+
+The app should help users turn a messy idea into enough structure for a first useful recommendation.
+
+---
+
+## Current Problem
+
+The new investigation form is good, but still form-first.
+
+The user should feel like:
+
+```text
+I can paste a messy idea, and Thesys will help me shape it.
+```
+
+---
+
+## Required Flow
+
+```text
+1. User enters rough idea.
+2. Thesys checks for missing context.
+3. Thesys asks 2–4 clarifying questions if useful.
+4. User can answer or skip.
+5. Thesys creates a structured thesis draft.
+6. Thesys recommends the first investigation path.
+```
+
+---
+
+## Intake Questions
+
+Ask only what is missing.
+
+Possible questions:
+
+```text
+Who is the first target user?
+What do they use today?
+What specific moment hurts?
+What would prove this is worth another week?
+Are you testing demand, competition, pricing, or positioning first?
+```
+
+---
+
+## Modes
+
+Offer three investigation modes:
+
+### Quick Orientation
+
+```text
+Structure the idea, identify missing context, and recommend the first next step.
+```
+
+### Evidence Review
+
+```text
+Discover sources, map competitors, identify the blocker, and produce a first evidence-backed verdict.
+```
+
+### Validation Sprint
+
+```text
+Start from the biggest unknown and create a concrete test plan.
+```
+
+---
+
+## “Continue With Assumptions” Option
+
+Do not block users if they do not know all answers.
+
+Add:
+
+```text
+Continue with assumptions
+```
+
+If selected, Thesys should mark missing fields as assumptions or open questions.
+
+---
+
+## Structured Thesis Output
+
+After intake, generate:
+
+```ts
+type ThesisDraft = {
+  target_user: string;
+  problem: string;
+  current_workaround: string;
+  proposed_solution: string;
+  possible_wedge: string;
+  biggest_unknown: string;
+  proof_needed: string;
+  open_questions: string[];
+};
+```
+
+Show this as:
+
+```text
+Here is the first testable thesis.
+
+Target user:
+Independent online fitness coaches
+
+Problem:
+They lose time triaging client check-ins across DMs and spreadsheets.
+
+Current workaround:
+Manual review across Instagram, SMS, spreadsheets, and coaching notes.
+
+Possible wedge:
+At-risk client triage from check-in messages.
+
+Biggest unknown:
+Will coaches pay for automated triage?
+
+First proof:
+Interview 5 coaches about recent missed check-ins and willingness to pay.
+```
+
+---
+
+## Acceptance Criteria
+
+- New investigation flow asks clarifying questions when context is missing.
+- User can skip clarification and continue with assumptions.
+- App generates a structured thesis draft.
+- App recommends an investigation mode.
+- New projects start with a clear next action.
+- The first-run experience feels guided, not like filling out a static form.
+
+---
+
+# V1 Sprint 21: Thesis Canvas and Idea Evolution
+
+## Goal
+
+Add a Thesis Canvas and Thesis Evolution timeline so users can see how the idea grows over time.
+
+This addresses the core product direction:
+
+> Thesys should help grow the idea, not just validate the original version.
+
+---
+
+## Required Thesis Canvas
+
+Create a structured canvas for each project.
+
+```ts
+type ThesisCanvas = {
+  original_idea: string;
+  current_thesis: string;
+  target_user: string;
+  problem: string;
+  current_workaround: string;
+  proposed_solution: string;
+  wedge: string;
+  biggest_unknown: string;
+  proof_needed: string;
+  rejected_directions: string[];
+  open_questions: string[];
+};
+```
+
+---
+
+## UI Requirements
+
+Create a “Thesis” or “Idea” view, or add it to the Decision/Guide area.
+
+Display:
+
+```text
+Current Thesis
+Who is it for?
+What problem hurts?
+What do they do today?
+What is the wedge?
+What is the biggest unknown?
+What proof would change our mind?
+Rejected directions
+Open questions
+```
+
+---
+
+## Thesis Evolution Timeline
+
+Show how the idea changed:
+
+```text
+Original idea
+→ Structured thesis
+→ Research-informed thesis
+→ Narrowed wedge
+→ Validation blocker
+→ Decision
+```
+
+Each timeline event should include:
+
+- date
+- change summary
+- reason
+- source/evidence if available
+- user or agent origin
+
+Example:
+
+```text
+Original idea:
+A place to learn about plants.
+
+Research-informed thesis:
+A local/social plant-care learning experience for beginner plant owners.
+
+Why it changed:
+Research showed heavy competition from generic plant-care apps and free online content.
+
+Rejected direction:
+Generic plant education app.
+```
+
+---
+
+## Guide Integration
+
+The Guide should be able to answer:
+
+```text
+How has this idea changed?
+Why did the thesis change?
+What directions did we reject?
+How can I improve the thesis?
+What is missing from the thesis?
+```
+
+Add action cards:
+
+```text
+[Edit thesis]
+[Suggest sharper thesis]
+[Compare wedges]
+[Show evolution]
+```
+
+---
+
+## Acceptance Criteria
+
+- Thesis Canvas exists.
+- Current thesis is visible and editable.
+- Original idea is preserved.
+- Rejected directions can be shown.
+- Thesis evolution timeline exists.
+- Research and validation updates can add timeline entries.
+- Guide can explain thesis evolution.
+- Users can see how the idea is growing over time.
+
+---
+
+# V1 Sprint 22: Wedge Explorer
+
+## Goal
+
+Add a Wedge Explorer that helps users compare possible strategic directions before committing to a validation path.
+
+This makes the app much more involved in growing and shaping the idea.
+
+---
+
+## Why This Matters
+
+Many ideas are not simply good or bad. They need a sharper wedge.
+
+The app should help answer:
+
+```text
+What should this idea become?
+```
+
+not only:
+
+```text
+Is this idea valid?
+```
+
+---
+
+## Required Data Model
+
+```ts
+type WedgeOption = {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  target_user: string;
+  problem_focus: string;
+  why_it_might_work: string;
+  main_risk: string;
+  competitor_pressure: "low" | "medium" | "high";
+  evidence_strength: "none" | "weak" | "partial" | "strong";
+  validation_test: string;
+  recommendation:
+    | "recommended"
+    | "promising"
+    | "research_later"
+    | "avoid_for_now"
+    | "rejected";
+  source_ids: string[];
+};
+```
+
+---
+
+## Wedge Explorer UI
+
+Show 3–5 possible wedges.
+
+Example for Plant Parenthood:
+
+| Wedge | Why it might work | Risk | First test |
+|---|---|---|---|
+| Generic plant education app | Clear interest in plant care | Crowded/free substitutes | Test willingness to pay |
+| Local plant workshops | Social + experiential | Operational complexity | $15 workshop landing page |
+| Personalized troubleshooting | Strong pain signal | Competes with apps/Reddit | Interview sick-plant owners |
+| Plant swap community | Engagement potential | Monetization unclear | Local event waitlist |
+
+---
+
+## Recommended Wedge
+
+The system should choose one recommended wedge and explain why.
+
+Example:
+
+```text
+Recommended wedge:
+Local workshops or personalized troubleshooting.
+
+Avoid for now:
+Generic plant education content.
+
+Why:
+Generic education competes with abundant free content. Local/social learning may create a more differentiated reason to pay.
+```
+
+---
+
+## Actions
+
+Each wedge should support:
+
+```text
+[Select wedge]
+[Test this wedge]
+[Research more]
+[Reject direction]
+```
+
+Selecting a wedge should update the Thesis Canvas and create a thesis evolution event.
+
+---
+
+## Guide Integration
+
+The Guide should be able to answer:
+
+```text
+What wedge should I choose?
+Why not the original idea?
+What are the alternatives?
+Which wedge is easiest to test?
+Which wedge is most defensible?
+```
+
+---
+
+## Acceptance Criteria
+
+- Wedge options can be generated from project state/research.
+- Wedges are displayed in a comparison view.
+- User can select, reject, or test a wedge.
+- Selected wedge updates Thesis Canvas.
+- Rejected wedges are preserved.
+- Guide can explain wedge recommendation.
+- Wedge Explorer makes the app feel like it is helping shape the idea.
+
+---
+
+# V1 Sprint 23: Validation Mission
+
+## Goal
+
+Transform validation from a workbench into a guided mission.
+
+The user should feel like Thesys is walking them through a specific proof, not showing a generic validation area.
+
+---
+
+## Rename Concept
+
+Replace or supplement:
+
+```text
+Validation workbench
+```
+
+with:
+
+```text
+Validation Mission
+```
+
+or:
+
+```text
+Current Proof
+```
+
+---
+
+## Mission Structure
+
+Each validation mission should show:
+
+```text
+Mission:
+Prove whether target users will pay for this workflow.
+
+Why this matters:
+This is the decision blocker. Without this proof, building is high risk.
+
+Steps:
+1. Recruit 5 target users.
+2. Run the interview script.
+3. Ask about current workaround and pain.
+4. Test willingness to pay.
+5. Log results.
+6. Review decision recommendation.
+```
+
+---
+
+## Required Data Model
+
+```ts
+type ValidationMission = {
+  id: string;
+  project_id: string;
+  assumption_id: string;
+  mission_title: string;
+  why_it_matters: string;
+  target_user: string;
+  test_type: string;
+  steps: string[];
+  success_criteria: string;
+  failure_criteria: string;
+  assets: ValidationAsset[];
+  result_count: number;
+  status:
+    | "planned"
+    | "running"
+    | "results_logged"
+    | "interpreted"
+    | "closed";
+};
+```
+
+---
+
+## UI Requirements
+
+The Validation page should show:
+
+1. Mission title
+2. Why this matters
+3. Step-by-step checklist
+4. Current progress
+5. Primary CTA
+6. Assets
+7. Log results
+8. Result interpretation
+
+---
+
+## Primary CTA Logic
+
+```text
+No mission:
+  Create validation mission
+
+Mission planned:
+  Start mission
+
+Mission running:
+  Log results
+
+Results logged:
+  Interpret results
+
+Results interpreted:
+  Review decision
+```
+
+---
+
+## Guide Integration
+
+Guide should say:
+
+```text
+Your current mission is to prove whether target users will pay enough to justify building.
+
+Next:
+Run the interviews and log results.
+```
+
+Guide action cards:
+
+```text
+[Open mission]
+[Draft outreach]
+[Copy interview script]
+[Log result]
+[Explain success criteria]
+```
+
+---
+
+## Acceptance Criteria
+
+- Validation Mission exists.
+- Validation page is mission-first.
+- User sees exact steps to run.
+- Primary CTA updates with mission status.
+- Validation assets are attached to mission.
+- Guide can route the user through the mission.
+- The app feels more directive and supportive.
+
+---
+
+# V1 Sprint 24: Result Interpreter
+
+## Goal
+
+Add a Result Interpreter that lets users paste validation notes and have Thesys extract signals, update confidence, and recommend the next decision.
+
+This is one of the highest-value additions.
+
+---
+
+## Why This Matters
+
+The app should not stop at creating a test plan.
+
+The most valuable moment is after the user runs the test:
+
+```text
+What do these results mean?
+```
+
+---
+
+## Result Input
+
+Allow user to paste:
+
+- interview notes
+- survey responses
+- call summaries
+- landing page metrics
+- raw observations
+- objections
+- pricing reactions
+
+---
+
+## Required Extraction
+
+For each result, extract:
+
+```ts
+type ValidationSignal = {
+  pain_severity: "none" | "low" | "medium" | "high";
+  current_workaround: string;
+  urgency: "low" | "medium" | "high";
+  willingness_to_pay: "none" | "weak" | "medium" | "strong";
+  switching_signal: "none" | "weak" | "medium" | "strong";
+  objections: string[];
+  quotes: string[];
+  confidence_change: "decrease" | "no_change" | "increase";
+  recommended_next_action: string;
+};
+```
+
+---
+
+## Result Interpretation Output
+
+Example:
+
+```text
+Interpretation
+
+Signal:
+Mixed but useful.
+
+What strengthened:
+Users do experience workflow pain.
+
+What weakened:
+Only 1 of 5 showed clear willingness to pay.
+
+Confidence change:
+Pain confidence increased. Monetization confidence remains low.
+
+Recommendation:
+Do not build full product yet. Run a paid pilot or pricing-specific test.
+```
+
+---
+
+## State Updates
+
+After interpretation, the system should propose updates:
+
+- assumption confidence
+- evidence strength
+- verdict
+- next action
+- decision recommendation
+- thesis evolution event
+
+Require user approval before committing major updates.
+
+---
+
+## Guide Integration
+
+The Guide should support:
+
+```text
+Interpret these notes.
+What did these interviews prove?
+Did this validate the assumption?
+Should I proceed?
+What should I test next?
+```
+
+Action cards:
+
+```text
+[Paste notes]
+[Interpret results]
+[Update confidence]
+[Review decision]
+```
+
+---
+
+## Acceptance Criteria
+
+- User can paste validation notes/results.
+- System extracts structured validation signals.
+- System recommends confidence changes.
+- System recommends next action.
+- Updates require approval before mutating project state.
+- Guide can interpret notes conversationally.
+- Result interpretation closes the loop from test to decision.
+
+---
+
+# V1 Sprint 25: Decision Coach
+
+## Goal
+
+Make the decision step feel guided and conversational.
+
+The app should not just record a decision. It should help the user understand which decision is recommended and why.
+
+---
+
+## Decision Coach Behavior
+
+Decision Coach should answer:
+
+```text
+Can I build now?
+Should I continue research?
+Should I pivot?
+Should I pause?
+What evidence is missing?
+What would change the decision?
+```
+
+---
+
+## Decision Recommendation Format
+
+```ts
+type DecisionRecommendation = {
+  recommendation:
+    | "proceed"
+    | "pivot"
+    | "pause"
+    | "kill"
+    | "continue_research";
+  rationale: string;
+  supporting_evidence: string[];
+  missing_evidence: string[];
+  risks: string[];
+  suggested_decision_record: {
+    title: string;
+    rationale: string;
+    expected_outcome: string;
+    revisit_trigger: string;
+  };
+};
+```
+
+---
+
+## UI Requirements
+
+Decision page should show:
+
+```text
+Recommended Decision:
+Continue research.
+
+Why:
+Pain exists, but willingness to pay remains weak.
+
+Do not proceed until:
+At least 3 target users express willingness to pay or join a pilot.
+
+Suggested record:
+[pre-filled decision]
+```
+
+---
+
+## Decision Coach Chat
+
+Allow the user to ask:
+
+```text
+Why not proceed?
+What would make this a pivot?
+What evidence is missing?
+What happens if I kill this?
+Summarize the decision for my notes.
+```
+
+Responses should include:
+
+- recommendation
+- rationale
+- evidence
+- missing proof
+- action cards
+
+---
+
+## Acceptance Criteria
+
+- Decision page recommends an actual decision.
+- User can ask decision-related questions.
+- Suggested decision record can be accepted or edited.
+- Decision Coach explains missing evidence.
+- Decision recommendation uses validation results when available.
+- Decision record links to evidence, blocker, and validation mission.
+
+---
+
+# V1 Sprint 26: Playbook Navigation
+
+## Goal
+
+Replace the abstract workspace model with a clearer guided playbook.
+
+The current left navigation is cleaner than before, but “Workspaces” is still system-oriented.
+
+The user should feel like they are moving through a validation journey.
+
+---
+
+## New Navigation Concept
+
+Replace:
+
+```text
+Workspaces
+- Decision
+- Intelligence
+- Validation
+- Record
+```
+
+with:
+
+```text
+Playbook
+- Guide
+- Thesis
+- Research
+- Test
+- Decision
+- History
+```
+
+or:
+
+```text
+Idea Playbook
+- Current Step
+- Shape Idea
+- Research
+- Choose Wedge
+- Run Test
+- Decide
+- History
+```
+
+Choose the version that best fits the current app structure.
+
+---
+
+## Required Navigation Behavior
+
+Each nav item should show:
+
+- label
+- short purpose
+- status
+- blocked/current/completed state
+
+Example:
+
+```text
+Guide
+What to do next
+current
+
+Thesis
+Shape the idea
+needs context
+
+Research
+Evidence and competitors
+complete
+
+Test
+Run the blocker test
+current
+
+Decision
+Proceed / pivot / pause
+blocked until results
+
+History
+Receipts and changes
+available
+```
+
+---
+
+## Stage-Aware Highlighting
+
+The current stage should automatically highlight the relevant playbook item.
+
+Examples:
+
+```text
+draft_idea:
+  highlight Thesis
+
+research_complete:
+  highlight Choose Wedge or Test
+
+validation_planned:
+  highlight Test
+
+results_logged:
+  highlight Decision
+
+decision_recorded:
+  highlight History
+```
+
+---
+
+## Acceptance Criteria
+
+- “Workspaces” label is removed or deprioritized.
+- Navigation communicates a journey.
+- Current stage is clearly highlighted.
+- Each nav item has a user-facing purpose.
+- User can understand the app structure without learning internal terminology.
+
+---
+
+# V1 Sprint 27: Contextual Nudges and Proactive Guidance
+
+## Goal
+
+Make Thesys proactive.
+
+The app should surface timely nudges based on project state, not wait for the user to ask.
+
+---
+
+## Nudge Types
+
+```ts
+type ProjectNudge = {
+  id: string;
+  project_id: string;
+  severity: "info" | "warning" | "action_required";
+  title: string;
+  message: string;
+  why_it_matters: string;
+  action: GuideAction;
+  dismissed: boolean;
+  created_at: string;
+};
+```
+
+---
+
+## Example Nudges
+
+### Too broad
+
+```text
+Your idea is still broad.
+
+Choose one wedge before running more research.
+
+[Compare wedges]
+```
+
+### Research enough for first test
+
+```text
+You have enough research for a first validation test.
+
+More research is less useful than real user evidence right now.
+
+[Open validation mission]
+```
+
+### No validation results
+
+```text
+Your plan exists, but no results are logged.
+
+Log real evidence before recording a proceed/pivot decision.
+
+[Log results]
+```
+
+### Weak evidence
+
+```text
+The weakest evidence area is willingness to pay.
+
+Run a pricing-specific test before building.
+
+[Create pricing test]
+```
+
+---
+
+## Placement
+
+Show nudges in:
+
+- Guide panel
+- project overview
+- relevant page headers
+- home/project queue if urgent
+
+Do not overwhelm users. Show at most 1–2 primary nudges at a time.
+
+---
+
+## Acceptance Criteria
+
+- Nudge service exists.
+- Nudges are generated from project state.
+- Nudges include action cards.
+- Users can dismiss nudges.
+- Nudges are not generic; they are project-specific.
+- Nudges improve direction without adding clutter.
+
+---
+
+# V1 Sprint 28: Guided Demo and Usability QA
+
+## Goal
+
+Create a polished guided demo and validate the improved UX against the intended first-session experience.
+
+This sprint makes the app presentation-ready for users, recruiters, and interview demos.
+
+---
+
+## Demo Project
+
+Create a polished demo project:
+
+```text
+AI Assistant for Independent Fitness Coaches
+```
+
+The demo should include:
+
+- rough idea
+- thesis canvas
+- wedge options
+- research sprint
+- evidence findings
+- competitors/substitutes
+- decision blocker
+- validation mission
+- sample validation results
+- interpreted results
+- decision recommendation
+- thesis evolution timeline
+
+---
+
+## Demo Flow
+
+The demo should show:
+
+```text
+1. Start with rough idea.
+2. Guide clarifies missing context.
+3. Thesis Canvas is generated.
+4. Research finds competitors/substitutes.
+5. Wedge Explorer recommends a narrow wedge.
+6. Biggest Unknown is identified.
+7. Validation Mission is created.
+8. Sample results are interpreted.
+9. Decision Coach recommends continue / pivot / proceed.
+10. History shows how the idea evolved.
+```
+
+---
+
+## Usability Tests
+
+Run these manually.
+
+### Test 1: New user understands promise
+
+Question:
+
+```text
+Can a new user understand what Thesys does from the home page in 30 seconds?
+```
+
+Pass if they can say:
+
+```text
+It helps turn a rough idea into a testable thesis and tells me what to validate next.
+```
+
+### Test 2: User knows what to do next
+
+Open a project.
+
+Pass if:
+
+- Guide shows current focus
+- next action is obvious
+- action opens correct form/page
+
+### Test 3: User understands idea evolution
+
+Pass if:
+
+- original idea is visible
+- current thesis is visible
+- changes are explained
+- rejected directions are visible
+
+### Test 4: User can choose a wedge
+
+Pass if:
+
+- Wedge Explorer shows alternatives
+- recommended wedge is clear
+- user can select/test/reject a wedge
+
+### Test 5: User can run validation
+
+Pass if:
+
+- mission is clear
+- steps are clear
+- assets are available
+- log result is obvious
+
+### Test 6: User can interpret results
+
+Pass if:
+
+- notes can be pasted
+- interpretation is produced
+- confidence/recommendation changes are proposed
+
+### Test 7: User can make a decision
+
+Pass if:
+
+- recommendation is explicit
+- rationale is clear
+- decision can be recorded
+- decision links to evidence/results
+
+---
+
+## Acceptance Criteria
+
+- Polished demo project exists.
+- Guide panel works throughout demo.
+- User can complete the core journey without guessing.
+- App feels conversational and directive.
+- App helps grow the idea, not just store validation records.
+- Demo is strong enough for a portfolio walkthrough.
+
+---
+
+# Final Definition of Done
+
+By the end of Sprint 28, Thesys should feel meaningfully more intuitive and helpful.
+
+The app should no longer feel like:
+
+```text
+A collection of workspaces for evidence, validation, and decisions.
+```
+
+It should feel like:
+
+```text
+A guided strategic copilot that helps shape, investigate, narrow, test, and decide on an idea.
+```
+
+The user experience should make this obvious:
+
+```text
+1. I can paste a rough idea.
+2. Thesys helps me shape it.
+3. Thesys researches it.
+4. Thesys compares wedges.
+5. Thesys identifies the biggest unknown.
+6. Thesys gives me the next proof to run.
+7. Thesys interprets results.
+8. Thesys recommends a decision.
+9. Thesys remembers how the idea evolved.
+```
+
+The product should be able to support this statement:
+
+> Thesys is not an AI idea generator. It is a stateful validation copilot that turns a rough idea into a sharper thesis, a focused wedge, a validation mission, and a decision trail.

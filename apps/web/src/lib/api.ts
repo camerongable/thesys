@@ -599,11 +599,14 @@ export type WorkflowRun = {
 export type ResearchPlanStatus = "draft" | "approved" | "rejected" | "completed";
 export type ResearchSprintStatus =
   | "planned"
+  | "waiting_for_approval"
   | "approved"
   | "running"
   | "needs_review"
+  | "waiting_for_memory_approval"
   | "completed"
   | "failed"
+  | "cancelled"
   | "rejected";
 export type DiscoveredSourceType =
   | "company_site"
@@ -653,6 +656,11 @@ export type ResearchSprint = {
   research_plan_id: string;
   ai_run_id: string | null;
   status: ResearchSprintStatus;
+  temporal_workflow_id: string | null;
+  temporal_run_id: string | null;
+  current_step: string | null;
+  failed_step: string | null;
+  failure_message: string | null;
   started_at: string | null;
   completed_at: string | null;
   langsmith_trace_id: string | null;
@@ -696,6 +704,24 @@ export type ResearchSprintPlanRun = {
 export type ResearchSprintApproval = {
   ai_run_id: string | null;
   sprint: ResearchSprint;
+};
+
+export type ResearchSprintExecution = {
+  sprint: ResearchSprint;
+  temporal_enabled: boolean;
+  temporal_workflow_id: string | null;
+  temporal_run_id: string | null;
+  status: ResearchSprintStatus;
+  current_step: string | null;
+  failed_step: string | null;
+  failure_message: string | null;
+  action_required: string | null;
+};
+
+export type ResearchSprintExecutionAction = {
+  sprint: ResearchSprint;
+  action: "started" | "cancelled" | "retried" | "signaled";
+  temporal_workflow_id: string | null;
 };
 
 export type DiscoveredSource = {
@@ -1554,6 +1580,39 @@ export function approveResearchSprint(
 export function rejectResearchSprint(projectId: string, sprintId: string) {
   return apiFetch<ResearchSprintApproval>(
     `/api/projects/${projectId}/research-sprints/${sprintId}/reject`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function getDurableResearchStatus(projectId: string, sprintId: string) {
+  return apiFetch<ResearchSprintExecution>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/durable/status`,
+  );
+}
+
+export function startDurableResearchWorkflow(projectId: string, sprintId: string) {
+  return apiFetch<ResearchSprintExecutionAction>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/durable/start`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function retryDurableResearchWorkflow(projectId: string, sprintId: string) {
+  return apiFetch<ResearchSprintExecutionAction>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/durable/retry`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function cancelDurableResearchWorkflow(projectId: string, sprintId: string) {
+  return apiFetch<ResearchSprintExecutionAction>(
+    `/api/projects/${projectId}/research-sprints/${sprintId}/durable/cancel`,
     {
       method: "POST",
     },

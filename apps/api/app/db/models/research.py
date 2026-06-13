@@ -93,7 +93,8 @@ class ResearchSprint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint(
             "status in ("
-            "'planned','approved','running','needs_review','completed','failed','rejected'"
+            "'planned','waiting_for_approval','approved','running','needs_review',"
+            "'waiting_for_memory_approval','completed','failed','cancelled','rejected'"
             ")",
             name="ck_research_sprints_status",
         ),
@@ -123,6 +124,11 @@ class ResearchSprint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="planned", index=True)
+    temporal_workflow_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    temporal_run_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    current_step: Mapped[str | None] = mapped_column(String(120), index=True)
+    failed_step: Mapped[str | None] = mapped_column(String(120))
+    failure_message: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     langsmith_trace_id: Mapped[str | None] = mapped_column(String(100), index=True)

@@ -722,6 +722,31 @@ curl http://localhost:8000/api/projects/<project_id>/tool-invocations?research_s
 Project pages also include a secondary Tool Activity panel in the evidence
 review workspace.
 
+## Durable Workflow Orchestration
+
+Thesys uses Temporal to coordinate long-running research sprints. Temporal owns
+durable execution, retries, timeouts, failure recovery, and approval waits.
+
+LangGraph remains responsible for agent reasoning and synthesis. External side
+effects such as source fetching, embeddings, LLM calls, eval checks, and
+persistence are modeled as Temporal Activities.
+
+The local stack includes:
+
+- `temporal`: Temporal server
+- `temporal-worker`: research sprint workflow worker
+- `api`: starts or signals durable workflows through project endpoints
+
+Useful local checks:
+
+```bash
+docker compose ps temporal temporal-worker api
+curl http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/durable/status
+curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/durable/start
+curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/durable/retry
+curl -X POST http://localhost:8000/api/projects/<project_id>/research-sprints/<sprint_id>/durable/cancel
+```
+
 ---
 
 ## Lessons Learned

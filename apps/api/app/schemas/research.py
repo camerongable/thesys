@@ -18,11 +18,14 @@ from app.schemas.artifacts import (
 ResearchPlanStatus = Literal["draft", "approved", "rejected", "completed"]
 ResearchSprintStatus = Literal[
     "planned",
+    "waiting_for_approval",
     "approved",
     "running",
     "needs_review",
+    "waiting_for_memory_approval",
     "completed",
     "failed",
+    "cancelled",
     "rejected",
 ]
 DiscoveredSourceType = Literal[
@@ -108,6 +111,11 @@ class ResearchSprintRead(BaseModel):
     research_plan_id: uuid.UUID
     ai_run_id: uuid.UUID | None
     status: ResearchSprintStatus
+    temporal_workflow_id: str | None = None
+    temporal_run_id: str | None = None
+    current_step: str | None = None
+    failed_step: str | None = None
+    failure_message: str | None = None
     started_at: datetime | None
     completed_at: datetime | None
     langsmith_trace_id: str | None = None
@@ -136,6 +144,24 @@ class ResearchSprintPlanRunRead(BaseModel):
 class ResearchSprintApprovalRead(BaseModel):
     ai_run_id: uuid.UUID | None
     sprint: ResearchSprintRead
+
+
+class ResearchSprintExecutionRead(BaseModel):
+    sprint: ResearchSprintRead
+    temporal_enabled: bool
+    temporal_workflow_id: str | None
+    temporal_run_id: str | None
+    status: ResearchSprintStatus
+    current_step: str | None
+    failed_step: str | None
+    failure_message: str | None
+    action_required: str | None = None
+
+
+class ResearchSprintExecutionActionRead(BaseModel):
+    sprint: ResearchSprintRead
+    action: Literal["started", "cancelled", "retried", "signaled"]
+    temporal_workflow_id: str | None
 
 
 class DiscoveredSourceRead(BaseModel):

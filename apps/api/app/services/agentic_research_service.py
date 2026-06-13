@@ -476,7 +476,7 @@ def approve_research_memo(
 ) -> AgenticResearchApprovalResult:
     require_permission(auth, "approve_memory_updates")
     sprint = _get_sprint(db, auth, project_id, sprint_id)
-    if sprint.status != "needs_review":
+    if sprint.status not in {"needs_review", "waiting_for_memory_approval"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only research memos awaiting review can be approved.",
@@ -607,7 +607,7 @@ def reject_research_memo(
 ) -> AgenticResearchApprovalResult:
     require_permission(auth, "approve_memory_updates")
     sprint = _get_sprint(db, auth, project_id, sprint_id)
-    if sprint.status != "needs_review":
+    if sprint.status not in {"needs_review", "waiting_for_memory_approval"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only research memos awaiting review can be rejected.",

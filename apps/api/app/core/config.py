@@ -84,6 +84,18 @@ class Settings(BaseSettings):
         default="https://smith.langchain.com",
         validation_alias="LANGSMITH_PUBLIC_URL_BASE",
     )
+    temporal_enabled: bool = Field(default=False, validation_alias="TEMPORAL_ENABLED")
+    temporal_address: str = Field(default="localhost:7233", validation_alias="TEMPORAL_ADDRESS")
+    temporal_namespace: str = Field(default="default", validation_alias="TEMPORAL_NAMESPACE")
+    temporal_task_queue: str = Field(
+        default="thesys-research-sprints",
+        validation_alias="TEMPORAL_TASK_QUEUE",
+    )
+    temporal_workflow_timeout_seconds: int = Field(
+        default=3600,
+        ge=60,
+        validation_alias="TEMPORAL_WORKFLOW_TIMEOUT_SECONDS",
+    )
 
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000"],

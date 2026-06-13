@@ -39,6 +39,7 @@ import {
   ApprovalRequest,
   Artifact,
   ArtifactVersion,
+  cancelDurableResearchWorkflow,
   Citation,
   CompetitorCandidate,
   CompetitorCandidateUpdateInput,
@@ -46,6 +47,7 @@ import {
   discoverSources,
   DiscoveredSource,
   executeNextAction,
+  getDurableResearchStatus,
   getProjectResearchHistory,
   getProjectOverview,
   getV1ResearchEval,
@@ -65,12 +67,14 @@ import {
   rejectAgenticResearchMemo,
   rejectResearchSprint,
   RecommendationConfidence,
+  retryDurableResearchWorkflow,
   ResearchPlan,
   ResearchPlanUpdateInput,
   ResearchSprint,
   runAgenticResearch,
   StrategicSnapshot,
   StrategicRecommendation,
+  startDurableResearchWorkflow,
   startResearchSprintPlan,
   ToolInvocation,
   updateCompetitorCandidate,
@@ -1986,7 +1990,10 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
   const latestSprint = sprintsQuery.data?.[0] ?? null;
 
   useEffect(() => {
-    if (!latestSprint || latestSprint.status !== "planned") {
+    if (
+      !latestSprint ||
+      !["planned", "waiting_for_approval"].includes(latestSprint.status)
+    ) {
       return;
     }
     setDraft(planToDraftState(latestSprint.plan));
@@ -2062,7 +2069,10 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
     approveMutation.error ??
     rejectMutation.error ??
     (sprintsQuery.error as Error | null);
-  const activePlan = latestSprint?.status === "planned" && draft ? draft : null;
+  const activePlan =
+    latestSprint && ["planned", "waiting_for_approval"].includes(latestSprint.status) && draft
+      ? draft
+      : null;
   const traceRunId = lastRunId ?? latestSprint?.ai_run_id ?? null;
   const traceKey = [
     traceRunId,
@@ -2073,7 +2083,13 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
   ].join(":");
   const canReviewDiscovery =
     latestSprint !== null &&
-    ["approved", "running", "needs_review", "completed"].includes(latestSprint.status);
+    [
+      "approved",
+      "running",
+      "needs_review",
+      "waiting_for_memory_approval",
+      "completed",
+    ].includes(latestSprint.status);
 
   return (
     <DomainPanel id="research-sprint">
@@ -2139,6 +2155,14 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
         />
       )}
 
+      {latestSprint ? (
+        <DurableResearchWorkflowPanel
+          projectId={projectId}
+          sprint={latestSprint}
+          onSprintUpdated={() => sprintsQuery.refetch()}
+        />
+      ) : null}
+
       {canReviewDiscovery && latestSprint ? (
         <ResearchDiscoveryPanel
           onRunTrace={setLastRunId}
@@ -2187,6 +2211,159 @@ function ResearchSprintCard({ projectId }: { projectId: string }) {
         </div>
       ) : null}
     </DomainPanel>
+  );
+}
+
+function DurableResearchWorkflowPanel({
+  onSprintUpdated,
+  projectId,
+  sprint,
+}: {
+  onSprintUpdated: () => Promise<unknown>;
+  projectId: string;
+  sprint: ResearchSprint;
+}) {
+  const queryClient = useQueryClient();
+  const statusQuery = useQuery({
+    queryKey: ["projects", projectId, "research-sprints", sprint.id, "durable"],
+    queryFn: () => getDurableResearchStatus(projectId, sprint.id),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status ?? sprint.status;
+      return ["running", "waiting_for_approval", "waiting_for_memory_approval"].includes(status)
+        ? 2500
+        : false;
+    },
+  });
+  const execution = statusQuery.data;
+  const displayedSprint = execution?.sprint ?? sprint;
+  const temporalEnabled = execution?.temporal_enabled ?? false;
+  const workflowId = execution?.temporal_workflow_id ?? displayedSprint.temporal_workflow_id;
+  const currentStep = execution?.current_step ?? displayedSprint.current_step;
+  const failedStep = execution?.failed_step ?? displayedSprint.failed_step;
+  const failureMessage = execution?.failure_message ?? displayedSprint.failure_message;
+  const actionRequired = execution?.action_required;
+  const active = ["running", "waiting_for_approval", "waiting_for_memory_approval"].includes(
+    displayedSprint.status,
+  );
+
+  async function refresh() {
+    await Promise.all([
+      statusQuery.refetch(),
+      onSprintUpdated(),
+      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "research-history"] }),
+      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] }),
+      queryClient.invalidateQueries({
+        queryKey: ["projects", projectId, "artifacts", "research_memo"],
+      }),
+    ]);
+  }
+
+  const startMutation = useMutation({
+    mutationFn: () => startDurableResearchWorkflow(projectId, sprint.id),
+    onSuccess: refresh,
+  });
+  const retryMutation = useMutation({
+    mutationFn: () => retryDurableResearchWorkflow(projectId, sprint.id),
+    onSuccess: refresh,
+  });
+  const cancelMutation = useMutation({
+    mutationFn: () => cancelDurableResearchWorkflow(projectId, sprint.id),
+    onSuccess: refresh,
+  });
+
+  const busy = startMutation.isPending || retryMutation.isPending || cancelMutation.isPending;
+  const error =
+    startMutation.error ??
+    retryMutation.error ??
+    cancelMutation.error ??
+    (statusQuery.error as Error | null);
+
+  return (
+    <div className="mt-5 rounded-md border border-border bg-surface px-4 py-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Route className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h3 className="text-sm font-semibold">Durable workflow status</h3>
+          </div>
+          <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+            Temporal coordinates long-running evidence review, retries, approval waits,
+            and recovery while memo reasoning stays inside LangGraph.
+          </p>
+        </div>
+        <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+          {temporalEnabled ? "Temporal enabled" : "Temporal disabled"}
+        </span>
+      </div>
+
+      <dl className="mt-4 grid gap-x-6 gap-y-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <dt className="text-xs font-medium text-muted-foreground">Status</dt>
+          <dd className="mt-1 text-sm font-semibold">{formatLabel(displayedSprint.status)}</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium text-muted-foreground">Current step</dt>
+          <dd className="mt-1 text-sm font-semibold">
+            {currentStep ? formatLabel(currentStep) : "Not started"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium text-muted-foreground">Started</dt>
+          <dd className="mt-1 text-sm font-semibold">
+            {displayedSprint.started_at ? formatDateTime(displayedSprint.started_at) : "Pending"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium text-muted-foreground">Workflow ID</dt>
+          <dd className="mt-1 break-all font-mono text-xs">{workflowId ?? "None"}</dd>
+        </div>
+      </dl>
+
+      {actionRequired ? (
+        <div className="mt-4 rounded-md bg-warning-muted px-3 py-2 text-sm text-warning-foreground">
+          Action required: {actionRequired}
+        </div>
+      ) : null}
+      {displayedSprint.status === "failed" ? (
+        <div className="mt-4 rounded-md border border-danger-border bg-danger-muted px-3 py-2 text-sm text-danger-foreground">
+          Failed step: {failedStep ? formatLabel(failedStep) : "Unknown"}
+          {failureMessage ? <span className="block break-words">{failureMessage}</span> : null}
+        </div>
+      ) : null}
+      {error ? (
+        <div
+          className="mt-4 break-words rounded-md border border-danger-border bg-danger-muted px-3 py-2 text-sm text-danger-foreground"
+          role="alert"
+        >
+          {error.message}
+        </div>
+      ) : null}
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {!workflowId && temporalEnabled ? (
+          <Button disabled={busy} onClick={() => startMutation.mutate()} size="sm" type="button">
+            <Route className="h-4 w-4" aria-hidden="true" />
+            {startMutation.isPending ? "Starting..." : "Start durable workflow"}
+          </Button>
+        ) : null}
+        {displayedSprint.status === "failed" ? (
+          <Button disabled={busy} onClick={() => retryMutation.mutate()} size="sm" type="button">
+            Retry workflow
+          </Button>
+        ) : null}
+        {workflowId && active ? (
+          <Button
+            disabled={busy}
+            onClick={() => cancelMutation.mutate()}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Cancel workflow
+          </Button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

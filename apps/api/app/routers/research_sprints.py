@@ -25,6 +25,8 @@ from app.schemas.research import (
     ResearchPlanRead,
     ResearchPlanUpdate,
     ResearchSprintApprovalRead,
+    ResearchSprintExecutionActionRead,
+    ResearchSprintExecutionRead,
     ResearchSprintListRead,
     ResearchSprintPlanCreate,
     ResearchSprintPlanRunRead,
@@ -38,6 +40,7 @@ from app.services import (
     research_history_service,
     research_sprint_service,
     source_discovery_service,
+    temporal_research_service,
 )
 
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["research-sprints"])
@@ -115,6 +118,11 @@ def start_research_sprint_plan(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=public_error_detail("Research sprint planning failed.", exc),
         ) from exc
+    except temporal_research_service.TemporalResearchWorkflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=public_error_detail("Temporal workflow start failed.", exc),
+        ) from exc
 
     return ResearchSprintPlanRunRead(
         ai_run_id=result.run.id,
@@ -148,10 +156,12 @@ def approve_research_sprint(
     payload: ResearchPlanUpdate,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> ResearchSprintApprovalRead:
     sprint = research_sprint_service.approve_research_sprint(
         db,
         auth,
+        settings,
         project_id,
         sprint_id,
         payload,
@@ -165,9 +175,134 @@ def reject_research_sprint(
     sprint_id: uuid.UUID,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> ResearchSprintApprovalRead:
-    sprint = research_sprint_service.reject_research_sprint(db, auth, project_id, sprint_id)
+    sprint = research_sprint_service.reject_research_sprint(
+        db,
+        auth,
+        settings,
+        project_id,
+        sprint_id,
+    )
     return ResearchSprintApprovalRead(ai_run_id=sprint.ai_run_id, sprint=serialize_sprint(sprint))
+
+
+@router.get(
+    "/research-sprints/{sprint_id}/durable/status",
+    response_model=ResearchSprintExecutionRead,
+)
+def get_durable_research_status(
+    project_id: uuid.UUID,
+    sprint_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> ResearchSprintExecutionRead:
+    payload = temporal_research_service.execution_payload(db, auth, settings, project_id, sprint_id)
+    return ResearchSprintExecutionRead(
+        sprint=serialize_sprint(payload["sprint"]),
+        temporal_enabled=payload["temporal_enabled"],
+        temporal_workflow_id=payload["temporal_workflow_id"],
+        temporal_run_id=payload["temporal_run_id"],
+        status=payload["status"],
+        current_step=payload["current_step"],
+        failed_step=payload["failed_step"],
+        failure_message=payload["failure_message"],
+        action_required=payload["action_required"],
+    )
+
+
+@router.post(
+    "/research-sprints/{sprint_id}/durable/start",
+    response_model=ResearchSprintExecutionActionRead,
+)
+def start_durable_research_workflow(
+    project_id: uuid.UUID,
+    sprint_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> ResearchSprintExecutionActionRead:
+    try:
+        sprint = temporal_research_service.start_research_sprint_workflow(
+            db,
+            auth,
+            settings,
+            project_id,
+            sprint_id,
+        )
+    except temporal_research_service.TemporalResearchWorkflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=public_error_detail("Temporal workflow start failed.", exc),
+        ) from exc
+    return ResearchSprintExecutionActionRead(
+        sprint=serialize_sprint(sprint),
+        action="started",
+        temporal_workflow_id=sprint.temporal_workflow_id,
+    )
+
+
+@router.post(
+    "/research-sprints/{sprint_id}/durable/retry",
+    response_model=ResearchSprintExecutionActionRead,
+)
+def retry_durable_research_workflow(
+    project_id: uuid.UUID,
+    sprint_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> ResearchSprintExecutionActionRead:
+    try:
+        sprint = temporal_research_service.retry_research_sprint_workflow(
+            db,
+            auth,
+            settings,
+            project_id,
+            sprint_id,
+        )
+    except temporal_research_service.TemporalResearchWorkflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=public_error_detail("Temporal workflow retry failed.", exc),
+        ) from exc
+    return ResearchSprintExecutionActionRead(
+        sprint=serialize_sprint(sprint),
+        action="retried",
+        temporal_workflow_id=sprint.temporal_workflow_id,
+    )
+
+
+@router.post(
+    "/research-sprints/{sprint_id}/durable/cancel",
+    response_model=ResearchSprintExecutionActionRead,
+)
+def cancel_durable_research_workflow(
+    project_id: uuid.UUID,
+    sprint_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> ResearchSprintExecutionActionRead:
+    try:
+        sprint = temporal_research_service.cancel_research_sprint_workflow(
+            db,
+            auth,
+            settings,
+            project_id,
+            sprint_id,
+        )
+    except temporal_research_service.TemporalResearchWorkflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=public_error_detail("Temporal workflow cancellation failed.", exc),
+        ) from exc
+    return ResearchSprintExecutionActionRead(
+        sprint=serialize_sprint(sprint),
+        action="cancelled",
+        temporal_workflow_id=sprint.temporal_workflow_id,
+    )
 
 
 @router.get(
@@ -426,6 +561,19 @@ def approve_agentic_research_memo(
         project_id,
         sprint_id,
     )
+    try:
+        temporal_research_service.signal_memory_updates_approved(
+            db,
+            auth,
+            settings,
+            project_id,
+            sprint_id,
+        )
+    except temporal_research_service.TemporalResearchWorkflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=public_error_detail("Temporal workflow signal failed.", exc),
+        ) from exc
     return AgenticResearchApprovalRead(
         ai_run_id=result.run.id,
         ai_step_id=result.step.id,
@@ -453,6 +601,19 @@ def reject_agentic_research_memo(
         project_id,
         sprint_id,
     )
+    try:
+        temporal_research_service.signal_memory_updates_rejected(
+            db,
+            auth,
+            settings,
+            project_id,
+            sprint_id,
+        )
+    except temporal_research_service.TemporalResearchWorkflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=public_error_detail("Temporal workflow signal failed.", exc),
+        ) from exc
     return AgenticResearchApprovalRead(
         ai_run_id=result.run.id,
         ai_step_id=result.step.id,

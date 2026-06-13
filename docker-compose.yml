@@ -54,6 +54,21 @@ services:
     volumes:
       - ./infra/litellm/config.yaml:/app/config.yaml:ro
 
+  temporal:
+    image: temporalio/auto-setup:1.25
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-thesys}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-thesys}
+      POSTGRES_SEEDS: postgres
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/docker.yaml
+    ports:
+      - "7233:7233"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -93,6 +108,11 @@ services:
       LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
       LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-thesys-local}
       LANGSMITH_PUBLIC_URL_BASE: ${LANGSMITH_PUBLIC_URL_BASE:-https://smith.langchain.com}
+      TEMPORAL_ENABLED: ${TEMPORAL_ENABLED:-true}
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-thesys-research-sprints}
+      TEMPORAL_WORKFLOW_TIMEOUT_SECONDS: ${TEMPORAL_WORKFLOW_TIMEOUT_SECONDS:-3600}
       CORS_ORIGINS: http://localhost:3000
     ports:
       - "8000:8000"
@@ -106,6 +126,63 @@ services:
       minio:
         condition: service_started
       litellm:
+        condition: service_started
+      temporal:
+        condition: service_started
+
+  temporal-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: python -m app.temporal.worker
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      AUTH_MODE: dev
+      DEV_AUTH_DEFAULT_EMAIL: ${DEV_AUTH_DEFAULT_EMAIL:-dev@thesys.local}
+      DEV_AUTH_DEFAULT_NAME: ${DEV_AUTH_DEFAULT_NAME:-Dev User}
+      DATABASE_URL: postgresql+psycopg://thesys:thesys@postgres:5432/thesys
+      REDIS_URL: redis://redis:6379/0
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_API_KEY: ${LITELLM_API_KEY:-sk-local-dev}
+      LITELLM_MODEL: ${LITELLM_MODEL:-dev-gpt-4o-mini}
+      LITELLM_TIMEOUT_SECONDS: ${LITELLM_TIMEOUT_SECONDS:-180}
+      LLM_STUB_MODE: ${LLM_STUB_MODE:-always}
+      LLM_STRUCTURED_OUTPUT_REPAIR_ATTEMPTS: ${LLM_STRUCTURED_OUTPUT_REPAIR_ATTEMPTS:-1}
+      LLM_FALLBACK_POLICY: ${LLM_FALLBACK_POLICY:-emergency}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minioadmin}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-thesys-local}
+      OBJECT_STORAGE_MODE: ${OBJECT_STORAGE_MODE:-s3}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
+      URL_FETCH_TIMEOUT_SECONDS: ${URL_FETCH_TIMEOUT_SECONDS:-15}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-deterministic-hash-embedding-1536}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1536}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-thesys-local}
+      LANGSMITH_PUBLIC_URL_BASE: ${LANGSMITH_PUBLIC_URL_BASE:-https://smith.langchain.com}
+      TEMPORAL_ENABLED: ${TEMPORAL_ENABLED:-true}
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-thesys-research-sprints}
+      TEMPORAL_WORKFLOW_TIMEOUT_SECONDS: ${TEMPORAL_WORKFLOW_TIMEOUT_SECONDS:-3600}
+    volumes:
+      - ./apps/api:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      litellm:
+        condition: service_started
+      temporal:
         condition: service_started
 
   web:
