@@ -1323,7 +1323,41 @@ Checks run:
   is not allowed to access `com.openai.codex`. Per the sprint request, no
   external browser QA was attempted.
 
+## V1 Sprint 26 Scope
+
+- [x] Add a typed playbook navigation contract to the project overview API.
+- [x] Compute stage-aware playbook steps for Guide, Thesis, Research, Test,
+  Decision, and History.
+- [x] Mark each playbook step as available, blocked, complete, or current.
+- [x] Highlight the current lifecycle step based on project stage:
+  - draft idea -> Thesis
+  - structured/researched stages -> Research
+  - assumption/validation stages -> Test
+  - results logged -> Decision
+  - recorded/paused/killed stages -> History
+- [x] Replace the project page "Workspaces" navigation with "Idea Playbook."
+- [x] Show each playbook item with user-facing purpose text and status.
+- [x] Replace mobile "Switch workspace" copy with "Switch playbook step."
+- [x] Preserve existing internal tab routes while exposing guided playbook
+  labels and deep links.
+- [x] Rename the visible Intelligence surface to Research.
+
+## V1 Sprint 26 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_project_overview.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [ ] Browser QA in the Codex in-app browser is blocked because Computer Use
+  is not allowed to access `com.openai.codex`. Per the sprint request, no
+  external browser QA was attempted.
+
 ## Next Work
 
-Complete the in-Codex browser QA for V1 Sprint 25 when Codex app access is
-available, then begin V1 Sprint 26.
+Complete the in-Codex browser QA for V1 Sprints 25 and 26 when Codex app access
+is available, then begin V1 Sprint 27.

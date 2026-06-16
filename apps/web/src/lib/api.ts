@@ -1333,6 +1333,17 @@ export type NextBestAction = {
   target_route: string | null;
 };
 
+export type PlaybookStepStatus = "available" | "blocked" | "complete" | "current";
+
+export type PlaybookStep = {
+  key: string;
+  label: string;
+  purpose: string;
+  status: PlaybookStepStatus;
+  is_current_stage: boolean;
+  target_route: string;
+};
+
 export type ReadinessItem = {
   key: string;
   label: string;
@@ -1393,6 +1404,7 @@ export type ProjectOverview = {
   current_recommendation: StrategicRecommendation;
   next_best_action: NextBestAction;
   secondary_actions: NextBestAction[];
+  playbook_steps: PlaybookStep[];
   idea_readiness: IdeaReadiness;
   strategic_snapshot: StrategicSnapshot;
   evidence_health: EvidenceHealth;

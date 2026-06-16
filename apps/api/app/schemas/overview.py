@@ -28,6 +28,7 @@ ReadinessStatus = Literal[
     "decision_ready",
 ]
 ReadinessItemStatus = Literal["complete", "missing", "needs_work"]
+PlaybookStepStatus = Literal["available", "blocked", "complete", "current"]
 StrategicUpdateEntityType = Literal[
     "artifact",
     "evidence",
@@ -60,6 +61,15 @@ class NextBestActionRead(BaseModel):
     primary: bool
     related_stage: ProjectStage
     target_route: str | None = None
+
+
+class PlaybookStepRead(BaseModel):
+    key: str
+    label: str
+    purpose: str
+    status: PlaybookStepStatus
+    is_current_stage: bool
+    target_route: str
 
 
 class ReadinessItemRead(BaseModel):
@@ -115,6 +125,7 @@ class ProjectOverviewRead(BaseModel):
     current_recommendation: StrategicRecommendationRead
     next_best_action: NextBestActionRead
     secondary_actions: list[NextBestActionRead] = Field(default_factory=list, max_length=2)
+    playbook_steps: list[PlaybookStepRead] = Field(default_factory=list)
     idea_readiness: IdeaReadinessRead
     strategic_snapshot: StrategicSnapshotRead
     evidence_health: EvidenceHealthRead

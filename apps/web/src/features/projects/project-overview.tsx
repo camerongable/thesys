@@ -62,6 +62,7 @@ import {
   listResearchSprints,
   listToolInvocations,
   NextBestAction,
+  PlaybookStep,
   ProjectStage,
   rejectApprovalRequest,
   rejectCompetitorCandidate,
@@ -119,43 +120,14 @@ type EvidenceReviewQueueItem =
   | { id: string; kind: "competitor"; candidate: CompetitorCandidate }
   | { artifact: Artifact; id: string; kind: "memo"; version: ArtifactVersion };
 
-const projectSections: {
-  tab: ProjectTab;
-  label: string;
-  description: string;
-  icon: LucideIcon;
-}[] = [
-  {
-    tab: "Decision",
-    label: "Decision",
-    description: "Verdict and next step",
-    icon: Lightbulb,
-  },
-  {
-    tab: "Thesis",
-    label: "Thesis",
-    description: "Idea and evolution",
-    icon: GitBranch,
-  },
-  {
-    tab: "Intelligence",
-    label: "Intelligence",
-    description: "Sources and market",
-    icon: FileSearch,
-  },
-  {
-    tab: "Validation",
-    label: "Validation",
-    description: "Blockers and tests",
-    icon: Beaker,
-  },
-  {
-    tab: "Record",
-    label: "Record",
-    description: "Decisions and history",
-    icon: ScrollText,
-  },
-];
+const playbookIcons: Record<string, LucideIcon> = {
+  decision: ClipboardCheck,
+  guide: Lightbulb,
+  history: ScrollText,
+  research: FileSearch,
+  test: Beaker,
+  thesis: GitBranch,
+};
 
 export function ProjectOverview() {
   const params = useParams<{ projectId: string }>();
@@ -178,11 +150,12 @@ export function ProjectOverview() {
     const syncTabFromHash = () => {
       const hash = window.location.hash;
       const rawAnchor = hash.replace("#", "") || null;
-      const tab = tabFromHash(hash) ?? tabFromAnchor(rawAnchor);
+      const tabFromAlias = tabFromHash(hash);
+      const tab = tabFromAlias ?? tabFromAnchor(rawAnchor);
       if (tab) {
         setActiveTab(tab);
       }
-      setActiveAnchor(tabFromHash(hash) ? null : rawAnchor);
+      setActiveAnchor(tabFromAlias && hashShouldRemainAnchor(rawAnchor) ? rawAnchor : tabFromAlias ? null : rawAnchor);
     };
     syncTabFromHash();
     window.addEventListener("hashchange", syncTabFromHash);
@@ -198,6 +171,10 @@ export function ProjectOverview() {
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", `#${tab.toLowerCase()}`);
     }
+  }
+
+  function openPlaybookStep(step: PlaybookStep) {
+    openWorkspace(tabForPlaybookStep(step), anchorForPlaybookStep(step));
   }
 
   function runAction(action: NextBestAction) {
@@ -321,8 +298,10 @@ export function ProjectOverview() {
 
             <div className="mt-5 grid gap-5 lg:grid-cols-[270px_minmax(0,1fr)_340px] xl:grid-cols-[270px_minmax(0,1fr)_360px]">
               <ProjectMap
+                activeAnchor={activeAnchor}
                 activeTab={activeTab}
-                onSelect={selectTab}
+                onOpen={openPlaybookStep}
+                overview={overview}
               />
 
               <GuidePanel
@@ -363,8 +342,10 @@ export function ProjectOverview() {
                   />
                 )}
                 <MobileWorkspaceSwitcher
+                  activeAnchor={activeAnchor}
                   activeTab={activeTab}
-                  onSelect={selectTab}
+                  onOpen={openPlaybookStep}
+                  overview={overview}
                 />
               </div>
 
@@ -424,50 +405,74 @@ function ProjectOverviewSkeleton() {
 }
 
 function ProjectMap({
+  activeAnchor,
   activeTab,
-  onSelect,
+  onOpen,
+  overview,
 }: {
+  activeAnchor: string | null;
   activeTab: ProjectTab;
-  onSelect: (tab: ProjectTab) => void;
+  onOpen: (step: PlaybookStep) => void;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
+  const steps = overview.playbook_steps;
   return (
     <aside className="hidden min-w-0 max-w-full self-start overflow-hidden rounded-lg border border-border bg-card p-2 lg:sticky lg:top-5 lg:block lg:p-3">
       <div className="hidden px-2 py-2 lg:block">
-        <h2 className="text-sm font-semibold">Workspaces</h2>
+        <h2 className="text-sm font-semibold">Idea Playbook</h2>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          Start with the verdict. Open details only when you need the evidence trail.
+          Move through the validation journey. The current step is highlighted.
         </p>
       </div>
       <nav
         className="grid w-full grid-cols-2 gap-1 sm:grid-cols-4 lg:mt-2 lg:grid-cols-1"
-        aria-label="Project workspace"
+        aria-label="Idea playbook"
       >
-        {projectSections.map((section) => {
-          const Icon = section.icon;
-          const selected = activeTab === section.tab;
+        {steps.map((step) => {
+          const Icon = playbookIcons[step.key] ?? Route;
+          const selected = playbookStepIsSelected(step, activeTab, activeAnchor);
+          const current = step.is_current_stage;
           return (
             <button
-              aria-label={`Open ${section.label} workspace: ${section.description}`}
+              aria-label={`Open ${step.label}: ${step.purpose}. ${playbookStatusLabel(step.status)}.`}
               aria-current={selected ? "page" : undefined}
               className={[
-                "flex min-h-12 cursor-pointer flex-col items-center justify-center gap-1 rounded-md px-1.5 py-2 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:min-h-0 lg:w-full lg:flex-row lg:items-start lg:justify-start lg:gap-3 lg:px-2 lg:py-2.5 lg:text-left",
-                selected ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                "flex min-h-12 cursor-pointer flex-col items-center justify-center gap-1 rounded-md border px-1.5 py-2 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:min-h-0 lg:w-full lg:flex-row lg:items-start lg:justify-start lg:gap-3 lg:px-2 lg:py-2.5 lg:text-left",
+                selected
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : current
+                    ? "border-warning-border bg-warning-muted text-foreground hover:bg-warning-muted"
+                    : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
               ].join(" ")}
-              key={section.tab}
-              onClick={() => onSelect(section.tab)}
+              key={step.key}
+              onClick={() => onOpen(step)}
               type="button"
             >
               <Icon
-                className={selected ? "h-4 w-4 shrink-0 text-primary lg:mt-0.5" : "h-4 w-4 shrink-0 lg:mt-0.5"}
+                className={
+                  selected || current
+                    ? "h-4 w-4 shrink-0 text-primary lg:mt-0.5"
+                    : "h-4 w-4 shrink-0 lg:mt-0.5"
+                }
                 aria-hidden="true"
               />
               <span className="min-w-0">
-                <span className="block truncate text-xs font-medium lg:text-sm">{section.label}</span>
+                <span className="flex min-w-0 flex-wrap items-center justify-center gap-1.5 lg:justify-start">
+                  <span className="block truncate text-xs font-medium lg:text-sm">{step.label}</span>
+                  {current ? (
+                    <span className="hidden rounded-md bg-primary/10 px-1.5 py-0.5 text-[0.68rem] font-medium text-primary lg:inline-flex">
+                      current
+                    </span>
+                  ) : null}
+                </span>
                 <span
                   aria-hidden="true"
                   className="mt-0.5 hidden text-xs leading-5 text-muted-foreground lg:block"
                 >
-                  {section.description}
+                  {step.purpose}
+                </span>
+                <span className={`${playbookStatusClass(step.status)} mt-1 hidden lg:inline-flex`}>
+                  {playbookStatusLabel(step.status)}
                 </span>
               </span>
             </button>
@@ -479,45 +484,62 @@ function ProjectMap({
 }
 
 function MobileWorkspaceSwitcher({
+  activeAnchor,
   activeTab,
-  onSelect,
+  onOpen,
+  overview,
 }: {
+  activeAnchor: string | null;
   activeTab: ProjectTab;
-  onSelect: (tab: ProjectTab) => void;
+  onOpen: (step: PlaybookStep) => void;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
+  const selectedStep =
+    overview.playbook_steps.find((step) => playbookStepIsSelected(step, activeTab, activeAnchor)) ??
+    overview.playbook_steps.find((step) => step.is_current_stage);
   return (
     <details className="mt-5 rounded-lg border border-border bg-card p-2 lg:hidden">
       <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md px-2 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-        <span>Switch workspace</span>
+        <span>Switch playbook step</span>
         <span className="inline-flex items-center gap-2 text-muted-foreground">
-          <span>{activeTab}</span>
+          <span>{selectedStep?.label ?? "Playbook"}</span>
           <ChevronDown className="h-4 w-4" aria-hidden="true" />
         </span>
       </summary>
       <nav
-        aria-label="Project workspace"
+        aria-label="Idea playbook"
         className="mt-2 grid grid-cols-2 gap-1 border-t border-border pt-2"
       >
-        {projectSections.map((section) => {
-          const Icon = section.icon;
-          const selected = activeTab === section.tab;
+        {overview.playbook_steps.map((step) => {
+          const Icon = playbookIcons[step.key] ?? Route;
+          const selected = playbookStepIsSelected(step, activeTab, activeAnchor);
+          const current = step.is_current_stage;
           return (
             <button
               aria-current={selected ? "page" : undefined}
-              aria-label={`Open ${section.label} workspace: ${section.description}`}
+              aria-label={`Open ${step.label}: ${step.purpose}. ${playbookStatusLabel(step.status)}.`}
               className={[
-                "flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-md px-2 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
-                selected ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                "flex min-h-14 cursor-pointer items-center justify-center gap-2 rounded-md border px-2 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+                selected
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : current
+                    ? "border-warning-border bg-warning-muted text-foreground"
+                    : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
               ].join(" ")}
-              key={section.tab}
-              onClick={() => onSelect(section.tab)}
+              key={step.key}
+              onClick={() => onOpen(step)}
               type="button"
             >
               <Icon
-                className={selected ? "h-4 w-4 shrink-0 text-primary" : "h-4 w-4 shrink-0"}
+                className={selected || current ? "h-4 w-4 shrink-0 text-primary" : "h-4 w-4 shrink-0"}
                 aria-hidden="true"
               />
-              <span className="truncate">{section.label}</span>
+              <span className="min-w-0">
+                <span className="block truncate">{step.label}</span>
+                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                  {playbookStatusLabel(step.status)}
+                </span>
+              </span>
             </button>
           );
         })}
@@ -1327,7 +1349,7 @@ function IntelligenceWorkspace({
         description="Inspect the sources, competitors, and findings only when the current evidence basis needs review."
         icon={<FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />}
         question="Review the evidence basis"
-        title="Intelligence"
+        title="Research"
       />
 
       <ResearchResultCard overview={overview} />
@@ -4992,6 +5014,81 @@ function tabForAction(action: NextBestAction): ProjectTab {
   return tabFromHash(hash ? `#${hash}` : "") ?? tabFromAnchor(hash ?? "") ?? tabForActionType(action.action_type);
 }
 
+function tabForPlaybookStep(step: PlaybookStep): ProjectTab {
+  if (step.key === "thesis") {
+    return "Thesis";
+  }
+  if (step.key === "research") {
+    return "Intelligence";
+  }
+  if (step.key === "test") {
+    return "Validation";
+  }
+  if (step.key === "decision" || step.key === "history") {
+    return "Record";
+  }
+  return "Decision";
+}
+
+function anchorForPlaybookStep(step: PlaybookStep): string | null {
+  if (step.key === "thesis") {
+    return "thesis-canvas";
+  }
+  if (step.key === "research") {
+    return "research-sprint";
+  }
+  if (step.key === "test") {
+    return "validation-mission";
+  }
+  if (step.key === "decision") {
+    return "record-decision-panel";
+  }
+  if (step.key === "history") {
+    return "history";
+  }
+  return null;
+}
+
+function playbookStepIsSelected(
+  step: PlaybookStep,
+  activeTab: ProjectTab,
+  activeAnchor: string | null,
+) {
+  if (step.key === "guide") {
+    return activeTab === "Decision";
+  }
+  if (step.key === "decision") {
+    return activeTab === "Record" && activeAnchor !== "history";
+  }
+  if (step.key === "history") {
+    return activeTab === "Record" && activeAnchor === "history";
+  }
+  return tabForPlaybookStep(step) === activeTab;
+}
+
+function playbookStatusLabel(status: PlaybookStep["status"]) {
+  const labels: Record<PlaybookStep["status"], string> = {
+    available: "available",
+    blocked: "blocked",
+    complete: "complete",
+    current: "current",
+  };
+  return labels[status];
+}
+
+function playbookStatusClass(status: PlaybookStep["status"]) {
+  if (status === "complete") {
+    return "rounded-md bg-success-muted px-1.5 py-0.5 text-[0.68rem] font-medium text-success-foreground";
+  }
+  if (status === "current") {
+    return "rounded-md bg-primary/10 px-1.5 py-0.5 text-[0.68rem] font-medium text-primary";
+  }
+  if (status === "blocked") {
+    return "rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] font-medium text-muted-foreground";
+  }
+  return "rounded-md bg-surface px-1.5 py-0.5 text-[0.68rem] font-medium text-muted-foreground";
+}
+
 function anchorForAction(action: NextBestAction): string | null {
   const hash = action.target_route?.split("#")[1];
   if (hash && !tabFromHash(`#${hash}`)) {
@@ -5073,12 +5170,14 @@ function tabFromHash(hash: string): ProjectTab | null {
     evidence: "Intelligence",
     experiment: "Validation",
     experiments: "Validation",
+    guide: "Decision",
     history: "Record",
     intelligence: "Intelligence",
     market: "Intelligence",
     overview: "Decision",
     record: "Record",
     research: "Intelligence",
+    test: "Validation",
     thesis: "Thesis",
     validation: "Validation",
     wedge: "Thesis",
@@ -5120,6 +5219,10 @@ function tabFromAnchor(anchor: string | null): ProjectTab | null {
     return "Record";
   }
   return null;
+}
+
+function hashShouldRemainAnchor(anchor: string | null) {
+  return anchor === "history";
 }
 
 function formatStage(stage: ProjectStage) {
@@ -5274,7 +5377,7 @@ function recoveryGuidance(
 
   if (overview.evidence_health.source_count === 0) {
     return {
-      detail: "Plan an evidence review before treating the verdict as durable. The workspace needs source coverage before it can support a strategic decision.",
+      detail: "Plan an evidence review before treating the verdict as durable. The project needs source coverage before it can support a strategic decision.",
       label: "No sources",
       title: "Recover by adding evidence",
       tone: "warning",
