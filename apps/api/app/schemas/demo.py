@@ -5,6 +5,11 @@ from app.schemas.projects import ProjectRead
 
 
 class DemoSeedCounts(BaseModel):
+    thesis_canvas: int
+    thesis_evolution_events: int
+    wedge_options: int
+    validation_missions: int
+    validation_interpretations: int
     evidence_sources: int
     artifacts: int
     competitors: int

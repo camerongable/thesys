@@ -204,11 +204,11 @@ export function ProjectList() {
             <div className="rounded-lg border border-border bg-card p-4">
               <div className="flex items-center gap-2">
                 <Database className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h2 className="text-sm font-semibold">Demo Project</h2>
+                <h2 className="text-sm font-semibold">Guided demo</h2>
               </div>
               <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                Load the fitness coach scenario to inspect the full loop: research, evidence,
-                assumptions, validation, and decision history.
+                Load the fitness coach scenario to walk through the full path: messy idea,
+                thesis, wedge choice, validation mission, interpreted result, and Decision Coach.
               </p>
               <Button
                 className="mt-4 w-full"
@@ -218,7 +218,7 @@ export function ProjectList() {
                 variant="secondary"
               >
                 <Database className="h-4 w-4" aria-hidden="true" />
-                {seedMutation.isPending ? "Loading demo..." : "Load demo"}
+                {seedMutation.isPending ? "Loading demo..." : "Load guided demo"}
               </Button>
               {seedMutation.error ? (
                 <div className="mt-3">

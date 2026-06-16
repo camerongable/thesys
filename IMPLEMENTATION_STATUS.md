@@ -2,10 +2,11 @@
 
 ## Current Phase
 
-V1 Sprint 25 implementation is complete pending in-Codex browser QA. Thesys can
-now turn interpreted validation results, evidence, blockers, and risks into a
-Decision Coach recommendation, answer decision-specific questions, and prefill a
-durable decision record with trace links.
+V1 Sprint 28 implementation is complete. Thesys now has a refreshed guided demo
+that opens directly into the Guide-led project experience and shows the full
+first-session path: messy idea intake, thesis shaping, wedge selection,
+validation mission, interpreted result, Decision Coach recommendation, and
+strategy history.
 Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
 multi-segment workflow packs remain V2 scope.
 
@@ -1399,7 +1400,46 @@ Checks run:
   is not allowed to access `com.openai.codex`. Per the sprint request, no
   external browser QA was attempted.
 
+## V1 Sprint 28 Scope
+
+- [x] Refresh the primary fitness-coach demo into a guided strategic journey
+  rather than a generic seeded data project.
+- [x] Seed a messy original idea, structured intake, Thesis Canvas, thesis
+  evolution events, and rejected directions.
+- [x] Seed Wedge Explorer options with a recommended narrow wedge and explicit
+  avoid/research-later alternatives.
+- [x] Seed a validation mission with interpreted results so the project reaches
+  the Decision Coach instead of stopping at raw experiment output.
+- [x] Seed a Decision Coach-aligned decision record recommendation that
+  preserves the "continue research" path and trace links to the relevant
+  assumption and experiment.
+- [x] Reset demo nudges on refresh so the guided project is repeatable.
+- [x] Update the project list demo entry point and API response so the demo
+  opens at the Guide panel.
+- [x] Extend demo seed counts and tests to verify the Sprint 28 journey objects.
+
+## V1 Sprint 28 Verification
+
+Checks run:
+
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_demo_eval_workflows.py -q`
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_demo_eval_workflows.py apps/api/app/tests/test_thesis_canvas.py apps/api/app/tests/test_wedge_explorer.py apps/api/app/tests/test_validation.py apps/api/app/tests/test_guide.py apps/api/app/tests/test_project_overview.py -q`
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests -q`
+- [x] `apps/api/.venv/bin/ruff check apps/api/app`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test: `POST /api/demo/seed` created the guided demo
+  project and returned `#guide` with seeded thesis canvas, thesis evolution,
+  wedges, validation mission, interpretation, and decision counts.
+- [x] Browser QA in the Codex in-app browser: clicked `Load guided demo`,
+  verified redirect to `#guide`, checked Guide, Thesis, Validation, Decision,
+  and History markers, confirmed no browser console warnings/errors, and ran
+  desktop/mobile layout probes for horizontal overflow and button text overflow.
+
 ## Next Work
 
-Complete the in-Codex browser QA for V1 Sprints 25, 26, and 27 when Codex app
-access is available, then begin V1 Sprint 28.
+V1 Sprint 28 is complete. Next work is V2 planning or production-hardening
+cleanup.

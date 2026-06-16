@@ -1249,6 +1249,11 @@ export type DemoSeedResult = {
   project: Project;
   created: boolean;
   counts: {
+    thesis_canvas: number;
+    thesis_evolution_events: number;
+    wedge_options: number;
+    validation_missions: number;
+    validation_interpretations: number;
     evidence_sources: number;
     artifacts: number;
     competitors: number;

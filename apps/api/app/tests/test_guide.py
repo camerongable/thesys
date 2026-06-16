@@ -58,9 +58,11 @@ def test_guide_context_and_recommendation_are_stage_aware(client: TestClient) ->
     seed_response = client.post("/api/demo/seed")
     assert seed_response.status_code == 200
     demo_id = seed_response.json()["project"]["id"]
-    proceeding = _guide_recommend(client, demo_id)
-    assert proceeding["recommended_action"]["id"] == "review_decision"
-    assert proceeding["current_focus"] == "Set the next milestone from the validated wedge."
+    demo_context = _guide_context(client, demo_id)
+    assert demo_context["stage"] == "decision_ready"
+    decision_ready_demo = _guide_recommend(client, demo_id)
+    assert decision_ready_demo["recommended_action"]["id"] == "use_suggested_decision"
+    assert "decision" in decision_ready_demo["current_focus"].lower()
 
 
 def test_guide_action_execution_routes_known_actions(client: TestClient) -> None:
