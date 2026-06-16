@@ -26,6 +26,10 @@ ValidationMissionStatus = Literal[
     "interpreted",
     "closed",
 ]
+ValidationSignalStrength = Literal["none", "weak", "medium", "strong"]
+ValidationSignalLevel = Literal["none", "low", "medium", "high"]
+ValidationConfidenceChange = Literal["decrease", "no_change", "increase"]
+DecisionRecommendation = Literal["proceed", "pivot", "pause", "kill", "continue_research"]
 DecisionType = Literal[
     "build",
     "pivot",
@@ -160,6 +164,66 @@ class ExperimentResultCreateRead(BaseModel):
     project_confidence_score: Decimal | None
 
 
+class ValidationSignalDraft(BaseModel):
+    pain_severity: ValidationSignalLevel
+    current_workaround: str = Field(min_length=1, max_length=2000)
+    urgency: Literal["low", "medium", "high"]
+    willingness_to_pay: ValidationSignalStrength
+    switching_signal: ValidationSignalStrength
+    objections: list[str] = Field(default_factory=list, max_length=10)
+    quotes: list[str] = Field(default_factory=list, max_length=10)
+    confidence_change: ValidationConfidenceChange
+    recommended_next_action: str = Field(min_length=1, max_length=2000)
+
+
+class ValidationResultInterpretationDraft(BaseModel):
+    signal_summary: str = Field(min_length=1, max_length=3000)
+    what_strengthened: list[str] = Field(default_factory=list, max_length=10)
+    what_weakened: list[str] = Field(default_factory=list, max_length=10)
+    signal: ValidationSignalDraft
+    confidence_rationale: str = Field(min_length=1, max_length=3000)
+    proposed_confidence_delta: float = Field(ge=-1, le=1)
+    proposed_assumption_status: AssumptionStatus | None = None
+    decision_recommendation: DecisionRecommendation
+
+
+class ValidationResultInterpretationCreate(BaseModel):
+    raw_notes: str | None = Field(default=None, max_length=20000)
+    include_logged_results: bool = True
+
+
+class ValidationResultInterpretationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    mission_id: uuid.UUID
+    experiment_id: uuid.UUID | None
+    assumption_id: uuid.UUID | None
+    ai_run_id: uuid.UUID | None
+    approval_request_id: uuid.UUID | None
+    raw_notes: str
+    signal_summary: str
+    what_strengthened: list[str] = Field(default_factory=list)
+    what_weakened: list[str] = Field(default_factory=list)
+    pain_severity: ValidationSignalLevel
+    current_workaround: str
+    urgency: Literal["low", "medium", "high"]
+    willingness_to_pay: ValidationSignalStrength
+    switching_signal: ValidationSignalStrength
+    objections: list[str] = Field(default_factory=list)
+    quotes: list[str] = Field(default_factory=list)
+    confidence_change: ValidationConfidenceChange
+    confidence_rationale: str
+    recommended_next_action: str
+    decision_recommendation: DecisionRecommendation
+    proposed_confidence_delta: Decimal
+    proposed_assumption_status: AssumptionStatus | None
+    proposed_updates: dict[str, object]
+    created_by: uuid.UUID | None
+    created_at: datetime
+
+
 class ValidationAssetRead(BaseModel):
     type: str
     title: str
@@ -185,6 +249,7 @@ class ValidationMissionRead(BaseModel):
     status: ValidationMissionStatus
     created_at: datetime
     updated_at: datetime
+    latest_interpretation: ValidationResultInterpretationRead | None = None
 
 
 class ValidationMissionListRead(BaseModel):
@@ -207,6 +272,20 @@ class ValidationPlanGenerateRead(BaseModel):
     artifact: ArtifactRead
     experiments: list[ExperimentRead]
     missions: list[ValidationMissionRead] = Field(default_factory=list)
+
+
+class ValidationResultInterpretationRunRead(BaseModel):
+    ai_run_id: uuid.UUID
+    ai_step_id: uuid.UUID
+    prompt_version: str
+    model_provider: str
+    model_name: str
+    used_stub: bool
+    total_tokens: int | None
+    total_cost: Decimal | None
+    mission: ValidationMissionRead
+    interpretation: ValidationResultInterpretationRead
+    approval_request_id: uuid.UUID | None
 
 
 class DecisionLinkRead(BaseModel):

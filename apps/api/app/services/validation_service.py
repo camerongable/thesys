@@ -18,6 +18,7 @@ from app.ai.prompts import (
     ASSUMPTION_EXTRACTION_PROMPT_VERSION,
     UNTRUSTED_RETRIEVED_CONTENT_RULE,
     VALIDATION_PLAN_PROMPT_VERSION,
+    VALIDATION_RESULT_INTERPRETATION_PROMPT_VERSION,
 )
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
 from app.core.auth import AuthContext, require_permission
@@ -25,6 +26,7 @@ from app.core.config import Settings
 from app.db.models import (
     AIRun,
     AIStep,
+    ApprovalRequest,
     Artifact,
     ArtifactVersion,
     Assumption,
@@ -36,7 +38,9 @@ from app.db.models import (
     ExperimentResult,
     Project,
     Risk,
+    ThesisEvolutionEvent,
     ValidationMission,
+    ValidationResultInterpretation,
 )
 from app.schemas.artifacts import AssumptionDraft, RiskDraft
 from app.schemas.validation import (
@@ -48,6 +52,9 @@ from app.schemas.validation import (
     ValidationPlanDraft,
     ValidationPlanGenerateCreate,
     ValidationPlanSetDraft,
+    ValidationResultInterpretationCreate,
+    ValidationResultInterpretationDraft,
+    ValidationResultInterpretationRead,
 )
 from app.services import (
     ai_run_service,
@@ -94,6 +101,20 @@ class ExperimentResultLogResult:
     experiment: Experiment
     assumption: Assumption | None
     project_confidence_score: Decimal | None
+
+
+@dataclass(frozen=True)
+class ValidationInterpretationResult:
+    run: AIRun
+    step: AIStep
+    mission: ValidationMissionRead
+    interpretation: ValidationResultInterpretationRead
+    approval_request: ApprovalRequest | None
+    model_provider: str
+    model_name: str
+    used_stub: bool
+    total_tokens: int | None
+    total_cost: Decimal | None
 
 
 def list_assumptions(db: Session, auth: AuthContext, project_id: uuid.UUID) -> list[Assumption]:
@@ -431,32 +452,223 @@ def start_validation_mission(
 def interpret_validation_mission(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
     mission_id: uuid.UUID,
-) -> ValidationMissionRead:
+) -> ValidationInterpretationResult:
+    return interpret_validation_results(db, auth, settings, project_id, mission_id, None)
+
+
+def interpret_validation_results(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    payload: ValidationResultInterpretationCreate | None,
+) -> ValidationInterpretationResult:
     require_permission(auth, "run_research")
+    project = project_service.get_project(db, auth, project_id)
     mission = _get_validation_mission(db, auth, project_id, mission_id)
-    if _mission_result_count(db, mission) == 0:
+    raw_notes = _interpretation_notes(db, mission, payload)
+    if not raw_notes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Log mission results before interpreting them.",
+            detail="Paste validation notes or log mission results before interpreting them.",
         )
-    if mission.status in {"running", "planned", "results_logged"}:
-        mission.status = "interpreted"
+    run = ai_run_service.start_run(
+        db,
+        auth,
+        workflow_type="validation_result_interpretation",
+        prompt_version=VALIDATION_RESULT_INTERPRETATION_PROMPT_VERSION,
+        input_summary=f"Interpret validation results for {project.name}"[:500],
+        project_id=project.id,
+        model_provider="stub" if settings.should_use_llm_stub else "litellm",
+        model_name=settings.litellm_model,
+    )
+    trace = langsmith_observability_service.ensure_run_trace(
+        db,
+        settings,
+        run,
+        metadata={
+            "project_id": str(project.id),
+            "validation_mission_id": str(mission.id),
+            "workflow_version": VALIDATION_RESULT_INTERPRETATION_PROMPT_VERSION,
+            "user_id": str(auth.user_id) if auth.user_id else None,
+            "model_provider": run.model_provider,
+            "model_name": run.model_name,
+        },
+    )
+    step: AIStep | None = None
+    try:
+        step = ai_run_service.start_step(
+            db,
+            run,
+            step_name="interpret_validation_results",
+            input_json={
+                "project_id": str(project.id),
+                "validation_mission_id": str(mission.id),
+                "experiment_id": str(mission.experiment_id) if mission.experiment_id else None,
+                "assumption_id": str(mission.assumption_id),
+            },
+        )
+        started = perf_counter()
+        messages = _validation_result_interpretation_messages(project, mission, raw_notes)
+        if settings.should_use_llm_stub or should_use_fallback_without_model(settings):
+            draft = _fallback_validation_interpretation(mission, raw_notes)
+            completion = _fallback_completion(
+                settings,
+                messages,
+                draft,
+                "validation_result_interpretation_policy_always",
+            )
+        else:
+            try:
+                draft_result = generate_structured_output(
+                    settings,
+                    ValidationResultInterpretationDraft,
+                    messages,
+                    model=settings.litellm_model,
+                    temperature=0.0,
+                )
+                draft = ValidationResultInterpretationDraft.model_validate(draft_result.parsed)
+                completion = draft_result.completion
+            except (StructuredOutputError, RuntimeError) as exc:
+                if not should_use_fallback_after_error(settings):
+                    raise
+                draft = _fallback_validation_interpretation(mission, raw_notes)
+                completion = _fallback_completion(
+                    settings,
+                    messages,
+                    draft,
+                    "validation_result_interpretation_emergency",
+                    exc,
+                )
+        interpretation = _write_validation_interpretation(
+            db,
+            auth,
+            mission,
+            run,
+            raw_notes,
+            draft,
+        )
+        db.flush()
+        approval = _create_validation_interpretation_approval(db, auth, interpretation)
+        interpretation.approval_request_id = approval.id
+        if mission.status in {"planned", "running", "results_logged"}:
+            mission.status = "interpreted"
+        if mission.experiment_id is not None:
+            experiment = get_experiment(db, auth, project_id, mission.experiment_id)
+            if experiment.status in {"planned", "running"}:
+                experiment.status = "completed"
+        db.flush()
+        completed_step = ai_run_service.complete_step(
+            db,
+            step,
+            output_json={
+                "validation_interpretation_id": str(interpretation.id),
+                "approval_request_id": str(approval.id),
+                "confidence_change": interpretation.confidence_change,
+                "decision_recommendation": interpretation.decision_recommendation,
+            },
+            latency_ms=int((perf_counter() - started) * 1000),
+            tokens=completion.total_tokens,
+            cost=completion.total_cost,
+        )
+        langsmith_observability_service.record_step_span(
+            db,
+            settings,
+            run=run,
+            step=completed_step,
+            trace=trace,
+            span_name="validation_result_interpretation",
+            input_json=step.input_json,
+            output_json=completed_step.output_json,
+            run_type="llm" if completion.model_provider != "stub" else "chain",
+        )
+    except (StructuredOutputError, RuntimeError, HTTPException) as exc:
+        if step is not None:
+            failed_step = ai_run_service.fail_step(db, step, error=str(exc))
+            langsmith_observability_service.record_step_span(
+                db,
+                settings,
+                run=run,
+                step=failed_step,
+                trace=trace,
+                span_name="validation_result_interpretation",
+                input_json=step.input_json,
+                error=str(exc),
+            )
+        ai_run_service.fail_run(db, run, error=str(exc))
+        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        raise
+    except Exception as exc:
+        if step is not None:
+            failed_step = ai_run_service.fail_step(db, step, error=str(exc))
+            langsmith_observability_service.record_step_span(
+                db,
+                settings,
+                run=run,
+                step=failed_step,
+                trace=trace,
+                span_name="validation_result_interpretation",
+                input_json=step.input_json,
+                error=str(exc),
+            )
+        ai_run_service.fail_run(db, run, error=str(exc))
+        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        raise ValidationWorkflowError("Validation result interpretation failed.") from exc
+
+    run = ai_run_service.complete_run(
+        db,
+        run,
+        output_summary=interpretation.signal_summary[:1000],
+        total_tokens=completion.total_tokens,
+        total_cost=completion.total_cost,
+        model_provider=completion.model_provider,
+        model_name=completion.model_name,
+    )
+    interpretation.ai_run_id = run.id
+    langsmith_observability_service.attach_run_trace(db, run, trace.trace_id, trace.trace_url)
+    langsmith_observability_service.complete_trace(
+        settings,
+        trace,
+        output_summary=interpretation.signal_summary[:1000],
+        metrics={
+            "proposed_confidence_delta": float(interpretation.proposed_confidence_delta),
+            "decision_recommendation": interpretation.decision_recommendation,
+        },
+    )
     governance_service.record_audit_event(
         db,
         auth,
-        event_type="validation_mission_interpreted",
-        actor_type="user",
+        event_type="validation_results_interpreted",
+        actor_type="agent",
         project_id=project_id,
-        entity_type="experiment",
-        entity_id=mission.experiment_id or mission.id,
+        entity_type="validation_interpretation",
+        entity_id=interpretation.id,
         risk_level="medium",
-        summary="Validation mission results were interpreted.",
-        metadata={"validation_mission_id": str(mission.id)},
+        summary="Validation notes interpreted and project updates proposed.",
+        metadata={
+            "validation_mission_id": str(mission.id),
+            "approval_request_id": str(approval.id),
+        },
     )
     db.commit()
-    return _mission_to_read(db, mission)
+    db.refresh(interpretation)
+    db.refresh(run)
+    return ValidationInterpretationResult(
+        run=run,
+        step=completed_step,
+        mission=_mission_to_read(db, mission),
+        interpretation=ValidationResultInterpretationRead.model_validate(interpretation),
+        approval_request=approval,
+        model_provider=completion.model_provider,
+        model_name=completion.model_name,
+        used_stub=completion.used_stub,
+        total_tokens=completion.total_tokens,
+        total_cost=completion.total_cost,
+    )
 
 
 def generate_validation_plan(
@@ -876,6 +1088,47 @@ def _validation_plan_messages(
     ]
 
 
+def _validation_result_interpretation_messages(
+    project: Project,
+    mission: ValidationMission,
+    raw_notes: str,
+) -> list[ChatMessage]:
+    payload = {
+        "project_state": _project_state(project),
+        "validation_mission": {
+            "id": str(mission.id),
+            "mission_title": mission.mission_title,
+            "why_it_matters": mission.why_it_matters,
+            "target_user": mission.target_user,
+            "test_type": mission.test_type,
+            "success_criteria": mission.success_criteria,
+            "failure_criteria": mission.failure_criteria,
+        },
+        "raw_validation_notes": raw_notes,
+    }
+    return [
+        ChatMessage(
+            role="system",
+            content=(
+                "Interpret founder validation results skeptically. Extract only signals "
+                "supported by the notes. Focus on pain severity, current workaround, urgency, "
+                "willingness to pay, switching intent, objections, confidence change, and the "
+                "next decision. Do not overstate weak evidence. Recommend proceed only when "
+                "pain, urgency, and willingness-to-pay or switching signals are all strong. "
+                "Return JSON only. "
+                f"{UNTRUSTED_RETRIEVED_CONTENT_RULE}"
+            ),
+        ),
+        ChatMessage(
+            role="user",
+            content=(
+                "Return a validation result interpretation as JSON only.\n\n"
+                f"{json.dumps(payload, indent=2, sort_keys=True)}"
+            ),
+        ),
+    ]
+
+
 def _fallback_assumption_extraction(project: Project) -> AssumptionExtractionDraft:
     project_label = project.name or "this project"
     return AssumptionExtractionDraft(
@@ -945,6 +1198,124 @@ def _fallback_assumption_extraction(project: Project) -> AssumptionExtractionDra
                 mitigation="Validate a repeated urgent workflow before broadening scope.",
             ),
         ],
+    )
+
+
+def _fallback_validation_interpretation(
+    mission: ValidationMission,
+    raw_notes: str,
+) -> ValidationResultInterpretationDraft:
+    lowered = raw_notes.casefold()
+    positive_terms = (
+        "pay",
+        "paid",
+        "pilot",
+        "urgent",
+        "pain",
+        "painful",
+        "switch",
+        "trial",
+        "yes",
+        "interested",
+    )
+    negative_terms = (
+        "free",
+        "not pay",
+        "no budget",
+        "not urgent",
+        "happy with",
+        "declined",
+        "wouldn't",
+        "would not",
+    )
+    positive_count = sum(1 for term in positive_terms if term in lowered)
+    negative_count = sum(1 for term in negative_terms if term in lowered)
+
+    if positive_count >= negative_count + 3:
+        pain = "high"
+        urgency = "high"
+        willingness = "strong" if "pay" in lowered or "paid" in lowered else "medium"
+        switching = "strong" if "switch" in lowered or "pilot" in lowered else "medium"
+        confidence_change = "increase"
+        confidence_delta = 0.18
+        status_value = "validated"
+        decision = "continue_research" if willingness != "strong" else "proceed"
+        signal_summary = "Strong validation signal with meaningful pain and action intent."
+        strengthened = [
+            "Target users appear to experience the problem with enough urgency to keep testing.",
+            "The notes contain a concrete signal that the mission assumption may be true.",
+        ]
+        weakened = [
+            "The result still needs more evidence before expanding beyond this wedge.",
+        ]
+        next_action = (
+            "If willingness-to-pay was explicit, prepare a narrow pilot. Otherwise run a "
+            "pricing-specific follow-up test before building."
+        )
+    elif negative_count > positive_count:
+        pain = "low"
+        urgency = "low"
+        willingness = "weak"
+        switching = "weak"
+        confidence_change = "decrease"
+        confidence_delta = -0.18
+        status_value = "invalidated"
+        decision = "pivot"
+        signal_summary = "Weak validation signal; the notes do not support the current mission."
+        strengthened = ["The test clarified where the current thesis is weak."]
+        weakened = [
+            "The notes suggest low urgency, weak willingness to pay, or satisfaction "
+            "with existing alternatives.",
+        ]
+        next_action = (
+            "Do not build the current version. Revisit the wedge or run a sharper test with "
+            "a better-qualified respondent profile."
+        )
+    else:
+        pain = "medium" if positive_count > 0 else "low"
+        urgency = "medium" if positive_count > 0 else "low"
+        willingness = "weak"
+        switching = "weak"
+        confidence_change = "no_change"
+        confidence_delta = 0.0
+        status_value = "inconclusive"
+        decision = "continue_research"
+        signal_summary = "Mixed or incomplete validation signal."
+        strengthened = [
+            "The notes contain some useful learning about the target user or current workaround.",
+        ]
+        weakened = [
+            "The result does not yet prove willingness to pay or a strong switching trigger.",
+        ]
+        next_action = (
+            "Run a tighter follow-up test focused on willingness to pay, switching behavior, "
+            "or the clearest objection."
+        )
+
+    quotes = _extract_quotes(raw_notes)
+    objections = _extract_objections(raw_notes)
+    return ValidationResultInterpretationDraft(
+        signal_summary=signal_summary,
+        what_strengthened=strengthened,
+        what_weakened=weakened,
+        signal={
+            "pain_severity": pain,
+            "current_workaround": _fallback_current_workaround(raw_notes),
+            "urgency": urgency,
+            "willingness_to_pay": willingness,
+            "switching_signal": switching,
+            "objections": objections,
+            "quotes": quotes,
+            "confidence_change": confidence_change,
+            "recommended_next_action": next_action,
+        },
+        confidence_rationale=(
+            "This interpretation is based on the validation notes and mission criteria, not "
+            "on general market assumptions."
+        ),
+        proposed_confidence_delta=confidence_delta,
+        proposed_assumption_status=status_value,
+        decision_recommendation=decision,
     )
 
 
@@ -1027,7 +1398,7 @@ def _fallback_validation_plan_item(assumption: Assumption) -> ValidationPlanDraf
 def _fallback_completion(
     settings: Settings,
     messages: list[ChatMessage],
-    draft: AssumptionExtractionDraft | ValidationPlanSetDraft,
+    draft: AssumptionExtractionDraft | ValidationPlanSetDraft | ValidationResultInterpretationDraft,
     fallback_name: str,
     error: BaseException | None = None,
 ) -> LLMCompletion:
@@ -1309,6 +1680,221 @@ def _write_validation_missions(
     return missions
 
 
+def _interpretation_notes(
+    db: Session,
+    mission: ValidationMission,
+    payload: ValidationResultInterpretationCreate | None,
+) -> str:
+    parts: list[str] = []
+    if payload and payload.raw_notes:
+        parts.append(payload.raw_notes.strip())
+    include_logged = payload.include_logged_results if payload is not None else True
+    if include_logged and mission.experiment_id is not None:
+        results = list(
+            db.scalars(
+                select(ExperimentResult)
+                .where(
+                    ExperimentResult.workspace_id == mission.workspace_id,
+                    ExperimentResult.project_id == mission.project_id,
+                    ExperimentResult.experiment_id == mission.experiment_id,
+                )
+                .order_by(ExperimentResult.created_at)
+            )
+        )
+        for index, result in enumerate(results, start=1):
+            parts.append(
+                "\n".join(
+                    item
+                    for item in [
+                        f"Logged result {index}: {result.result_summary}",
+                        f"Outcome: {result.outcome}",
+                        f"Confidence delta: {result.confidence_delta}",
+                        f"Raw notes: {result.raw_notes}" if result.raw_notes else "",
+                    ]
+                    if item
+                )
+            )
+    return "\n\n".join(part for part in parts if part).strip()
+
+
+def _write_validation_interpretation(
+    db: Session,
+    auth: AuthContext,
+    mission: ValidationMission,
+    run: AIRun,
+    raw_notes: str,
+    draft: ValidationResultInterpretationDraft,
+) -> ValidationResultInterpretation:
+    signal = draft.signal
+    proposed_updates = _validation_interpretation_proposed_updates(mission, draft)
+    interpretation = ValidationResultInterpretation(
+        workspace_id=auth.workspace_id,
+        project_id=mission.project_id,
+        mission_id=mission.id,
+        experiment_id=mission.experiment_id,
+        assumption_id=mission.assumption_id,
+        ai_run_id=run.id,
+        raw_notes=raw_notes,
+        signal_summary=draft.signal_summary,
+        what_strengthened=draft.what_strengthened,
+        what_weakened=draft.what_weakened,
+        pain_severity=signal.pain_severity,
+        current_workaround=signal.current_workaround,
+        urgency=signal.urgency,
+        willingness_to_pay=signal.willingness_to_pay,
+        switching_signal=signal.switching_signal,
+        objections=signal.objections,
+        quotes=signal.quotes,
+        confidence_change=signal.confidence_change,
+        confidence_rationale=draft.confidence_rationale,
+        recommended_next_action=signal.recommended_next_action,
+        decision_recommendation=draft.decision_recommendation,
+        proposed_confidence_delta=_decimal_score(draft.proposed_confidence_delta) or Decimal("0"),
+        proposed_assumption_status=draft.proposed_assumption_status,
+        proposed_updates=proposed_updates,
+        created_by=auth.user_id,
+    )
+    db.add(interpretation)
+    return interpretation
+
+
+def _validation_interpretation_proposed_updates(
+    mission: ValidationMission,
+    draft: ValidationResultInterpretationDraft,
+) -> dict[str, Any]:
+    return {
+        "validation_mission_id": str(mission.id),
+        "experiment_id": str(mission.experiment_id) if mission.experiment_id else None,
+        "assumption_id": str(mission.assumption_id),
+        "confidence_change": draft.signal.confidence_change,
+        "proposed_confidence_delta": round(draft.proposed_confidence_delta, 4),
+        "proposed_assumption_status": draft.proposed_assumption_status,
+        "decision_recommendation": draft.decision_recommendation,
+        "recommended_next_action": draft.signal.recommended_next_action,
+        "signal_summary": draft.signal_summary,
+        "thesis_evolution_event": {
+            "event_type": "validation_blocker",
+            "title": "Validation results interpreted",
+            "change_summary": draft.signal_summary,
+            "reason": draft.confidence_rationale,
+        },
+    }
+
+
+def _create_validation_interpretation_approval(
+    db: Session,
+    auth: AuthContext,
+    interpretation: ValidationResultInterpretation,
+) -> ApprovalRequest:
+    return governance_service.create_approval_request(
+        db,
+        auth,
+        project_id=interpretation.project_id,
+        request_type="memory_update",
+        requested_by="agent",
+        risk_level="medium",
+        summary=(
+            "Apply interpreted validation signal to assumption confidence, mission history, "
+            "and the decision trail."
+        ),
+        proposed_change=interpretation.proposed_updates,
+        entity_type="validation_interpretation",
+        entity_id=interpretation.id,
+    )
+
+
+def apply_validation_interpretation_approval(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    approval_id: uuid.UUID,
+) -> ApprovalRequest:
+    approval = db.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.id == approval_id,
+            ApprovalRequest.workspace_id == auth.workspace_id,
+            ApprovalRequest.project_id == project_id,
+            ApprovalRequest.entity_type == "validation_interpretation",
+        )
+    )
+    if approval is None or approval.entity_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Validation interpretation approval not found.",
+        )
+    interpretation = _get_validation_interpretation(db, auth, project_id, approval.entity_id)
+    approval = governance_service.approve_approval_request(db, auth, project_id, approval_id)
+    project = project_service.get_project(db, auth, project_id)
+    if interpretation.assumption_id is not None:
+        assumption = get_assumption(db, auth, project_id, interpretation.assumption_id)
+        current_score = assumption.confidence_score or Decimal("0.5")
+        assumption.confidence_score = _clamp_decimal(
+            current_score + interpretation.proposed_confidence_delta
+        )
+        if interpretation.proposed_assumption_status:
+            assumption.status = interpretation.proposed_assumption_status
+    mission = _get_validation_mission(db, auth, project_id, interpretation.mission_id)
+    mission.status = "interpreted"
+    _recalculate_project_confidence(db, auth, project_id)
+    db.add(
+        ThesisEvolutionEvent(
+            workspace_id=auth.workspace_id,
+            project_id=project_id,
+            event_type="validation_blocker",
+            title="Validation results interpreted",
+            change_summary=interpretation.signal_summary,
+            reason=interpretation.confidence_rationale,
+            source_entity_type="validation_interpretation",
+            source_entity_id=interpretation.id,
+            origin="agent",
+            created_by=auth.user_id,
+        )
+    )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="validation_interpretation_updates_applied",
+        actor_type="user",
+        project_id=project.id,
+        entity_type="validation_interpretation",
+        entity_id=interpretation.id,
+        risk_level="medium",
+        summary="Approved validation interpretation updates were applied.",
+        metadata={
+            "approval_request_id": str(approval.id),
+            "assumption_id": str(interpretation.assumption_id)
+            if interpretation.assumption_id
+            else None,
+            "confidence_delta": str(interpretation.proposed_confidence_delta),
+            "decision_recommendation": interpretation.decision_recommendation,
+        },
+    )
+    db.commit()
+    db.refresh(approval)
+    return approval
+
+
+def _get_validation_interpretation(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    interpretation_id: uuid.UUID,
+) -> ValidationResultInterpretation:
+    interpretation = db.scalar(
+        select(ValidationResultInterpretation).where(
+            ValidationResultInterpretation.id == interpretation_id,
+            ValidationResultInterpretation.workspace_id == auth.workspace_id,
+            ValidationResultInterpretation.project_id == project_id,
+        )
+    )
+    if interpretation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Validation interpretation not found.",
+        )
+    return interpretation
+
+
 def _get_validation_mission(
     db: Session,
     auth: AuthContext,
@@ -1353,14 +1939,25 @@ def _mission_to_read(db: Session, mission: ValidationMission) -> ValidationMissi
             "status": display_status,
             "created_at": mission.created_at,
             "updated_at": mission.updated_at,
+            "latest_interpretation": _latest_validation_interpretation(db, mission),
         }
     )
 
 
 def _mission_result_count(db: Session, mission: ValidationMission) -> int:
+    interpretation_count = int(
+        db.scalar(
+            select(func.count(ValidationResultInterpretation.id)).where(
+                ValidationResultInterpretation.workspace_id == mission.workspace_id,
+                ValidationResultInterpretation.project_id == mission.project_id,
+                ValidationResultInterpretation.mission_id == mission.id,
+            )
+        )
+        or 0
+    )
     if mission.experiment_id is None:
-        return 0
-    return int(
+        return interpretation_count
+    experiment_result_count = int(
         db.scalar(
             select(func.count(ExperimentResult.id)).where(
                 ExperimentResult.workspace_id == mission.workspace_id,
@@ -1370,6 +1967,26 @@ def _mission_result_count(db: Session, mission: ValidationMission) -> int:
         )
         or 0
     )
+    return experiment_result_count + interpretation_count
+
+
+def _latest_validation_interpretation(
+    db: Session,
+    mission: ValidationMission,
+) -> ValidationResultInterpretationRead | None:
+    interpretation = db.scalar(
+        select(ValidationResultInterpretation)
+        .where(
+            ValidationResultInterpretation.workspace_id == mission.workspace_id,
+            ValidationResultInterpretation.project_id == mission.project_id,
+            ValidationResultInterpretation.mission_id == mission.id,
+        )
+        .order_by(ValidationResultInterpretation.created_at.desc())
+        .limit(1)
+    )
+    if interpretation is None:
+        return None
+    return ValidationResultInterpretationRead.model_validate(interpretation)
 
 
 def _mission_why_it_matters(assumption: Assumption) -> str:
@@ -1547,6 +2164,51 @@ def _result_delta(payload: ExperimentResultCreate) -> Decimal:
         "inconclusive": Decimal("0.00"),
     }
     return defaults[payload.outcome]
+
+
+def _extract_quotes(raw_notes: str) -> list[str]:
+    quoted: list[str] = []
+    fragments = raw_notes.replace("“", '"').replace("”", '"').split('"')
+    for index, fragment in enumerate(fragments):
+        if index % 2 == 1:
+            stripped = fragment.strip()
+            if stripped:
+                quoted.append(_shorten(stripped, 240))
+    if quoted:
+        return quoted[:5]
+    lines = [
+        _shorten(line.strip("-• \t"), 240)
+        for line in raw_notes.splitlines()
+        if len(line.strip()) >= 20
+    ]
+    return lines[:3]
+
+
+def _extract_objections(raw_notes: str) -> list[str]:
+    objections: list[str] = []
+    for line in raw_notes.splitlines():
+        lowered = line.casefold()
+        if any(term in lowered for term in ("objection", "concern", "worried", "but ", "however")):
+            objections.append(_shorten(line.strip("-• \t"), 240))
+    if objections:
+        return objections[:5]
+    lowered = raw_notes.casefold()
+    defaults: list[str] = []
+    if "free" in lowered:
+        defaults.append("Existing free alternatives may cap willingness to pay.")
+    if "budget" in lowered:
+        defaults.append("Budget ownership or willingness to pay is unclear.")
+    if "switch" in lowered and "not" in lowered:
+        defaults.append("Switching from the current workaround may be difficult.")
+    return defaults[:5]
+
+
+def _fallback_current_workaround(raw_notes: str) -> str:
+    for line in raw_notes.splitlines():
+        lowered = line.casefold()
+        if "workaround" in lowered or "today" in lowered or "currently" in lowered:
+            return _shorten(line.strip("-• \t"), 500)
+    return "The current workaround was not clearly isolated in the notes."
 
 
 def _assumption_status_for_outcome(outcome: str) -> str:

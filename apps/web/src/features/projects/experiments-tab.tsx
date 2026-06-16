@@ -62,6 +62,7 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
     });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
+    await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "approvals"] });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "workflows"] });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "mvp"] });
   };
@@ -75,13 +76,18 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
     onSuccess: invalidate,
   });
   const interpretMissionMutation = useMutation({
-    mutationFn: (missionId: string) => interpretValidationMission(projectId, missionId),
+    mutationFn: ({ missionId, rawNotes }: { missionId: string; rawNotes?: string }) =>
+      interpretValidationMission(projectId, missionId, {
+        include_logged_results: true,
+        raw_notes: rawNotes?.trim() || undefined,
+      }),
     onSuccess: invalidate,
   });
 
   const experiments = generateMutation.data?.experiments ?? experimentsQuery.data ?? [];
   const missions = generateMutation.data?.missions ?? missionsQuery.data ?? [];
   const currentMission =
+    interpretMissionMutation.data?.mission ??
     generateMutation.data?.missions?.[0] ?? currentMissionQuery.data ?? missions[0] ?? null;
   const assumptions = assumptionsQuery.data ?? [];
   const validationPlanArtifact =
@@ -109,6 +115,7 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
     missionsQuery.error ??
     currentMissionQuery.error ??
     generateMutation.error ??
+    interpretMissionMutation.error ??
     null;
 
   function runPrimaryAction() {
@@ -121,7 +128,10 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
       return;
     }
     if (currentMission.status === "results_logged") {
-      interpretMissionMutation.mutate(currentMission.id);
+      document.getElementById("interpret-results-panel")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
       return;
     }
     if (currentMission.status === "interpreted" || currentMission.status === "closed") {
@@ -225,7 +235,14 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
         <>
           <ValidationMissionPanel
             mission={currentMission}
+            onInterpret={(rawNotes) =>
+              interpretMissionMutation.mutate({
+                missionId: currentMission.id,
+                rawNotes,
+              })
+            }
             onPrimaryAction={runPrimaryAction}
+            interpretationPending={interpretMissionMutation.isPending}
             pending={primaryActionPending}
           />
 
@@ -311,11 +328,15 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
 }
 
 function ValidationMissionPanel({
+  interpretationPending,
   mission,
+  onInterpret,
   onPrimaryAction,
   pending,
 }: {
+  interpretationPending: boolean;
   mission: ValidationMission;
+  onInterpret: (rawNotes: string) => void;
   onPrimaryAction: () => void;
   pending: boolean;
 }) {
@@ -411,6 +432,12 @@ function ValidationMissionPanel({
         <div className="mt-5 border-t border-border pt-4">
           <ResultInterpretationSummary mission={mission} />
         </div>
+
+        <InterpretResultsForm
+          disabled={interpretationPending}
+          mission={mission}
+          onInterpret={onInterpret}
+        />
       </div>
     </DomainPanel>
   );
@@ -447,14 +474,48 @@ function MissionAssetGrid({ assets }: { assets: ValidationMission["assets"] }) {
 }
 
 function ResultInterpretationSummary({ mission }: { mission: ValidationMission }) {
-  if (mission.status === "interpreted") {
+  const interpretation = mission.latest_interpretation;
+  if (interpretation) {
     return (
       <>
         <h4 className="text-xs font-medium text-muted-foreground">Result interpretation</h4>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Results have been interpreted for this mission. Review the decision page before
-          proceeding, pivoting, pausing, killing, or continuing research.
-        </p>
+        <div className="mt-3 rounded-md border border-border bg-background p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold">{interpretation.signal_summary}</p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                {interpretation.confidence_rationale}
+              </p>
+            </div>
+            <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+              {formatLabel(interpretation.decision_recommendation)}
+            </span>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-4">
+            <Block title="Pain" value={formatLabel(interpretation.pain_severity)} />
+            <Block title="Urgency" value={formatLabel(interpretation.urgency)} />
+            <Block
+              title="Willingness to pay"
+              value={formatLabel(interpretation.willingness_to_pay)}
+            />
+            <Block title="Switching" value={formatLabel(interpretation.switching_signal)} />
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <Block
+              title="What strengthened"
+              value={markdownBullets(interpretation.what_strengthened)}
+            />
+            <Block title="What weakened" value={markdownBullets(interpretation.what_weakened)} />
+            <Block title="Current workaround" value={interpretation.current_workaround} />
+            <Block title="Recommended next action" value={interpretation.recommended_next_action} />
+          </div>
+          {interpretation.approval_request_id ? (
+            <p className="mt-4 rounded-md bg-warning-muted px-3 py-2 text-xs leading-5 text-warning-foreground">
+              Confidence and decision-trail updates are pending human approval in the
+              Overview governance panel.
+            </p>
+          ) : null}
+        </div>
       </>
     );
   }
@@ -477,6 +538,60 @@ function ResultInterpretationSummary({ mission }: { mission: ValidationMission }
         signal against the success and failure criteria.
       </p>
     </>
+  );
+}
+
+function InterpretResultsForm({
+  disabled,
+  mission,
+  onInterpret,
+}: {
+  disabled: boolean;
+  mission: ValidationMission;
+  onInterpret: (rawNotes: string) => void;
+}) {
+  const [rawNotes, setRawNotes] = useState("");
+  const canUseLoggedResults = mission.result_count > 0;
+  const canSubmit = rawNotes.trim().length > 0 || canUseLoggedResults;
+
+  return (
+    <form
+      className="mt-5 rounded-md border border-border bg-background p-4"
+      id="interpret-results-panel"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onInterpret(rawNotes);
+      }}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h4 className="text-sm font-semibold">Interpret validation notes</h4>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Paste interview notes, survey responses, landing page metrics, objections, or
+            pricing reactions. Thesys will extract signal and propose confidence updates for
+            approval.
+          </p>
+        </div>
+        {canUseLoggedResults ? (
+          <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+            Logged results included
+          </span>
+        ) : null}
+      </div>
+      <label className="mt-4 block">
+        <span className="text-sm font-medium">Raw notes or metrics</span>
+        <textarea
+          className="mt-2 min-h-28 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+          onChange={(event) => setRawNotes(event.target.value)}
+          placeholder="Example: 5 coaches interviewed. 4 described missed check-ins as painful. 2 asked for a pilot. 1 said they would pay $49/mo. Main objection: setup time."
+          value={rawNotes}
+        />
+      </label>
+      <Button className="mt-4" disabled={disabled || !canSubmit} type="submit">
+        <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+        {disabled ? "Interpreting..." : "Interpret results"}
+      </Button>
+    </form>
   );
 }
 
@@ -885,6 +1000,10 @@ function resultNotes({
     `Recommendation change: ${formatLabel(recommendationChange)}`,
   ].filter(Boolean);
   return parts.length > 0 ? parts.join("\n\n") : undefined;
+}
+
+function markdownBullets(values: string[]) {
+  return values.length > 0 ? values.map((value) => `- ${value}`).join("\n") : "Not found";
 }
 
 function Block({ title, value }: { title: string; value: string | null }) {

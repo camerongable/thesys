@@ -144,6 +144,100 @@ class ValidationMission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
 
 
+class ValidationResultInterpretation(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "validation_result_interpretations"
+    __table_args__ = (
+        CheckConstraint(
+            "pain_severity in ('none','low','medium','high')",
+            name="ck_validation_result_interpretations_pain_severity",
+        ),
+        CheckConstraint(
+            "urgency in ('low','medium','high')",
+            name="ck_validation_result_interpretations_urgency",
+        ),
+        CheckConstraint(
+            "willingness_to_pay in ('none','weak','medium','strong')",
+            name="ck_validation_result_interpretations_willingness_to_pay",
+        ),
+        CheckConstraint(
+            "switching_signal in ('none','weak','medium','strong')",
+            name="ck_validation_result_interpretations_switching_signal",
+        ),
+        CheckConstraint(
+            "confidence_change in ('decrease','no_change','increase')",
+            name="ck_validation_result_interpretations_confidence_change",
+        ),
+        CheckConstraint(
+            "decision_recommendation in "
+            "('proceed','pivot','pause','kill','continue_research')",
+            name="ck_validation_result_interpretations_decision_recommendation",
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    mission_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("validation_missions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    experiment_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("experiments.id", ondelete="SET NULL"),
+        index=True,
+    )
+    assumption_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("assumptions.id", ondelete="SET NULL"),
+        index=True,
+    )
+    ai_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("ai_runs.id", ondelete="SET NULL"),
+        index=True,
+    )
+    approval_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("approval_requests.id", ondelete="SET NULL"),
+        index=True,
+    )
+    raw_notes: Mapped[str] = mapped_column(Text, nullable=False)
+    signal_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    what_strengthened: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    what_weakened: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    pain_severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    current_workaround: Mapped[str] = mapped_column(Text, nullable=False)
+    urgency: Mapped[str] = mapped_column(String(20), nullable=False)
+    willingness_to_pay: Mapped[str] = mapped_column(String(20), nullable=False)
+    switching_signal: Mapped[str] = mapped_column(String(20), nullable=False)
+    objections: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    quotes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    confidence_change: Mapped[str] = mapped_column(String(20), nullable=False)
+    confidence_rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    recommended_next_action: Mapped[str] = mapped_column(Text, nullable=False)
+    decision_recommendation: Mapped[str] = mapped_column(String(40), nullable=False)
+    proposed_confidence_delta: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    proposed_assumption_status: Mapped[str | None] = mapped_column(String(30))
+    proposed_updates: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+
 class Decision(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "decisions"
     __table_args__ = (

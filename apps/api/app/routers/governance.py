@@ -16,7 +16,7 @@ from app.schemas.governance import (
     AuditEventListRead,
     AuditEventRead,
 )
-from app.services import governance_service, tool_service
+from app.services import governance_service, tool_service, validation_service
 
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["governance"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -61,6 +61,13 @@ def approve_project_approval(
     if approval.entity_type == "tool_invocation" and approval.entity_id is not None:
         tool_service.approve_tool_invocation(db, auth, project_id, approval.entity_id)
         db.refresh(approval)
+    elif approval.entity_type == "validation_interpretation":
+        approval = validation_service.apply_validation_interpretation_approval(
+            db,
+            auth,
+            project_id,
+            approval_id,
+        )
     else:
         approval = governance_service.approve_approval_request(db, auth, project_id, approval_id)
     return ApprovalRequestActionRead(approval=serialize_approval(approval))

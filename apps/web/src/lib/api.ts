@@ -535,11 +535,50 @@ export type ValidationMissionStatus =
   | "results_logged"
   | "interpreted"
   | "closed";
+export type ValidationSignalStrength = "none" | "weak" | "medium" | "strong";
+export type ValidationSignalLevel = "none" | "low" | "medium" | "high";
+export type ValidationConfidenceChange = "decrease" | "no_change" | "increase";
+export type DecisionRecommendation =
+  | "proceed"
+  | "pivot"
+  | "pause"
+  | "kill"
+  | "continue_research";
 
 export type ValidationAsset = {
   type: string;
   title: string;
   content: string;
+};
+
+export type ValidationResultInterpretation = {
+  id: string;
+  project_id: string;
+  mission_id: string;
+  experiment_id: string | null;
+  assumption_id: string | null;
+  ai_run_id: string | null;
+  approval_request_id: string | null;
+  raw_notes: string;
+  signal_summary: string;
+  what_strengthened: string[];
+  what_weakened: string[];
+  pain_severity: ValidationSignalLevel;
+  current_workaround: string;
+  urgency: "low" | "medium" | "high";
+  willingness_to_pay: ValidationSignalStrength;
+  switching_signal: ValidationSignalStrength;
+  objections: string[];
+  quotes: string[];
+  confidence_change: ValidationConfidenceChange;
+  confidence_rationale: string;
+  recommended_next_action: string;
+  decision_recommendation: DecisionRecommendation;
+  proposed_confidence_delta: string;
+  proposed_assumption_status: Assumption["status"] | null;
+  proposed_updates: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
 };
 
 export type ValidationMission = {
@@ -559,6 +598,7 @@ export type ValidationMission = {
   status: ValidationMissionStatus;
   created_at: string;
   updated_at: string;
+  latest_interpretation: ValidationResultInterpretation | null;
 };
 
 export type GenerateValidationPlanInput = {
@@ -592,6 +632,25 @@ export type LogExperimentResultResult = {
   experiment: Experiment;
   assumption: Assumption | null;
   project_confidence_score: string | null;
+};
+
+export type InterpretValidationMissionInput = {
+  raw_notes?: string;
+  include_logged_results?: boolean;
+};
+
+export type InterpretValidationMissionResult = {
+  ai_run_id: string;
+  ai_step_id: string;
+  prompt_version: string;
+  model_provider: string;
+  model_name: string;
+  used_stub: boolean;
+  total_tokens: number | null;
+  total_cost: string | null;
+  mission: ValidationMission;
+  interpretation: ValidationResultInterpretation;
+  approval_request_id: string | null;
 };
 
 export type DecisionType =
@@ -1848,11 +1907,16 @@ export function startValidationMission(projectId: string, missionId: string) {
   );
 }
 
-export function interpretValidationMission(projectId: string, missionId: string) {
-  return apiFetch<ValidationMission>(
+export function interpretValidationMission(
+  projectId: string,
+  missionId: string,
+  input: InterpretValidationMissionInput = {},
+) {
+  return apiFetch<InterpretValidationMissionResult>(
     `/api/projects/${projectId}/experiments/missions/${missionId}/interpret`,
     {
       method: "POST",
+      body: JSON.stringify(input),
     },
   );
 }

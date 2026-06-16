@@ -9,13 +9,16 @@ from app.core.config import get_settings
 from app.db.models import (
     AIRun,
     AIStep,
+    ApprovalRequest,
     Artifact,
     ArtifactVersion,
     Decision,
     DecisionLink,
     Experiment,
     ExperimentResult,
+    ThesisEvolutionEvent,
     ValidationMission,
+    ValidationResultInterpretation,
 )
 
 
@@ -217,7 +220,103 @@ def test_generate_validation_plan_and_log_result_updates_confidence(
         f"/api/projects/{project_id}/experiments/missions/{mission['id']}/interpret"
     )
     assert interpret_response.status_code == 200
-    assert interpret_response.json()["status"] == "interpreted"
+    interpret_body = interpret_response.json()
+    assert interpret_body["mission"]["status"] == "interpreted"
+    assert interpret_body["interpretation"]["signal_summary"]
+    assert (
+        interpret_body["interpretation"]["approval_request_id"]
+        == interpret_body["approval_request_id"]
+    )
+    assert interpret_body["interpretation"]["confidence_change"] in {
+        "increase",
+        "no_change",
+        "decrease",
+    }
+    assert db_session.scalar(select(ValidationResultInterpretation)) is not None
+    approval = db_session.scalar(select(ApprovalRequest))
+    assert approval is not None
+    assert approval.request_type == "memory_update"
+    assert approval.entity_type == "validation_interpretation"
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/approvals/{interpret_body['approval_request_id']}/approve"
+    )
+    assert approve_response.status_code == 200
+    assert approve_response.json()["approval"]["status"] == "approved"
+    assert db_session.scalar(select(ThesisEvolutionEvent)) is not None
+
+
+def test_interpret_validation_notes_creates_pending_memory_update(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    create_response = client.post("/api/projects", json={"name": "Raw notes interpretation"})
+    project_id = create_response.json()["id"]
+    extract_response = client.post(f"/api/projects/{project_id}/assumptions/extract")
+    assumption = extract_response.json()["assumptions"][0]
+    old_confidence = float(assumption["confidence_score"])
+    plan_response = client.post(
+        f"/api/projects/{project_id}/experiments/validation-plan",
+        json={"assumption_ids": [assumption["id"]], "max_plans": 1},
+    )
+    mission = plan_response.json()["missions"][0]
+
+    start_response = client.post(
+        f"/api/projects/{project_id}/experiments/missions/{mission['id']}/start"
+    )
+    assert start_response.status_code == 200
+
+    interpret_response = client.post(
+        f"/api/projects/{project_id}/experiments/missions/{mission['id']}/interpret",
+        json={
+            "raw_notes": (
+                "Interviewed 5 target users. 4 described the problem as painful and "
+                "urgent. 3 asked for a pilot. 2 said they would pay $49/month. "
+                "Main objection: setup time."
+            )
+        },
+    )
+
+    assert interpret_response.status_code == 200
+    body = interpret_response.json()
+    interpretation = body["interpretation"]
+    assert body["used_stub"] is True
+    assert body["mission"]["status"] == "interpreted"
+    assert body["mission"]["result_count"] == 1
+    assert body["mission"]["latest_interpretation"]["id"] == interpretation["id"]
+    assert interpretation["pain_severity"] == "high"
+    assert interpretation["willingness_to_pay"] == "strong"
+    assert interpretation["recommended_next_action"]
+    assert interpretation["proposed_updates"]["assumption_id"] == assumption["id"]
+    assert body["approval_request_id"]
+
+    unchanged_assumption = client.get(f"/api/projects/{project_id}/assumptions").json()[
+        "assumptions"
+    ][0]
+    assert float(unchanged_assumption["confidence_score"]) == old_confidence
+
+    approval = db_session.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.id == uuid.UUID(body["approval_request_id"])
+        )
+    )
+    assert approval is not None
+    assert approval.status == "pending"
+    assert approval.proposed_change["decision_recommendation"] in {
+        "proceed",
+        "continue_research",
+    }
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/approvals/{body['approval_request_id']}/approve"
+    )
+    assert approve_response.status_code == 200
+    assert approve_response.json()["approval"]["status"] == "approved"
+    updated_assumption = client.get(f"/api/projects/{project_id}/assumptions").json()[
+        "assumptions"
+    ][0]
+    assert float(updated_assumption["confidence_score"]) > old_confidence
+    assert updated_assumption["status"] == "validated"
 
 
 def test_validation_plan_can_force_local_fallback_with_always_policy(

@@ -2,11 +2,10 @@
 
 ## Current Phase
 
-V1 Sprint 23 reshapes validation around a guided Validation Mission and current
-proof. Thesys can now create a mission from the top decision blocker, show the
-mission purpose, target user, steps, criteria, assets, progress, result logging,
-and interpretation, then route the user into decision review once results have
-been interpreted.
+V1 Sprint 24 adds structured result interpretation to the validation loop.
+Thesys can now turn pasted validation notes or logged results into extracted
+signals, a decision recommendation, proposed confidence updates, and a pending
+human approval before major project-state changes are applied.
 Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
 multi-segment workflow packs remain V2 scope.
 
@@ -1243,12 +1242,52 @@ Checks run:
 - [x] `curl -fsS http://localhost:8000/health`
 - [x] `curl -I -fsS http://localhost:3000/projects`
 - [x] Browser QA in the Codex in-app browser after restarting containers:
+  created a disposable QA project, generated and started a validation mission,
+  pasted raw interview/pricing/workaround notes, confirmed the interpreted
+  signal summary, pain/urgency/WTP/switching fields, strengthened/weakened
+  bullets, recommended next action, and pending-approval copy, then approved the
+  pending memory update from Intelligence > Evidence review and confirmed the
+  governance panel cleared to 0 pending with audit events recorded.
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Browser QA in the Codex in-app browser after restarting containers:
   created a disposable QA project, extracted assumptions, generated a
   validation plan, opened `#validation-mission`, started the mission, logged a
   result, interpreted the result, and confirmed the final CTA routes to
   `#decisions`. Checked desktop and mobile mission-panel viewports for
   horizontal overflow.
 
+## V1 Sprint 24 Scope
+
+- [x] Add persisted `ValidationResultInterpretation` records linked to
+  project, mission, experiment, assumption, AI run, and approval request.
+- [x] Add Alembic migration for validation result interpretations.
+- [x] Replace the status-only mission interpretation endpoint with a structured
+  interpretation workflow that accepts pasted validation notes or uses logged
+  results.
+- [x] Extract pain severity, urgency, willingness-to-pay signal, switching
+  signal, objections, quotes, confidence change, next action, and decision
+  recommendation.
+- [x] Create a pending `memory_update` approval before applying major project
+  state changes.
+- [x] Apply approved interpretation updates to assumption confidence/status,
+  project confidence, audit trail, and thesis evolution.
+- [x] Show the latest interpretation inside the Validation Mission UI.
+- [x] Add a paste-notes interpretation form with a pending-approval message.
+- [x] Treat validation interpretations as decision evidence in overview
+  readiness/stage logic.
+
+## V1 Sprint 24 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_validation.py -q`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `cd apps/web && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/next typegen && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/tsc --noEmit`
+
 ## Next Work
 
-Begin V1 Sprint 24.
+Begin V1 Sprint 25.

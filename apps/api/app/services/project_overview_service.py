@@ -21,6 +21,7 @@ from app.db.models import (
     ExperimentResult,
     Project,
     Risk,
+    ValidationResultInterpretation,
 )
 from app.schemas.overview import (
     EvidenceHealthRead,
@@ -50,6 +51,7 @@ class _OverviewCounts:
     experiments: int
     running_experiments: int
     experiment_results: int
+    validation_interpretations: int
     decisions: int
     cited_claims: int
     unsupported_claims: int
@@ -169,7 +171,7 @@ def _project_stage(context: _OverviewContext) -> str:
         }:
             return "proceeding"
 
-    if counts.experiment_results > 0:
+    if counts.experiment_results > 0 or counts.validation_interpretations > 0:
         return "decision_ready"
     if counts.running_experiments > 0:
         return "experiment_running"
@@ -403,7 +405,12 @@ def _idea_readiness(context: _OverviewContext, recommended_action: str) -> IdeaR
     score = round((complete_count / len(items)) * 100)
     missing_items = [item for item in items if item.status != "complete"]
 
-    if counts.decisions > 0 or counts.experiment_results > 0:
+    has_decision_evidence = (
+        counts.decisions > 0
+        or counts.experiment_results > 0
+        or counts.validation_interpretations > 0
+    )
+    if has_decision_evidence:
         status = "decision_ready"
     elif counts.validation_plans > 0 or counts.experiments > 0:
         status = "ready_for_validation"
@@ -914,6 +921,7 @@ def _counts(db: Session, auth: AuthContext, project_id: uuid.UUID) -> _OverviewC
             ),
         ),
         experiment_results=_model_count(db, ExperimentResult, base_filter),
+        validation_interpretations=_model_count(db, ValidationResultInterpretation, base_filter),
         decisions=_model_count(db, Decision, base_filter),
         cited_claims=_count(
             db,

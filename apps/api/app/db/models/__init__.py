@@ -36,6 +36,7 @@ from app.db.models.validation import (
     Experiment,
     ExperimentResult,
     ValidationMission,
+    ValidationResultInterpretation,
 )
 
 __all__ = [
@@ -75,6 +76,7 @@ __all__ = [
     "UUIDPrimaryKeyMixin",
     "User",
     "ValidationMission",
+    "ValidationResultInterpretation",
     "WedgeOption",
     "Workspace",
     "WorkspaceMember",
