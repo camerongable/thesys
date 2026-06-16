@@ -19,6 +19,13 @@ from app.schemas.artifacts import (
 ExperimentStatus = Literal["planned", "running", "completed", "cancelled"]
 ExperimentOutcome = Literal["positive", "negative", "mixed", "inconclusive"]
 ExpectedSignalStrength = Literal["weak", "medium", "strong"]
+ValidationMissionStatus = Literal[
+    "planned",
+    "running",
+    "results_logged",
+    "interpreted",
+    "closed",
+]
 DecisionType = Literal[
     "build",
     "pivot",
@@ -139,19 +146,6 @@ class ExperimentListRead(BaseModel):
     experiments: list[ExperimentRead]
 
 
-class ValidationPlanGenerateRead(BaseModel):
-    ai_run_id: uuid.UUID
-    ai_step_id: uuid.UUID
-    prompt_version: str
-    model_provider: str
-    model_name: str
-    used_stub: bool
-    total_tokens: int | None
-    total_cost: Decimal | None
-    artifact: ArtifactRead
-    experiments: list[ExperimentRead]
-
-
 class ExperimentResultCreate(BaseModel):
     result_summary: str = Field(min_length=1, max_length=5000)
     outcome: ExperimentOutcome
@@ -164,6 +158,55 @@ class ExperimentResultCreateRead(BaseModel):
     experiment: ExperimentRead
     assumption: AssumptionRead | None
     project_confidence_score: Decimal | None
+
+
+class ValidationAssetRead(BaseModel):
+    type: str
+    title: str
+    content: str
+
+
+class ValidationMissionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    assumption_id: uuid.UUID
+    experiment_id: uuid.UUID | None
+    mission_title: str
+    why_it_matters: str
+    target_user: str
+    test_type: str
+    steps: list[str] = Field(default_factory=list)
+    success_criteria: str
+    failure_criteria: str
+    assets: list[ValidationAssetRead] = Field(default_factory=list)
+    result_count: int
+    status: ValidationMissionStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class ValidationMissionListRead(BaseModel):
+    missions: list[ValidationMissionRead]
+
+
+class CurrentValidationMissionRead(BaseModel):
+    mission: ValidationMissionRead | None
+
+
+class ValidationPlanGenerateRead(BaseModel):
+    ai_run_id: uuid.UUID
+    ai_step_id: uuid.UUID
+    prompt_version: str
+    model_provider: str
+    model_name: str
+    used_stub: bool
+    total_tokens: int | None
+    total_cost: Decimal | None
+    artifact: ArtifactRead
+    experiments: list[ExperimentRead]
+    missions: list[ValidationMissionRead] = Field(default_factory=list)
 
 
 class DecisionLinkRead(BaseModel):

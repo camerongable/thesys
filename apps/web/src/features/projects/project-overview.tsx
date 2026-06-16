@@ -357,7 +357,7 @@ export function ProjectOverview() {
                 ) : (
                   <RecordWorkspace
                     activeAnchor={activeAnchor}
-                    onOpenValidation={() => openWorkspace("Validation", "validation-tests")}
+                    onOpenValidation={() => openWorkspace("Validation", "validation-mission")}
                     overview={overview}
                     projectId={project.id}
                   />
@@ -568,11 +568,11 @@ function MobileWorkspaceAction({
           }
         : activeTab === "Validation"
           ? {
-              action: () => onOpenWorkspace("Validation", "validation-tests"),
-              button: "Open test bench",
-              description: "Run or log the one validation loop that can change the verdict.",
+              action: () => onOpenWorkspace("Validation", "validation-mission"),
+              button: "Open mission",
+              description: "Run or log the one proof that can change the verdict.",
               icon: Beaker,
-              title: "Test bench",
+              title: "Current proof",
             }
           : decisionReady
             ? {
@@ -583,8 +583,8 @@ function MobileWorkspaceAction({
                 title: "Decision record",
               }
             : {
-                action: () => onOpenWorkspace("Validation", "validation-tests"),
-                button: "Log validation result",
+                action: () => onOpenWorkspace("Validation", "validation-mission"),
+                button: "Log mission result",
                 description: "Record is guarded until validation evidence exists. Complete the proof first.",
                 icon: Beaker,
                 title: "Guardrail",
@@ -1423,13 +1423,13 @@ function ValidationWorkspace({
         action={
           <Button onClick={() => setDetailMode("tests")} type="button">
             <Beaker className="h-4 w-4" aria-hidden="true" />
-            Open test bench
+            Open mission
           </Button>
         }
-        description="Run or log the one blocker test that can change the project decision."
+        description="Run or log the current proof that can change the project decision."
         icon={<Beaker className="h-4 w-4 text-primary" aria-hidden="true" />}
-        question="Run the blocker test"
-        title="Validation"
+        question="Run the current proof"
+        title="Validation Mission"
       />
 
       <RiskiestAssumptionCard overview={overview} onAction={onAction} />
@@ -1439,9 +1439,9 @@ function ValidationWorkspace({
         description="Keep validation focused on the current blocker. Open one supporting surface only when you are ready to plan, log, or re-rank."
         options={[
           {
-            description: "Plan the active test and log real-world results.",
+            description: "Open the active proof, assets, steps, and result logging.",
             icon: Beaker,
-            label: "Test bench",
+            label: "Current proof",
             mode: "tests",
           },
           {
@@ -1451,16 +1451,16 @@ function ValidationWorkspace({
             mode: "blockers",
           },
         ]}
-        title="Validation workbench"
+        title="Proof path"
         onSelect={setDetailMode}
       />
 
       {detailMode ? (
         <ActiveWorkbenchPanel
           description={detailMode === "tests" ? "Plan or log the one validation loop that can change the verdict." : "Inspect the ranked beliefs only when the active blocker needs review."}
-          id={detailMode === "tests" ? "validation-tests" : undefined}
+          id={detailMode === "tests" ? "validation-mission" : undefined}
           onClose={() => setDetailMode(null)}
-          title={detailMode === "tests" ? "Test bench" : "Decision blockers"}
+          title={detailMode === "tests" ? "Current proof" : "Decision blockers"}
         >
           {detailMode === "tests" ? (
             <ExperimentsTab projectId={projectId} />

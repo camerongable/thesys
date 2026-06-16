@@ -35,6 +35,11 @@ def test_guide_context_and_recommendation_are_stage_aware(client: TestClient) ->
     assert validation["stage"] == "validation_plan_created"
     assert validation["active_validation_plan_id"] is not None
     assert validation["available_actions"][0]["id"] == "log_results"
+    assert any(
+        action["id"] == "open_validation_mission"
+        and action["target_route"].endswith("#validation-mission")
+        for action in validation["available_actions"]
+    )
 
     experiment = plan_response.json()["experiments"][0]
     result_response = client.post(

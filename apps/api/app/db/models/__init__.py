@@ -30,7 +30,13 @@ from app.db.models.research import (
     ResearchSprint,
 )
 from app.db.models.tool import ToolInvocation
-from app.db.models.validation import Decision, DecisionLink, Experiment, ExperimentResult
+from app.db.models.validation import (
+    Decision,
+    DecisionLink,
+    Experiment,
+    ExperimentResult,
+    ValidationMission,
+)
 
 __all__ = [
     "AIRun",
@@ -68,6 +74,7 @@ __all__ = [
     "ToolInvocation",
     "UUIDPrimaryKeyMixin",
     "User",
+    "ValidationMission",
     "WedgeOption",
     "Workspace",
     "WorkspaceMember",

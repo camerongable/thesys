@@ -36,6 +36,7 @@ from app.db.models import (
     ExperimentResult,
     Project,
     Risk,
+    ValidationMission,
 )
 from app.schemas.artifacts import AssumptionDraft, RiskDraft
 from app.schemas.validation import (
@@ -43,6 +44,7 @@ from app.schemas.validation import (
     AssumptionUpdate,
     DecisionCreate,
     ExperimentResultCreate,
+    ValidationMissionRead,
     ValidationPlanDraft,
     ValidationPlanGenerateCreate,
     ValidationPlanSetDraft,
@@ -78,6 +80,7 @@ class ValidationPlanResult:
     step: AIStep
     artifact: Artifact
     experiments: list[Experiment]
+    missions: list[ValidationMissionRead]
     model_provider: str
     model_name: str
     used_stub: bool
@@ -343,6 +346,119 @@ def get_experiment(
     return experiment
 
 
+def list_validation_missions(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> list[ValidationMissionRead]:
+    project_service.get_project(db, auth, project_id)
+    missions = list(
+        db.scalars(
+            select(ValidationMission)
+            .where(
+                ValidationMission.workspace_id == auth.workspace_id,
+                ValidationMission.project_id == project_id,
+            )
+            .order_by(
+                ValidationMission.status == "closed",
+                ValidationMission.updated_at.desc(),
+                ValidationMission.created_at.desc(),
+            )
+        )
+    )
+    return [_mission_to_read(db, mission) for mission in missions]
+
+
+def get_current_validation_mission(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> ValidationMissionRead | None:
+    project_service.get_project(db, auth, project_id)
+    mission = db.scalar(
+        select(ValidationMission)
+        .where(
+            ValidationMission.workspace_id == auth.workspace_id,
+            ValidationMission.project_id == project_id,
+            ValidationMission.status != "closed",
+        )
+        .order_by(ValidationMission.updated_at.desc(), ValidationMission.created_at.desc())
+        .limit(1)
+    )
+    if mission is None:
+        mission = db.scalar(
+            select(ValidationMission)
+            .where(
+                ValidationMission.workspace_id == auth.workspace_id,
+                ValidationMission.project_id == project_id,
+            )
+            .order_by(ValidationMission.updated_at.desc(), ValidationMission.created_at.desc())
+            .limit(1)
+        )
+    return _mission_to_read(db, mission) if mission is not None else None
+
+
+def start_validation_mission(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    mission_id: uuid.UUID,
+) -> ValidationMissionRead:
+    require_permission(auth, "run_research")
+    mission = _get_validation_mission(db, auth, project_id, mission_id)
+    if mission.status == "planned":
+        mission.status = "running"
+    if mission.experiment_id is not None:
+        experiment = get_experiment(db, auth, project_id, mission.experiment_id)
+        if experiment.status == "planned":
+            experiment.status = "running"
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="validation_mission_started",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="experiment",
+        entity_id=mission.experiment_id or mission.id,
+        risk_level="low",
+        summary="Validation mission started.",
+        metadata={"validation_mission_id": str(mission.id)},
+    )
+    db.commit()
+    return _mission_to_read(db, mission)
+
+
+def interpret_validation_mission(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    mission_id: uuid.UUID,
+) -> ValidationMissionRead:
+    require_permission(auth, "run_research")
+    mission = _get_validation_mission(db, auth, project_id, mission_id)
+    if _mission_result_count(db, mission) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Log mission results before interpreting them.",
+        )
+    if mission.status in {"running", "planned", "results_logged"}:
+        mission.status = "interpreted"
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="validation_mission_interpreted",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="experiment",
+        entity_id=mission.experiment_id or mission.id,
+        risk_level="medium",
+        summary="Validation mission results were interpreted.",
+        metadata={"validation_mission_id": str(mission.id)},
+    )
+    db.commit()
+    return _mission_to_read(db, mission)
+
+
 def generate_validation_plan(
     db: Session,
     auth: AuthContext,
@@ -426,12 +542,15 @@ def generate_validation_plan(
         artifact = _write_validation_plan_artifact(db, auth, run, project, draft, trace)
         experiments = _write_experiments(db, auth, project, assumptions, draft)
         db.flush()
+        missions = _write_validation_missions(db, auth, project, assumptions, experiments, draft)
+        db.flush()
         completed_step = ai_run_service.complete_step(
             db,
             step,
             output_json={
                 "artifact_id": str(artifact.id),
                 "experiment_ids": [str(item.id) for item in experiments],
+                "validation_mission_ids": [str(item.id) for item in missions],
             },
             latency_ms=int((perf_counter() - started) * 1000),
             tokens=completion.total_tokens,
@@ -510,6 +629,7 @@ def generate_validation_plan(
         metadata={
             "artifact_id": str(artifact.id),
             "experiment_ids": [str(item.id) for item in experiments],
+            "validation_mission_ids": [str(item.id) for item in missions],
         },
     )
     db.commit()
@@ -517,11 +637,13 @@ def generate_validation_plan(
     experiments = [
         get_experiment(db, auth, project.id, experiment.id) for experiment in experiments
     ]
+    mission_reads = [_mission_to_read(db, mission) for mission in missions]
     return ValidationPlanResult(
         run=run,
         step=completed_step,
         artifact=artifact,
         experiments=experiments,
+        missions=mission_reads,
         model_provider=completion.model_provider,
         model_name=completion.model_name,
         used_stub=completion.used_stub,
@@ -558,6 +680,15 @@ def log_experiment_result(
         current_score = assumption.confidence_score or Decimal("0.5")
         assumption.confidence_score = _clamp_decimal(current_score + delta)
         assumption.status = _assumption_status_for_outcome(payload.outcome)
+    mission = db.scalar(
+        select(ValidationMission).where(
+            ValidationMission.workspace_id == auth.workspace_id,
+            ValidationMission.project_id == project_id,
+            ValidationMission.experiment_id == experiment.id,
+        )
+    )
+    if mission is not None and mission.status in {"planned", "running"}:
+        mission.status = "results_logged"
     project_confidence = _recalculate_project_confidence(db, auth, project_id)
     governance_service.record_audit_event(
         db,
@@ -1135,6 +1266,199 @@ def _write_experiments(
         assumption.status = "testing"
         experiments.append(experiment)
     return experiments
+
+
+def _write_validation_missions(
+    db: Session,
+    auth: AuthContext,
+    project: Project,
+    assumptions: list[Assumption],
+    experiments: list[Experiment],
+    draft: ValidationPlanSetDraft,
+) -> list[ValidationMission]:
+    assumptions_by_id = {assumption.id: assumption for assumption in assumptions}
+    experiments_by_assumption_id = {
+        experiment.assumption_id: experiment
+        for experiment in experiments
+        if experiment.assumption_id is not None
+    }
+    missions: list[ValidationMission] = []
+    for plan in draft.plans:
+        assumption = assumptions_by_id.get(plan.assumption_id)
+        experiment = experiments_by_assumption_id.get(plan.assumption_id)
+        if assumption is None or experiment is None:
+            continue
+        mission = ValidationMission(
+            workspace_id=auth.workspace_id,
+            project_id=project.id,
+            assumption_id=assumption.id,
+            experiment_id=experiment.id,
+            mission_title=f"Prove: {_shorten(assumption.text, 110)}",
+            why_it_matters=_mission_why_it_matters(assumption),
+            target_user=plan.target_respondent,
+            test_type=_optional_truncate(plan.method, 120) or "validation_test",
+            steps=_mission_steps(plan),
+            success_criteria=plan.success_criteria,
+            failure_criteria=plan.failure_threshold,
+            assets=_mission_assets(plan),
+            status="planned",
+            created_by=auth.user_id,
+        )
+        db.add(mission)
+        missions.append(mission)
+    return missions
+
+
+def _get_validation_mission(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    mission_id: uuid.UUID,
+) -> ValidationMission:
+    mission = db.scalar(
+        select(ValidationMission).where(
+            ValidationMission.id == mission_id,
+            ValidationMission.workspace_id == auth.workspace_id,
+            ValidationMission.project_id == project_id,
+        )
+    )
+    if mission is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Validation mission not found.",
+        )
+    return mission
+
+
+def _mission_to_read(db: Session, mission: ValidationMission) -> ValidationMissionRead:
+    result_count = _mission_result_count(db, mission)
+    display_status = mission.status
+    if result_count > 0 and display_status in {"planned", "running"}:
+        display_status = "results_logged"
+    return ValidationMissionRead.model_validate(
+        {
+            "id": mission.id,
+            "project_id": mission.project_id,
+            "assumption_id": mission.assumption_id,
+            "experiment_id": mission.experiment_id,
+            "mission_title": mission.mission_title,
+            "why_it_matters": mission.why_it_matters,
+            "target_user": mission.target_user,
+            "test_type": mission.test_type,
+            "steps": mission.steps or [],
+            "success_criteria": mission.success_criteria,
+            "failure_criteria": mission.failure_criteria,
+            "assets": mission.assets or [],
+            "result_count": result_count,
+            "status": display_status,
+            "created_at": mission.created_at,
+            "updated_at": mission.updated_at,
+        }
+    )
+
+
+def _mission_result_count(db: Session, mission: ValidationMission) -> int:
+    if mission.experiment_id is None:
+        return 0
+    return int(
+        db.scalar(
+            select(func.count(ExperimentResult.id)).where(
+                ExperimentResult.workspace_id == mission.workspace_id,
+                ExperimentResult.project_id == mission.project_id,
+                ExperimentResult.experiment_id == mission.experiment_id,
+            )
+        )
+        or 0
+    )
+
+
+def _mission_why_it_matters(assumption: Assumption) -> str:
+    risk = "the current decision blocker"
+    if assumption.kill_risk or assumption.importance in {"critical", "high"}:
+        risk = "the highest-risk decision blocker"
+    return (
+        f"This is {risk}. Without this proof, building is risky because the project "
+        "still depends on an unvalidated belief."
+    )
+
+
+def _mission_steps(plan: ValidationPlanDraft) -> list[str]:
+    if plan.steps:
+        return plan.steps[:12]
+    return [
+        f"Recruit target respondents: {plan.target_respondent}.",
+        "Run the interview or test script.",
+        "Ask about the current workaround and urgency.",
+        "Test willingness to pay or switching intent.",
+        "Log the result and raw notes.",
+        "Review the decision recommendation.",
+    ]
+
+
+def _mission_assets(plan: ValidationPlanDraft) -> list[dict[str, str]]:
+    return [
+        {
+            "type": "interview_script",
+            "title": "Interview script",
+            "content": _asset_content(
+                [
+                    f"Target respondent: {plan.target_respondent}",
+                    "Interview questions:",
+                    *_numbered_asset_lines(plan.interview_questions),
+                ]
+            ),
+        },
+        {
+            "type": "screener_questions",
+            "title": "Screener questions",
+            "content": _asset_content(_numbered_asset_lines(plan.screener_questions)),
+        },
+        {
+            "type": "survey_questions",
+            "title": "Survey questions",
+            "content": _asset_content(_numbered_asset_lines(plan.survey_questions)),
+        },
+        {
+            "type": "outreach_message",
+            "title": "Outreach message",
+            "content": plan.outreach_message
+            or (
+                f"I am testing {plan.assumption_text.lower()} and looking for quick "
+                "feedback from people who have dealt with this recently. Would you be "
+                "open to a short conversation?"
+            ),
+        },
+        {
+            "type": "landing_page_copy",
+            "title": "Landing page copy",
+            "content": plan.landing_page_copy
+            or f"Validate demand for this workflow before building: {plan.assumption_text}",
+        },
+        {
+            "type": "note_taking_template",
+            "title": "Note-taking template",
+            "content": plan.note_taking_template
+            or "Pain observed:\nCurrent workaround:\nUrgency:\nWillingness to pay:\nObjections:",
+        },
+        {
+            "type": "results_rubric",
+            "title": "Result interpretation rubric",
+            "content": plan.result_interpretation_rubric
+            or (
+                f"Success: {plan.success_criteria}\n\nFailure: {plan.failure_threshold}"
+            ),
+        },
+    ]
+
+
+def _numbered_asset_lines(values: list[str]) -> list[str]:
+    if not values:
+        return ["Not generated yet."]
+    return [f"{index}. {value}" for index, value in enumerate(values, start=1)]
+
+
+def _asset_content(parts: list[str]) -> str:
+    return "\n".join(part for part in parts if part).strip() or "Not generated yet."
 
 
 def _get_artifact(

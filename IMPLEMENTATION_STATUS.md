@@ -2,10 +2,11 @@
 
 ## Current Phase
 
-V1 Sprint 22 adds the Wedge Explorer on top of the Thesis Canvas and Guide
-layers. Thesys can now generate 3-5 possible strategic directions from project
-state, compare pressure/evidence/risk, select or reject a wedge, move a wedge
-into validation, and preserve those choices in the thesis evolution trail.
+V1 Sprint 23 reshapes validation around a guided Validation Mission and current
+proof. Thesys can now create a mission from the top decision blocker, show the
+mission purpose, target user, steps, criteria, assets, progress, result logging,
+and interpretation, then route the user into decision review once results have
+been interpreted.
 Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
 multi-segment workflow packs remain V2 scope.
 
@@ -1207,6 +1208,47 @@ Checks run:
   might work, main risk, and first test. Browser logs reported no app warnings
   or errors.
 
+## V1 Sprint 23 Scope
+
+- [x] Add `ValidationMission` persistence with project/workspace scoping,
+  assumption link, optional experiment link, mission status, steps, criteria,
+  and validation assets.
+- [x] Add Alembic migration for the `validation_missions` table.
+- [x] Add mission APIs:
+  - `GET /api/projects/{project_id}/experiments/missions`
+  - `GET /api/projects/{project_id}/experiments/missions/current`
+  - `POST /api/projects/{project_id}/experiments/missions/{mission_id}/start`
+  - `POST /api/projects/{project_id}/experiments/missions/{mission_id}/interpret`
+- [x] Create validation missions when validation plans generate experiments.
+- [x] Advance mission state when a mission starts, results are logged, and
+  results are interpreted.
+- [x] Update demo seeding so the fitness coach demo includes a validation
+  mission.
+- [x] Update Guide actions and related entities to route to the current
+  validation mission.
+- [x] Redesign the Validation workspace front door around a mission-first
+  current proof with steps, progress, primary CTA, criteria, assets, result
+  logging, and interpretation.
+
+## V1 Sprint 23 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_validation.py app/tests/test_guide.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `cd apps/web && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/next typegen && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/tsc --noEmit`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Browser QA in the Codex in-app browser after restarting containers:
+  created a disposable QA project, extracted assumptions, generated a
+  validation plan, opened `#validation-mission`, started the mission, logged a
+  result, interpreted the result, and confirmed the final CTA routes to
+  `#decisions`. Checked desktop and mobile mission-panel viewports for
+  horizontal overflow.
+
 ## Next Work
 
-Begin V1 Sprint 23.
+Begin V1 Sprint 24.

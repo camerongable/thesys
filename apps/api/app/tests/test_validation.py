@@ -15,6 +15,7 @@ from app.db.models import (
     DecisionLink,
     Experiment,
     ExperimentResult,
+    ValidationMission,
 )
 
 
@@ -149,9 +150,17 @@ def test_generate_validation_plan_and_log_result_updates_confidence(
     assert plan_structured["result_interpretation_rubric"]
     assert "Landing Page Copy" in plan_body["artifact"]["current_version"]["markdown_content"]
     assert len(plan_body["experiments"]) == 1
+    assert len(plan_body["missions"]) == 1
     experiment = plan_body["experiments"][0]
+    mission = plan_body["missions"][0]
     assert experiment["assumption_id"] == assumption["id"]
     assert experiment["status"] == "planned"
+    assert mission["assumption_id"] == assumption["id"]
+    assert mission["experiment_id"] == experiment["id"]
+    assert mission["status"] == "planned"
+    assert mission["result_count"] == 0
+    assert mission["steps"]
+    assert mission["assets"]
 
     artifact = db_session.scalar(
         select(Artifact).where(Artifact.artifact_type == "validation_plan")
@@ -165,6 +174,19 @@ def test_generate_validation_plan_and_log_result_updates_confidence(
     assert version.langsmith_trace_url
     persisted_experiment = db_session.scalar(select(Experiment))
     assert persisted_experiment is not None
+    assert db_session.scalar(select(ValidationMission)) is not None
+
+    current_mission_response = client.get(
+        f"/api/projects/{project_id}/experiments/missions/current"
+    )
+    assert current_mission_response.status_code == 200
+    assert current_mission_response.json()["mission"]["id"] == mission["id"]
+
+    start_response = client.post(
+        f"/api/projects/{project_id}/experiments/missions/{mission['id']}/start"
+    )
+    assert start_response.status_code == 200
+    assert start_response.json()["status"] == "running"
 
     result_response = client.post(
         f"/api/projects/{project_id}/experiments/{experiment['id']}/results",
@@ -184,6 +206,18 @@ def test_generate_validation_plan_and_log_result_updates_confidence(
     assert float(result_body["assumption"]["confidence_score"]) > old_confidence
     assert result_body["project_confidence_score"] is not None
     assert db_session.scalar(select(ExperimentResult)) is not None
+
+    missions_response = client.get(f"/api/projects/{project_id}/experiments/missions")
+    assert missions_response.status_code == 200
+    logged_mission = missions_response.json()["missions"][0]
+    assert logged_mission["status"] == "results_logged"
+    assert logged_mission["result_count"] == 1
+
+    interpret_response = client.post(
+        f"/api/projects/{project_id}/experiments/missions/{mission['id']}/interpret"
+    )
+    assert interpret_response.status_code == 200
+    assert interpret_response.json()["status"] == "interpreted"
 
 
 def test_validation_plan_can_force_local_fallback_with_always_policy(

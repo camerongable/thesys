@@ -10,10 +10,13 @@ from app.db.models import Artifact
 from app.db.session import get_db
 from app.schemas.artifacts import ArtifactRead
 from app.schemas.validation import (
+    CurrentValidationMissionRead,
     ExperimentListRead,
     ExperimentRead,
     ExperimentResultCreate,
     ExperimentResultCreateRead,
+    ValidationMissionListRead,
+    ValidationMissionRead,
     ValidationPlanGenerateCreate,
     ValidationPlanGenerateRead,
 )
@@ -42,6 +45,48 @@ def list_experiments(
     )
 
 
+@router.get("/missions", response_model=ValidationMissionListRead)
+def list_validation_missions(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> ValidationMissionListRead:
+    return ValidationMissionListRead(
+        missions=validation_service.list_validation_missions(db, auth, project_id)
+    )
+
+
+@router.get("/missions/current", response_model=CurrentValidationMissionRead)
+def get_current_validation_mission(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> CurrentValidationMissionRead:
+    return CurrentValidationMissionRead(
+        mission=validation_service.get_current_validation_mission(db, auth, project_id)
+    )
+
+
+@router.post("/missions/{mission_id}/start", response_model=ValidationMissionRead)
+def start_validation_mission(
+    project_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> ValidationMissionRead:
+    return validation_service.start_validation_mission(db, auth, project_id, mission_id)
+
+
+@router.post("/missions/{mission_id}/interpret", response_model=ValidationMissionRead)
+def interpret_validation_mission(
+    project_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> ValidationMissionRead:
+    return validation_service.interpret_validation_mission(db, auth, project_id, mission_id)
+
+
 @router.post("/validation-plan", response_model=ValidationPlanGenerateRead)
 def generate_validation_plan(
     project_id: uuid.UUID,
@@ -64,6 +109,7 @@ def generate_validation_plan(
         experiments=[
             ExperimentRead.model_validate(experiment) for experiment in result.experiments
         ],
+        missions=result.missions,
     )
 
 

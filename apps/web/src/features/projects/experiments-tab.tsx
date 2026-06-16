@@ -1,6 +1,6 @@
 "use client";
 
-import { Beaker, CheckCircle2, FileText, RefreshCw } from "lucide-react";
+import { Beaker, CheckCircle2, ClipboardCheck, FileText, PlayCircle, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -11,10 +11,15 @@ import {
   Experiment,
   ExperimentOutcome,
   generateValidationPlan,
+  getCurrentValidationMission,
+  interpretValidationMission,
   listArtifacts,
   listAssumptions,
   listExperiments,
+  listValidationMissions,
   logExperimentResult,
+  startValidationMission,
+  ValidationMission,
 } from "@/lib/api";
 import { MarkdownContent } from "@/features/projects/markdown-content";
 import { WorkflowTrace } from "@/features/projects/workflow-trace";
@@ -29,6 +34,14 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
     queryKey: ["projects", projectId, "experiments"],
     queryFn: () => listExperiments(projectId),
   });
+  const missionsQuery = useQuery({
+    queryKey: ["projects", projectId, "validation-missions"],
+    queryFn: () => listValidationMissions(projectId),
+  });
+  const currentMissionQuery = useQuery({
+    queryKey: ["projects", projectId, "validation-missions", "current"],
+    queryFn: () => getCurrentValidationMission(projectId),
+  });
   const assumptionsQuery = useQuery({
     queryKey: ["projects", projectId, "assumptions"],
     queryFn: () => listAssumptions(projectId),
@@ -40,6 +53,9 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
 
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "experiments"] });
+    await queryClient.invalidateQueries({
+      queryKey: ["projects", projectId, "validation-missions"],
+    });
     await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "assumptions"] });
     await queryClient.invalidateQueries({
       queryKey: ["projects", projectId, "artifacts", "validation_plan"],
@@ -54,8 +70,19 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
     mutationFn: () => generateValidationPlan(projectId, { max_plans: 3 }),
     onSuccess: invalidate,
   });
+  const startMissionMutation = useMutation({
+    mutationFn: (missionId: string) => startValidationMission(projectId, missionId),
+    onSuccess: invalidate,
+  });
+  const interpretMissionMutation = useMutation({
+    mutationFn: (missionId: string) => interpretValidationMission(projectId, missionId),
+    onSuccess: invalidate,
+  });
 
   const experiments = generateMutation.data?.experiments ?? experimentsQuery.data ?? [];
+  const missions = generateMutation.data?.missions ?? missionsQuery.data ?? [];
+  const currentMission =
+    generateMutation.data?.missions?.[0] ?? currentMissionQuery.data ?? missions[0] ?? null;
   const assumptions = assumptionsQuery.data ?? [];
   const validationPlanArtifact =
     generateMutation.data?.artifact ?? artifactsQuery.data?.[0] ?? null;
@@ -63,31 +90,51 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
   const assumptionById = new Map(assumptions.map((assumption) => [assumption.id, assumption]));
   const hasExperiments = experiments.length > 0;
   const hasLoggedResults = experiments.some((experiment) => experiment.results.length > 0);
+  const currentExperiment = currentMission?.experiment_id
+    ? experiments.find((experiment) => experiment.id === currentMission.experiment_id) ?? null
+    : experiments[0] ?? null;
   const resultCount = experiments.reduce(
     (count, experiment) => count + experiment.results.length,
     0,
   );
-  const primaryActionLabel = validationPrimaryActionLabel(hasExperiments, hasLoggedResults);
+  const primaryActionLabel = validationPrimaryActionLabel(currentMission);
+  const primaryActionPending =
+    generateMutation.isPending ||
+    startMissionMutation.isPending ||
+    interpretMissionMutation.isPending;
   const error =
     experimentsQuery.error ??
     assumptionsQuery.error ??
     artifactsQuery.error ??
+    missionsQuery.error ??
+    currentMissionQuery.error ??
     generateMutation.error ??
     null;
 
   function runPrimaryAction() {
-    if (!hasExperiments) {
+    if (!currentMission) {
       generateMutation.mutate();
       return;
     }
-    if (hasLoggedResults) {
+    if (currentMission.status === "planned") {
+      startMissionMutation.mutate(currentMission.id);
+      return;
+    }
+    if (currentMission.status === "results_logged") {
+      interpretMissionMutation.mutate(currentMission.id);
+      return;
+    }
+    if (currentMission.status === "interpreted" || currentMission.status === "closed") {
       if (typeof window !== "undefined") {
         window.location.hash = "decisions";
         window.dispatchEvent(new HashChangeEvent("hashchange"));
       }
       return;
     }
-    document.getElementById("log-results-panel")?.scrollIntoView({ behavior: "smooth" });
+    document.getElementById("log-results-panel")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
   }
 
   return (
@@ -96,28 +143,32 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
         action={
           <Button
             className="w-full justify-center whitespace-nowrap sm:w-60"
-            disabled={generateMutation.isPending || (!hasExperiments && assumptions.length === 0)}
+            disabled={primaryActionPending || (!currentMission && assumptions.length === 0)}
             onClick={runPrimaryAction}
             type="button"
           >
-            <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            {generateMutation.isPending ? "Creating test plan..." : primaryActionLabel}
+            {currentMission?.status === "planned" ? (
+              <PlayCircle className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            )}
+            {primaryActionPending ? "Updating mission..." : primaryActionLabel}
           </Button>
         }
-        description="Convert the top decision blocker into a test with success criteria, failure criteria, assets, result logging, and interpretation."
+        description="Turn the top decision blocker into one guided proof with steps, assets, result logging, and interpretation."
         icon={<Beaker className="h-4 w-4 text-primary" aria-hidden="true" />}
-        question="What should we test before deciding?"
+        question="What proof should we run before deciding?"
         signals={[
-          { label: "Experiments", value: experiments.length },
+          { label: "Missions", value: missions.length },
           { label: "Assumptions", value: assumptions.length },
           { label: "Logged results", tone: resultCount > 0 ? "success" : "warning", value: resultCount },
           {
             label: "Next move",
-            tone: hasLoggedResults ? "success" : hasExperiments ? "warning" : "neutral",
+            tone: currentMission?.status === "interpreted" ? "success" : currentMission ? "warning" : "neutral",
             value: primaryActionLabel,
           },
         ]}
-        title="Validation"
+        title="Validation Mission"
       />
 
       {error ? (
@@ -130,25 +181,29 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
           <div className="mt-4 border-t border-border pt-4">
             <WorkflowTrace
               pending={generateMutation.isPending}
-              pendingSteps={["generate_validation_plan", "write_artifact_version", "write_experiments"]}
+              pendingSteps={[
+                "generate_validation_plan",
+                "write_artifact_version",
+                "write_experiments",
+                "write_validation_missions",
+              ]}
               runId={generateMutation.data?.ai_run_id ?? null}
             />
           </div>
         </details>
       ) : null}
 
-      {experimentsQuery.isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading validation tests...</p>
-      ) : experiments.length === 0 ? (
+      {experimentsQuery.isLoading || missionsQuery.isLoading || currentMissionQuery.isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading validation mission...</p>
+      ) : !currentMission ? (
         <DomainPanel>
           <div className="flex items-center gap-2">
             <Beaker className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h3 className="text-sm font-semibold">No validation tests yet.</h3>
+            <h3 className="text-sm font-semibold">No validation mission yet.</h3>
           </div>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Experiments help you reduce uncertainty before building. Start by testing the
-            top decision blocker with a clear method, success criteria, and failure
-            threshold.
+            A mission turns the top decision blocker into one proof with exact steps,
+            assets, success criteria, failure criteria, result logging, and interpretation.
           </p>
           <Button
             className="mt-4 whitespace-nowrap"
@@ -162,66 +217,266 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
             {assumptions.length === 0
               ? "Rank blockers first"
               : generateMutation.isPending
-                ? "Creating test plan..."
-                : "Create test plan"}
+                ? "Creating mission..."
+                : "Create validation mission"}
           </Button>
         </DomainPanel>
       ) : (
         <>
-        <RecommendedValidationPlan
-          artifactTitle={validationPlanArtifact?.title ?? "Recommended validation plan"}
-          experiments={experiments}
-          hasLoggedResults={hasLoggedResults}
-        />
-        <div
-          className={
-            validationPlanVersion
-              ? "grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]"
-              : "grid gap-5"
-          }
-        >
-          <div className="grid gap-5">
-            {experiments.map((experiment) => (
-              <ExperimentCard
-                assumptionText={
-                  experiment.assumption_id
-                    ? assumptionBeliefText(assumptionById.get(experiment.assumption_id)?.text ?? "") || null
-                    : null
-                }
-                experiment={experiment}
-                key={experiment.id}
-                onSaved={invalidate}
-                projectId={projectId}
-              />
-            ))}
-          </div>
+          <ValidationMissionPanel
+            mission={currentMission}
+            onPrimaryAction={runPrimaryAction}
+            pending={primaryActionPending}
+          />
 
-          {validationPlanVersion ? (
-            <aside className="rounded-lg border border-border bg-card p-5">
-              <div className="flex items-center gap-2 border-b border-border pb-4">
-                <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h3 className="text-sm font-semibold">
-                  {validationPlanArtifact?.title ?? "Validation plan"}
-                </h3>
-                <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-                  Version {validationPlanVersion.version}
-                </span>
-              </div>
-              <details className="mt-4">
-                <summary className="cursor-pointer text-sm font-medium">
-                  Show full validation plan
-                </summary>
-              <MarkdownContent
-                className="mt-4 space-y-4 text-sm leading-6 text-foreground"
-                markdown={validationPlanVersion.markdown_content}
-              />
-              </details>
-            </aside>
-          ) : null}
-        </div>
+          <div
+            className={
+              validationPlanVersion
+                ? "grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]"
+                : "grid gap-5"
+            }
+          >
+            <div className="grid gap-5">
+              {currentExperiment ? (
+                <ExperimentCard
+                  assumptionText={
+                    currentExperiment.assumption_id
+                      ? assumptionBeliefText(
+                          assumptionById.get(currentExperiment.assumption_id)?.text ?? "",
+                        ) || null
+                      : null
+                  }
+                  experiment={currentExperiment}
+                  key={currentExperiment.id}
+                  onSaved={invalidate}
+                  projectId={projectId}
+                />
+              ) : null}
+
+              {experiments.length > 1 ? (
+                <details className="rounded-lg border border-border bg-card p-5">
+                  <summary className="cursor-pointer text-sm font-semibold">
+                    Show other validation tests
+                  </summary>
+                  <div className="mt-4 grid gap-5 border-t border-border pt-4">
+                    {experiments
+                      .filter((experiment) => experiment.id !== currentExperiment?.id)
+                      .map((experiment) => (
+                        <ExperimentCard
+                          assumptionText={
+                            experiment.assumption_id
+                              ? assumptionBeliefText(
+                                  assumptionById.get(experiment.assumption_id)?.text ?? "",
+                                ) || null
+                              : null
+                          }
+                          experiment={experiment}
+                          key={experiment.id}
+                          onSaved={invalidate}
+                          projectId={projectId}
+                        />
+                      ))}
+                  </div>
+                </details>
+              ) : null}
+            </div>
+
+            {validationPlanVersion ? (
+              <aside className="rounded-lg border border-border bg-card p-5">
+                <div className="flex items-center gap-2 border-b border-border pb-4">
+                  <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
+                  <h3 className="text-sm font-semibold">
+                    {validationPlanArtifact?.title ?? "Validation plan"}
+                  </h3>
+                  <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                    Version {validationPlanVersion.version}
+                  </span>
+                </div>
+                <details className="mt-4">
+                  <summary className="cursor-pointer text-sm font-medium">
+                    Show full validation plan
+                  </summary>
+                  <MarkdownContent
+                    className="mt-4 space-y-4 text-sm leading-6 text-foreground"
+                    markdown={validationPlanVersion.markdown_content}
+                  />
+                </details>
+              </aside>
+            ) : null}
+          </div>
         </>
       )}
     </section>
+  );
+}
+
+function ValidationMissionPanel({
+  mission,
+  onPrimaryAction,
+  pending,
+}: {
+  mission: ValidationMission;
+  onPrimaryAction: () => void;
+  pending: boolean;
+}) {
+  const completedSteps =
+    mission.status === "planned" ? 0 : mission.status === "running" ? 1 : mission.steps.length;
+  const progressLabel =
+    mission.status === "interpreted"
+      ? "Results interpreted"
+      : mission.status === "results_logged"
+        ? "Results logged"
+        : mission.status === "running"
+          ? "Mission running"
+          : "Mission planned";
+
+  return (
+    <DomainPanel>
+      <div id="validation-mission" className="scroll-mt-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-muted-foreground">Current proof</p>
+            <h3 className="mt-2 text-lg font-semibold">{mission.mission_title}</h3>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              {mission.why_it_matters}
+            </p>
+          </div>
+          <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+            {progressLabel}
+          </span>
+        </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-3">
+          <Block title="Target user" value={mission.target_user} />
+          <Block title="Test type" value={formatLabel(mission.test_type)} />
+          <Block title="Progress" value={`${completedSteps}/${mission.steps.length} steps`} />
+        </div>
+
+        <div className="mt-5 rounded-md border border-border bg-background p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h4 className="text-sm font-semibold">Mission steps</h4>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Run these steps before changing the decision recommendation.
+              </p>
+            </div>
+            <Button
+              className="w-full whitespace-nowrap sm:w-fit"
+              disabled={pending}
+              onClick={onPrimaryAction}
+              size="sm"
+              type="button"
+            >
+              {mission.status === "planned" ? (
+                <PlayCircle className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+              )}
+              {pending ? "Updating mission..." : validationPrimaryActionLabel(mission)}
+            </Button>
+          </div>
+          <ol className="mt-4 space-y-3">
+            {mission.steps.map((step, index) => {
+              const complete = index < completedSteps;
+              return (
+                <li className="flex gap-3" key={`${mission.id}:step:${index}`}>
+                  <span
+                    className={[
+                      "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold",
+                      complete
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    {complete ? (
+                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    ) : (
+                      index + 1
+                    )}
+                  </span>
+                  <span className="text-sm leading-6 text-muted-foreground">{step}</span>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <Block title="Success criteria" value={mission.success_criteria} />
+          <Block title="Failure criteria" value={mission.failure_criteria} />
+        </div>
+
+        <MissionAssetGrid assets={mission.assets} />
+
+        <div className="mt-5 border-t border-border pt-4">
+          <ResultInterpretationSummary mission={mission} />
+        </div>
+      </div>
+    </DomainPanel>
+  );
+}
+
+function MissionAssetGrid({ assets }: { assets: ValidationMission["assets"] }) {
+  return (
+    <div className="mt-5 border-t border-border pt-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <ClipboardCheck className="h-4 w-4 text-primary" aria-hidden="true" />
+          <h4 className="text-sm font-semibold">Mission assets</h4>
+        </div>
+        <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+          Ready to use
+        </span>
+      </div>
+      <div className="mt-3 grid gap-x-6 gap-y-3 md:grid-cols-2">
+        {assets.map((asset, index) => (
+          <details
+            className="border-t border-border py-3 first:border-t-0 first:pt-0"
+            key={`${asset.type}:${asset.title}`}
+            open={index === 0}
+          >
+            <summary className="cursor-pointer text-sm font-medium">{asset.title}</summary>
+            <div className="mt-3 border-t border-border pt-3">
+              <Block title={asset.title} value={asset.content} />
+            </div>
+          </details>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ResultInterpretationSummary({ mission }: { mission: ValidationMission }) {
+  if (mission.status === "interpreted") {
+    return (
+      <>
+        <h4 className="text-xs font-medium text-muted-foreground">Result interpretation</h4>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          Results have been interpreted for this mission. Review the decision page before
+          proceeding, pivoting, pausing, killing, or continuing research.
+        </p>
+      </>
+    );
+  }
+  if (mission.result_count > 0 || mission.status === "results_logged") {
+    return (
+      <>
+        <h4 className="text-xs font-medium text-muted-foreground">Result interpretation</h4>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          Results are logged. Interpret them against the mission criteria, then review the
+          decision recommendation.
+        </p>
+      </>
+    );
+  }
+  return (
+    <>
+      <h4 className="text-xs font-medium text-muted-foreground">Result interpretation</h4>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        No results have been logged. Run the mission, capture real notes, then compare the
+        signal against the success and failure criteria.
+      </p>
+    </>
   );
 }
 
@@ -596,11 +851,17 @@ function resultInterpretation(outcome: ExperimentOutcome) {
   return "This is not strong enough proof yet. Clarify the respondent profile or test design and run another validation pass.";
 }
 
-function validationPrimaryActionLabel(hasExperiments: boolean, hasLoggedResults: boolean) {
-  if (!hasExperiments) {
-    return "Create test plan";
+function validationPrimaryActionLabel(mission: ValidationMission | null) {
+  if (!mission) {
+    return "Create validation mission";
   }
-  if (hasLoggedResults) {
+  if (mission.status === "planned") {
+    return "Start mission";
+  }
+  if (mission.status === "results_logged") {
+    return "Interpret results";
+  }
+  if (mission.status === "interpreted" || mission.status === "closed") {
     return "Review decision";
   }
   return "Log results";

@@ -529,6 +529,38 @@ export type Experiment = {
   results: ExperimentResult[];
 };
 
+export type ValidationMissionStatus =
+  | "planned"
+  | "running"
+  | "results_logged"
+  | "interpreted"
+  | "closed";
+
+export type ValidationAsset = {
+  type: string;
+  title: string;
+  content: string;
+};
+
+export type ValidationMission = {
+  id: string;
+  project_id: string;
+  assumption_id: string;
+  experiment_id: string | null;
+  mission_title: string;
+  why_it_matters: string;
+  target_user: string;
+  test_type: string;
+  steps: string[];
+  success_criteria: string;
+  failure_criteria: string;
+  assets: ValidationAsset[];
+  result_count: number;
+  status: ValidationMissionStatus;
+  created_at: string;
+  updated_at: string;
+};
+
 export type GenerateValidationPlanInput = {
   assumption_ids?: string[];
   max_plans?: number;
@@ -545,6 +577,7 @@ export type ValidationPlanGenerateResult = {
   total_cost: string | null;
   artifact: Artifact;
   experiments: Experiment[];
+  missions: ValidationMission[];
 };
 
 export type LogExperimentResultInput = {
@@ -1790,6 +1823,38 @@ export async function listExperiments(projectId: string) {
     `/api/projects/${projectId}/experiments`,
   );
   return response.experiments;
+}
+
+export async function listValidationMissions(projectId: string) {
+  const response = await apiFetch<{ missions: ValidationMission[] }>(
+    `/api/projects/${projectId}/experiments/missions`,
+  );
+  return response.missions;
+}
+
+export async function getCurrentValidationMission(projectId: string) {
+  const response = await apiFetch<{ mission: ValidationMission | null }>(
+    `/api/projects/${projectId}/experiments/missions/current`,
+  );
+  return response.mission;
+}
+
+export function startValidationMission(projectId: string, missionId: string) {
+  return apiFetch<ValidationMission>(
+    `/api/projects/${projectId}/experiments/missions/${missionId}/start`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function interpretValidationMission(projectId: string, missionId: string) {
+  return apiFetch<ValidationMission>(
+    `/api/projects/${projectId}/experiments/missions/${missionId}/interpret`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export function generateValidationPlan(projectId: string, input: GenerateValidationPlanInput = {}) {

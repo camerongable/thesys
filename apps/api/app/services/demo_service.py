@@ -29,6 +29,7 @@ from app.db.models import (
     Problem,
     Project,
     Risk,
+    ValidationMission,
 )
 from app.schemas.demo import DemoSeedCounts, DemoSeedRead
 from app.schemas.evidence import EvidenceNoteCreate
@@ -530,6 +531,57 @@ def _write_experiment_result(
         status="planned",
     )
     db.add(experiment)
+    db.flush()
+    mission = ValidationMission(
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        assumption_id=assumption.id,
+        experiment_id=experiment.id,
+        mission_title="Prove: coaches will trust cited AI recommendations",
+        why_it_matters=(
+            "This is the highest-risk decision blocker. Without proof that coaches "
+            "trust and use the workflow, building the product is premature."
+        ),
+        target_user="Independent online fitness coaches",
+        test_type="customer_interview",
+        steps=[
+            "Recruit five independent online fitness coaches.",
+            "Show a mocked weekly check-in recommendation with cited rationale.",
+            "Ask what they trust, what they would edit, and what they would reject.",
+            "Test whether rationale/citations change willingness to use the draft.",
+            "Log objections, willingness-to-pay signals, and switching concerns.",
+            "Review whether the result supports continue, pivot, pause, or proceed.",
+        ],
+        success_criteria=experiment.success_criteria or "Three of five coaches show usage intent.",
+        failure_criteria=experiment.failure_threshold or "Fewer than two coaches show usage intent.",
+        assets=[
+            {
+                "type": "interview_script",
+                "title": "Interview script",
+                "content": experiment.plan or "Show the recommendation mock and ask for trust signals.",
+            },
+            {
+                "type": "outreach_message",
+                "title": "Outreach message",
+                "content": (
+                    "I am testing a workflow that turns client check-ins into cited "
+                    "recommendation drafts for independent coaches. Would you be open "
+                    "to a short feedback call?"
+                ),
+            },
+            {
+                "type": "results_rubric",
+                "title": "Result interpretation rubric",
+                "content": (
+                    f"Success: {experiment.success_criteria}\n\n"
+                    f"Failure: {experiment.failure_threshold}"
+                ),
+            },
+        ],
+        status="planned",
+        created_by=auth.user_id,
+    )
+    db.add(mission)
     db.commit()
     validation_service.log_experiment_result(
         db,

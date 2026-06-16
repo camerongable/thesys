@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
-from app.db.models import Artifact, Experiment, ResearchSprint
+from app.db.models import Artifact, Experiment, ResearchSprint, ValidationMission
 from app.schemas.guide import (
     GuideActionRead,
     GuideChatResponseRead,
@@ -269,8 +269,8 @@ def chat(
 
     if any(term in normalized for term in ("interpret", "result", "notes", "validate")):
         answer = (
-            "Paste validation notes into the test area, then compare the signal against "
-            "the mission's success and failure criteria before changing confidence."
+            "Paste validation notes into the current mission, then compare the signal "
+            "against the mission's success and failure criteria before changing confidence."
         )
         return _chat_response(answer, context, [_action_by_id(context, "log_results")])
 
@@ -435,12 +435,26 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
         actions.extend(
             [
                 GuideActionRead(
+                    id="open_validation_mission",
+                    type="navigate",
+                    label="Open mission",
+                    description="Open the current proof with steps, assets, and result logging.",
+                    why_it_matters=(
+                        "The mission keeps validation focused on the one proof that can "
+                        "change the decision."
+                    ),
+                    target_route=f"/projects/{project_id}#validation-mission",
+                    target_modal="validation-mission",
+                    risk_level="low",
+                    requires_confirmation=False,
+                ),
+                GuideActionRead(
                     id="draft_outreach",
                     type="generate_draft",
                     label="Draft outreach",
                     description="Use the current blocker to draft validation outreach.",
                     why_it_matters="Outreach turns a plan into real user evidence.",
-                    target_route=f"/projects/{project_id}#validation-tests",
+                    target_route=f"/projects/{project_id}#validation-mission",
                     target_modal="draft-outreach",
                     risk_level="low",
                     requires_confirmation=False,
@@ -449,11 +463,24 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
                     id="log_results",
                     type="log_result",
                     label="Log results",
-                    description="Open the validation result form.",
+                    description="Open the mission result form.",
                     why_it_matters="Logged results are what should change confidence and verdicts.",
-                    target_route=f"/projects/{project_id}#validation-tests",
+                    target_route=f"/projects/{project_id}#validation-mission",
                     target_modal="log-result",
                     risk_level="medium",
+                    requires_confirmation=False,
+                ),
+                GuideActionRead(
+                    id="explain_success_criteria",
+                    type="explain",
+                    label="Explain success criteria",
+                    description="Explain what result would make the proof strong enough.",
+                    why_it_matters=(
+                        "Validation is only useful when success and failure are explicit "
+                        "before results arrive."
+                    ),
+                    target_route=f"/projects/{project_id}#validation-mission",
+                    risk_level="low",
                     requires_confirmation=False,
                 ),
             ]
@@ -536,6 +563,18 @@ def _active_validation_plan_id(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> uuid.UUID | None:
+    mission_id = db.scalar(
+        select(ValidationMission.id)
+        .where(
+            ValidationMission.workspace_id == auth.workspace_id,
+            ValidationMission.project_id == project_id,
+            ValidationMission.status != "closed",
+        )
+        .order_by(ValidationMission.updated_at.desc())
+        .limit(1)
+    )
+    if mission_id:
+        return mission_id
     experiment_id = db.scalar(
         select(Experiment.id)
         .where(
@@ -627,6 +666,7 @@ def _is_in_scope(message: str) -> bool:
         "evolution",
         "evolved",
         "missing",
+        "mission",
         "next",
         "notes",
         "outreach",
@@ -640,6 +680,7 @@ def _is_in_scope(message: str) -> bool:
         "source",
         "stage",
         "test",
+        "criteria",
         "thesis",
         "validate",
         "validation",
@@ -678,7 +719,7 @@ def _related_entities(context: GuideContextRead) -> list[GuideRelatedEntityRead]
             GuideRelatedEntityRead(
                 type="validation_plan",
                 id=str(context.active_validation_plan_id),
-                label="Active validation plan",
+                label="Current validation mission",
             )
         )
     return entities
@@ -690,8 +731,10 @@ def _support_actions(context: GuideContextRead) -> list[GuideActionRead]:
         "show_evidence",
         "update_thesis",
         "compare_wedges",
+        "open_validation_mission",
         "draft_outreach",
         "log_results",
+        "explain_success_criteria",
         "record_decision",
     ]
     return [

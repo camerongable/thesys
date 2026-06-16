@@ -2,7 +2,17 @@ import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Numeric, String, Text, Uuid
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    String,
+    Text,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -87,6 +97,51 @@ class ExperimentResult(UUIDPrimaryKeyMixin, Base):
     )
 
     experiment: Mapped[Experiment] = relationship(back_populates="results")
+
+
+class ValidationMission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "validation_missions"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('planned','running','results_logged','interpreted','closed')",
+            name="ck_validation_missions_status",
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    assumption_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("assumptions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    experiment_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("experiments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    mission_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    why_it_matters: Mapped[str] = mapped_column(Text, nullable=False)
+    target_user: Mapped[str] = mapped_column(Text, nullable=False)
+    test_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    steps: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    success_criteria: Mapped[str] = mapped_column(Text, nullable=False)
+    failure_criteria: Mapped[str] = mapped_column(Text, nullable=False)
+    assets: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="planned")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
 
 
 class Decision(UUIDPrimaryKeyMixin, Base):
