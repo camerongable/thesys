@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   Target,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -47,11 +48,13 @@ import {
   discoverCompetitorCandidates,
   discoverSources,
   DiscoveredSource,
+  dismissProjectNudge,
   executeNextAction,
   GuideAction,
   getDurableResearchStatus,
   getProjectResearchHistory,
   getProjectOverview,
+  getProjectNudges,
   getV1ResearchEval,
   IdeaReadiness,
   listApprovalRequests,
@@ -64,6 +67,7 @@ import {
   NextBestAction,
   PlaybookStep,
   ProjectStage,
+  ProjectNudge,
   rejectApprovalRequest,
   rejectCompetitorCandidate,
   rejectDiscoveredSource,
@@ -102,6 +106,7 @@ import { MarkdownContent } from "@/features/projects/markdown-content";
 import { StructuredIntakeWizard } from "@/features/projects/structured-intake-wizard";
 import { ThesisTab } from "@/features/projects/thesis-tab";
 import { WorkflowTrace } from "@/features/projects/workflow-trace";
+import { cn } from "@/lib/utils";
 
 const tabs = [
   "Decision",
@@ -315,6 +320,7 @@ export function ProjectOverview() {
                   <GuidedOverview
                     actionPending={nextActionMutation.isPending}
                     onAction={runAction}
+                    onGuideAction={runGuideAction}
                     onIntakeFinalized={refreshOverviewAfterIntake}
                     overview={overview}
                   />
@@ -640,11 +646,13 @@ function MobileWorkspaceAction({
 function GuidedOverview({
   actionPending,
   onAction,
+  onGuideAction,
   onIntakeFinalized,
   overview,
 }: {
   actionPending: boolean;
   onAction: (action: NextBestAction) => void;
+  onGuideAction: (action: GuideAction) => void;
   onIntakeFinalized: () => Promise<string | null>;
   overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
@@ -679,6 +687,8 @@ function GuidedOverview({
           />
         </div>
       </div>
+
+      <OverviewNudges onAction={onGuideAction} projectId={overview.project.id} />
 
       <div className="hidden lg:block">
         <RiskiestAssumptionCard overview={overview} onAction={onAction} />
@@ -720,6 +730,106 @@ function GuidedOverview({
       </details>
     </section>
   );
+}
+
+function OverviewNudges({
+  onAction,
+  projectId,
+}: {
+  onAction: (action: GuideAction) => void;
+  projectId: string;
+}) {
+  const queryClient = useQueryClient();
+  const nudgesQuery = useQuery({
+    queryKey: ["projects", projectId, "nudges"],
+    queryFn: () => getProjectNudges(projectId),
+  });
+  const dismissMutation = useMutation({
+    mutationFn: (nudgeId: string) => dismissProjectNudge(projectId, nudgeId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "nudges"] });
+    },
+  });
+  const nudges = nudgesQuery.data ?? [];
+  if (nudges.length === 0) {
+    return null;
+  }
+  return (
+    <section aria-label="Project nudges" className="grid gap-2 lg:grid-cols-2">
+      {nudges.slice(0, 2).map((nudge) => (
+        <CompactNudge
+          disabled={dismissMutation.isPending}
+          key={nudge.id}
+          nudge={nudge}
+          onAction={() => onAction(nudge.action)}
+          onDismiss={() => dismissMutation.mutate(nudge.id)}
+        />
+      ))}
+    </section>
+  );
+}
+
+function CompactNudge({
+  disabled,
+  nudge,
+  onAction,
+  onDismiss,
+}: {
+  disabled: boolean;
+  nudge: ProjectNudge;
+  onAction: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <section className={cn("rounded-lg border p-3", compactNudgeClass(nudge.severity))}>
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 rounded-md bg-background p-2 text-primary">
+          <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold">{nudge.title}</h2>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">{nudge.message}</p>
+            </div>
+            <button
+              aria-label={`Dismiss ${nudge.title}`}
+              className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              disabled={disabled}
+              onClick={onDismiss}
+              type="button"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
+              {nudge.why_it_matters}
+            </p>
+            <Button
+              className="min-h-10 shrink-0"
+              onClick={onAction}
+              size="sm"
+              type="button"
+              variant={nudge.severity === "action_required" ? "default" : "secondary"}
+            >
+              {nudge.action.label}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function compactNudgeClass(severity: ProjectNudge["severity"]) {
+  if (severity === "action_required") {
+    return "border-warning-border bg-warning-muted";
+  }
+  if (severity === "warning") {
+    return "border-warning-border bg-card";
+  }
+  return "border-border bg-card";
 }
 
 function MobileDecisionSpine({

@@ -1488,6 +1488,20 @@ export type GuideChatResponse = {
   related_entities: GuideRelatedEntity[];
 };
 
+export type ProjectNudgeSeverity = "info" | "warning" | "action_required";
+
+export type ProjectNudge = {
+  id: string;
+  project_id: string;
+  severity: ProjectNudgeSeverity;
+  title: string;
+  message: string;
+  why_it_matters: string;
+  action: GuideAction;
+  dismissed: boolean;
+  created_at: string;
+};
+
 export type AIProviderKeyStatus = {
   openai: boolean;
   anthropic: boolean;
@@ -1781,6 +1795,17 @@ export function askProjectGuide(projectId: string, message: string) {
   return apiFetch<GuideChatResponse>(`/api/projects/${projectId}/guide/chat`, {
     method: "POST",
     body: JSON.stringify({ message }),
+  });
+}
+
+export async function getProjectNudges(projectId: string) {
+  const response = await apiFetch<{ nudges: ProjectNudge[] }>(`/api/projects/${projectId}/nudges`);
+  return response.nudges;
+}
+
+export function dismissProjectNudge(projectId: string, nudgeId: string) {
+  return apiFetch<ProjectNudge>(`/api/projects/${projectId}/nudges/${nudgeId}/dismiss`, {
+    method: "POST",
   });
 }
 

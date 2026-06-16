@@ -1,16 +1,28 @@
 "use client";
 
-import { ArrowRight, Compass, HelpCircle, MessageSquare, Send, Sparkles } from "lucide-react";
+import {
+  ArrowRight,
+  Bell,
+  Compass,
+  HelpCircle,
+  MessageSquare,
+  Send,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { FormEvent, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import {
   askProjectGuide,
+  dismissProjectNudge,
   executeGuideAction,
   getGuideRecommendation,
+  getProjectNudges,
   GuideAction,
   GuideChatResponse,
+  ProjectNudge,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -25,13 +37,24 @@ export function GuidePanel({
 }) {
   const [message, setMessage] = useState("");
   const [chatResponse, setChatResponse] = useState<GuideChatResponse | null>(null);
+  const queryClient = useQueryClient();
   const guideQuery = useQuery({
     queryKey: ["projects", projectId, "guide", "recommendation"],
     queryFn: () => getGuideRecommendation(projectId),
   });
+  const nudgesQuery = useQuery({
+    queryKey: ["projects", projectId, "nudges"],
+    queryFn: () => getProjectNudges(projectId),
+  });
   const actionMutation = useMutation({
     mutationFn: (action: GuideAction) => executeGuideAction(projectId, action.id),
     onSuccess: (action) => onAction(action),
+  });
+  const dismissNudgeMutation = useMutation({
+    mutationFn: (nudgeId: string) => dismissProjectNudge(projectId, nudgeId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "nudges"] });
+    },
   });
   const chatMutation = useMutation({
     mutationFn: (question: string) => askProjectGuide(projectId, question),
@@ -100,6 +123,26 @@ export function GuidePanel({
               {guideQuery.data.why_this_matters}
             </p>
           </section>
+
+          {nudgesQuery.data && nudgesQuery.data.length > 0 ? (
+            <section>
+              <div className="flex items-center gap-2">
+                <Bell className="h-4 w-4 text-primary" aria-hidden="true" />
+                <h3 className="text-sm font-semibold">Nudges</h3>
+              </div>
+              <div className="mt-2 grid gap-2">
+                {nudgesQuery.data.slice(0, 2).map((nudge) => (
+                  <GuideNudgeCard
+                    disabled={dismissNudgeMutation.isPending}
+                    key={nudge.id}
+                    nudge={nudge}
+                    onAction={() => onAction(nudge.action)}
+                    onDismiss={() => dismissNudgeMutation.mutate(nudge.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           <section className="rounded-md border border-border bg-background p-3">
             <p className="text-xs font-medium text-muted-foreground">Recommended next move</p>
@@ -217,6 +260,51 @@ export function GuidePanel({
   );
 }
 
+function GuideNudgeCard({
+  disabled,
+  nudge,
+  onAction,
+  onDismiss,
+}: {
+  disabled: boolean;
+  nudge: ProjectNudge;
+  onAction: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <section className={cn("rounded-md border p-3", nudgeToneClass(nudge.severity))}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">{nudge.title}</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{nudge.message}</p>
+        </div>
+        <button
+          aria-label={`Dismiss ${nudge.title}`}
+          className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          disabled={disabled}
+          onClick={onDismiss}
+          type="button"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
+      <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">
+        {nudge.why_it_matters}
+      </p>
+      <Button
+        className="mt-3 min-h-10 w-full"
+        onClick={onAction}
+        size="sm"
+        type="button"
+        variant={nudge.severity === "action_required" ? "default" : "secondary"}
+      >
+        {nudge.action.label}
+        <ArrowRight className="h-4 w-4" aria-hidden="true" />
+      </Button>
+    </section>
+  );
+}
+
 function GuideActionButton({
   action,
   disabled,
@@ -246,6 +334,16 @@ function GuideActionButton({
       )}
     </button>
   );
+}
+
+function nudgeToneClass(severity: ProjectNudge["severity"]) {
+  if (severity === "action_required") {
+    return "border-warning-border bg-warning-muted";
+  }
+  if (severity === "warning") {
+    return "border-warning-border bg-background";
+  }
+  return "border-border bg-background";
 }
 
 function GuidePanelSkeleton() {

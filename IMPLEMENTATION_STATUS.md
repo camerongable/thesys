@@ -1357,7 +1357,49 @@ Checks run:
   is not allowed to access `com.openai.codex`. Per the sprint request, no
   external browser QA was attempted.
 
+## V1 Sprint 27 Scope
+
+- [x] Add persisted `ProjectNudge` records with severity, message,
+  why-it-matters copy, embedded `GuideAction`, and dismissed state.
+- [x] Add Alembic migration for `project_nudges`.
+- [x] Add deterministic `NudgeService` that derives project-specific nudges
+  from current project state instead of generating generic chat output.
+- [x] Generate proactive nudges for:
+  - broad ideas that need wedge comparison
+  - projects with enough research for a first validation test
+  - validation plans/missions with no logged results
+  - weak evidence areas such as willingness to pay or unsupported claims
+- [x] Cap visible nudges to at most two active nudges.
+- [x] Add nudge APIs:
+  - `GET /api/projects/{project_id}/nudges`
+  - `POST /api/projects/{project_id}/nudges/{nudge_id}/dismiss`
+- [x] Add nudge display in the persistent Guide panel.
+- [x] Add a compact nudge surface to the project overview.
+- [x] Let users dismiss nudges and keep dismissal persisted.
+- [x] Route nudge action cards through existing guide action navigation.
+
+## V1 Sprint 27 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_nudges.py`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_nudges.py app/tests/test_guide.py app/tests/test_project_overview.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test created a disposable project, added evidence,
+  extracted assumptions, confirmed two project-specific nudges, dismissed one,
+  and confirmed it no longer appeared in active nudges.
+- [ ] Browser QA in the Codex in-app browser is blocked because Computer Use
+  is not allowed to access `com.openai.codex`. Per the sprint request, no
+  external browser QA was attempted.
+
 ## Next Work
 
-Complete the in-Codex browser QA for V1 Sprints 25 and 26 when Codex app access
-is available, then begin V1 Sprint 27.
+Complete the in-Codex browser QA for V1 Sprints 25, 26, and 27 when Codex app
+access is available, then begin V1 Sprint 28.

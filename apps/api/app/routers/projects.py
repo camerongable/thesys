@@ -14,6 +14,7 @@ from app.schemas.guide import (
     GuideContextRead,
     GuideResponseRead,
 )
+from app.schemas.nudges import ProjectNudgeListRead, ProjectNudgeRead
 from app.schemas.overview import (
     IdeaReadinessRead,
     NextBestActionRead,
@@ -29,6 +30,7 @@ from app.schemas.thesis import (
 from app.schemas.wedges import WedgeActionRead, WedgeOptionListRead
 from app.services import (
     guide_service,
+    nudge_service,
     project_overview_service,
     project_service,
     thesis_service,
@@ -104,6 +106,31 @@ def get_project_strategic_updates(
     auth: AuthContextDep,
 ) -> list[StrategicUpdateRead]:
     return project_overview_service.get_strategic_updates(db, auth, project_id)
+
+
+@router.get("/{project_id}/nudges", response_model=ProjectNudgeListRead)
+def list_project_nudges(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> ProjectNudgeListRead:
+    return ProjectNudgeListRead(nudges=nudge_service.list_project_nudges(db, auth, project_id))
+
+
+@router.post("/{project_id}/nudges/{nudge_id}/dismiss", response_model=ProjectNudgeRead)
+def dismiss_project_nudge(
+    project_id: uuid.UUID,
+    nudge_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> ProjectNudgeRead:
+    try:
+        return nudge_service.dismiss_project_nudge(db, auth, project_id, nudge_id)
+    except nudge_service.ProjectNudgeNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Nudge not found.",
+        ) from exc
 
 
 @router.post("/{project_id}/next-action", response_model=NextBestActionRead)
