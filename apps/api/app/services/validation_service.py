@@ -46,8 +46,12 @@ from app.schemas.artifacts import AssumptionDraft, RiskDraft
 from app.schemas.validation import (
     AssumptionExtractionDraft,
     AssumptionUpdate,
+    DecisionCoachActionRead,
+    DecisionCoachChatRead,
     DecisionCreate,
+    DecisionRecommendationRead,
     ExperimentResultCreate,
+    SuggestedDecisionRecordRead,
     ValidationMissionRead,
     ValidationPlanDraft,
     ValidationPlanGenerateCreate,
@@ -999,6 +1003,579 @@ def create_decision(
     )
     db.commit()
     return get_decision(db, auth, project_id, decision.id)
+
+
+def get_decision_recommendation(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> DecisionRecommendationRead:
+    project_service.get_project(db, auth, project_id)
+    assumptions = _load_assumptions(db, auth, project_id)
+    risks = _load_risks(db, auth, project_id)
+    evidence_sources = _load_decision_evidence_sources(db, auth, project_id)
+    experiments = _load_decision_experiments(db, auth, project_id)
+    interpretation = _latest_project_validation_interpretation(db, auth, project_id)
+    mission = _decision_validation_mission(db, auth, project_id, interpretation)
+    recommendation = _decision_recommendation_value(
+        assumptions=assumptions,
+        experiments=experiments,
+        interpretation=interpretation,
+    )
+    supporting_evidence = _decision_supporting_evidence(
+        assumptions=assumptions,
+        evidence_sources=evidence_sources,
+        experiments=experiments,
+        interpretation=interpretation,
+    )
+    missing_evidence = _decision_missing_evidence(
+        assumptions=assumptions,
+        evidence_sources=evidence_sources,
+        experiments=experiments,
+        interpretation=interpretation,
+        mission=mission,
+    )
+    risk_texts = _decision_risks(assumptions, risks, interpretation)
+    rationale = _decision_recommendation_rationale(
+        recommendation=recommendation,
+        supporting_evidence=supporting_evidence,
+        missing_evidence=missing_evidence,
+        interpretation=interpretation,
+    )
+    suggested_record = _suggested_decision_record(
+        recommendation=recommendation,
+        rationale=rationale,
+        supporting_evidence=supporting_evidence,
+        missing_evidence=missing_evidence,
+        risks=risk_texts,
+        assumptions=assumptions,
+        risks_rows=risks,
+        evidence_sources=evidence_sources,
+        experiments=experiments,
+        interpretation=interpretation,
+        mission=mission,
+    )
+    return DecisionRecommendationRead(
+        recommendation=recommendation,
+        rationale=rationale,
+        supporting_evidence=supporting_evidence,
+        missing_evidence=missing_evidence,
+        risks=risk_texts,
+        suggested_decision_record=suggested_record,
+        action_cards=_decision_action_cards(project_id, recommendation, bool(mission)),
+    )
+
+
+def chat_decision_coach(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    message: str,
+) -> DecisionCoachChatRead:
+    recommendation = get_decision_recommendation(db, auth, project_id)
+    normalized = message.casefold()
+    missing = _format_bullets(recommendation.missing_evidence)
+    supporting = _format_bullets(recommendation.supporting_evidence)
+    risks = _format_bullets(recommendation.risks)
+
+    if any(term in normalized for term in ("why not", "build", "proceed", "can i build")):
+        if recommendation.recommendation == "proceed":
+            answer = (
+                "A narrow proceed decision is currently supportable, but only within the "
+                "validated wedge. Keep the build scoped to the proof that was actually "
+                f"supported. Supporting evidence: {supporting}"
+            )
+        else:
+            answer = (
+                "Do not proceed yet. "
+                f"{recommendation.rationale} Missing proof: {missing}"
+            )
+    elif "pivot" in normalized:
+        answer = (
+            "A pivot is warranted when the validation signal weakens the current wedge "
+            "but still reveals a different user, problem, or buying trigger worth testing. "
+            "Current recommendation: "
+            f"{_decision_recommendation_label(recommendation.recommendation)}. "
+            f"Risks to consider: {risks}"
+        )
+    elif any(term in normalized for term in ("missing", "evidence", "proof")):
+        answer = f"The missing proof is: {missing}"
+    elif "kill" in normalized:
+        answer = (
+            "Killing the idea is appropriate only when the core pain, urgency, or "
+            "willingness-to-pay signal is weak enough that another small test would not "
+            f"change the decision. Current recommendation: "
+            f"{_decision_recommendation_label(recommendation.recommendation)}."
+        )
+    elif any(term in normalized for term in ("summarize", "notes", "record")):
+        record = recommendation.suggested_decision_record
+        answer = (
+            f"Suggested record: {record.title}. "
+            f"Rationale: {record.rationale} "
+            f"Expected outcome: {record.expected_outcome}"
+        )
+    else:
+        answer = (
+            f"Recommended decision: "
+            f"{_decision_recommendation_label(recommendation.recommendation)}. "
+            f"{recommendation.rationale}"
+        )
+
+    return DecisionCoachChatRead(
+        answer=answer,
+        recommendation=recommendation.recommendation,
+        rationale=recommendation.rationale,
+        supporting_evidence=recommendation.supporting_evidence,
+        missing_evidence=recommendation.missing_evidence,
+        action_cards=recommendation.action_cards,
+    )
+
+
+def _load_decision_evidence_sources(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> list[EvidenceSource]:
+    return list(
+        db.scalars(
+            select(EvidenceSource)
+            .where(
+                EvidenceSource.workspace_id == auth.workspace_id,
+                EvidenceSource.project_id == project_id,
+            )
+            .order_by(EvidenceSource.created_at.desc())
+        )
+    )
+
+
+def _load_decision_experiments(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> list[Experiment]:
+    return list(
+        db.scalars(
+            select(Experiment)
+            .where(
+                Experiment.workspace_id == auth.workspace_id,
+                Experiment.project_id == project_id,
+            )
+            .options(selectinload(Experiment.results))
+            .order_by(Experiment.updated_at.desc())
+        )
+    )
+
+
+def _latest_project_validation_interpretation(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> ValidationResultInterpretation | None:
+    return db.scalar(
+        select(ValidationResultInterpretation)
+        .where(
+            ValidationResultInterpretation.workspace_id == auth.workspace_id,
+            ValidationResultInterpretation.project_id == project_id,
+        )
+        .order_by(ValidationResultInterpretation.created_at.desc())
+        .limit(1)
+    )
+
+
+def _decision_validation_mission(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    interpretation: ValidationResultInterpretation | None,
+) -> ValidationMission | None:
+    if interpretation is not None:
+        mission = db.scalar(
+            select(ValidationMission).where(
+                ValidationMission.id == interpretation.mission_id,
+                ValidationMission.workspace_id == auth.workspace_id,
+                ValidationMission.project_id == project_id,
+            )
+        )
+        if mission is not None:
+            return mission
+    return db.scalar(
+        select(ValidationMission)
+        .where(
+            ValidationMission.workspace_id == auth.workspace_id,
+            ValidationMission.project_id == project_id,
+        )
+        .order_by(ValidationMission.updated_at.desc())
+        .limit(1)
+    )
+
+
+def _decision_recommendation_value(
+    *,
+    assumptions: list[Assumption],
+    experiments: list[Experiment],
+    interpretation: ValidationResultInterpretation | None,
+) -> str:
+    if interpretation is not None:
+        if (
+            interpretation.decision_recommendation == "proceed"
+            and interpretation.willingness_to_pay in {"medium", "strong"}
+            and interpretation.switching_signal in {"medium", "strong"}
+        ):
+            return "proceed"
+        if interpretation.decision_recommendation in {"pivot", "pause", "kill"}:
+            return interpretation.decision_recommendation
+        return "continue_research"
+    if any(experiment.results for experiment in experiments):
+        return "continue_research"
+    if any(
+        assumption.status == "invalidated" and assumption.kill_risk
+        for assumption in assumptions
+    ):
+        return "pivot"
+    return "continue_research"
+
+
+def _decision_supporting_evidence(
+    *,
+    assumptions: list[Assumption],
+    evidence_sources: list[EvidenceSource],
+    experiments: list[Experiment],
+    interpretation: ValidationResultInterpretation | None,
+) -> list[str]:
+    evidence: list[str] = []
+    if interpretation is not None:
+        evidence.append(_shorten(interpretation.signal_summary, 240))
+        evidence.extend(_shorten(item, 240) for item in interpretation.what_strengthened[:3])
+        if interpretation.quotes:
+            evidence.append(f"Validation quote: {_shorten(interpretation.quotes[0], 200)}")
+    for experiment in experiments:
+        if experiment.results:
+            latest_result = experiment.results[0]
+            evidence.append(
+                f"Logged result for {experiment.name}: "
+                f"{_shorten(latest_result.result_summary, 180)}"
+            )
+            break
+    validated = next((item for item in assumptions if item.status == "validated"), None)
+    if validated is not None:
+        evidence.append(f"Validated blocker: {_shorten(validated.text, 180)}")
+    if evidence_sources:
+        evidence.append(
+            f"{len(evidence_sources)} evidence source"
+            f"{'' if len(evidence_sources) == 1 else 's'} in the project trail."
+        )
+    return _dedupe_strings(evidence)[:6]
+
+
+def _decision_missing_evidence(
+    *,
+    assumptions: list[Assumption],
+    evidence_sources: list[EvidenceSource],
+    experiments: list[Experiment],
+    interpretation: ValidationResultInterpretation | None,
+    mission: ValidationMission | None,
+) -> list[str]:
+    missing: list[str] = []
+    if not evidence_sources:
+        missing.append("Add source-backed evidence for the core customer and market claim.")
+    if not assumptions:
+        missing.append("Identify the biggest unknown or must-be-true blocker.")
+    if mission is None:
+        missing.append("Create a validation mission tied to the top blocker.")
+    if not any(experiment.results for experiment in experiments):
+        missing.append("Log real validation results before recording a proceed decision.")
+    if interpretation is None:
+        missing.append("Interpret validation notes/results before changing the decision.")
+    else:
+        if interpretation.willingness_to_pay not in {"medium", "strong"}:
+            missing.append(
+                "Get stronger willingness-to-pay proof from target users or a pilot commitment."
+            )
+        if interpretation.switching_signal not in {"medium", "strong"}:
+            missing.append("Show that users will switch from their current workaround.")
+        if interpretation.pain_severity not in {"medium", "high"}:
+            missing.append("Confirm the problem is painful and frequent enough to matter.")
+    return _dedupe_strings(missing)
+
+
+def _decision_risks(
+    assumptions: list[Assumption],
+    risks: list[Risk],
+    interpretation: ValidationResultInterpretation | None,
+) -> list[str]:
+    risk_texts = [
+        _shorten(assumption.text, 220)
+        for assumption in assumptions
+        if assumption.kill_risk and assumption.status != "validated"
+    ]
+    risk_texts.extend(_shorten(risk.text, 220) for risk in risks[:3])
+    if interpretation is not None:
+        risk_texts.extend(_shorten(item, 220) for item in interpretation.what_weakened[:2])
+        risk_texts.extend(_shorten(item, 220) for item in interpretation.objections[:2])
+    return _dedupe_strings(risk_texts)[:7]
+
+
+def _decision_recommendation_rationale(
+    *,
+    recommendation: str,
+    supporting_evidence: list[str],
+    missing_evidence: list[str],
+    interpretation: ValidationResultInterpretation | None,
+) -> str:
+    if recommendation == "proceed":
+        return (
+            "Proceed only with the narrow wedge that was validated. The latest result "
+            "shows enough pain, willingness to pay, and switching signal to justify a "
+            "small build or pilot."
+        )
+    if recommendation == "pivot":
+        return (
+            "Pivot before building. The current validation signal weakens the existing "
+            "wedge, so the next move is to change the target user, problem focus, or "
+            "positioning and run a sharper test."
+        )
+    if recommendation == "pause":
+        return (
+            "Pause active work until new evidence changes the picture. The current "
+            "evidence does not justify more execution effort."
+        )
+    if recommendation == "kill":
+        return (
+            "Kill the current version if the blocker is invalidated and another small "
+            "test is unlikely to change the conclusion."
+        )
+    if interpretation is not None:
+        return (
+            "Continue research. The validation result produced useful learning, but "
+            "there is not enough decision-grade proof to proceed yet."
+        )
+    if supporting_evidence and missing_evidence:
+        return (
+            "Continue research. Some project evidence exists, but the missing proof is "
+            "still material to a build, pivot, pause, or kill decision."
+        )
+    return (
+        "Continue research. The project does not yet have enough validation evidence "
+        "to support a durable proceed, pivot, pause, or kill decision."
+    )
+
+
+def _suggested_decision_record(
+    *,
+    recommendation: str,
+    rationale: str,
+    supporting_evidence: list[str],
+    missing_evidence: list[str],
+    risks: list[str],
+    assumptions: list[Assumption],
+    risks_rows: list[Risk],
+    evidence_sources: list[EvidenceSource],
+    experiments: list[Experiment],
+    interpretation: ValidationResultInterpretation | None,
+    mission: ValidationMission | None,
+) -> SuggestedDecisionRecordRead:
+    decision_type = _decision_type_for_recommendation(recommendation)
+    title = _decision_title_for_recommendation(recommendation)
+    revisit_trigger = _decision_revisit_trigger(recommendation, mission)
+    linked_assumption_ids = _decision_linked_assumption_ids(assumptions, interpretation, mission)
+    linked_experiment_ids = _decision_linked_experiment_ids(experiments, interpretation, mission)
+    record_rationale = _decision_record_markdown(
+        rationale=rationale,
+        supporting_evidence=supporting_evidence,
+        missing_evidence=missing_evidence,
+        risks=risks,
+    )
+    expected_outcome = (
+        f"{_decision_expected_outcome(recommendation)}\n\n"
+        f"Revisit trigger: {revisit_trigger}"
+    )
+    return SuggestedDecisionRecordRead(
+        decision_type=decision_type,
+        title=title,
+        rationale=record_rationale,
+        expected_outcome=expected_outcome,
+        revisit_trigger=revisit_trigger,
+        linked_assumption_ids=linked_assumption_ids,
+        linked_risk_ids=[risk.id for risk in risks_rows[:2]],
+        linked_evidence_source_ids=[source.id for source in evidence_sources[:3]],
+        linked_artifact_ids=[],
+        linked_competitor_ids=[],
+        linked_experiment_ids=linked_experiment_ids,
+        validation_mission_id=mission.id if mission is not None else None,
+    )
+
+
+def _decision_linked_assumption_ids(
+    assumptions: list[Assumption],
+    interpretation: ValidationResultInterpretation | None,
+    mission: ValidationMission | None,
+) -> list[uuid.UUID]:
+    ids: list[uuid.UUID] = []
+    if interpretation is not None and interpretation.assumption_id is not None:
+        ids.append(interpretation.assumption_id)
+    if mission is not None:
+        ids.append(mission.assumption_id)
+    if assumptions:
+        ids.append(assumptions[0].id)
+    return _dedupe_uuids(ids)[:3]
+
+
+def _decision_linked_experiment_ids(
+    experiments: list[Experiment],
+    interpretation: ValidationResultInterpretation | None,
+    mission: ValidationMission | None,
+) -> list[uuid.UUID]:
+    ids: list[uuid.UUID] = []
+    if interpretation is not None and interpretation.experiment_id is not None:
+        ids.append(interpretation.experiment_id)
+    if mission is not None and mission.experiment_id is not None:
+        ids.append(mission.experiment_id)
+    ids.extend(experiment.id for experiment in experiments if experiment.results)
+    return _dedupe_uuids(ids)[:3]
+
+
+def _decision_action_cards(
+    project_id: uuid.UUID,
+    recommendation: str,
+    has_mission: bool,
+) -> list[DecisionCoachActionRead]:
+    actions = [
+        DecisionCoachActionRead(
+            id="prepare_recommended_record",
+            label="Prepare recommended record",
+            description="Prefill the decision record from this recommendation.",
+            target_route=f"/projects/{project_id}#record-decision-panel",
+            target_modal="record-decision-panel",
+        ),
+        DecisionCoachActionRead(
+            id="show_evidence",
+            label="Show evidence",
+            description="Review the evidence and validation trail behind this decision.",
+            target_route=f"/projects/{project_id}#evidence",
+        ),
+    ]
+    if has_mission and recommendation != "proceed":
+        actions.insert(
+            1,
+            DecisionCoachActionRead(
+                id="open_validation_mission",
+                label="Open validation mission",
+                description="Run or inspect the blocker test before deciding.",
+                target_route=f"/projects/{project_id}#validation-mission",
+                target_modal="validation-mission",
+            ),
+        )
+    return actions
+
+
+def _decision_record_markdown(
+    *,
+    rationale: str,
+    supporting_evidence: list[str],
+    missing_evidence: list[str],
+    risks: list[str],
+) -> str:
+    sections = [rationale]
+    if supporting_evidence:
+        sections.append(
+            "Supporting evidence:\n" + "\n".join(f"- {item}" for item in supporting_evidence)
+        )
+    if missing_evidence:
+        sections.append("Missing proof:\n" + "\n".join(f"- {item}" for item in missing_evidence))
+    if risks:
+        sections.append("Risks:\n" + "\n".join(f"- {item}" for item in risks[:5]))
+    return "\n\n".join(sections)
+
+
+def _decision_type_for_recommendation(recommendation: str) -> str:
+    return {
+        "proceed": "build",
+        "pivot": "pivot",
+        "pause": "pause",
+        "kill": "kill",
+        "continue_research": "run_experiment",
+    }[recommendation]
+
+
+def _decision_title_for_recommendation(recommendation: str) -> str:
+    return {
+        "proceed": "Proceed with a narrow validated wedge",
+        "pivot": "Pivot from the current wedge",
+        "pause": "Pause until evidence improves",
+        "kill": "Kill the current idea",
+        "continue_research": "Continue research before building",
+    }[recommendation]
+
+
+def _decision_expected_outcome(recommendation: str) -> str:
+    return {
+        "proceed": "Start a narrow build or pilot tied to the validated wedge.",
+        "pivot": "Change the wedge, target user, or positioning before further build work.",
+        "pause": "Stop active work until a specific new learning goal appears.",
+        "kill": "Stop active work and preserve the decision trail for future reference.",
+        "continue_research": (
+            "Run the next validation test and revisit the decision with stronger proof."
+        ),
+    }[recommendation]
+
+
+def _decision_revisit_trigger(
+    recommendation: str,
+    mission: ValidationMission | None,
+) -> str:
+    if recommendation == "proceed":
+        return "Revisit if pilot users do not activate, pay, or switch as expected."
+    if recommendation == "pivot":
+        return (
+            "Revisit after a new wedge has a cleaner pain, urgency, or "
+            "willingness-to-pay signal."
+        )
+    if recommendation == "pause":
+        return "Revisit only when new evidence changes the biggest unknown."
+    if recommendation == "kill":
+        return "Reopen only if a materially different target user, wedge, or market signal appears."
+    if mission is not None:
+        return f"Revisit after completing: {mission.mission_title}."
+    return "Revisit after direct validation results are logged and interpreted."
+
+
+def _decision_recommendation_label(recommendation: str) -> str:
+    return {
+        "proceed": "Proceed",
+        "pivot": "Pivot",
+        "pause": "Pause",
+        "kill": "Kill",
+        "continue_research": "Continue research",
+    }[recommendation]
+
+
+def _format_bullets(items: list[str]) -> str:
+    if not items:
+        return "no major gaps are currently flagged"
+    return "; ".join(items)
+
+
+def _dedupe_strings(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for item in items:
+        normalized = _normalize_key(item)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(item)
+    return deduped
+
+
+def _dedupe_uuids(items: list[uuid.UUID]) -> list[uuid.UUID]:
+    seen: set[uuid.UUID] = set()
+    deduped: list[uuid.UUID] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return deduped
 
 
 def current_version(artifact: Artifact) -> ArtifactVersion | None:

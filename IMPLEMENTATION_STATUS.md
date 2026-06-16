@@ -2,10 +2,10 @@
 
 ## Current Phase
 
-V1 Sprint 24 adds structured result interpretation to the validation loop.
-Thesys can now turn pasted validation notes or logged results into extracted
-signals, a decision recommendation, proposed confidence updates, and a pending
-human approval before major project-state changes are applied.
+V1 Sprint 25 implementation is complete pending in-Codex browser QA. Thesys can
+now turn interpreted validation results, evidence, blockers, and risks into a
+Decision Coach recommendation, answer decision-specific questions, and prefill a
+durable decision record with trace links.
 Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
 multi-segment workflow packs remain V2 scope.
 
@@ -1288,6 +1288,42 @@ Checks run:
 - [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
 - [x] `cd apps/web && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/next typegen && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/tsc --noEmit`
 
+## V1 Sprint 25 Scope
+
+- [x] Add backend Decision Coach response contracts for recommendation,
+  supporting evidence, missing evidence, risks, action cards, and suggested
+  decision record prefill.
+- [x] Add decision APIs:
+  - `GET /api/projects/{project_id}/decisions/recommendation`
+  - `POST /api/projects/{project_id}/decisions/coach`
+- [x] Derive recommendations from interpreted validation results when present,
+  with deterministic fallbacks for projects that still need evidence.
+- [x] Generate suggested decision records with trace links to the key blocker,
+  evidence sources, and validation experiment tied to the mission.
+- [x] Route decision-related Guide chat questions through Decision Coach.
+- [x] Update the Decisions workspace to show a Decision Coach panel with the
+  recommended decision, rationale, missing proof, supporting evidence, risks,
+  constrained Q&A, and prefilled record action.
+- [x] Preserve the existing durable decision record form and evidence-link
+  workflow.
+
+## V1 Sprint 25 Verification
+
+Checks run:
+
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_validation.py apps/api/app/tests/test_guide.py -q`
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests -q`
+- [x] `apps/api/.venv/bin/ruff check apps/api/app/services/validation_service.py apps/api/app/routers/decisions.py apps/api/app/services/guide_service.py apps/api/app/schemas/validation.py apps/api/app/tests/test_validation.py`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I http://localhost:3000/projects`
+- [ ] Browser QA in the Codex in-app browser is blocked because Computer Use
+  is not allowed to access `com.openai.codex`. Per the sprint request, no
+  external browser QA was attempted.
+
 ## Next Work
 
-Begin V1 Sprint 25.
+Complete the in-Codex browser QA for V1 Sprint 25 when Codex app access is
+available, then begin V1 Sprint 26.

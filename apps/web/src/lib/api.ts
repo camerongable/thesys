@@ -698,6 +698,48 @@ export type CreateDecisionInput = {
   linked_experiment_ids?: string[];
 };
 
+export type SuggestedDecisionRecord = {
+  decision_type: DecisionType;
+  title: string;
+  rationale: string;
+  expected_outcome: string;
+  revisit_trigger: string;
+  linked_assumption_ids: string[];
+  linked_risk_ids: string[];
+  linked_evidence_source_ids: string[];
+  linked_artifact_ids: string[];
+  linked_competitor_ids: string[];
+  linked_experiment_ids: string[];
+  validation_mission_id: string | null;
+};
+
+export type DecisionCoachAction = {
+  id: string;
+  label: string;
+  description: string;
+  target_route: string | null;
+  target_modal: string | null;
+};
+
+export type DecisionCoachRecommendation = {
+  recommendation: DecisionRecommendation;
+  rationale: string;
+  supporting_evidence: string[];
+  missing_evidence: string[];
+  risks: string[];
+  suggested_decision_record: SuggestedDecisionRecord;
+  action_cards: DecisionCoachAction[];
+};
+
+export type DecisionCoachChatResponse = {
+  answer: string;
+  recommendation: DecisionRecommendation;
+  rationale: string;
+  supporting_evidence: string[];
+  missing_evidence: string[];
+  action_cards: DecisionCoachAction[];
+};
+
 export type Citation = {
   source_id: string;
   chunk_id: string | null;
@@ -1950,6 +1992,19 @@ export async function listDecisions(projectId: string) {
     `/api/projects/${projectId}/decisions`,
   );
   return response.decisions;
+}
+
+export function getDecisionRecommendation(projectId: string) {
+  return apiFetch<DecisionCoachRecommendation>(
+    `/api/projects/${projectId}/decisions/recommendation`,
+  );
+}
+
+export function askDecisionCoach(projectId: string, message: string) {
+  return apiFetch<DecisionCoachChatResponse>(`/api/projects/${projectId}/decisions/coach`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
 }
 
 export function createDecision(projectId: string, input: CreateDecisionInput) {

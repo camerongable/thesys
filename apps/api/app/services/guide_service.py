@@ -15,7 +15,8 @@ from app.schemas.guide import (
     GuideResponseRead,
 )
 from app.schemas.overview import NextBestActionRead, ProjectOverviewRead
-from app.services import project_overview_service, thesis_service, wedge_service
+from app.schemas.validation import DecisionCoachActionRead
+from app.services import project_overview_service, thesis_service, validation_service, wedge_service
 
 
 class GuideActionNotFoundError(ValueError):
@@ -274,13 +275,19 @@ def chat(
         )
         return _chat_response(answer, context, [_action_by_id(context, "log_results")])
 
-    if any(term in normalized for term in ("decision", "proceed", "pivot", "pause", "kill")):
-        answer = (
-            f"Current verdict: {context.verdict} "
-            "A durable decision should cite the evidence, name what is still missing, "
-            "and define what would cause you to revisit it."
+    if any(
+        term in normalized
+        for term in ("build", "decision", "proceed", "pivot", "pause", "kill")
+    ):
+        coach = validation_service.chat_decision_coach(db, auth, project_id, message)
+        return GuideChatResponseRead(
+            answer=coach.answer,
+            action_cards=[
+                _guide_action_from_decision_coach(project_id, action)
+                for action in coach.action_cards
+            ],
+            related_entities=_related_entities(context),
         )
-        return _chat_response(answer, context, [_action_by_id(context, "record_decision")])
 
     stage_copy = _STAGE_GUIDE_COPY.get(context.stage, _fallback_stage_copy(context.stage))
     return _chat_response(stage_copy.summary, context, context.available_actions[:3])
@@ -353,6 +360,26 @@ def _guide_action_from_next_best(action: NextBestActionRead) -> GuideActionRead:
         payload={"related_stage": action.related_stage},
         risk_level=_action_risk(action.action_type),
         requires_confirmation=action.action_type in {"use_suggested_decision", "resume_or_archive"},
+    )
+
+
+def _guide_action_from_decision_coach(
+    project_id: uuid.UUID,
+    action: DecisionCoachActionRead,
+) -> GuideActionRead:
+    return GuideActionRead(
+        id=action.id,
+        type="record_decision" if "record" in action.id else "navigate",
+        label=action.label,
+        description=action.description,
+        why_it_matters=(
+            "Decision actions keep the recommendation tied to evidence, missing proof, "
+            "and a durable record."
+        ),
+        target_route=action.target_route or f"/projects/{project_id}#decisions",
+        target_modal=action.target_modal,
+        risk_level="high" if "record" in action.id else "low",
+        requires_confirmation=False,
     )
 
 
@@ -655,6 +682,7 @@ def _is_in_scope(message: str) -> bool:
         "action",
         "assumption",
         "blocker",
+        "build",
         "decision",
         "evidence",
         "experiment",
@@ -663,6 +691,7 @@ def _is_in_scope(message: str) -> bool:
         "changed",
         "directions",
         "interview",
+        "kill",
         "evolution",
         "evolved",
         "missing",
@@ -670,6 +699,7 @@ def _is_in_scope(message: str) -> bool:
         "next",
         "notes",
         "outreach",
+        "pause",
         "pivot",
         "proceed",
         "proof",

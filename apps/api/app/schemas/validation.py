@@ -312,6 +312,52 @@ class DecisionCreate(BaseModel):
     linked_experiment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=25)
 
 
+class SuggestedDecisionRecordRead(BaseModel):
+    decision_type: DecisionType
+    title: str
+    rationale: str
+    expected_outcome: str
+    revisit_trigger: str
+    linked_assumption_ids: list[uuid.UUID] = Field(default_factory=list)
+    linked_risk_ids: list[uuid.UUID] = Field(default_factory=list)
+    linked_evidence_source_ids: list[uuid.UUID] = Field(default_factory=list)
+    linked_artifact_ids: list[uuid.UUID] = Field(default_factory=list)
+    linked_competitor_ids: list[uuid.UUID] = Field(default_factory=list)
+    linked_experiment_ids: list[uuid.UUID] = Field(default_factory=list)
+    validation_mission_id: uuid.UUID | None = None
+
+
+class DecisionCoachActionRead(BaseModel):
+    id: str
+    label: str
+    description: str
+    target_route: str | None = None
+    target_modal: str | None = None
+
+
+class DecisionRecommendationRead(BaseModel):
+    recommendation: DecisionRecommendation
+    rationale: str
+    supporting_evidence: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    suggested_decision_record: SuggestedDecisionRecordRead
+    action_cards: list[DecisionCoachActionRead] = Field(default_factory=list)
+
+
+class DecisionCoachChatCreate(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+
+
+class DecisionCoachChatRead(BaseModel):
+    answer: str
+    recommendation: DecisionRecommendation
+    rationale: str
+    supporting_evidence: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    action_cards: list[DecisionCoachActionRead] = Field(default_factory=list)
+
+
 class DecisionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

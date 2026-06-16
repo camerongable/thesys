@@ -435,3 +435,102 @@ def test_create_decision_with_links(client: TestClient, db_session: Session) -> 
     list_response = client.get(f"/api/projects/{project_id}/decisions")
     assert list_response.status_code == 200
     assert list_response.json()["decisions"][0]["id"] == body["id"]
+
+
+def test_decision_coach_recommends_research_before_validation(client: TestClient) -> None:
+    create_response = client.post("/api/projects", json={"name": "Decision coach early"})
+    project_id = create_response.json()["id"]
+
+    response = client.get(f"/api/projects/{project_id}/decisions/recommendation")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recommendation"] == "continue_research"
+    assert body["suggested_decision_record"]["decision_type"] == "run_experiment"
+    assert any("validation" in item.casefold() for item in body["missing_evidence"])
+    assert body["action_cards"]
+
+    chat_response = client.post(
+        f"/api/projects/{project_id}/decisions/coach",
+        json={"message": "What evidence is missing?"},
+    )
+
+    assert chat_response.status_code == 200
+    chat = chat_response.json()
+    assert chat["recommendation"] == "continue_research"
+    assert "missing proof" in chat["answer"].casefold()
+    assert chat["missing_evidence"]
+
+
+def test_decision_coach_uses_interpreted_results_and_prefills_record(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    create_response = client.post("/api/projects", json={"name": "Decision coach proceed"})
+    project_id = create_response.json()["id"]
+    evidence_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={
+            "title": "Validation interview notes",
+            "text": "Target users described urgent pain and asked for a paid pilot.",
+        },
+    )
+    extract_response = client.post(f"/api/projects/{project_id}/assumptions/extract")
+    assumption_id = extract_response.json()["assumptions"][0]["id"]
+    plan_response = client.post(
+        f"/api/projects/{project_id}/experiments/validation-plan",
+        json={"assumption_ids": [assumption_id], "max_plans": 1},
+    )
+    mission = plan_response.json()["missions"][0]
+
+    interpret_response = client.post(
+        f"/api/projects/{project_id}/experiments/missions/{mission['id']}/interpret",
+        json={
+            "raw_notes": (
+                "Interviewed 5 target users. 4 described urgent painful workflow pain. "
+                "3 asked for a paid pilot and said yes to switching. 2 would pay $99/month."
+            )
+        },
+    )
+    assert interpret_response.status_code == 200
+
+    response = client.get(f"/api/projects/{project_id}/decisions/recommendation")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recommendation"] == "proceed"
+    record = body["suggested_decision_record"]
+    assert record["decision_type"] == "build"
+    assert record["linked_assumption_ids"] == [assumption_id]
+    assert record["linked_evidence_source_ids"] == [evidence_response.json()["id"]]
+    assert record["linked_experiment_ids"] == [mission["experiment_id"]]
+    assert record["validation_mission_id"] == mission["id"]
+    assert body["supporting_evidence"]
+
+    decision_response = client.post(
+        f"/api/projects/{project_id}/decisions",
+        json={
+            "decision_type": record["decision_type"],
+            "title": record["title"],
+            "rationale": record["rationale"],
+            "expected_outcome": record["expected_outcome"],
+            "linked_assumption_ids": record["linked_assumption_ids"],
+            "linked_evidence_source_ids": record["linked_evidence_source_ids"],
+            "linked_experiment_ids": record["linked_experiment_ids"],
+        },
+    )
+
+    assert decision_response.status_code == 201
+    assert {link["linked_type"] for link in decision_response.json()["links"]} == {
+        "assumption",
+        "evidence",
+        "experiment",
+    }
+    assert db_session.scalar(select(Decision)) is not None
+
+    guide_response = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={"message": "Can I build now?"},
+    )
+    assert guide_response.status_code == 200
+    assert "proceed" in guide_response.json()["answer"].casefold()
