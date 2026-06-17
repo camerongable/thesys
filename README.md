@@ -587,8 +587,10 @@ Use the guided demo for the fastest review path:
 
 1. Start the local stack and open `http://localhost:3000/projects`.
 2. Choose `Load guided demo`.
-3. Review the Guide panel first. The seeded project opens directly at `#guide`.
-4. Follow the Idea Playbook through Thesis, Test, Decision, and History.
+3. Review the Current Step first. The seeded project opens directly at
+   `#current-step`.
+4. Use Ask Thesys and the inspect panels to move through Thesis, Test,
+   Decision, and History.
 5. Inspect the seeded Thesis Canvas, recommended wedge, validation mission,
    interpreted result, Decision Coach recommendation, and thesis evolution log.
 

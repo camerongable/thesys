@@ -17,7 +17,7 @@ def test_seed_demo_project_runs_mvp_eval_and_exposes_workflow_events(
     seed_body = seed_response.json()
     assert seed_body["created"] is True
     assert seed_body["project"]["name"] == "AI Assistant for Independent Fitness Coaches"
-    assert seed_body["next_url"].endswith("#guide")
+    assert seed_body["next_url"].endswith("#current-step")
     assert seed_body["counts"]["thesis_canvas"] == 1
     assert seed_body["counts"]["thesis_evolution_events"] >= 5
     assert seed_body["counts"]["wedge_options"] >= 4

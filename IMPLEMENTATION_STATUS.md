@@ -2,14 +2,13 @@
 
 ## Current Phase
 
-V1 Sprint 31 implementation is complete. Thesys now surfaces a compact Idea
-Story on Current Step that connects the messy original idea to the current
-thesis, selected wedge, rejected directions, blocker, and next proof. Wedge
-Explorer defaults to the recommended/avoid/research-later storyline while
-keeping the full comparison inspectable, and the Guide can explain idea
-evolution, wedge rationale, broad-direction rejection, and the next proof.
-Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
-multi-segment workflow packs remain V2 scope.
+V1 Sprint 32 implementation is complete. Thesys now opens around a less busy
+validation workflow: the homepage emphasizes rough idea to wedge to unknown to
+next proof, the default queue hides disposable QA/demo clutter, new
+investigations route to Current Step, and the project workspace keeps thesis,
+wedge, biggest unknown, next proof, and one primary action visible before
+supporting details. Watchlists, monitoring, collaboration, portfolio
+dashboards, integrations, and multi-segment workflow packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -1515,6 +1514,50 @@ Checks run:
   is not allowed to access `com.openai.codex`. Per the sprint request, no
   external browser QA was attempted.
 
+## V1 Sprint 32 Scope
+
+- [x] Update the homepage headline/subheading around the Sprint 32 promise:
+  rough idea → wedge → biggest unknown → next proof.
+- [x] Rename the default queue to "Ideas in progress" and reduce project rows
+  to the allowed essentials: thesis/description, verdict, next action, stage,
+  and evidence summary.
+- [x] Hide disposable smoke, QA, and browser-test projects from the homepage by
+  default while keeping the guided fitness-coach demo visible.
+- [x] Add a "Show test projects" filter for inspecting hidden QA projects.
+- [x] Keep new-investigation intake focused after preview by showing one
+  recommended path and collapsing alternate paths.
+- [x] Route newly created investigations to Current Step by default, with
+  explicit actions for Current Step, research, or wedge comparison.
+- [x] Compress Current Step so the primary job, CTA, thesis, selected wedge,
+  biggest unknown, and next proof are visible first.
+- [x] Move supporting evidence, recovery, blocker details, and idea-history
+  details behind Inspect sections.
+- [x] Apply Sprint 32 terminology across visible detail labels: evidence
+  summary, competitors and substitutes, full research memo, active test, and
+  assumptions behind the decision.
+- [x] Add frontend tests for homepage test-project filtering.
+
+## V1 Sprint 32 Verification
+
+Checks run:
+
+- [x] `pnpm --filter thesys-web test`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `docker compose config`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test: `POST /api/demo/seed` refreshed the guided
+  demo project and returned `#current-step` with seeded thesis canvas, thesis
+  evolution, wedges, validation mission, interpretation, and decision counts.
+- [x] Browser QA in the Codex in-app browser: verified homepage copy, "Ideas in
+  progress," default hiding of QA/browser/endpoint-audit/demo clutter, "Show
+  test projects" reveal behavior, guided demo visibility, direct Current Step
+  landing on `#current-step`, compact thesis/wedge/biggest unknown/next proof
+  story, collapsed Inspect sections, and no browser warn/error console logs.
+
 ## Next Work
 
-V1 Sprint 31 is complete. Next work is V1 Sprint 32: Usability Compression and Demo Polish.
+Begin the next planned sprint from the implementation brief.

@@ -38,7 +38,7 @@ export const projectNavigationItems: ProjectNavigationItem[] = [
   },
   {
     anchor: null,
-    detail: "Current proof",
+    detail: "Active test",
     key: "test",
     label: "Test",
   },

@@ -9,6 +9,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { AiModeIndicator } from "@/features/ai/ai-mode-indicator";
+import { filterHomepageProjects, isDisposableProject } from "@/features/projects/project-list-utils";
 import { getMe, getProjectOverview, listProjects, seedDemoProject } from "@/lib/api";
 
 type ProjectOverviewResult = Awaited<ReturnType<typeof getProjectOverview>>;
@@ -25,6 +26,7 @@ export function ProjectList() {
   const [riskFilter, setRiskFilter] = useState<QueueRiskFilter>("all");
   const [sortMode, setSortMode] = useState<QueueSortMode>("updated");
   const [compactRows, setCompactRows] = useState(false);
+  const [showTestProjects, setShowTestProjects] = useState(false);
   const meQuery = useQuery({ queryKey: ["me"], queryFn: getMe });
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: listProjects });
   const seedMutation = useMutation({
@@ -68,17 +70,19 @@ export function ProjectList() {
       queryFn: () => getProjectOverview(project.id),
     })),
   });
-  const activeProjects = projects.filter((project) => project.status === "active").length;
-  const readyProjects = overviewQueries.filter(
-    (query) => query.data?.idea_readiness.status === "decision_ready",
-  ).length;
   const projectRows = projects.map((project, index) => ({
     overview: overviewQueries[index]?.data,
     overviewPending: overviewQueries[index]?.isLoading ?? false,
     project,
   }));
+  const hiddenTestProjectCount = projectRows.filter(({ project }) => isDisposableProject(project)).length;
+  const homepageRows = filterHomepageProjects(projectRows, showTestProjects);
+  const activeProjects = homepageRows.filter(({ project }) => project.status === "active").length;
+  const readyProjects = homepageRows.filter(
+    ({ overview }) => overview?.idea_readiness.status === "decision_ready",
+  ).length;
   const filteredRows = sortProjectRows(
-    projectRows.filter(({ overview, project }) =>
+    homepageRows.filter(({ overview, project }) =>
       projectMatchesFilters({
         overview,
         project,
@@ -100,11 +104,11 @@ export function ProjectList() {
               {meQuery.data?.workspace.name ?? "Local workspace"}
             </p>
             <h1 className="mt-2 max-w-[68ch] text-2xl font-semibold tracking-normal sm:text-3xl">
-              Decide what to validate next.
+              Turn a rough idea into the next validation test.
             </h1>
             <p className="mt-3 max-w-[68ch] text-sm leading-6 text-muted-foreground">
-              Thesys keeps each idea tied to a verdict, the evidence behind it, the biggest
-              uncertainty, and the next validation move.
+              Thesys shapes the idea, finds the wedge, identifies the biggest unknown,
+              and tells you what proof to run next.
             </p>
           </div>
           <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-2 sm:flex sm:items-center sm:justify-end lg:shrink-0 lg:pt-1">
@@ -127,15 +131,15 @@ export function ProjectList() {
             <div className="rounded-lg border border-border bg-card">
               <div className="flex flex-col gap-4 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h2 className="text-base font-semibold">Validation queue</h2>
+                  <h2 className="text-base font-semibold">Ideas in progress</h2>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Open a project to review the verdict, blocker, and next test.
+                    Open an idea to see the thesis, biggest unknown, and next proof.
                   </p>
                 </div>
                 <div className="grid w-full grid-cols-3 divide-x divide-border overflow-hidden rounded-md border border-border bg-surface text-center text-xs sm:w-auto sm:min-w-64">
-                  <QueueMetric label="Ideas" value={projects.length} />
+                  <QueueMetric label="Ideas" value={homepageRows.length} />
                   <QueueMetric label="Active" value={activeProjects} />
-                  <QueueMetric label="Drafted" value={readyProjects} />
+                  <QueueMetric label="Ready" value={readyProjects} />
                 </div>
               </div>
               {projects.length > 0 ? (
@@ -145,15 +149,18 @@ export function ProjectList() {
                   searchQuery={searchQuery}
                   sortMode={sortMode}
                   statusFilter={statusFilter}
+                  hiddenTestProjectCount={hiddenTestProjectCount}
+                  showTestProjects={showTestProjects}
                   onCompactRowsChange={setCompactRows}
                   onRiskFilterChange={setRiskFilter}
                   onSearchQueryChange={setSearchQuery}
+                  onShowTestProjectsChange={setShowTestProjects}
                   onSortModeChange={setSortMode}
                   onStatusFilterChange={setStatusFilter}
                 />
               ) : null}
               <p className="sr-only" aria-live="polite">
-                Showing {formatNumber(visibleProjectCount)} of {formatNumber(projects.length)} projects.
+                Showing {formatNumber(visibleProjectCount)} of {formatNumber(homepageRows.length)} ideas.
               </p>
 
               {projectsQuery.isLoading ? (
@@ -168,6 +175,11 @@ export function ProjectList() {
                 </div>
               ) : projects.length === 0 ? (
                 <EmptyProjectQueue onSeed={() => seedMutation.mutate()} pending={seedMutation.isPending} />
+              ) : homepageRows.length === 0 ? (
+                <EmptyHiddenQueue
+                  hiddenCount={hiddenTestProjectCount}
+                  onShow={() => setShowTestProjects(true)}
+                />
               ) : filteredRows.length === 0 ? (
                 <EmptyFilteredQueue />
               ) : (
@@ -243,9 +255,12 @@ function QueueToolbar({
   searchQuery,
   sortMode,
   statusFilter,
+  hiddenTestProjectCount,
+  showTestProjects,
   onCompactRowsChange,
   onRiskFilterChange,
   onSearchQueryChange,
+  onShowTestProjectsChange,
   onSortModeChange,
   onStatusFilterChange,
 }: {
@@ -254,9 +269,12 @@ function QueueToolbar({
   searchQuery: string;
   sortMode: QueueSortMode;
   statusFilter: QueueStatusFilter;
+  hiddenTestProjectCount: number;
+  showTestProjects: boolean;
   onCompactRowsChange: (value: boolean) => void;
   onRiskFilterChange: (value: QueueRiskFilter) => void;
   onSearchQueryChange: (value: string) => void;
+  onShowTestProjectsChange: (value: boolean) => void;
   onSortModeChange: (value: QueueSortMode) => void;
   onStatusFilterChange: (value: QueueStatusFilter) => void;
 }) {
@@ -265,11 +283,12 @@ function QueueToolbar({
     riskFilter !== "all",
     sortMode !== "updated",
     compactRows,
+    showTestProjects,
   ].filter(Boolean).length;
 
   return (
     <div className="border-b border-border px-4 py-3">
-      <div className="grid gap-2 min-[1200px]:grid-cols-[minmax(16rem,1fr)_9rem_9rem_9rem_auto]">
+      <div className="grid gap-2 min-[1200px]:grid-cols-[minmax(16rem,1fr)_9rem_9rem_9rem_auto_auto]">
         <label className="relative block min-w-0">
           <span className="sr-only">Search projects</span>
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
@@ -286,11 +305,14 @@ function QueueToolbar({
         <QueueAdvancedFilters
           className="hidden min-[1200px]:contents"
           compactRows={compactRows}
+          hiddenTestProjectCount={hiddenTestProjectCount}
           riskFilter={riskFilter}
+          showTestProjects={showTestProjects}
           sortMode={sortMode}
           statusFilter={statusFilter}
           onCompactRowsChange={onCompactRowsChange}
           onRiskFilterChange={onRiskFilterChange}
+          onShowTestProjectsChange={onShowTestProjectsChange}
           onSortModeChange={onSortModeChange}
           onStatusFilterChange={onStatusFilterChange}
         />
@@ -310,11 +332,14 @@ function QueueToolbar({
         <QueueAdvancedFilters
           className="mt-2 hidden gap-2 group-open:grid"
           compactRows={compactRows}
+          hiddenTestProjectCount={hiddenTestProjectCount}
           riskFilter={riskFilter}
+          showTestProjects={showTestProjects}
           sortMode={sortMode}
           statusFilter={statusFilter}
           onCompactRowsChange={onCompactRowsChange}
           onRiskFilterChange={onRiskFilterChange}
+          onShowTestProjectsChange={onShowTestProjectsChange}
           onSortModeChange={onSortModeChange}
           onStatusFilterChange={onStatusFilterChange}
         />
@@ -326,21 +351,27 @@ function QueueToolbar({
 function QueueAdvancedFilters({
   className,
   compactRows,
+  hiddenTestProjectCount,
   riskFilter,
+  showTestProjects,
   sortMode,
   statusFilter,
   onCompactRowsChange,
   onRiskFilterChange,
+  onShowTestProjectsChange,
   onSortModeChange,
   onStatusFilterChange,
 }: {
   className?: string;
   compactRows: boolean;
+  hiddenTestProjectCount: number;
   riskFilter: QueueRiskFilter;
+  showTestProjects: boolean;
   sortMode: QueueSortMode;
   statusFilter: QueueStatusFilter;
   onCompactRowsChange: (value: boolean) => void;
   onRiskFilterChange: (value: QueueRiskFilter) => void;
+  onShowTestProjectsChange: (value: boolean) => void;
   onSortModeChange: (value: QueueSortMode) => void;
   onStatusFilterChange: (value: QueueStatusFilter) => void;
 }) {
@@ -393,6 +424,17 @@ function QueueAdvancedFilters({
         />
         Compact
       </label>
+      {hiddenTestProjectCount > 0 ? (
+        <label className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground sm:h-10 sm:min-h-10">
+          <input
+            checked={showTestProjects}
+            className="h-4 w-4 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            onChange={(event) => onShowTestProjectsChange(event.target.checked)}
+            type="checkbox"
+          />
+          Show test projects
+        </label>
+      ) : null}
     </div>
   );
 }
@@ -413,8 +455,11 @@ function ProjectDecisionRow({
     overview?.current_recommendation.recommendation ??
     (overviewPending ? "Loading verdict..." : "Open the project to generate a verdict.");
   const nextAction = overview?.next_best_action.label ?? "Structure the idea";
-  const risk = overview ? highestProjectRisk(overview) : "Unknown";
-  const rowLabel = `${project.name}. ${stage}. Recommendation: ${recommendation}. Next action: ${nextAction}. Risk: ${risk}.`;
+  const thesisOrDescription =
+    overview?.strategic_snapshot.current_thesis ??
+    project.short_description ??
+    "No thesis recorded yet.";
+  const rowLabel = `${project.name}. ${stage}. Verdict: ${recommendation}. Next action: ${nextAction}.`;
 
   return (
     <Link
@@ -440,7 +485,7 @@ function ProjectDecisionRow({
           </div>
           {!compact ? (
             <p className="mt-2 line-clamp-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
-              {project.short_description ?? "No description recorded yet."}
+              {thesisOrDescription}
             </p>
           ) : null}
           <p
@@ -457,13 +502,12 @@ function ProjectDecisionRow({
         <div
           className={
             compact
-              ? "grid gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-[minmax(10rem,1fr)_minmax(12rem,1.15fr)_minmax(7rem,0.7fr)]"
-              : "grid gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-1"
+            ? "grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-[minmax(10rem,1fr)_minmax(12rem,1.15fr)]"
+            : "grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-1"
           }
         >
           <Signal compact={compact} label="Next action" value={nextAction} />
-          <Signal compact={compact} label="Evidence" value={overview ? evidenceSummary(overview) : "Pending"} />
-          <Signal compact={compact} label="Risk" value={risk} />
+          <Signal compact={compact} label="Evidence summary" value={overview ? evidenceSummary(overview) : "Pending"} />
         </div>
 
         <ArrowRight
@@ -479,10 +523,10 @@ function EmptyProjectQueue({ onSeed, pending }: { onSeed: () => void; pending: b
   return (
     <div className="px-4 py-10">
       <div className="max-w-2xl">
-        <h3 className="text-base font-semibold">No ideas under validation.</h3>
+        <h3 className="text-base font-semibold">No ideas in progress.</h3>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Start with a rough idea. Thesys will turn it into a structured project, surface
-          missing evidence, and recommend the first validation action.
+          Start with a rough idea. Thesys will shape it into a thesis, identify the
+          biggest unknown, and recommend the next proof to run.
         </p>
         <div className="mt-5 flex flex-col gap-2 sm:flex-row">
           <Link className={buttonVariants()} href="/projects/new">
@@ -495,6 +539,27 @@ function EmptyProjectQueue({ onSeed, pending }: { onSeed: () => void; pending: b
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function EmptyHiddenQueue({
+  hiddenCount,
+  onShow,
+}: {
+  hiddenCount: number;
+  onShow: () => void;
+}) {
+  return (
+    <div className="px-4 py-8">
+      <h3 className="text-sm font-semibold">Only test/demo projects are hidden.</h3>
+      <p className="mt-2 max-w-[65ch] text-sm leading-6 text-muted-foreground">
+        {formatNumber(hiddenCount)} test, demo, or audit project{hiddenCount === 1 ? "" : "s"} are
+        hidden so the default queue stays focused on real ideas and the guided demo.
+      </p>
+      <Button className="mt-4" onClick={onShow} type="button" variant="secondary">
+        Show test projects
+      </Button>
     </div>
   );
 }

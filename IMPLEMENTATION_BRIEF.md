@@ -11028,3 +11028,200 @@ A guided copilot that turns a rough idea into a sharper thesis, selected wedge, 
 The desired first-session user reaction:
 
 > I pasted a messy idea, and Thesys told me what it could become, what might kill it, and exactly what to test next.
+
+---
+
+# V1 Sprints 33-36: Usability Reset
+
+## Goal
+
+Sprint 32 improved labels, routing, and some progressive disclosure, but the app still feels too busy because the project page presents status, navigation, context, nudges, details, and actions as competing surfaces.
+
+The next four sprints reset the default experience around a quieter command surface.
+
+The product should feel like:
+
+```text
+Open a project → understand the current decision → see the biggest unknown → run the next proof.
+```
+
+Not like:
+
+```text
+Open a project → interpret every subsystem at once.
+```
+
+---
+
+## Product Direction
+
+Use the following defaults:
+
+- UX target: Quiet Current Step
+- Sprint count: 4
+- Advanced details model: Inspect Drawer
+- Backend/API default: no schema or database changes unless implementation proves they are required
+
+The default project page should show:
+
+```text
+current verdict
+one primary action
+current thesis
+selected wedge
+biggest unknown
+next proof
+Ask Thesys
+Inspect details
+```
+
+Everything else should be secondary.
+
+---
+
+# V1 Sprint 33: Quiet Current Step
+
+## Goal
+
+Make Current Step the calm command surface for a project.
+
+## Scope
+
+- Replace the current desktop/mobile split with one responsive Current Step surface.
+- On mobile, show the Current Step and Current test path before any Decision context.
+- Collapse the project status bar into a short verdict summary.
+- Move full status, evidence counts, blocker rationale, recovery, and history out of the default page.
+- Show one primary CTA.
+- Keep only two secondary actions visible by default:
+  - Ask Thesys
+  - Inspect details
+
+## Acceptance Criteria
+
+- A user can identify the primary action in 5 seconds.
+- A user can identify current thesis, selected wedge, biggest unknown, and next proof without opening another workspace.
+- Mobile does not show Decision context before Current test path.
+- Current Step has one dominant CTA.
+- No full guided sidebar is visible on the default Current Step page.
+
+---
+
+# V1 Sprint 34: Inspect Drawer and Navigation Simplification
+
+## Goal
+
+Preserve depth without making advanced details compete with the main action.
+
+## Scope
+
+- Add a reusable Project Inspect Drawer.
+- Drawer sections:
+  - Status
+  - Evidence summary
+  - Assumptions behind the decision
+  - Test path
+  - Research details
+  - Decision history
+  - Project context
+- On desktop, open the drawer from the right.
+- On mobile, open it as a full-screen sheet.
+- Replace the full Guided mode sidebar with a compact Explore control.
+- Keep existing hash routing for Shape, Research, Test, Decide, History, and legacy hashes.
+- Treat drawer open/closed state as UI state, not a new route.
+
+## Acceptance Criteria
+
+- Advanced details are available but not visible by default.
+- The user can open and close Inspect details on desktop and mobile.
+- Existing deep links still route to the correct destination.
+- Shape, Research, Test, Decide, and History remain reachable.
+- Current Step remains visually dominant when the drawer is closed.
+
+---
+
+# V1 Sprint 35: Homepage and New Investigation Simplification
+
+## Goal
+
+Reduce first-session clutter before the user even reaches a project.
+
+## Scope
+
+- Make the homepage a focused project launcher and idea queue.
+- Keep one headline and one primary Start investigation CTA.
+- Collapse filters behind a Filter control.
+- Move guided demo into a secondary action instead of a competing card.
+- Keep test/demo/audit project hiding by default.
+- Move Show test projects into the filter menu.
+- Convert New Investigation into a single-column primary flow.
+- Remove persistent explanatory sidebar cards from the desktop intake page.
+- Post-preview result should show:
+  - First thesis
+  - Possible wedge
+  - Biggest unknown
+  - Recommended path
+  - Continue to Current Step
+- Keep Run research and Compare wedges as secondary actions.
+
+## Acceptance Criteria
+
+- Homepage has one dominant action.
+- Homepage default queue does not show disposable test/demo/audit clutter.
+- New Investigation does not show competing sidebar cards.
+- Post-preview flow makes Continue to Current Step the dominant action.
+- Users are not dumped into a full workspace after creating an idea.
+
+---
+
+# V1 Sprint 36: Usability Polish, Empty States, and QA
+
+## Goal
+
+Make the simplified experience feel coherent, reliable, and ready for repeated use.
+
+## Scope
+
+- Standardize empty states across project surfaces:
+  - what is missing
+  - why it matters
+  - what to do next
+- Reduce repeated card treatment by using spacing, dividers, and drawer sections.
+- Remove repeated explanations where status, CTA rationale, nudge, and detail panels say the same thing.
+- Tighten copy across default surfaces.
+- Run full desktop and mobile QA in the in-Codex browser.
+- Update implementation status with completed verification.
+
+## Acceptance Criteria
+
+- Empty states are specific and action-oriented.
+- Default screens do not use cards for every information group.
+- No visible text overflow or horizontal overflow.
+- No browser warning/error console logs on checked routes.
+- Manual QA covers:
+  - homepage
+  - new investigation
+  - current project
+  - guided demo
+  - Inspect Drawer
+  - deep links
+  - mobile Current Step
+
+---
+
+## Usability Reset Definition of Done
+
+After Sprint 36, Thesys should feel like a guided validation command surface, not a strategic records database.
+
+The default experience should answer:
+
+```text
+What is the idea now?
+What is the wedge?
+What is the biggest unknown?
+What proof should I run next?
+Where can I inspect the reasoning?
+```
+
+The desired user reaction:
+
+> I know exactly what to do next, and I can inspect the supporting evidence when I need it.

@@ -700,7 +700,7 @@ function MobileWorkspaceAction({
               button: "Open mission",
               description: "Run or log the one proof that can change the verdict.",
               icon: Beaker,
-              title: "Current proof",
+              title: "Active test",
             }
           : activeTab === "History"
             ? {
@@ -818,12 +818,12 @@ function GuidedOverview({
         <summary className="cursor-pointer list-none">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-                <h2 className="text-base font-semibold">Project history</h2>
+              <h2 className="text-base font-semibold">Decision history</h2>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 Lifecycle status, active risks, and recent decision updates.
               </p>
             </div>
-            <DisclosureLabel closedLabel="Show history" open={recordOpen} openLabel="Hide history" />
+            <DisclosureLabel closedLabel="Inspect history" open={recordOpen} openLabel="Hide history" />
           </div>
         </summary>
         <div className="mt-5 grid gap-5 border-t border-border pt-5">
@@ -1176,7 +1176,7 @@ function MobileDecisionSupport({
 
       <MobileSupportSection
         icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
-        title="Evidence basis"
+        title="Evidence summary"
       >
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
           <MobileMetric label="Sources" value={health.source_count} />
@@ -1395,6 +1395,7 @@ function CurrentStepPanel({
   const nextProof = blocker?.recommended_test
     ? stripLeadingSignalLabel(nextProofText(blocker))
     : clarifyActionText(nextBestAction.description);
+  const [signalsOpen, setSignalsOpen] = useState(false);
   const ideaStoryQuery = useQuery({
     queryKey: ["projects", overview.project.id, "idea-story"],
     queryFn: () => getIdeaStory(overview.project.id),
@@ -1442,38 +1443,54 @@ function CurrentStepPanel({
           overview={overview}
         />
 
-        <div className="mt-6 grid gap-5 border-t border-border pt-5 xl:grid-cols-3">
-          <DecisionSignal
-            body={
-              blocker
-                ? decisionBlockerText(blocker)
-                : "No ranked blocker yet. Structure context or extract assumptions before treating the verdict as durable."
-            }
-            icon={<ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />}
-            label="Blocker"
-            title={blocker ? assumptionBeliefText(blocker.text) : "Blocker missing"}
-          />
-          <DecisionSignal
-            body={`Weakest area: ${health.weakest_evidence_area}`}
-            icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
-            label="Evidence"
-            meta={
-              <div className="flex flex-wrap gap-2">
-                <DecisionMetric label="Sources" value={health.source_count} />
-                <DecisionMetric label="Open" value={health.unsupported_claim_count} />
-                <DecisionMetric label="Validated" value={health.validated_assumption_count} />
+        <details
+          className="mt-5 border-t border-border pt-4"
+          onToggle={(event) => setSignalsOpen(event.currentTarget.open)}
+        >
+          <summary className="cursor-pointer list-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-sm font-semibold">Inspect supporting signals</h3>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Evidence, recovery, and blocker details stay available when you need the receipts.
+                </p>
               </div>
-            }
-            title={decisionGrade.detail}
-          />
-          <DecisionSignal
-            body={recovery.detail}
-            icon={<ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />}
-            label="Recovery"
-            meta={<span className={tonePillClass(recovery.tone)}>{recovery.label}</span>}
-            title={recovery.title}
-          />
-        </div>
+              <DisclosureLabel closedLabel="Inspect details" open={signalsOpen} openLabel="Hide details" />
+            </div>
+          </summary>
+          <div className="mt-4 grid gap-5 xl:grid-cols-3">
+            <DecisionSignal
+              body={
+                blocker
+                  ? decisionBlockerText(blocker)
+                  : "No ranked blocker yet. Structure context or extract assumptions before treating the verdict as durable."
+              }
+              icon={<ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />}
+              label="Biggest unknown"
+              title={blocker ? assumptionBeliefText(blocker.text) : "Blocker missing"}
+            />
+            <DecisionSignal
+              body={`Weakest area: ${health.weakest_evidence_area}`}
+              icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
+              label="Evidence summary"
+              meta={
+                <div className="flex flex-wrap gap-2">
+                  <DecisionMetric label="Sources" value={health.source_count} />
+                  <DecisionMetric label="Open" value={health.unsupported_claim_count} />
+                  <DecisionMetric label="Validated" value={health.validated_assumption_count} />
+                </div>
+              }
+              title={decisionGrade.detail}
+            />
+            <DecisionSignal
+              body={recovery.detail}
+              icon={<ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />}
+              label="After this step"
+              meta={<span className={tonePillClass(recovery.tone)}>{recovery.label}</span>}
+              title={recovery.title}
+            />
+          </div>
+        </details>
 
         <div className="mt-6 flex flex-wrap gap-2 border-t border-border pt-5">
           <Button
@@ -1553,43 +1570,68 @@ function IdeaStorySection({
       "The idea story is being assembled from thesis, wedge, evidence, validation, and decision history.",
   };
   const rejectedDirection = story.rejected_directions[0] ?? "No rejected direction yet.";
+  const [storyOpen, setStoryOpen] = useState(false);
 
   return (
-    <section className="mt-6 border-t border-border pt-5" id="idea-story">
+    <section className="mt-5 border-t border-border pt-5" id="idea-story">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <GitBranch className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h3 className="text-base font-semibold">How this idea has changed</h3>
+            <h3 className="text-base font-semibold">Current test path</h3>
           </div>
           <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
             {isLoading
-              ? "Loading the idea story from thesis, wedge, and validation history..."
+              ? "Loading thesis, wedge, blocker, and next proof..."
               : isError
-                ? "Showing the available project story while the full evolution trail reloads."
-                : story.why_it_changed}
+                ? "Showing the available project story while the evolution trail reloads."
+                : `Started as: ${truncate(story.original_idea, 180)}`}
           </p>
         </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <IdeaStoryRow label="Current thesis" value={story.current_thesis} emphasis />
+        <IdeaStoryRow label="Selected wedge" value={story.selected_wedge} emphasis />
+        <IdeaStoryRow label="Biggest unknown" value={story.current_blocker} />
+        <IdeaStoryRow label="Next proof" value={story.next_proof} emphasis />
+      </div>
+
+      <details
+        className="mt-4 border-t border-border pt-4"
+        onToggle={(event) => setStoryOpen(event.currentTarget.open)}
+      >
+        <summary className="cursor-pointer list-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h4 className="text-sm font-semibold">Inspect idea growth</h4>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                See what changed, what was rejected, and why this wedge is the current path.
+              </p>
+            </div>
+            <DisclosureLabel closedLabel="Inspect story" open={storyOpen} openLabel="Hide story" />
+          </div>
+        </summary>
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          <IdeaStoryRow label="Original idea" value={story.original_idea} />
+          <IdeaStoryRow label="Rejected direction" value={rejectedDirection} />
+          <IdeaStoryRow label="Why it changed" value={story.why_it_changed} />
+          <IdeaStoryRow
+            label={story.latest_change_title ?? "Latest change"}
+            value={story.latest_change_reason ?? "No additional change reason recorded yet."}
+          />
+        </div>
         <Button
-          className="min-h-10 shrink-0"
+          className="mt-4 min-h-10"
           onClick={() => onOpenWorkspace("Shape", "thesis-evolution")}
           size="sm"
           type="button"
           variant="secondary"
         >
           <ScrollText className="h-4 w-4" aria-hidden="true" />
-          Inspect evolution
+          Inspect full evolution
         </Button>
-      </div>
-
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <IdeaStoryRow label="Original idea" value={story.original_idea} />
-        <IdeaStoryRow label="Current thesis" value={story.current_thesis} emphasis />
-        <IdeaStoryRow label="Selected wedge" value={story.selected_wedge} emphasis />
-        <IdeaStoryRow label="Rejected direction" value={rejectedDirection} />
-        <IdeaStoryRow label="Biggest unknown" value={story.current_blocker} />
-        <IdeaStoryRow label="Next proof" value={story.next_proof} emphasis />
-      </div>
+      </details>
     </section>
   );
 }
@@ -1675,7 +1717,7 @@ function RiskiestAssumptionCard({
         <div className="max-w-[72ch]">
           <div className="flex items-center gap-2">
             <ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Decision Blocker</h2>
+            <h2 className="text-base font-semibold">Assumptions behind the decision</h2>
           </div>
           <p className="mt-3 text-xs font-medium text-muted-foreground">
             Belief to validate
@@ -1789,7 +1831,7 @@ function IntelligenceWorkspace({
         }
         description="Inspect the sources, competitors, and findings only when the current evidence basis needs review."
         icon={<FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />}
-        question="Review the evidence basis"
+        question="Inspect research details"
         title="Research"
       />
 
@@ -1802,13 +1844,13 @@ function IntelligenceWorkspace({
           {
             description: "Source coverage, citations, and open questions.",
             icon: Database,
-            label: "Evidence basis",
+            label: "Evidence summary",
             mode: "evidence",
           },
           {
             description: "Direct competitors, substitutes, and incumbents.",
             icon: Building2,
-            label: "Competitor map",
+            label: "Competitors and substitutes",
             mode: "competitors",
           },
           {
@@ -1820,7 +1862,7 @@ function IntelligenceWorkspace({
           {
             description: "Longer generated thesis record.",
             icon: FileText,
-            label: "Opportunity brief",
+            label: "Full research memo",
             mode: "brief",
           },
         ]}
@@ -1905,13 +1947,13 @@ function ValidationWorkspace({
           {
             description: "Open the active proof, assets, steps, and result logging.",
             icon: Beaker,
-            label: "Current proof",
+            label: "Active test",
             mode: "tests",
           },
           {
             description: "Review and re-rank the beliefs behind the verdict.",
             icon: ShieldAlert,
-            label: "Decision blockers",
+            label: "Assumptions behind the decision",
             mode: "blockers",
           },
         ]}
@@ -1924,7 +1966,7 @@ function ValidationWorkspace({
           description={detailMode === "tests" ? "Plan or log the one validation loop that can change the verdict." : "Inspect the ranked beliefs only when the active blocker needs review."}
           id={detailMode === "tests" ? "validation-mission" : undefined}
           onClose={() => setDetailMode(null)}
-          title={detailMode === "tests" ? "Current proof" : "Decision blockers"}
+          title={detailMode === "tests" ? "Active test" : "Assumptions behind the decision"}
         >
           {detailMode === "tests" ? (
             <ExperimentsTab projectId={projectId} />
@@ -1983,7 +2025,7 @@ function RecordWorkspace({
           {
             description: "Generated thesis record and supporting narrative.",
             icon: FileText,
-            label: "Opportunity brief",
+            label: "Full research memo",
             mode: "brief",
           },
         ]}
@@ -1995,7 +2037,7 @@ function RecordWorkspace({
         <ActiveWorkbenchPanel
           description="Use the brief as the longer record after the decision work is clear."
           onClose={() => setDetailMode(null)}
-          title="Opportunity brief"
+          title="Full research memo"
         >
           <BriefTab projectId={projectId} />
         </ActiveWorkbenchPanel>
@@ -2149,15 +2191,15 @@ function ActiveWorkbenchPanel({
 
 function intelligenceDetailTitle(mode: IntelligenceDetailMode) {
   if (mode === "evidence") {
-    return "Evidence basis";
+    return "Evidence summary";
   }
   if (mode === "competitors") {
-    return "Competitor map";
+    return "Competitors and substitutes";
   }
   if (mode === "review") {
     return "Evidence review controls";
   }
-  return "Opportunity brief";
+  return "Full research memo";
 }
 
 function intelligenceDetailDescription(mode: IntelligenceDetailMode) {
@@ -2170,7 +2212,7 @@ function intelligenceDetailDescription(mode: IntelligenceDetailMode) {
   if (mode === "review") {
     return "Plan an evidence review, approve discovered sources, inspect source checks, and review the generated memo.";
   }
-  return "Review the generated opportunity brief when you need the longer thesis record.";
+  return "Review the full generated research memo when you need the longer thesis record.";
 }
 
 function DisclosureLabel({
@@ -2208,15 +2250,15 @@ function ResearchResultCard({
     <DomainPanel>
       <div className="flex items-center gap-2">
         <FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />
-        <h3 className="text-base font-semibold">Evidence basis</h3>
+        <h3 className="text-base font-semibold">Evidence summary</h3>
       </div>
       <div className="mt-4 grid gap-x-8 lg:grid-cols-2">
         <ResultBlock title="Verdict" value={overview.current_recommendation.recommendation} />
         <ResultBlock title="Possible wedge" value={overview.strategic_snapshot.proposed_wedge ?? "Wedge still needs evidence."} />
         <ResultBlock title="Competitive pressure" value={topSubstitute} />
         <ResultBlock title="Main risk" value={overview.strategic_snapshot.main_risk ?? "The largest risk has not been identified yet."} />
-        <ResultBlock title="Decision Blocker" value={assumption ? decisionBlockerText(assumption) : "No decision blocker ranked yet."} />
-        <ResultBlock title="First test" value={assumption ? nextProofText(assumption) : clarifyActionText(overview.next_best_action.description)} />
+        <ResultBlock title="Assumptions behind the decision" value={assumption ? decisionBlockerText(assumption) : "No decision blocker ranked yet."} />
+        <ResultBlock title="Next proof" value={assumption ? nextProofText(assumption) : clarifyActionText(overview.next_best_action.description)} />
         <ResultBlock title="Scope guardrail" value="Do not expand product scope until the decision blocker has real validation evidence." />
         <ResultBlock title="Decision rationale" value={clarifyDecisionNarrative(overview.current_recommendation.rationale)} />
       </div>

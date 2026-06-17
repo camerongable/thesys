@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, CheckCircle2, CircleAlert, FileSearch, Save } from "lucide-react";
+import { ArrowLeft, CheckCircle2, CircleAlert, FileSearch, GitBranch, Save } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useMemo, useState } from "react";
@@ -21,6 +21,7 @@ import {
 } from "@/lib/api";
 
 const RAW_IDEA_MAX_LENGTH = 10000;
+type CreateLandingTarget = "current" | "research" | "wedge";
 
 export function NewProjectForm() {
   const router = useRouter();
@@ -56,7 +57,7 @@ export function NewProjectForm() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (target: CreateLandingTarget) => {
       if (!preview) {
         throw new Error("Shape the idea before creating the investigation.");
       }
@@ -70,11 +71,11 @@ export function NewProjectForm() {
         raw_idea: preview.raw_idea,
         answers: filledAnswers(answers),
       });
-      return project;
+      return { project, target };
     },
-    onSuccess: async (project) => {
+    onSuccess: async ({ project, target }) => {
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
-      router.push(`/projects/${project.id}${landingHash(selectedMode)}`);
+      router.push(`/projects/${project.id}${landingHash(target)}`);
     },
   });
 
@@ -109,7 +110,7 @@ export function NewProjectForm() {
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (preview?.ready_to_create) {
-      createMutation.mutate();
+      createMutation.mutate("current");
       return;
     }
     shapeIdea();
@@ -312,17 +313,33 @@ export function NewProjectForm() {
               {preview ? (
                 <fieldset className="border-t border-border pt-4">
                   <legend className="text-sm font-medium">Recommended investigation path</legend>
-                  <div className="mt-3 grid gap-3 lg:grid-cols-3">
-                    {preview.modes.map((mode) => (
-                      <ModeOption
-                        active={selectedMode === mode.mode}
-                        key={mode.mode}
-                        mode={mode}
-                        recommended={preview.recommended_mode.mode === mode.mode}
-                        onClick={() => setSelectedMode(mode.mode)}
-                      />
-                    ))}
+                  <div className="mt-3 rounded-md border border-primary/30 bg-primary/10 p-3">
+                    <div className="text-sm font-semibold">{preview.recommended_mode.label}</div>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                      {preview.recommended_mode.description}
+                    </p>
+                    {preview.recommended_mode.why_recommended ? (
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        Why: {preview.recommended_mode.why_recommended}
+                      </p>
+                    ) : null}
                   </div>
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-sm font-medium text-muted-foreground">
+                      Compare investigation paths
+                    </summary>
+                    <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                      {preview.modes.map((mode) => (
+                        <ModeOption
+                          active={selectedMode === mode.mode}
+                          key={mode.mode}
+                          mode={mode}
+                          recommended={preview.recommended_mode.mode === mode.mode}
+                          onClick={() => setSelectedMode(mode.mode)}
+                        />
+                      ))}
+                    </div>
+                  </details>
                 </fieldset>
               ) : null}
 
@@ -332,7 +349,7 @@ export function NewProjectForm() {
                     <Button
                       className="w-fit border-danger-border text-danger-foreground hover:bg-danger-muted"
                       disabled={pending}
-                      onClick={() => (preview ? createMutation.mutate() : shapeIdea())}
+                      onClick={() => (preview ? createMutation.mutate("current") : shapeIdea())}
                       size="sm"
                       type="button"
                       variant="secondary"
@@ -346,8 +363,10 @@ export function NewProjectForm() {
 
               <div className="flex flex-col gap-3 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs leading-5 text-muted-foreground">
-                  {preview?.next_action_description ??
-                    "Thesys will draft the thesis before anything is saved to project memory."}
+                  {preview?.ready_to_create
+                    ? "Choose where to start. The project opens on a focused Current Step unless you pick a deeper path."
+                    : preview?.next_action_description ??
+                      "Thesys will draft the thesis before anything is saved to project memory."}
                 </p>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   {!preview?.ready_to_create ? (
@@ -355,13 +374,32 @@ export function NewProjectForm() {
                       <FileSearch className="h-4 w-4" aria-hidden="true" />
                       {previewMutation.isPending ? "Shaping idea..." : preview ? "Refresh thesis" : "Shape idea"}
                     </Button>
-                  ) : null}
-                  <Button disabled={!canCreate} type="submit">
-                    <Save className="h-4 w-4" aria-hidden="true" />
-                    {createMutation.isPending
-                      ? "Creating investigation..."
-                      : preview?.next_action_label ?? "Create investigation"}
-                  </Button>
+                  ) : (
+                    <>
+                      <Button disabled={!canCreate} onClick={() => createMutation.mutate("current")} type="button">
+                        <Save className="h-4 w-4" aria-hidden="true" />
+                        {createMutation.isPending ? "Creating..." : "Continue to Current Step"}
+                      </Button>
+                      <Button
+                        disabled={!canCreate}
+                        onClick={() => createMutation.mutate("research")}
+                        type="button"
+                        variant="secondary"
+                      >
+                        <FileSearch className="h-4 w-4" aria-hidden="true" />
+                        Run research
+                      </Button>
+                      <Button
+                        disabled={!canCreate}
+                        onClick={() => createMutation.mutate("wedge")}
+                        type="button"
+                        variant="secondary"
+                      >
+                        <GitBranch className="h-4 w-4" aria-hidden="true" />
+                        Compare wedges
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             </form>
@@ -502,14 +540,14 @@ function filledAnswers(answers: ClarifyingAnswer[]) {
     .filter((answer) => answer.answer.length > 0);
 }
 
-function landingHash(mode: InvestigationMode) {
-  if (mode === "validation_sprint") {
-    return "#validation";
+function landingHash(target: CreateLandingTarget) {
+  if (target === "research") {
+    return "#research";
   }
-  if (mode === "quick_orientation") {
-    return "#structured-intake";
+  if (target === "wedge") {
+    return "#wedge";
   }
-  return "#research";
+  return "#current-step";
 }
 
 function FieldLimit({

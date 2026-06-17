@@ -356,7 +356,7 @@ function ValidationMissionPanel({
       <div id="validation-mission" className="scroll-mt-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-muted-foreground">Current proof</p>
+            <p className="text-sm font-medium text-muted-foreground">Active test</p>
             <h3 className="mt-2 text-lg font-semibold">{mission.mission_title}</h3>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               {mission.why_it_matters}

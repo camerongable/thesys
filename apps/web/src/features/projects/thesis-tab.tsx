@@ -499,7 +499,7 @@ function WedgeFocusCard({
         <dl className="mt-3 grid gap-3 text-sm">
           <WedgeFact label="Why it might work" value={wedge.why_it_might_work} />
           <WedgeFact label="Main risk" value={wedge.main_risk} />
-          <WedgeFact label="First test" value={wedge.validation_test} />
+          <WedgeFact label="First proof" value={wedge.validation_test} />
         </dl>
       </div>
       <div className="grid content-start gap-2">
@@ -566,7 +566,7 @@ function WedgeRow({
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
           <WedgeFact label="Why it might work" value={wedge.why_it_might_work} />
           <WedgeFact label="Main risk" value={wedge.main_risk} />
-          <WedgeFact label="First test" value={wedge.validation_test} />
+          <WedgeFact label="First proof" value={wedge.validation_test} />
           <WedgeFact
             label="Pressure / evidence"
             value={`${formatLabel(wedge.competitor_pressure)} pressure · ${formatLabel(

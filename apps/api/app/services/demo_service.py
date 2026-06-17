@@ -1324,7 +1324,7 @@ def _read_result(
         ),
         created=created,
         counts=counts,
-        next_url=f"/projects/{project.id}#guide",
+        next_url=f"/projects/{project.id}#current-step",
         message=(
             "Created guided demo project."
             if created
