@@ -2,13 +2,14 @@
 
 ## Current Phase
 
-V1 Sprint 32 implementation is complete. Thesys now opens around a less busy
-validation workflow: the homepage emphasizes rough idea to wedge to unknown to
-next proof, the default queue hides disposable QA/demo clutter, new
-investigations route to Current Step, and the project workspace keeps thesis,
-wedge, biggest unknown, next proof, and one primary action visible before
-supporting details. Watchlists, monitoring, collaboration, portfolio
-dashboards, integrations, and multi-segment workflow packs remain V2 scope.
+V1 Sprint 33 implementation is complete. Thesys now opens to a quieter Current
+Step: the default project workspace shows the current verdict, one primary CTA,
+the active thesis/wedge/unknown/proof path, and Ask Thesys without the old
+status bar, map/sidebar, mobile action stack, or always-visible process detail.
+Supporting evidence, context gaps, recovery guidance, cross-links, and decision
+history remain available behind Inspect details. Watchlists, monitoring,
+collaboration, portfolio dashboards, integrations, and multi-segment workflow
+packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -1558,6 +1559,48 @@ Checks run:
   landing on `#current-step`, compact thesis/wedge/biggest unknown/next proof
   story, collapsed Inspect sections, and no browser warn/error console logs.
 
+## V1 Sprint 33 Scope
+
+- [x] Make Current Step the quiet default project workspace surface by removing
+  the default status bar, project map/sidebar, mobile project menu, mobile
+  workspace action, and mobile decision spine from that tab.
+- [x] Keep the current verdict/status, one primary CTA, and current test path
+  visible before any process detail.
+- [x] Preserve the active idea story: current thesis, selected wedge, biggest
+  unknown, and next proof remain visible together.
+- [x] Move project nudges, decision context, evidence summary, recovery detail,
+  supporting workspace links, and decision history behind Inspect details.
+- [x] Keep Ask Thesys available through the floating guide drawer instead of a
+  permanent guide panel or secondary button row on the default Current Step.
+- [x] Preserve workspace routes and deep links for Test, Research, Shape,
+  Decide, and History from the inspect controls.
+- [x] Add frontend regression coverage for the quiet Current Step rendering
+  contract.
+
+## V1 Sprint 33 Verification
+
+Checks run:
+
+- [x] `pnpm --filter thesys-web test`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `docker compose config`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test: `POST /api/demo/seed` refreshed the guided
+  demo project and returned
+  `/projects/3160c9e9-5c3e-491f-9cc5-6e8081c2917c#current-step`.
+- [x] Manual Chrome browser QA against the guided demo project: verified the
+  desktop default Current Step shows one main panel, one primary CTA, the
+  current test path, collapsed Inspect details, and the floating Ask Thesys
+  drawer without the old project map/sidebar or default status/process chrome.
+- [x] Manual responsive QA in Chrome DevTools at 400px width: verified the
+  mobile Current Step starts with the project title, primary CTA, current test
+  path, Inspect details, and Ask Thesys without the old mobile menu or mobile
+  decision spine.
+
 ## Next Work
 
-Begin the next planned sprint from the implementation brief.
+V1 Sprint 34: Inspect drawer and navigation simplification.

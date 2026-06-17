@@ -252,7 +252,9 @@ export function ProjectOverview() {
           </Link>
           <div className="flex items-center gap-2">
             <ThemeToggle />
-            <MobileProjectMenu activeTab={activeTab} onOpen={openNavigationItem} />
+            {activeTab !== "Current Step" ? (
+              <MobileProjectMenu activeTab={activeTab} onOpen={openNavigationItem} />
+            ) : null}
           </div>
         </div>
 
@@ -299,23 +301,31 @@ export function ProjectOverview() {
               </div>
             </header>
 
-            <ProjectStatusBar overview={overview} />
-
-            <MobileWorkspaceAction
-              activeTab={activeTab}
-              actionPending={nextActionMutation.isPending}
-              onAction={runAction}
-              onOpenWorkspace={openWorkspace}
-              overview={overview}
-            />
-
-            <div className="mt-5 grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[250px_minmax(0,1fr)]">
-              <ProjectMap
-                activeAnchor={activeAnchor}
+            {activeTab !== "Current Step" ? (
+              <MobileWorkspaceAction
                 activeTab={activeTab}
-                onOpen={openNavigationItem}
+                actionPending={nextActionMutation.isPending}
+                onAction={runAction}
+                onOpenWorkspace={openWorkspace}
                 overview={overview}
               />
+            ) : null}
+
+            <div
+              className={
+                activeTab === "Current Step"
+                  ? "mt-5 grid gap-5 lg:grid-cols-1"
+                  : "mt-5 grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[250px_minmax(0,1fr)]"
+              }
+            >
+              {activeTab !== "Current Step" ? (
+                <ProjectMap
+                  activeAnchor={activeAnchor}
+                  activeTab={activeTab}
+                  onOpen={openNavigationItem}
+                  overview={overview}
+                />
+              ) : null}
 
               <div className="min-w-0">
                 {activeTab === "Current Step" ? (
@@ -768,7 +778,6 @@ function GuidedOverview({
 }) {
   const { current_recommendation, next_best_action } = overview;
   const snapshot = overview.strategic_snapshot;
-  const [recordOpen, setRecordOpen] = useState(false);
   const showInitialIntake =
     snapshot.current_stage === "draft_idea" ||
     snapshot.current_stage === "structured_intake" ||
@@ -781,58 +790,19 @@ function GuidedOverview({
   const missingContextCount = contextGaps.filter((item) => item.status !== "complete").length;
 
   return (
-    <section className="space-y-4 lg:space-y-6">
-      <div id="next-best-action">
-        <MobileDecisionSpine
-          currentRecommendation={current_recommendation}
-          missingContextCount={missingContextCount}
-          overview={overview}
-        />
-        <div className="hidden lg:block">
-          <CurrentStepPanel
-            actionPending={actionPending}
-            currentRecommendation={current_recommendation}
-            missingContextCount={missingContextCount}
-            nextBestAction={next_best_action}
-            onAction={onAction}
-            onOpenWorkspace={onOpenWorkspace}
-            overview={overview}
-          />
-        </div>
-      </div>
-
-      <OverviewNudges onAction={onGuideAction} projectId={overview.project.id} />
-
-      <DecisionContextDrawer
-        contextGaps={contextGaps}
-        missingContextCount={missingContextCount}
-        onIntakeFinalized={onIntakeFinalized}
-        overview={overview}
-        showInitialIntake={showInitialIntake}
-      />
-
-      <details
-        className="hidden rounded-lg border border-border bg-card p-5 lg:block"
-        onToggle={(event) => setRecordOpen(event.currentTarget.open)}
-      >
-        <summary className="cursor-pointer list-none">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-base font-semibold">Decision history</h2>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Lifecycle status, active risks, and recent decision updates.
-              </p>
-            </div>
-            <DisclosureLabel closedLabel="Inspect history" open={recordOpen} openLabel="Hide history" />
-          </div>
-        </summary>
-        <div className="mt-5 grid gap-5 border-t border-border pt-5">
-          <LifecycleProgressCard overview={overview} />
-          <TopRisksCard risks={overview.key_risks} />
-          <RecentUpdatesCard updates={overview.recent_strategic_updates} />
-        </div>
-      </details>
-    </section>
+    <CurrentStepPanel
+      actionPending={actionPending}
+      contextGaps={contextGaps}
+      currentRecommendation={current_recommendation}
+      missingContextCount={missingContextCount}
+      nextBestAction={next_best_action}
+      onAction={onAction}
+      onGuideAction={onGuideAction}
+      onIntakeFinalized={onIntakeFinalized}
+      onOpenWorkspace={onOpenWorkspace}
+      overview={overview}
+      showInitialIntake={showInitialIntake}
+    />
   );
 }
 
@@ -934,135 +904,6 @@ function compactNudgeClass(severity: ProjectNudge["severity"]) {
     return "border-warning-border bg-card";
   }
   return "border-border bg-card";
-}
-
-function MobileDecisionSpine({
-  currentRecommendation,
-  missingContextCount,
-  overview,
-}: {
-  currentRecommendation: StrategicRecommendation;
-  missingContextCount: number;
-  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
-}) {
-  const blocker = riskiestAssumption(overview);
-  const recovery = recoveryGuidance(overview, missingContextCount);
-
-  return (
-    <section
-      aria-labelledby="mobile-decision-spine-title"
-      className="rounded-lg border border-border bg-card lg:hidden"
-    >
-      <div className="border-b border-border px-4 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 id="mobile-decision-spine-title" className="text-sm font-semibold">
-            Decision context
-          </h2>
-        </div>
-      </div>
-
-      <div className="divide-y divide-border">
-        <MobileDecisionSpineRow
-          body={
-            blocker
-              ? decisionBlockerText(blocker)
-              : "No decision blocker has been ranked yet. Structure context or extract assumptions before treating the verdict as durable."
-          }
-          icon={<ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />}
-          label="Blocker"
-          meta={
-            blocker ? (
-              <div className="flex flex-wrap gap-2">
-                <AssumptionCompactSignal
-                  label="Risk"
-                  tone={
-                    blocker.kill_risk ||
-                    blocker.importance === "critical" ||
-                    blocker.importance === "high"
-                      ? "warning"
-                      : "neutral"
-                  }
-                  value={blocker.kill_risk ? "High" : formatLabel(blocker.importance)}
-                />
-                <AssumptionCompactSignal
-                  label="Evidence"
-                  tone={blocker.evidence_links.length > 0 ? "neutral" : "warning"}
-                  value={evidenceReadinessText(blocker)}
-                />
-              </div>
-            ) : null
-          }
-          title={blocker ? assumptionBeliefText(blocker.text) : "Blocker missing"}
-        />
-
-        <MobileDecisionSpineRow
-          body={clarifyDecisionNarrative(currentRecommendation.rationale)}
-          icon={<Lightbulb className="h-4 w-4 text-primary" aria-hidden="true" />}
-          label="Rationale"
-          title="Why the decision waits"
-        />
-
-        <MobileDecisionSpineRow
-          body={recovery.detail}
-          icon={<ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />}
-          label="Recovery"
-          meta={<span className={tonePillClass(recovery.tone)}>{recovery.label}</span>}
-          title={recovery.title}
-        />
-      </div>
-    </section>
-  );
-}
-
-function MobileDecisionSpineRow({
-  action,
-  body,
-  icon,
-  label,
-  meta,
-  title,
-}: {
-  action?: ReactNode;
-  body: string;
-  icon: ReactNode;
-  label: string;
-  meta?: ReactNode;
-  title: string;
-}) {
-  return (
-    <section className="px-4 py-4">
-      <div className="flex items-center gap-2">
-        {icon}
-        <h3 className="text-xs font-medium text-muted-foreground">{label}</h3>
-      </div>
-      <MarkdownContent
-        className="mt-2 line-clamp-3 space-y-2 text-base font-semibold leading-6 text-foreground"
-        markdown={title}
-      />
-      <MarkdownContent
-        className="mt-2 line-clamp-4 space-y-2 text-sm leading-6 text-muted-foreground"
-        markdown={body}
-      />
-      {meta ? <div className="mt-3">{meta}</div> : null}
-      {action ? <div className="mt-4 space-y-2">{action}</div> : null}
-    </section>
-  );
-}
-
-function AssumptionCompactSignal({
-  label,
-  tone,
-  value,
-}: {
-  label: string;
-  tone: HealthTone;
-  value: string;
-}) {
-  return (
-    <span className={tonePillClass(tone)}>
-      {label}: {value}
-    </span>
-  );
 }
 
 function DecisionContextDrawer({
@@ -1336,52 +1177,30 @@ function ContextGapList({ items }: { items: DecisionContextItem[] }) {
   );
 }
 
-function ProjectStatusBar({
-  overview,
-}: {
-  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
-}) {
-  const status = canonicalProjectStatus(overview);
-  return (
-    <section
-      aria-label="Project status"
-      className="mt-3 border-b border-border pb-3 text-card-foreground sm:mt-4 sm:pb-4"
-    >
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="text-xs font-medium text-muted-foreground">Status</div>
-          <span className={tonePillClass(status.tone)}>{status.label}</span>
-        </div>
-        <p className="mt-0.5 max-w-[84ch] text-sm font-semibold leading-5 text-foreground sm:hidden">
-          {status.mobileSentence}
-        </p>
-        <p className="mt-1 hidden max-w-[84ch] text-sm font-semibold leading-6 text-foreground sm:block">
-          {status.sentence}
-        </p>
-        <p className="mt-1 hidden max-w-[84ch] text-xs leading-5 text-muted-foreground sm:block">
-          {status.detail}
-        </p>
-      </div>
-    </section>
-  );
-}
-
 function CurrentStepPanel({
   actionPending,
+  contextGaps,
   currentRecommendation,
   missingContextCount,
   nextBestAction,
   onAction,
+  onGuideAction,
+  onIntakeFinalized,
   onOpenWorkspace,
   overview,
+  showInitialIntake,
 }: {
   actionPending: boolean;
+  contextGaps: DecisionContextItem[];
   currentRecommendation: StrategicRecommendation;
   missingContextCount: number;
   nextBestAction: NextBestAction;
   onAction: (action: NextBestAction) => void;
+  onGuideAction: (action: GuideAction) => void;
+  onIntakeFinalized: () => Promise<string | null>;
   onOpenWorkspace: (tab: ProjectTab, anchor?: string | null) => void;
   overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+  showInitialIntake: boolean;
 }) {
   const nextActionLabel = clarifyActionLabel(nextBestAction.label);
   const blocker = riskiestAssumption(overview);
@@ -1395,7 +1214,7 @@ function CurrentStepPanel({
   const nextProof = blocker?.recommended_test
     ? stripLeadingSignalLabel(nextProofText(blocker))
     : clarifyActionText(nextBestAction.description);
-  const [signalsOpen, setSignalsOpen] = useState(false);
+  const [inspectOpen, setInspectOpen] = useState(false);
   const ideaStoryQuery = useQuery({
     queryKey: ["projects", overview.project.id, "idea-story"],
     queryFn: () => getIdeaStory(overview.project.id),
@@ -1412,7 +1231,6 @@ function CurrentStepPanel({
                 <span>Current Step</span>
               </div>
               <span className={tonePillClass(status.tone)}>{status.label}</span>
-              <span className={tonePillClass(decisionGrade.tone)}>{decisionGrade.value}</span>
             </div>
             <h2 className="mt-4 max-w-4xl text-2xl font-semibold tracking-normal">
               {nextActionLabel}
@@ -1445,91 +1263,121 @@ function CurrentStepPanel({
 
         <details
           className="mt-5 border-t border-border pt-4"
-          onToggle={(event) => setSignalsOpen(event.currentTarget.open)}
+          id="quiet-current-step-inspect"
+          onToggle={(event) => setInspectOpen(event.currentTarget.open)}
         >
           <summary className="cursor-pointer list-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="text-sm font-semibold">Inspect supporting signals</h3>
+                <h3 className="text-sm font-semibold">Inspect details</h3>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  Evidence, recovery, and blocker details stay available when you need the receipts.
+                  Open the evidence, context, and decision trail only when you need the receipts.
                 </p>
               </div>
-              <DisclosureLabel closedLabel="Inspect details" open={signalsOpen} openLabel="Hide details" />
+              <DisclosureLabel closedLabel="Inspect details" open={inspectOpen} openLabel="Hide details" />
             </div>
           </summary>
-          <div className="mt-4 grid gap-5 xl:grid-cols-3">
-            <DecisionSignal
-              body={
-                blocker
-                  ? decisionBlockerText(blocker)
-                  : "No ranked blocker yet. Structure context or extract assumptions before treating the verdict as durable."
-              }
-              icon={<ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />}
-              label="Biggest unknown"
-              title={blocker ? assumptionBeliefText(blocker.text) : "Blocker missing"}
+          <div className="mt-4 space-y-5">
+            <OverviewNudges onAction={onGuideAction} projectId={overview.project.id} />
+            <div className="grid gap-5 xl:grid-cols-3">
+              <DecisionSignal
+                body={
+                  blocker
+                    ? decisionBlockerText(blocker)
+                    : "No ranked blocker yet. Structure context or extract assumptions before treating the verdict as durable."
+                }
+                icon={<ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />}
+                label="Biggest unknown"
+                title={blocker ? assumptionBeliefText(blocker.text) : "Blocker missing"}
+              />
+              <DecisionSignal
+                body={`Weakest area: ${health.weakest_evidence_area}`}
+                icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
+                label="Evidence summary"
+                meta={
+                  <div className="flex flex-wrap gap-2">
+                    <DecisionMetric label="Sources" value={health.source_count} />
+                    <DecisionMetric label="Open" value={health.unsupported_claim_count} />
+                    <DecisionMetric label="Validated" value={health.validated_assumption_count} />
+                  </div>
+                }
+                title={decisionGrade.detail}
+              />
+              <DecisionSignal
+                body={recovery.detail}
+                icon={<ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />}
+                label="After this step"
+                meta={<span className={tonePillClass(recovery.tone)}>{recovery.label}</span>}
+                title={recovery.title}
+              />
+            </div>
+            <DecisionContextDrawer
+              contextGaps={contextGaps}
+              missingContextCount={missingContextCount}
+              onIntakeFinalized={onIntakeFinalized}
+              overview={overview}
+              showInitialIntake={showInitialIntake}
             />
-            <DecisionSignal
-              body={`Weakest area: ${health.weakest_evidence_area}`}
-              icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
-              label="Evidence summary"
-              meta={
-                <div className="flex flex-wrap gap-2">
-                  <DecisionMetric label="Sources" value={health.source_count} />
-                  <DecisionMetric label="Open" value={health.unsupported_claim_count} />
-                  <DecisionMetric label="Validated" value={health.validated_assumption_count} />
+            <div className="flex flex-wrap gap-2 border-t border-border pt-5">
+              <Button
+                onClick={() => onOpenWorkspace("Test", "validation-mission")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <Beaker className="h-4 w-4" aria-hidden="true" />
+                Show test plan
+              </Button>
+              <Button
+                onClick={() => onOpenWorkspace("Research", "evidence")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <Database className="h-4 w-4" aria-hidden="true" />
+                Show evidence
+              </Button>
+              <Button
+                onClick={() => onOpenWorkspace("Shape", "wedge-explorer")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <GitBranch className="h-4 w-4" aria-hidden="true" />
+                Compare wedges
+              </Button>
+              <Button
+                onClick={() => onOpenWorkspace("Shape", "thesis-evolution")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <ScrollText className="h-4 w-4" aria-hidden="true" />
+                Inspect idea history
+              </Button>
+            </div>
+            <details className="rounded-lg border border-border bg-card p-5">
+              <summary className="cursor-pointer list-none">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-base font-semibold">Decision history</h2>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                      Lifecycle status, active risks, and recent decision updates.
+                    </p>
+                  </div>
+                  <span className="inline-flex min-h-10 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground">
+                    Open history
+                  </span>
                 </div>
-              }
-              title={decisionGrade.detail}
-            />
-            <DecisionSignal
-              body={recovery.detail}
-              icon={<ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />}
-              label="After this step"
-              meta={<span className={tonePillClass(recovery.tone)}>{recovery.label}</span>}
-              title={recovery.title}
-            />
+              </summary>
+              <div className="mt-5 grid gap-5 border-t border-border pt-5">
+                <LifecycleProgressCard overview={overview} />
+                <TopRisksCard risks={overview.key_risks} />
+                <RecentUpdatesCard updates={overview.recent_strategic_updates} />
+              </div>
+            </details>
           </div>
         </details>
-
-        <div className="mt-6 flex flex-wrap gap-2 border-t border-border pt-5">
-          <Button
-            onClick={() => onOpenWorkspace("Test", "validation-mission")}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            <Beaker className="h-4 w-4" aria-hidden="true" />
-            Show test plan
-          </Button>
-          <Button
-            onClick={() => onOpenWorkspace("Research", "evidence")}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            <Database className="h-4 w-4" aria-hidden="true" />
-            Show evidence
-          </Button>
-          <Button
-            onClick={() => onOpenWorkspace("Shape", "wedge-explorer")}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            <GitBranch className="h-4 w-4" aria-hidden="true" />
-            Compare wedges
-          </Button>
-          <Button
-            onClick={() => onOpenWorkspace("Current Step", "project-guide")}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            <Compass className="h-4 w-4" aria-hidden="true" />
-            Ask Thesys
-          </Button>
-        </div>
       </div>
     </section>
   );
