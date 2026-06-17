@@ -2,12 +2,12 @@
 
 ## Current Phase
 
-V1 Sprint 33 implementation is complete. Thesys now opens to a quieter Current
-Step: the default project workspace shows the current verdict, one primary CTA,
-the active thesis/wedge/unknown/proof path, and Ask Thesys without the old
-status bar, map/sidebar, mobile action stack, or always-visible process detail.
-Supporting evidence, context gaps, recovery guidance, cross-links, and decision
-history remain available behind Inspect details. Watchlists, monitoring,
+V1 Sprint 34 implementation is complete. Thesys now opens to a quiet Current
+Step with one primary CTA, the active thesis/wedge/unknown/proof path, Ask
+Thesys, a reusable Inspect drawer for advanced project detail, and a compact
+Explore control for workspace navigation. The old guided sidebar/mobile project
+menu is no longer mounted by the project overview, while canonical workspace
+hashes and legacy deep links remain compatible. Watchlists, monitoring,
 collaboration, portfolio dashboards, integrations, and multi-segment workflow
 packs remain V2 scope.
 
@@ -1601,6 +1601,65 @@ Checks run:
   path, Inspect details, and Ask Thesys without the old mobile menu or mobile
   decision spine.
 
+## V1 Sprint 34 Scope
+
+- [x] Add a reusable `ProjectInspectDrawer` driven by existing project overview
+  and idea-story data.
+- [x] Move advanced status, evidence, assumptions, test path, research details,
+  decision history, and project context into the drawer.
+- [x] Replace the inline Current Step inspect/evolution detail with an
+  `Inspect details` button that opens local drawer state without changing the
+  route or hash.
+- [x] Keep the closed Current Step focused on the verdict/current step, one
+  primary CTA, current thesis, selected wedge, biggest unknown, next proof, and
+  lightweight Ask Thesys access.
+- [x] Replace the desktop project map/sidebar and mobile project menu with a
+  compact `Explore` control backed by `projectNavigationItems`.
+- [x] Keep canonical Explore routing at `#current-step`, `#shape`, `#research`,
+  `#test`, `#decide`, and `#history`.
+- [x] Preserve legacy aliases and deep-link anchors such as `#guide`,
+  `#decision`, `#evidence`, `#validation`, `#record`,
+  `#validation-mission`, and `#record-decision-panel`.
+- [x] Add frontend regression coverage for the quiet Current Step, Inspect
+  drawer sections/actions, responsive sheet sizing, compact Explore control,
+  removed legacy navigation chrome, and routing compatibility.
+
+## V1 Sprint 34 Verification
+
+Checks run:
+
+- [x] `pnpm --filter thesys-web test`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `docker compose config`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test: `POST /api/demo/seed` refreshed the guided
+  demo project and returned
+  `/projects/3160c9e9-5c3e-491f-9cc5-6e8081c2917c#current-step`.
+- [x] Desktop browser QA in the Codex in-app browser: verified the quiet
+  Current Step has one dominant CTA, current thesis/wedge/unknown/proof path,
+  Inspect details, Ask Thesys, no default evidence metrics/status history, no
+  old Guided mode sidebar/mobile project menu labels, and no app console
+  warnings/errors.
+- [x] Desktop Inspect drawer QA in the Codex in-app browser: verified all
+  required sections and action links, close-button focus, Escape close,
+  backdrop close, body scroll lock cleanup, and no URL hash change for drawer
+  open/close.
+- [x] Desktop Explore QA in the Codex in-app browser: verified compact
+  navigation opens with Current Step, Shape, Research, Test, Decide, and History;
+  each item closes Explore and routes to the canonical hash.
+- [x] Deep-link QA in the Codex in-app browser: verified `#research`,
+  `#validation-mission`, `#record-decision-panel`, and `#history` land on the
+  expected workspace surface without restoring old navigation chrome.
+- [x] Responsive browser QA at 410x844 through a temporary Chrome CDP session:
+  verified the quiet Current Step has no horizontal overflow, Inspect details
+  opens as a full-screen sheet with required sections/actions and closes without
+  changing `#current-step`, Explore opens as a full-screen sheet, and selecting
+  Shape routes to `#shape`.
+
 ## Next Work
 
-V1 Sprint 34: Inspect drawer and navigation simplification.
+V1 Sprint 35: define the next brief-backed scope.

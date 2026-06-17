@@ -18,7 +18,6 @@ import {
   Globe2,
   Lightbulb,
   ListChecks,
-  Menu,
   Route,
   ScrollText,
   ShieldCheck,
@@ -29,7 +28,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -123,6 +122,7 @@ import {
 type IntelligenceDetailMode = "evidence" | "competitors" | "review" | "brief";
 type ValidationDetailMode = "tests" | "blockers";
 type RecordDetailMode = "brief";
+type IdeaStory = NonNullable<Awaited<ReturnType<typeof getIdeaStory>>>;
 
 type EvidenceReviewQueueItem =
   | { id: string; kind: "source"; source: DiscoveredSource }
@@ -252,9 +252,7 @@ export function ProjectOverview() {
           </Link>
           <div className="flex items-center gap-2">
             <ThemeToggle />
-            {activeTab !== "Current Step" ? (
-              <MobileProjectMenu activeTab={activeTab} onOpen={openNavigationItem} />
-            ) : null}
+            <ProjectExploreControl activeTab={activeTab} onOpen={openNavigationItem} />
           </div>
         </div>
 
@@ -311,22 +309,7 @@ export function ProjectOverview() {
               />
             ) : null}
 
-            <div
-              className={
-                activeTab === "Current Step"
-                  ? "mt-5 grid gap-5 lg:grid-cols-1"
-                  : "mt-5 grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[250px_minmax(0,1fr)]"
-              }
-            >
-              {activeTab !== "Current Step" ? (
-                <ProjectMap
-                  activeAnchor={activeAnchor}
-                  activeTab={activeTab}
-                  onOpen={openNavigationItem}
-                  overview={overview}
-                />
-              ) : null}
-
+            <div className="mt-5 grid gap-5 lg:grid-cols-1">
               <div className="min-w-0">
                 {activeTab === "Current Step" ? (
                   <GuidedOverview
@@ -416,79 +399,7 @@ function ProjectOverviewSkeleton() {
   );
 }
 
-function ProjectMap({
-  activeAnchor,
-  activeTab,
-  onOpen,
-  overview,
-}: {
-  activeAnchor: string | null;
-  activeTab: ProjectTab;
-  onOpen: (item: ProjectNavigationItem) => void;
-  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
-}) {
-  return (
-    <aside className="hidden min-w-0 max-w-full self-start overflow-hidden lg:sticky lg:top-5 lg:block">
-      <div className="px-1 pb-2">
-        <h2 className="text-xs font-medium text-muted-foreground">Guided mode</h2>
-      </div>
-      <nav
-        className="grid w-full grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-1"
-        aria-label="Project navigation"
-      >
-        {projectNavigationItems.map((item) => {
-          const Icon = playbookIcons[item.key] ?? Route;
-          const selected = item.label === activeTab;
-          const current = item.label === "Current Step";
-          return (
-            <button
-              aria-label={`Open ${item.label}: ${item.detail}.`}
-              aria-current={selected ? "page" : undefined}
-              className={[
-                "flex min-h-12 cursor-pointer flex-col items-center justify-center gap-1 rounded-md border px-1.5 py-2 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:min-h-0 lg:w-full lg:flex-row lg:items-start lg:justify-start lg:gap-3 lg:px-2 lg:py-2.5 lg:text-left",
-                selected
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : current
-                    ? "border-border bg-card text-foreground hover:bg-muted"
-                    : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
-              ].join(" ")}
-              key={item.key}
-              onClick={() => onOpen(item)}
-              type="button"
-            >
-              <Icon
-                className={
-                  selected || current
-                    ? "h-4 w-4 shrink-0 text-primary lg:mt-0.5"
-                    : "h-4 w-4 shrink-0 lg:mt-0.5"
-                }
-                aria-hidden="true"
-              />
-              <span className="min-w-0">
-                <span className="flex min-w-0 flex-wrap items-center justify-center gap-1.5 lg:justify-start">
-                  <span className="block truncate text-xs font-medium lg:text-sm">{item.label}</span>
-                  {current ? (
-                    <span className="hidden rounded-md bg-primary/10 px-1.5 py-0.5 text-[0.68rem] font-medium text-primary lg:inline-flex">
-                      now
-                    </span>
-                  ) : null}
-                </span>
-                <span
-                  aria-hidden="true"
-                  className="mt-0.5 hidden text-xs leading-5 text-muted-foreground xl:block"
-                >
-                  {item.detail}
-                </span>
-              </span>
-            </button>
-          );
-        })}
-      </nav>
-    </aside>
-  );
-}
-
-function MobileProjectMenu({
+function ProjectExploreControl({
   activeTab,
   onOpen,
 }: {
@@ -498,41 +409,59 @@ function MobileProjectMenu({
   const [open, setOpen] = useState(false);
   const selectedItem =
     projectNavigationItems.find((item) => item.label === activeTab) ?? projectNavigationItems[0];
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    closeButtonRef.current?.focus({ preventScroll: true });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
   return (
     <>
       <button
-        aria-controls="mobile-project-menu"
+        aria-controls="project-explore-menu"
         aria-expanded={open}
-        aria-label="Open project menu"
-        className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-md border border-border bg-card text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:hidden"
+        aria-label="Explore project sections"
+        className="inline-flex h-11 min-h-11 cursor-pointer items-center gap-2 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus sm:h-10 sm:min-h-10"
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
-        <Menu className="h-5 w-5 text-primary" aria-hidden="true" />
+        <Compass className="h-4 w-4 text-primary" aria-hidden="true" />
+        <span>Explore</span>
       </button>
       {open ? (
-        <div className="fixed inset-0 z-50 lg:hidden">
+        <div className="fixed inset-0 z-50">
           <button
-            aria-label="Close project menu backdrop"
+            aria-label="Close Explore menu backdrop"
             className="absolute inset-0 cursor-default bg-background/60 backdrop-blur-sm"
             onClick={() => setOpen(false)}
             type="button"
           />
           <aside
-            aria-label="Project menu"
+            aria-label="Explore project"
             aria-modal="true"
-            className="absolute right-0 top-0 flex h-full w-[min(22rem,calc(100vw-2rem))] flex-col border-l border-border bg-card shadow-2xl"
-            id="mobile-project-menu"
+            className="absolute right-0 top-0 flex h-full w-full flex-col border-l border-border bg-card shadow-2xl sm:w-[min(24rem,calc(100vw-2rem))]"
+            id="project-explore-menu"
             role="dialog"
           >
             <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-4">
               <div className="min-w-0">
-                <p className="text-xs font-medium text-muted-foreground">Project menu</p>
+                <p className="text-xs font-medium text-muted-foreground">Explore</p>
                 <h2 className="truncate text-base font-semibold">{selectedItem.label}</h2>
               </div>
               <button
-                aria-label="Close project menu"
+                aria-label="Close Explore menu"
                 className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                ref={closeButtonRef}
                 onClick={() => setOpen(false)}
                 type="button"
               >
@@ -788,21 +717,34 @@ function GuidedOverview({
       overview.key_assumptions.length === 0);
   const contextGaps = decisionContextGaps(overview);
   const missingContextCount = contextGaps.filter((item) => item.status !== "complete").length;
+  const [inspectOpen, setInspectOpen] = useState(false);
 
   return (
-    <CurrentStepPanel
-      actionPending={actionPending}
-      contextGaps={contextGaps}
-      currentRecommendation={current_recommendation}
-      missingContextCount={missingContextCount}
-      nextBestAction={next_best_action}
-      onAction={onAction}
-      onGuideAction={onGuideAction}
-      onIntakeFinalized={onIntakeFinalized}
-      onOpenWorkspace={onOpenWorkspace}
-      overview={overview}
-      showInitialIntake={showInitialIntake}
-    />
+    <>
+      <CurrentStepPanel
+        actionPending={actionPending}
+        currentRecommendation={current_recommendation}
+        nextBestAction={next_best_action}
+        onAction={onAction}
+        onOpenInspect={() => setInspectOpen(true)}
+        onOpenWorkspace={onOpenWorkspace}
+        overview={overview}
+      />
+      <ProjectInspectDrawer
+        contextGaps={contextGaps}
+        missingContextCount={missingContextCount}
+        onClose={() => setInspectOpen(false)}
+        onGuideAction={onGuideAction}
+        onIntakeFinalized={onIntakeFinalized}
+        onOpenWorkspace={(tab, anchor) => {
+          setInspectOpen(false);
+          onOpenWorkspace(tab, anchor);
+        }}
+        open={inspectOpen}
+        overview={overview}
+        showInitialIntake={showInitialIntake}
+      />
+    </>
   );
 }
 
@@ -1179,34 +1121,24 @@ function ContextGapList({ items }: { items: DecisionContextItem[] }) {
 
 function CurrentStepPanel({
   actionPending,
-  contextGaps,
   currentRecommendation,
-  missingContextCount,
   nextBestAction,
   onAction,
-  onGuideAction,
-  onIntakeFinalized,
+  onOpenInspect,
   onOpenWorkspace,
   overview,
-  showInitialIntake,
 }: {
   actionPending: boolean;
-  contextGaps: DecisionContextItem[];
   currentRecommendation: StrategicRecommendation;
-  missingContextCount: number;
   nextBestAction: NextBestAction;
   onAction: (action: NextBestAction) => void;
-  onGuideAction: (action: GuideAction) => void;
-  onIntakeFinalized: () => Promise<string | null>;
+  onOpenInspect: () => void;
   onOpenWorkspace: (tab: ProjectTab, anchor?: string | null) => void;
   overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
-  showInitialIntake: boolean;
 }) {
   const nextActionLabel = clarifyActionLabel(nextBestAction.label);
   const blocker = riskiestAssumption(overview);
-  const decisionGrade = decisionGradeEvidence(overview);
   const health = overview.evidence_health;
-  const recovery = recoveryGuidance(overview, missingContextCount);
   const status = canonicalProjectStatus(overview);
   const biggestUnknown = blocker
     ? assumptionBeliefText(blocker.text)
@@ -1214,7 +1146,6 @@ function CurrentStepPanel({
   const nextProof = blocker?.recommended_test
     ? stripLeadingSignalLabel(nextProofText(blocker))
     : clarifyActionText(nextBestAction.description);
-  const [inspectOpen, setInspectOpen] = useState(false);
   const ideaStoryQuery = useQuery({
     queryKey: ["projects", overview.project.id, "idea-story"],
     queryFn: () => getIdeaStory(overview.project.id),
@@ -1261,25 +1192,180 @@ function CurrentStepPanel({
           overview={overview}
         />
 
-        <details
-          className="mt-5 border-t border-border pt-4"
-          id="quiet-current-step-inspect"
-          onToggle={(event) => setInspectOpen(event.currentTarget.open)}
-        >
-          <summary className="cursor-pointer list-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="text-sm font-semibold">Inspect details</h3>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  Open the evidence, context, and decision trail only when you need the receipts.
-                </p>
-              </div>
-              <DisclosureLabel closedLabel="Inspect details" open={inspectOpen} openLabel="Hide details" />
-            </div>
-          </summary>
-          <div className="mt-4 space-y-5">
+        <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm leading-6 text-muted-foreground">
+            Need the evidence, assumptions, research, or history behind this step?
+          </p>
+          <Button
+            className="min-h-10 w-full sm:w-fit"
+            onClick={onOpenInspect}
+            type="button"
+            variant="secondary"
+          >
+            <Database className="h-4 w-4" aria-hidden="true" />
+            Inspect details
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ProjectInspectDrawer({
+  contextGaps,
+  missingContextCount,
+  onClose,
+  onGuideAction,
+  onIntakeFinalized,
+  onOpenWorkspace,
+  open,
+  overview,
+  showInitialIntake,
+}: {
+  contextGaps: DecisionContextItem[];
+  missingContextCount: number;
+  onClose: () => void;
+  onGuideAction: (action: GuideAction) => void;
+  onIntakeFinalized: () => Promise<string | null>;
+  onOpenWorkspace: (tab: ProjectTab, anchor?: string | null) => void;
+  open: boolean;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+  showInitialIntake: boolean;
+}) {
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const blocker = riskiestAssumption(overview);
+  const decisionGrade = decisionGradeEvidence(overview);
+  const health = overview.evidence_health;
+  const recovery = recoveryGuidance(overview, missingContextCount);
+  const status = canonicalProjectStatus(overview);
+  const biggestUnknown = blocker
+    ? assumptionBeliefText(blocker.text)
+    : overview.strategic_snapshot.main_risk ?? "Blocker missing";
+  const nextProof = blocker?.recommended_test
+    ? stripLeadingSignalLabel(nextProofText(blocker))
+    : clarifyActionText(overview.next_best_action.description);
+  const ideaStoryQuery = useQuery({
+    queryKey: ["projects", overview.project.id, "idea-story"],
+    queryFn: () => getIdeaStory(overview.project.id),
+  });
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    closeButtonRef.current?.focus({ preventScroll: true });
+    const priorOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = priorOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose, open]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-40" id="project-inspect-drawer">
+      <button
+        aria-label="Close Inspect details backdrop"
+        className="absolute inset-0 cursor-default bg-background/60 backdrop-blur-sm"
+        onClick={onClose}
+        type="button"
+      />
+      <aside
+        aria-label="Inspect project details"
+        aria-modal="true"
+        className="absolute right-0 top-0 flex h-full w-full flex-col border-l border-border bg-card shadow-2xl sm:w-[min(34rem,calc(100vw-2rem))]"
+        role="dialog"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">Inspect details</p>
+            <h2 className="mt-1 text-lg font-semibold">Receipts behind the current step</h2>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              Evidence, assumptions, test path, research, and history stay here until you need them.
+            </p>
+          </div>
+          <button
+            aria-label="Close Inspect details"
+            className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            onClick={onClose}
+            ref={closeButtonRef}
+            type="button"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="space-y-6">
             <OverviewNudges onAction={onGuideAction} projectId={overview.project.id} />
-            <div className="grid gap-5 xl:grid-cols-3">
+
+            <DrawerSection
+              icon={<ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />}
+              title="Status"
+            >
+              <div className="grid gap-4">
+                <DecisionSignal
+                  body={status.detail}
+                  icon={<Target className="h-4 w-4 text-primary" aria-hidden="true" />}
+                  label="Current verdict"
+                  meta={<span className={tonePillClass(status.tone)}>{status.label}</span>}
+                  title={status.sentence}
+                />
+                <DecisionSignal
+                  body={recovery.detail}
+                  icon={<ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />}
+                  label="After this step"
+                  meta={<span className={tonePillClass(recovery.tone)}>{recovery.label}</span>}
+                  title={recovery.title}
+                />
+              </div>
+            </DrawerSection>
+
+            <DrawerSection
+              icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
+              title="Evidence summary"
+            >
+              <DecisionSignal
+                body={`Weakest area: ${health.weakest_evidence_area}`}
+                icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
+                label="Evidence basis"
+                meta={
+                  <div className="flex flex-wrap gap-2">
+                    <DecisionMetric label="Sources" value={health.source_count} />
+                    <DecisionMetric label="Competitors" value={health.competitor_count} />
+                    <DecisionMetric label="Supported" value={health.cited_claim_count} />
+                    <DecisionMetric label="Open" value={health.unsupported_claim_count} />
+                    <DecisionMetric label="Validated" value={health.validated_assumption_count} />
+                  </div>
+                }
+                title={decisionGrade.detail}
+              />
+              <div className="mt-4">
+                <Button
+                  onClick={() => onOpenWorkspace("Research", "evidence")}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  <Database className="h-4 w-4" aria-hidden="true" />
+                  Show evidence
+                </Button>
+              </div>
+            </DrawerSection>
+
+            <DrawerSection
+              icon={<ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />}
+              title="Assumptions behind the decision"
+            >
               <DecisionSignal
                 body={
                   blocker
@@ -1288,97 +1374,127 @@ function CurrentStepPanel({
                 }
                 icon={<ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />}
                 label="Biggest unknown"
-                title={blocker ? assumptionBeliefText(blocker.text) : "Blocker missing"}
+                title={biggestUnknown}
               />
-              <DecisionSignal
-                body={`Weakest area: ${health.weakest_evidence_area}`}
-                icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
-                label="Evidence summary"
-                meta={
-                  <div className="flex flex-wrap gap-2">
-                    <DecisionMetric label="Sources" value={health.source_count} />
-                    <DecisionMetric label="Open" value={health.unsupported_claim_count} />
-                    <DecisionMetric label="Validated" value={health.validated_assumption_count} />
-                  </div>
-                }
-                title={decisionGrade.detail}
+            </DrawerSection>
+
+            <DrawerSection
+              icon={<Beaker className="h-4 w-4 text-primary" aria-hidden="true" />}
+              title="Test path"
+            >
+              <MarkdownContent
+                className="space-y-2 text-sm leading-6 text-muted-foreground"
+                markdown={nextProof}
               />
-              <DecisionSignal
-                body={recovery.detail}
-                icon={<ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />}
-                label="After this step"
-                meta={<span className={tonePillClass(recovery.tone)}>{recovery.label}</span>}
-                title={recovery.title}
-              />
-            </div>
-            <DecisionContextDrawer
-              contextGaps={contextGaps}
-              missingContextCount={missingContextCount}
-              onIntakeFinalized={onIntakeFinalized}
-              overview={overview}
-              showInitialIntake={showInitialIntake}
-            />
-            <div className="flex flex-wrap gap-2 border-t border-border pt-5">
+              <div className="mt-4">
+                <Button
+                  onClick={() => onOpenWorkspace("Test", "validation-mission")}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  <Beaker className="h-4 w-4" aria-hidden="true" />
+                  Open test path
+                </Button>
+              </div>
+            </DrawerSection>
+
+            <DrawerSection
+              icon={<FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />}
+              title="Research details"
+            >
+              <p className="text-sm leading-6 text-muted-foreground">
+                Review sources, competitors, and generated findings only when the evidence basis
+                needs a closer read.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  onClick={() => onOpenWorkspace("Research", "research-sprint")}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  <FileSearch className="h-4 w-4" aria-hidden="true" />
+                  Inspect research
+                </Button>
+                <Button
+                  onClick={() => onOpenWorkspace("Shape", "wedge-explorer")}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  <GitBranch className="h-4 w-4" aria-hidden="true" />
+                  Compare wedges
+                </Button>
+              </div>
+            </DrawerSection>
+
+            <DrawerSection
+              icon={<ScrollText className="h-4 w-4 text-primary" aria-hidden="true" />}
+              title="Decision history"
+            >
+              <div className="grid gap-4">
+                <LifecycleProgressCard overview={overview} />
+                <TopRisksCard risks={overview.key_risks} />
+                <RecentUpdatesCard updates={overview.recent_strategic_updates} />
+              </div>
               <Button
-                onClick={() => onOpenWorkspace("Test", "validation-mission")}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                <Beaker className="h-4 w-4" aria-hidden="true" />
-                Show test plan
-              </Button>
-              <Button
-                onClick={() => onOpenWorkspace("Research", "evidence")}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                <Database className="h-4 w-4" aria-hidden="true" />
-                Show evidence
-              </Button>
-              <Button
-                onClick={() => onOpenWorkspace("Shape", "wedge-explorer")}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                <GitBranch className="h-4 w-4" aria-hidden="true" />
-                Compare wedges
-              </Button>
-              <Button
-                onClick={() => onOpenWorkspace("Shape", "thesis-evolution")}
+                className="mt-4"
+                onClick={() => onOpenWorkspace("History", "history")}
                 size="sm"
                 type="button"
                 variant="secondary"
               >
                 <ScrollText className="h-4 w-4" aria-hidden="true" />
-                Inspect idea history
+                Open history
               </Button>
-            </div>
-            <details className="rounded-lg border border-border bg-card p-5">
-              <summary className="cursor-pointer list-none">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h2 className="text-base font-semibold">Decision history</h2>
-                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                      Lifecycle status, active risks, and recent decision updates.
-                    </p>
-                  </div>
-                  <span className="inline-flex min-h-10 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground">
-                    Open history
-                  </span>
-                </div>
-              </summary>
-              <div className="mt-5 grid gap-5 border-t border-border pt-5">
-                <LifecycleProgressCard overview={overview} />
-                <TopRisksCard risks={overview.key_risks} />
-                <RecentUpdatesCard updates={overview.recent_strategic_updates} />
-              </div>
-            </details>
+            </DrawerSection>
+
+            <DrawerSection
+              icon={<ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />}
+              title="Project context"
+            >
+              <IdeaGrowthDetails
+                currentRecommendation={overview.current_recommendation}
+                fallbackBiggestUnknown={biggestUnknown}
+                fallbackNextProof={nextProof}
+                ideaStory={ideaStoryQuery.data ?? null}
+                isError={ideaStoryQuery.isError}
+                isLoading={ideaStoryQuery.isLoading}
+                onOpenWorkspace={onOpenWorkspace}
+                overview={overview}
+              />
+              <DecisionContextDrawer
+                contextGaps={contextGaps}
+                missingContextCount={missingContextCount}
+                onIntakeFinalized={onIntakeFinalized}
+                overview={overview}
+                showInitialIntake={showInitialIntake}
+              />
+            </DrawerSection>
           </div>
-        </details>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function DrawerSection({
+  children,
+  icon,
+  title,
+}: {
+  children: ReactNode;
+  icon: ReactNode;
+  title: string;
+}) {
+  return (
+    <section className="border-t border-border pt-5 first:border-t-0 first:pt-0">
+      <div className="mb-4 flex items-center gap-2">
+        {icon}
+        <h3 className="text-base font-semibold">{title}</h3>
       </div>
+      {children}
     </section>
   );
 }
@@ -1402,23 +1518,13 @@ function IdeaStorySection({
   onOpenWorkspace: (tab: ProjectTab, anchor?: string | null) => void;
   overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
-  const story = ideaStory ?? {
-    current_blocker: fallbackBiggestUnknown,
-    current_thesis: overview.strategic_snapshot.current_thesis ?? currentRecommendation.recommendation,
-    latest_change_reason: null,
-    latest_change_title: null,
-    next_proof: fallbackNextProof,
-    original_idea: overview.project.short_description ?? overview.project.name,
-    project_id: overview.project.id,
-    rejected_directions: [] as string[],
-    selected_wedge:
-      overview.strategic_snapshot.proposed_wedge ??
-      "Choose or refine the wedge before expanding validation.",
-    why_it_changed:
-      "The idea story is being assembled from thesis, wedge, evidence, validation, and decision history.",
-  };
-  const rejectedDirection = story.rejected_directions[0] ?? "No rejected direction yet.";
-  const [storyOpen, setStoryOpen] = useState(false);
+  const story = resolveIdeaStory({
+    currentRecommendation,
+    fallbackBiggestUnknown,
+    fallbackNextProof,
+    ideaStory,
+    overview,
+  });
 
   return (
     <section className="mt-5 border-t border-border pt-5" id="idea-story">
@@ -1444,43 +1550,103 @@ function IdeaStorySection({
         <IdeaStoryRow label="Biggest unknown" value={story.current_blocker} />
         <IdeaStoryRow label="Next proof" value={story.next_proof} emphasis />
       </div>
-
-      <details
-        className="mt-4 border-t border-border pt-4"
-        onToggle={(event) => setStoryOpen(event.currentTarget.open)}
-      >
-        <summary className="cursor-pointer list-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h4 className="text-sm font-semibold">Inspect idea growth</h4>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                See what changed, what was rejected, and why this wedge is the current path.
-              </p>
-            </div>
-            <DisclosureLabel closedLabel="Inspect story" open={storyOpen} openLabel="Hide story" />
-          </div>
-        </summary>
-        <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          <IdeaStoryRow label="Original idea" value={story.original_idea} />
-          <IdeaStoryRow label="Rejected direction" value={rejectedDirection} />
-          <IdeaStoryRow label="Why it changed" value={story.why_it_changed} />
-          <IdeaStoryRow
-            label={story.latest_change_title ?? "Latest change"}
-            value={story.latest_change_reason ?? "No additional change reason recorded yet."}
-          />
-        </div>
-        <Button
-          className="mt-4 min-h-10"
-          onClick={() => onOpenWorkspace("Shape", "thesis-evolution")}
-          size="sm"
-          type="button"
-          variant="secondary"
-        >
-          <ScrollText className="h-4 w-4" aria-hidden="true" />
-          Inspect full evolution
-        </Button>
-      </details>
     </section>
+  );
+}
+
+function IdeaGrowthDetails({
+  currentRecommendation,
+  fallbackBiggestUnknown,
+  fallbackNextProof,
+  ideaStory,
+  isError,
+  isLoading,
+  onOpenWorkspace,
+  overview,
+}: {
+  currentRecommendation: StrategicRecommendation;
+  fallbackBiggestUnknown: string;
+  fallbackNextProof: string;
+  ideaStory: IdeaStory | null;
+  isError: boolean;
+  isLoading: boolean;
+  onOpenWorkspace: (tab: ProjectTab, anchor?: string | null) => void;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const story = resolveIdeaStory({
+    currentRecommendation,
+    fallbackBiggestUnknown,
+    fallbackNextProof,
+    ideaStory,
+    overview,
+  });
+  const rejectedDirection = story.rejected_directions[0] ?? "No rejected direction yet.";
+
+  return (
+    <div className="mb-5 rounded-md border border-border bg-surface p-4">
+      <div className="flex items-center gap-2">
+        <GitBranch className="h-4 w-4 text-primary" aria-hidden="true" />
+        <h4 className="text-sm font-semibold">Inspect idea growth</h4>
+      </div>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        {isLoading
+          ? "Loading the idea evolution trail..."
+          : isError
+            ? "Showing the available project story while the evolution trail reloads."
+            : "See what changed, what was rejected, and why this wedge is the current path."}
+      </p>
+      <div className="mt-4 grid gap-3">
+        <IdeaStoryRow label="Original idea" value={story.original_idea} />
+        <IdeaStoryRow label="Rejected direction" value={rejectedDirection} />
+        <IdeaStoryRow label="Why it changed" value={story.why_it_changed} />
+        <IdeaStoryRow
+          label={story.latest_change_title ?? "Latest change"}
+          value={story.latest_change_reason ?? "No additional change reason recorded yet."}
+        />
+      </div>
+      <Button
+        className="mt-4 min-h-10"
+        onClick={() => onOpenWorkspace("Shape", "thesis-evolution")}
+        size="sm"
+        type="button"
+        variant="secondary"
+      >
+        <ScrollText className="h-4 w-4" aria-hidden="true" />
+        Inspect full evolution
+      </Button>
+    </div>
+  );
+}
+
+function resolveIdeaStory({
+  currentRecommendation,
+  fallbackBiggestUnknown,
+  fallbackNextProof,
+  ideaStory,
+  overview,
+}: {
+  currentRecommendation: StrategicRecommendation;
+  fallbackBiggestUnknown: string;
+  fallbackNextProof: string;
+  ideaStory: IdeaStory | null;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}): IdeaStory {
+  return (
+    ideaStory ?? {
+      current_blocker: fallbackBiggestUnknown,
+      current_thesis: overview.strategic_snapshot.current_thesis ?? currentRecommendation.recommendation,
+      latest_change_reason: null,
+      latest_change_title: null,
+      next_proof: fallbackNextProof,
+      original_idea: overview.project.short_description ?? overview.project.name,
+      project_id: overview.project.id,
+      rejected_directions: [],
+      selected_wedge:
+        overview.strategic_snapshot.proposed_wedge ??
+        "Choose or refine the wedge before expanding validation.",
+      why_it_changed:
+        "The idea story is being assembled from thesis, wedge, evidence, validation, and decision history.",
+    }
   );
 }
 
