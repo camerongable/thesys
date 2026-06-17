@@ -2,14 +2,15 @@
 
 ## Current Phase
 
-V1 Sprint 34 implementation is complete. Thesys now opens to a quiet Current
-Step with one primary CTA, the active thesis/wedge/unknown/proof path, Ask
-Thesys, a reusable Inspect drawer for advanced project detail, and a compact
-Explore control for workspace navigation. The old guided sidebar/mobile project
-menu is no longer mounted by the project overview, while canonical workspace
-hashes and legacy deep links remain compatible. Watchlists, monitoring,
-collaboration, portfolio dashboards, integrations, and multi-segment workflow
-packs remain V2 scope.
+V1 Sprint 35 implementation is complete. Thesys now treats `/projects` as a
+quieter homepage launcher with one dominant Start investigation CTA, secondary
+guided-demo access, collapsed filters, and hidden disposable test/demo/audit
+rows by default. `/projects/new` is a single-column creation flow with the rough
+idea, context check, clarifying questions, thesis preview, recommended path, and
+post-preview actions in one sequence; the primary creation action lands on
+`#current-step`, while research and wedge paths remain secondary deep links.
+Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
+multi-segment workflow packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -1660,6 +1661,66 @@ Checks run:
   changing `#current-step`, Explore opens as a full-screen sheet, and selecting
   Shape routes to `#shape`.
 
+## V1 Sprint 35 Scope
+
+- [x] Simplify `/projects` into a launcher with one headline, one supporting
+  sentence, one dominant `Start investigation` CTA, and secondary
+  `Load guided demo` access.
+- [x] Remove the right-side launcher/demo cards from `/projects`.
+- [x] Collapse search, stage/risk filters, sort, compact rows, and
+  `Show test projects` behind one `Filter` disclosure on every viewport.
+- [x] Preserve project queue behavior, keyboard shortcut entry points, and
+  disposable test/demo/audit hiding by default, including existing local audit
+  rows.
+- [x] Convert `/projects/new` to a single-column rough-idea flow without
+  persistent explanatory sidebars.
+- [x] Keep context checks, clarifying questions, assumptions continuation,
+  thesis preview, recommended path, loading states, validation errors, sample
+  idea, and existing API calls.
+- [x] Make `Continue to Current Step` the dominant post-preview creation action,
+  with `Run research` and `Compare wedges` as secondary actions.
+- [x] Preserve primary routing to `/projects/{id}#current-step` and secondary
+  routing to `#research` and `#wedge`.
+- [x] Add frontend regression coverage for disposable row hiding, collapsed
+  launcher filters, removed competing launcher cards, and single-column new
+  investigation structure.
+
+## V1 Sprint 35 Verification
+
+Checks run:
+
+- [x] `pnpm --filter thesys-web test`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `docker compose stop web`
+- [x] `docker compose rm -f web`
+- [x] `docker volume rm thesys_web_next_cache`
+- [x] `docker compose up -d web`
+- [x] `docker compose restart web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test: `POST /api/demo/seed` refreshed the guided
+  demo project and returned
+  `/projects/3160c9e9-5c3e-491f-9cc5-6e8081c2917c#current-step`.
+- [x] Desktop Codex in-app browser QA on `/` and `/projects`: verified `/`
+  redirects to `/projects`, only one dominant `Start investigation` CTA is
+  visible, `Load guided demo` is secondary, the old right rail cards are gone,
+  filters are collapsed behind `Filter`, disposable test/demo/audit rows are
+  hidden by default, `Show test projects` lives inside the filter disclosure and
+  reveals hidden rows, and the app console reported no warnings/errors.
+- [x] Desktop Codex in-app browser QA on `/projects/new`: verified the page is
+  single-column, no persistent explanatory sidebar cards render, the sample
+  rough idea previews a first thesis, possible wedge, biggest unknown, and
+  recommended path, `Continue to Current Step` is primary, `Run research` and
+  `Compare wedges` are secondary, and creating from preview opens
+  `/projects/{id}#current-step`.
+- [x] Mobile Codex in-app browser QA at 410px width on `/projects`: verified no
+  horizontal overflow, the primary CTA stays obvious, the filter menu opens
+  cleanly, and `Show test projects` is usable inside the disclosure.
+- [x] Mobile Codex in-app browser QA at 410px width on `/projects/new`: verified
+  no horizontal overflow, the single-column preview remains usable, and the
+  post-preview Current Step/research/wedge action row fits and remains usable.
+
 ## Next Work
 
-V1 Sprint 35: define the next brief-backed scope.
+V1 Sprint 36: define the next brief-backed scope.

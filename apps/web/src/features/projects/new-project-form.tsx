@@ -120,7 +120,7 @@ export function NewProjectForm() {
 
   return (
     <main className="min-h-screen px-4 py-5 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-6xl">
+      <div className="mx-auto max-w-3xl">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <Link
             className="-ml-2 inline-flex min-h-11 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
@@ -137,7 +137,7 @@ export function NewProjectForm() {
           </div>
         </div>
 
-        <section className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <section className="mt-6">
           <div className="min-w-0">
             <header className="border-b border-border pb-5">
               <p className="text-sm text-muted-foreground">New investigation</p>
@@ -287,7 +287,7 @@ export function NewProjectForm() {
                   <h2 id="thesis-title" className="mt-1 text-lg font-semibold">
                     {preview.structured_intake.project_name}
                   </h2>
-                  <div className="mt-4 grid gap-3">
+                  <div className="mt-4 divide-y divide-border rounded-md border border-border">
                     <DraftRow label="Target user" value={preview.thesis_draft.target_user} />
                     <DraftRow label="Problem" value={preview.thesis_draft.problem} />
                     <DraftRow label="Current workaround" value={preview.thesis_draft.current_workaround} />
@@ -361,41 +361,53 @@ export function NewProjectForm() {
                 />
               ) : null}
 
-              <div className="flex flex-col gap-3 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs leading-5 text-muted-foreground">
+              <div className="flex flex-col gap-3 border-t border-border pt-5">
+                <p className="max-w-[65ch] text-xs leading-5 text-muted-foreground">
                   {preview?.ready_to_create
                     ? "Choose where to start. The project opens on a focused Current Step unless you pick a deeper path."
                     : preview?.next_action_description ??
                       "Thesys will draft the thesis before anything is saved to project memory."}
                 </p>
-                <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                   {!preview?.ready_to_create ? (
-                    <Button disabled={!canPreview} type="submit" variant={preview ? "secondary" : "default"}>
-                      <FileSearch className="h-4 w-4" aria-hidden="true" />
+                    <Button
+                      className="w-full whitespace-nowrap sm:w-auto"
+                      disabled={!canPreview}
+                      type="submit"
+                      variant={preview ? "secondary" : "default"}
+                    >
+                      <FileSearch className="h-4 w-4 shrink-0" aria-hidden="true" />
                       {previewMutation.isPending ? "Shaping idea..." : preview ? "Refresh thesis" : "Shape idea"}
                     </Button>
                   ) : (
                     <>
-                      <Button disabled={!canCreate} onClick={() => createMutation.mutate("current")} type="button">
-                        <Save className="h-4 w-4" aria-hidden="true" />
+                      <Button
+                        className="w-full whitespace-nowrap sm:w-auto"
+                        disabled={!canCreate}
+                        onClick={() => createMutation.mutate("current")}
+                        type="button"
+                      >
+                        <Save className="h-4 w-4 shrink-0" aria-hidden="true" />
                         {createMutation.isPending ? "Creating..." : "Continue to Current Step"}
                       </Button>
                       <Button
+                        className="w-full whitespace-nowrap sm:w-auto"
                         disabled={!canCreate}
                         onClick={() => createMutation.mutate("research")}
                         type="button"
                         variant="secondary"
                       >
-                        <FileSearch className="h-4 w-4" aria-hidden="true" />
+                        <FileSearch className="h-4 w-4 shrink-0" aria-hidden="true" />
                         Run research
                       </Button>
                       <Button
+                        className="w-full whitespace-nowrap sm:w-auto"
                         disabled={!canCreate}
                         onClick={() => createMutation.mutate("wedge")}
                         type="button"
                         variant="secondary"
                       >
-                        <GitBranch className="h-4 w-4" aria-hidden="true" />
+                        <GitBranch className="h-4 w-4 shrink-0" aria-hidden="true" />
                         Compare wedges
                       </Button>
                     </>
@@ -404,28 +416,6 @@ export function NewProjectForm() {
               </div>
             </form>
           </div>
-
-          <aside className="space-y-4 lg:sticky lg:top-5 lg:self-start">
-            <div className="rounded-lg border border-border bg-card p-4">
-              <div className="flex items-center gap-2">
-                <FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h2 className="text-sm font-semibold">How this starts</h2>
-              </div>
-              <div className="mt-4 space-y-4">
-                <ProcessStep title="Shape the idea" text="Turn messy notes into a first testable thesis." />
-                <ProcessStep title="Clarify only gaps" text="Answer 2-4 useful questions, or skip and keep assumptions visible." />
-                <ProcessStep title="Pick a path" text="Choose quick orientation, evidence review, or validation sprint." />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border bg-card p-4">
-              <h2 className="text-sm font-semibold">You do not need all the answers.</h2>
-              <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                Unknowns are part of the workflow. Continue with assumptions when the idea is
-                still early; Thesys will keep those assumptions visible in the project.
-              </p>
-            </div>
-          </aside>
         </section>
       </div>
     </main>
@@ -458,7 +448,7 @@ function QuestionInput({
 
 function DraftRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-border bg-muted/30 p-3">
+    <div className="p-3">
       <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
       <p className="mt-1 text-sm leading-6 text-foreground">{value}</p>
     </div>
@@ -567,18 +557,6 @@ function FieldLimit({
     >
       {formatNumber(current)} of {formatNumber(max)} characters
     </p>
-  );
-}
-
-function ProcessStep({ text, title }: { text: string; title: string }) {
-  return (
-    <div className="flex gap-3">
-      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
-      <div className="min-w-0">
-        <div className="text-sm font-medium">{title}</div>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">{text}</p>
-      </div>
-    </div>
   );
 }
 
