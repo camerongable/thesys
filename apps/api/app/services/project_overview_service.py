@@ -21,11 +21,13 @@ from app.db.models import (
     ExperimentResult,
     Project,
     Risk,
+    ValidationResultInterpretation,
 )
 from app.schemas.overview import (
     EvidenceHealthRead,
     IdeaReadinessRead,
     NextBestActionRead,
+    PlaybookStepRead,
     ProjectOverviewRead,
     ReadinessItemRead,
     StrategicRecommendationRead,
@@ -50,6 +52,7 @@ class _OverviewCounts:
     experiments: int
     running_experiments: int
     experiment_results: int
+    validation_interpretations: int
     decisions: int
     cited_claims: int
     unsupported_claims: int
@@ -81,6 +84,7 @@ def get_project_overview(
         current_recommendation=_current_recommendation(context, stage, next_action),
         next_best_action=next_action,
         secondary_actions=_secondary_actions(context.project.id, stage),
+        playbook_steps=_playbook_steps(context.project.id, stage, context),
         idea_readiness=readiness,
         strategic_snapshot=_strategic_snapshot(context, stage),
         evidence_health=_evidence_health(context),
@@ -169,7 +173,7 @@ def _project_stage(context: _OverviewContext) -> str:
         }:
             return "proceeding"
 
-    if counts.experiment_results > 0:
+    if counts.experiment_results > 0 or counts.validation_interpretations > 0:
         return "decision_ready"
     if counts.running_experiments > 0:
         return "experiment_running"
@@ -222,24 +226,25 @@ def _next_best_action(project_id: uuid.UUID, stage: str) -> NextBestActionRead:
         ),
         "assumptions_identified": (
             "create_validation_plan",
-            "Create the first validation test",
-            "Convert the riskiest assumptions into concrete experiments.",
-            "A validation plan reduces uncertainty before committing to build.",
-            "experiments",
+            "Create validation mission",
+            "Turn the riskiest assumption into one proof with steps, assets, and criteria.",
+            "A validation mission reduces uncertainty before committing to build.",
+            "validation-mission",
         ),
         "validation_plan_created": (
             "log_results",
-            "Run the test and log results",
-            "Collect validation evidence for the highest-risk assumption.",
+            "Start mission and log results",
+            "Run the current proof and capture validation evidence for the highest-risk "
+            "assumption.",
             "Real user evidence is the fastest way to update confidence before building.",
-            "experiments",
+            "validation-mission",
         ),
         "experiment_running": (
             "add_results",
-            "Log validation results",
-            "Log what happened during validation and update confidence.",
+            "Log mission results",
+            "Log what happened during the current proof and update confidence.",
             "Results convert activity into reusable evidence for the next strategic decision.",
-            "experiments",
+            "validation-mission",
         ),
         "decision_ready": (
             "use_suggested_decision",
@@ -328,6 +333,119 @@ def _secondary_actions(project_id: uuid.UUID, stage: str) -> list[NextBestAction
     return actions
 
 
+def _playbook_steps(
+    project_id: uuid.UUID,
+    stage: str,
+    _context: _OverviewContext,
+) -> list[PlaybookStepRead]:
+    focus_key = _playbook_focus_key(stage)
+    current_position = _playbook_position_for_stage(stage)
+    definitions = [
+        (
+            "guide",
+            "Guide",
+            "What to do next",
+            "guide",
+            None,
+        ),
+        (
+            "thesis",
+            "Thesis",
+            "Shape the idea",
+            "thesis",
+            0,
+        ),
+        (
+            "research",
+            "Research",
+            "Evidence and competitors",
+            "research",
+            1,
+        ),
+        (
+            "test",
+            "Test",
+            "Run the blocker test",
+            "validation",
+            2,
+        ),
+        (
+            "decision",
+            "Decision",
+            "Proceed, pivot, pause, or kill",
+            "decisions",
+            3,
+        ),
+        (
+            "history",
+            "History",
+            "Receipts and changes",
+            "history",
+            4,
+        ),
+    ]
+    steps: list[PlaybookStepRead] = []
+    for key, label, purpose, hash_target, position in definitions:
+        is_current = key == focus_key
+        status = _playbook_step_status(key, position, current_position, is_current)
+        steps.append(
+            PlaybookStepRead(
+                key=key,
+                label=label,
+                purpose=purpose,
+                status=status,  # type: ignore[arg-type]
+                is_current_stage=is_current,
+                target_route=f"/projects/{project_id}#{hash_target}",
+            )
+        )
+    return steps
+
+
+def _playbook_focus_key(stage: str) -> str:
+    if stage == "draft_idea":
+        return "thesis"
+    if stage in {"structured_intake", "brief_generated", "competitors_analyzed"}:
+        return "research"
+    if stage in {"assumptions_identified", "validation_plan_created", "experiment_running"}:
+        return "test"
+    if stage == "decision_ready":
+        return "decision"
+    if stage in {"paused", "killed", "proceeding"}:
+        return "history"
+    return "guide"
+
+
+def _playbook_position_for_stage(stage: str) -> int:
+    if stage == "draft_idea":
+        return 0
+    if stage in {"structured_intake", "brief_generated", "competitors_analyzed"}:
+        return 1
+    if stage in {"assumptions_identified", "validation_plan_created", "experiment_running"}:
+        return 2
+    if stage == "decision_ready":
+        return 3
+    if stage in {"paused", "killed", "proceeding"}:
+        return 4
+    return 0
+
+
+def _playbook_step_status(
+    key: str,
+    position: int | None,
+    current_position: int,
+    is_current: bool,
+) -> str:
+    if key == "guide":
+        return "available"
+    if is_current:
+        return "current"
+    if key == "history" and current_position < 4:
+        return "available"
+    if position is not None and position < current_position:
+        return "complete"
+    return "blocked"
+
+
 def _idea_readiness(context: _OverviewContext, recommended_action: str) -> IdeaReadinessRead:
     project = context.project
     counts = context.counts
@@ -402,7 +520,12 @@ def _idea_readiness(context: _OverviewContext, recommended_action: str) -> IdeaR
     score = round((complete_count / len(items)) * 100)
     missing_items = [item for item in items if item.status != "complete"]
 
-    if counts.decisions > 0 or counts.experiment_results > 0:
+    has_decision_evidence = (
+        counts.decisions > 0
+        or counts.experiment_results > 0
+        or counts.validation_interpretations > 0
+    )
+    if has_decision_evidence:
         status = "decision_ready"
     elif counts.validation_plans > 0 or counts.experiments > 0:
         status = "ready_for_validation"
@@ -913,6 +1036,7 @@ def _counts(db: Session, auth: AuthContext, project_id: uuid.UUID) -> _OverviewC
             ),
         ),
         experiment_results=_model_count(db, ExperimentResult, base_filter),
+        validation_interpretations=_model_count(db, ValidationResultInterpretation, base_filter),
         decisions=_model_count(db, Decision, base_filter),
         cited_claims=_count(
             db,

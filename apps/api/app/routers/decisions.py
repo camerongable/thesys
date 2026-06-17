@@ -6,7 +6,14 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContextDep
 from app.db.session import get_db
-from app.schemas.validation import DecisionCreate, DecisionListRead, DecisionRead
+from app.schemas.validation import (
+    DecisionCoachChatCreate,
+    DecisionCoachChatRead,
+    DecisionCreate,
+    DecisionListRead,
+    DecisionRead,
+    DecisionRecommendationRead,
+)
 from app.services import validation_service
 
 router = APIRouter(prefix="/api/projects/{project_id}/decisions", tags=["decisions"])
@@ -23,6 +30,25 @@ def list_decisions(
     return DecisionListRead(
         decisions=[DecisionRead.model_validate(decision) for decision in decisions]
     )
+
+
+@router.get("/recommendation", response_model=DecisionRecommendationRead)
+def get_decision_recommendation(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> DecisionRecommendationRead:
+    return validation_service.get_decision_recommendation(db, auth, project_id)
+
+
+@router.post("/coach", response_model=DecisionCoachChatRead)
+def chat_with_decision_coach(
+    project_id: uuid.UUID,
+    payload: DecisionCoachChatCreate,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> DecisionCoachChatRead:
+    return validation_service.chat_decision_coach(db, auth, project_id, payload.message)
 
 
 @router.post("", response_model=DecisionRead, status_code=status.HTTP_201_CREATED)

@@ -80,9 +80,10 @@ def test_ai_status_reports_stub_mode_without_secret_values(
     client: TestClient,
     monkeypatch,
 ) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("LITELLM_MODEL", "dev-gpt-4o-mini")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
     get_settings.cache_clear()
     monkeypatch.setattr(
         "app.routers.ai._check_litellm_reachability",
@@ -151,6 +152,7 @@ def test_structured_output_endpoint_uses_litellm_when_stub_mode_is_never(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_MODEL", "dev-gpt-4o-mini")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-provider-key")
     get_settings.cache_clear()
 

@@ -62,6 +62,121 @@ export type Project = {
   problems: Problem[];
 };
 
+export type ThesisEvolutionEventType =
+  | "original_idea"
+  | "structured_thesis"
+  | "research_update"
+  | "wedge_change"
+  | "validation_blocker"
+  | "decision"
+  | "manual_update";
+export type ThesisEvolutionOrigin = "user" | "agent" | "system";
+
+export type ThesisCanvas = {
+  id: string;
+  project_id: string;
+  original_idea: string;
+  current_thesis: string;
+  target_user: string;
+  problem: string;
+  current_workaround: string;
+  proposed_solution: string;
+  wedge: string;
+  biggest_unknown: string;
+  proof_needed: string;
+  rejected_directions: string[];
+  open_questions: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type ThesisEvolutionEvent = {
+  id: string;
+  project_id: string;
+  event_type: ThesisEvolutionEventType;
+  title: string;
+  change_summary: string;
+  reason: string;
+  source_entity_type: string | null;
+  source_entity_id: string | null;
+  origin: ThesisEvolutionOrigin;
+  created_at: string;
+};
+
+export type ThesisCanvasDetail = {
+  canvas: ThesisCanvas;
+  evolution: ThesisEvolutionEvent[];
+};
+
+export type IdeaStory = {
+  project_id: string;
+  original_idea: string;
+  current_thesis: string;
+  selected_wedge: string;
+  rejected_directions: string[];
+  why_it_changed: string;
+  current_blocker: string;
+  next_proof: string;
+  latest_change_title: string | null;
+  latest_change_reason: string | null;
+};
+
+export type CompetitorPressure = "low" | "medium" | "high";
+export type EvidenceStrength = "none" | "weak" | "partial" | "strong";
+export type WedgeRecommendation =
+  | "recommended"
+  | "promising"
+  | "research_later"
+  | "avoid_for_now"
+  | "rejected";
+
+export type WedgeOption = {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  target_user: string;
+  problem_focus: string;
+  why_it_might_work: string;
+  main_risk: string;
+  competitor_pressure: CompetitorPressure;
+  evidence_strength: EvidenceStrength;
+  validation_test: string;
+  recommendation: WedgeRecommendation;
+  source_ids: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type WedgeOptionList = {
+  wedges: WedgeOption[];
+  recommended_wedge_id: string | null;
+  recommendation_summary: string;
+};
+
+export type WedgeAction = {
+  wedge: WedgeOption;
+  message: string;
+};
+
+export type UpdateThesisCanvasInput = Partial<
+  Pick<
+    ThesisCanvas,
+    | "current_thesis"
+    | "target_user"
+    | "problem"
+    | "current_workaround"
+    | "proposed_solution"
+    | "wedge"
+    | "biggest_unknown"
+    | "proof_needed"
+    | "rejected_directions"
+    | "open_questions"
+  >
+> & {
+  change_reason?: string;
+};
+
 export type Me = {
   user: {
     id: string;
@@ -121,6 +236,55 @@ export type FinalizeIntakeInput = {
   structured_intake: StructuredProjectIntake;
   raw_idea?: string;
   answers?: ClarifyingAnswer[];
+};
+
+export type InvestigationMode = "quick_orientation" | "evidence_review" | "validation_sprint";
+
+export type ThesisDraft = {
+  target_user: string;
+  problem: string;
+  current_workaround: string;
+  proposed_solution: string;
+  possible_wedge: string;
+  biggest_unknown: string;
+  proof_needed: string;
+  open_questions: string[];
+};
+
+export type InvestigationModeOption = {
+  mode: InvestigationMode;
+  label: string;
+  description: string;
+  why_recommended: string | null;
+};
+
+export type PreviewInvestigationInput = {
+  raw_idea: string;
+  answers?: ClarifyingAnswer[];
+  continue_with_assumptions?: boolean;
+  mode_preference?: InvestigationMode;
+};
+
+export type ConversationalInvestigationPreview = {
+  ai_run_id: string;
+  ai_step_id: string;
+  prompt_version: string;
+  model_provider: string;
+  model_name: string;
+  used_stub: boolean;
+  total_tokens: number | null;
+  total_cost: string | null;
+  raw_idea: string;
+  structured_intake: StructuredProjectIntake;
+  thesis_draft: ThesisDraft;
+  missing_context: string[];
+  clarifying_questions: string[];
+  assumptions_made: string[];
+  recommended_mode: InvestigationModeOption;
+  modes: InvestigationModeOption[];
+  ready_to_create: boolean;
+  next_action_label: string;
+  next_action_description: string;
 };
 
 export type StructuredIntakeRun = {
@@ -378,6 +542,78 @@ export type Experiment = {
   results: ExperimentResult[];
 };
 
+export type ValidationMissionStatus =
+  | "planned"
+  | "running"
+  | "results_logged"
+  | "interpreted"
+  | "closed";
+export type ValidationSignalStrength = "none" | "weak" | "medium" | "strong";
+export type ValidationSignalLevel = "none" | "low" | "medium" | "high";
+export type ValidationConfidenceChange = "decrease" | "no_change" | "increase";
+export type DecisionRecommendation =
+  | "proceed"
+  | "pivot"
+  | "pause"
+  | "kill"
+  | "continue_research";
+
+export type ValidationAsset = {
+  type: string;
+  title: string;
+  content: string;
+};
+
+export type ValidationResultInterpretation = {
+  id: string;
+  project_id: string;
+  mission_id: string;
+  experiment_id: string | null;
+  assumption_id: string | null;
+  ai_run_id: string | null;
+  approval_request_id: string | null;
+  raw_notes: string;
+  signal_summary: string;
+  what_strengthened: string[];
+  what_weakened: string[];
+  pain_severity: ValidationSignalLevel;
+  current_workaround: string;
+  urgency: "low" | "medium" | "high";
+  willingness_to_pay: ValidationSignalStrength;
+  switching_signal: ValidationSignalStrength;
+  objections: string[];
+  quotes: string[];
+  confidence_change: ValidationConfidenceChange;
+  confidence_rationale: string;
+  recommended_next_action: string;
+  decision_recommendation: DecisionRecommendation;
+  proposed_confidence_delta: string;
+  proposed_assumption_status: Assumption["status"] | null;
+  proposed_updates: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+};
+
+export type ValidationMission = {
+  id: string;
+  project_id: string;
+  assumption_id: string;
+  experiment_id: string | null;
+  mission_title: string;
+  why_it_matters: string;
+  target_user: string;
+  test_type: string;
+  steps: string[];
+  success_criteria: string;
+  failure_criteria: string;
+  assets: ValidationAsset[];
+  result_count: number;
+  status: ValidationMissionStatus;
+  created_at: string;
+  updated_at: string;
+  latest_interpretation: ValidationResultInterpretation | null;
+};
+
 export type GenerateValidationPlanInput = {
   assumption_ids?: string[];
   max_plans?: number;
@@ -394,6 +630,7 @@ export type ValidationPlanGenerateResult = {
   total_cost: string | null;
   artifact: Artifact;
   experiments: Experiment[];
+  missions: ValidationMission[];
 };
 
 export type LogExperimentResultInput = {
@@ -408,6 +645,25 @@ export type LogExperimentResultResult = {
   experiment: Experiment;
   assumption: Assumption | null;
   project_confidence_score: string | null;
+};
+
+export type InterpretValidationMissionInput = {
+  raw_notes?: string;
+  include_logged_results?: boolean;
+};
+
+export type InterpretValidationMissionResult = {
+  ai_run_id: string;
+  ai_step_id: string;
+  prompt_version: string;
+  model_provider: string;
+  model_name: string;
+  used_stub: boolean;
+  total_tokens: number | null;
+  total_cost: string | null;
+  mission: ValidationMission;
+  interpretation: ValidationResultInterpretation;
+  approval_request_id: string | null;
 };
 
 export type DecisionType =
@@ -453,6 +709,48 @@ export type CreateDecisionInput = {
   linked_artifact_ids?: string[];
   linked_competitor_ids?: string[];
   linked_experiment_ids?: string[];
+};
+
+export type SuggestedDecisionRecord = {
+  decision_type: DecisionType;
+  title: string;
+  rationale: string;
+  expected_outcome: string;
+  revisit_trigger: string;
+  linked_assumption_ids: string[];
+  linked_risk_ids: string[];
+  linked_evidence_source_ids: string[];
+  linked_artifact_ids: string[];
+  linked_competitor_ids: string[];
+  linked_experiment_ids: string[];
+  validation_mission_id: string | null;
+};
+
+export type DecisionCoachAction = {
+  id: string;
+  label: string;
+  description: string;
+  target_route: string | null;
+  target_modal: string | null;
+};
+
+export type DecisionCoachRecommendation = {
+  recommendation: DecisionRecommendation;
+  rationale: string;
+  supporting_evidence: string[];
+  missing_evidence: string[];
+  risks: string[];
+  suggested_decision_record: SuggestedDecisionRecord;
+  action_cards: DecisionCoachAction[];
+};
+
+export type DecisionCoachChatResponse = {
+  answer: string;
+  recommendation: DecisionRecommendation;
+  rationale: string;
+  supporting_evidence: string[];
+  missing_evidence: string[];
+  action_cards: DecisionCoachAction[];
 };
 
 export type Citation = {
@@ -964,6 +1262,11 @@ export type DemoSeedResult = {
   project: Project;
   created: boolean;
   counts: {
+    thesis_canvas: number;
+    thesis_evolution_events: number;
+    wedge_options: number;
+    validation_missions: number;
+    validation_interpretations: number;
     evidence_sources: number;
     artifacts: number;
     competitors: number;
@@ -1048,6 +1351,17 @@ export type NextBestAction = {
   target_route: string | null;
 };
 
+export type PlaybookStepStatus = "available" | "blocked" | "complete" | "current";
+
+export type PlaybookStep = {
+  key: string;
+  label: string;
+  purpose: string;
+  status: PlaybookStepStatus;
+  is_current_stage: boolean;
+  target_route: string;
+};
+
 export type ReadinessItem = {
   key: string;
   label: string;
@@ -1108,12 +1422,104 @@ export type ProjectOverview = {
   current_recommendation: StrategicRecommendation;
   next_best_action: NextBestAction;
   secondary_actions: NextBestAction[];
+  playbook_steps: PlaybookStep[];
   idea_readiness: IdeaReadiness;
   strategic_snapshot: StrategicSnapshot;
   evidence_health: EvidenceHealth;
   recent_strategic_updates: StrategicUpdate[];
   key_assumptions: Assumption[];
   key_risks: Risk[];
+};
+
+export type GuideRiskLevel = "none" | "low" | "medium" | "high";
+export type GuideConfidenceLevel = "unknown" | "low" | "medium" | "high";
+export type GuideActionType =
+  | "navigate"
+  | "open_form"
+  | "run_workflow"
+  | "generate_draft"
+  | "explain"
+  | "compare_wedges"
+  | "update_thesis"
+  | "log_result"
+  | "record_decision";
+
+export type GuideAction = {
+  id: string;
+  type: GuideActionType;
+  label: string;
+  description: string;
+  why_it_matters: string;
+  target_route: string | null;
+  target_modal: string | null;
+  payload: Record<string, unknown> | null;
+  risk_level: "low" | "medium" | "high";
+  requires_confirmation: boolean;
+};
+
+export type GuideEvidenceSummary = {
+  sources: number;
+  competitors: number;
+  supported_findings: number;
+  open_questions: number;
+  validated_assumptions: number;
+};
+
+export type GuideContext = {
+  project_id: string;
+  project_name: string;
+  stage: string;
+  verdict: string;
+  next_action: string;
+  risk_level: GuideRiskLevel;
+  confidence_level: GuideConfidenceLevel;
+  current_thesis: string | null;
+  target_user: string | null;
+  primary_problem: string | null;
+  current_wedge: string | null;
+  biggest_unknown: string | null;
+  active_validation_plan_id: string | null;
+  latest_research_sprint_id: string | null;
+  evidence_summary: GuideEvidenceSummary;
+  missing_context: string[];
+  available_actions: GuideAction[];
+};
+
+export type GuideResponse = {
+  summary: string;
+  current_focus: string;
+  why_this_matters: string;
+  after_that: string;
+  recommended_action: GuideAction;
+  secondary_actions: GuideAction[];
+  suggested_questions: string[];
+};
+
+export type GuideRelatedEntity = {
+  type: "evidence" | "assumption" | "validation_plan" | "decision" | "research" | "thesis";
+  id: string;
+  label: string;
+};
+
+export type GuideChatResponse = {
+  answer: string;
+  recommended_action: GuideAction | null;
+  action_cards: GuideAction[];
+  related_entities: GuideRelatedEntity[];
+};
+
+export type ProjectNudgeSeverity = "info" | "warning" | "action_required";
+
+export type ProjectNudge = {
+  id: string;
+  project_id: string;
+  severity: ProjectNudgeSeverity;
+  title: string;
+  message: string;
+  why_it_matters: string;
+  action: GuideAction;
+  dismissed: boolean;
+  created_at: string;
 };
 
 export type AIProviderKeyStatus = {
@@ -1311,8 +1717,68 @@ export function createProject(input: CreateProjectInput) {
   });
 }
 
+export function previewInvestigation(input: PreviewInvestigationInput) {
+  return apiFetch<ConversationalInvestigationPreview>("/api/intake/investigation/preview", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export function getProject(projectId: string) {
   return apiFetch<Project>(`/api/projects/${projectId}`);
+}
+
+export function getThesisCanvas(projectId: string) {
+  return apiFetch<ThesisCanvasDetail>(`/api/projects/${projectId}/thesis-canvas`);
+}
+
+export function getIdeaStory(projectId: string) {
+  return apiFetch<IdeaStory>(`/api/projects/${projectId}/idea-story`);
+}
+
+export function updateThesisCanvas(projectId: string, input: UpdateThesisCanvasInput) {
+  return apiFetch<ThesisCanvasDetail>(`/api/projects/${projectId}/thesis-canvas`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getThesisEvolution(projectId: string) {
+  return apiFetch<ThesisEvolutionEvent[]>(`/api/projects/${projectId}/thesis-evolution`);
+}
+
+export function listWedgeOptions(projectId: string) {
+  return apiFetch<WedgeOptionList>(`/api/projects/${projectId}/wedges`);
+}
+
+export function generateWedgeOptions(projectId: string) {
+  return apiFetch<WedgeOptionList>(`/api/projects/${projectId}/wedges/generate`, {
+    method: "POST",
+  });
+}
+
+export function selectWedgeOption(projectId: string, wedgeId: string) {
+  return apiFetch<WedgeAction>(`/api/projects/${projectId}/wedges/${wedgeId}/select`, {
+    method: "POST",
+  });
+}
+
+export function rejectWedgeOption(projectId: string, wedgeId: string) {
+  return apiFetch<WedgeAction>(`/api/projects/${projectId}/wedges/${wedgeId}/reject`, {
+    method: "POST",
+  });
+}
+
+export function testWedgeOption(projectId: string, wedgeId: string) {
+  return apiFetch<WedgeAction>(`/api/projects/${projectId}/wedges/${wedgeId}/test`, {
+    method: "POST",
+  });
+}
+
+export function researchWedgeOptionLater(projectId: string, wedgeId: string) {
+  return apiFetch<WedgeAction>(`/api/projects/${projectId}/wedges/${wedgeId}/research-more`, {
+    method: "POST",
+  });
 }
 
 export function getProjectOverview(projectId: string) {
@@ -1329,6 +1795,40 @@ export function getStrategicUpdates(projectId: string) {
 
 export function executeNextAction(projectId: string) {
   return apiFetch<NextBestAction>(`/api/projects/${projectId}/next-action`, {
+    method: "POST",
+  });
+}
+
+export function getGuideContext(projectId: string) {
+  return apiFetch<GuideContext>(`/api/projects/${projectId}/guide/context`);
+}
+
+export function getGuideRecommendation(projectId: string) {
+  return apiFetch<GuideResponse>(`/api/projects/${projectId}/guide/recommend`, {
+    method: "POST",
+  });
+}
+
+export function executeGuideAction(projectId: string, actionId: string) {
+  return apiFetch<GuideAction>(`/api/projects/${projectId}/guide/actions/${actionId}/execute`, {
+    method: "POST",
+  });
+}
+
+export function askProjectGuide(projectId: string, message: string) {
+  return apiFetch<GuideChatResponse>(`/api/projects/${projectId}/guide/chat`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+}
+
+export async function getProjectNudges(projectId: string) {
+  const response = await apiFetch<{ nudges: ProjectNudge[] }>(`/api/projects/${projectId}/nudges`);
+  return response.nudges;
+}
+
+export function dismissProjectNudge(projectId: string, nudgeId: string) {
+  return apiFetch<ProjectNudge>(`/api/projects/${projectId}/nudges/${nudgeId}/dismiss`, {
     method: "POST",
   });
 }
@@ -1487,6 +1987,43 @@ export async function listExperiments(projectId: string) {
   return response.experiments;
 }
 
+export async function listValidationMissions(projectId: string) {
+  const response = await apiFetch<{ missions: ValidationMission[] }>(
+    `/api/projects/${projectId}/experiments/missions`,
+  );
+  return response.missions;
+}
+
+export async function getCurrentValidationMission(projectId: string) {
+  const response = await apiFetch<{ mission: ValidationMission | null }>(
+    `/api/projects/${projectId}/experiments/missions/current`,
+  );
+  return response.mission;
+}
+
+export function startValidationMission(projectId: string, missionId: string) {
+  return apiFetch<ValidationMission>(
+    `/api/projects/${projectId}/experiments/missions/${missionId}/start`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function interpretValidationMission(
+  projectId: string,
+  missionId: string,
+  input: InterpretValidationMissionInput = {},
+) {
+  return apiFetch<InterpretValidationMissionResult>(
+    `/api/projects/${projectId}/experiments/missions/${missionId}/interpret`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
 export function generateValidationPlan(projectId: string, input: GenerateValidationPlanInput = {}) {
   return apiFetch<ValidationPlanGenerateResult>(
     `/api/projects/${projectId}/experiments/validation-plan`,
@@ -1516,6 +2053,19 @@ export async function listDecisions(projectId: string) {
     `/api/projects/${projectId}/decisions`,
   );
   return response.decisions;
+}
+
+export function getDecisionRecommendation(projectId: string) {
+  return apiFetch<DecisionCoachRecommendation>(
+    `/api/projects/${projectId}/decisions/recommendation`,
+  );
+}
+
+export function askDecisionCoach(projectId: string, message: string) {
+  return apiFetch<DecisionCoachChatResponse>(`/api/projects/${projectId}/decisions/coach`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
 }
 
 export function createDecision(projectId: string, input: CreateDecisionInput) {

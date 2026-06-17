@@ -9,6 +9,92 @@ from app.core.config import get_settings
 from app.db.models import AIRun, AIStep, CustomerSegment, Problem, ProjectIntake, ProjectThesis
 
 
+def test_conversational_investigation_preview_asks_missing_context_questions(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    response = client.post(
+        "/api/intake/investigation/preview",
+        json={"raw_idea": "A tool that helps people decide what to do with a messy idea."},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["used_stub"] is True
+    assert body["prompt_version"].endswith(":conversational-investigation-intake:v1")
+    assert 2 <= len(body["clarifying_questions"]) <= 4
+    assert body["ready_to_create"] is False
+    assert body["thesis_draft"]["target_user"]
+    assert body["thesis_draft"]["proof_needed"]
+    assert {mode["mode"] for mode in body["modes"]} == {
+        "quick_orientation",
+        "evidence_review",
+        "validation_sprint",
+    }
+
+    run = db_session.scalar(select(AIRun).where(AIRun.id == uuid.UUID(body["ai_run_id"])))
+    assert run is not None
+    assert run.workflow_type == "conversational_investigation_intake"
+    assert run.project_id is None
+
+    step = db_session.scalar(select(AIStep).where(AIStep.id == uuid.UUID(body["ai_step_id"])))
+    assert step is not None
+    assert step.step_name == "shape_investigation"
+
+
+def test_conversational_investigation_can_continue_with_assumptions_and_finalize(
+    client: TestClient,
+) -> None:
+    preview_response = client.post(
+        "/api/intake/investigation/preview",
+        json={
+            "raw_idea": (
+                "An AI workflow for independent fitness coaches who lose time reviewing "
+                "weekly check-ins in spreadsheets and DMs."
+            ),
+            "continue_with_assumptions": True,
+        },
+    )
+
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    assert preview["ready_to_create"] is True
+    assert preview["clarifying_questions"] == []
+    assert preview["assumptions_made"]
+    assert preview["recommended_mode"]["mode"] in {
+        "quick_orientation",
+        "evidence_review",
+        "validation_sprint",
+    }
+
+    create_response = client.post(
+        "/api/projects",
+        json={
+            "name": preview["structured_intake"]["project_name"],
+            "short_description": preview["structured_intake"]["one_sentence_summary"],
+            "initial_thesis": preview["structured_intake"]["one_sentence_summary"],
+        },
+    )
+    assert create_response.status_code == 201
+    project_id = create_response.json()["id"]
+
+    finalize_response = client.post(
+        f"/api/projects/{project_id}/intake/finalize",
+        json={
+            "structured_intake": preview["structured_intake"],
+            "raw_idea": preview["raw_idea"],
+            "answers": [],
+        },
+    )
+
+    assert finalize_response.status_code == 200
+    overview_response = client.get(f"/api/projects/{project_id}/overview")
+    assert overview_response.status_code == 200
+    overview = overview_response.json()
+    assert overview["strategic_snapshot"]["current_stage"] == "structured_intake"
+    assert overview["next_best_action"]["label"] == "Run first research pass"
+
+
 def test_structured_intake_analyze_uses_stub_and_logs_step(
     client: TestClient,
     db_session: Session,

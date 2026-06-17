@@ -9,18 +9,22 @@ import {
   CheckCircle2,
   CircleAlert,
   ClipboardCheck,
+  Compass,
   Database,
   ExternalLink,
   FileSearch,
   FileText,
+  GitBranch,
   Globe2,
   Lightbulb,
   ListChecks,
+  Menu,
   Route,
   ScrollText,
   ShieldCheck,
   ShieldAlert,
   Target,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -46,12 +50,15 @@ import {
   discoverCompetitorCandidates,
   discoverSources,
   DiscoveredSource,
+  dismissProjectNudge,
   executeNextAction,
+  GuideAction,
+  getIdeaStory,
   getDurableResearchStatus,
   getProjectResearchHistory,
   getProjectOverview,
+  getProjectNudges,
   getV1ResearchEval,
-  IdeaReadiness,
   listApprovalRequests,
   listArtifacts,
   listAuditEvents,
@@ -61,6 +68,7 @@ import {
   listToolInvocations,
   NextBestAction,
   ProjectStage,
+  ProjectNudge,
   rejectApprovalRequest,
   rejectCompetitorCandidate,
   rejectDiscoveredSource,
@@ -72,7 +80,6 @@ import {
   ResearchPlanUpdateInput,
   ResearchSprint,
   runAgenticResearch,
-  StrategicSnapshot,
   StrategicRecommendation,
   startDurableResearchWorkflow,
   startResearchSprintPlan,
@@ -94,62 +101,50 @@ import { DecisionsTab } from "@/features/projects/decisions-tab";
 import { DomainError, DomainHeader, DomainPanel } from "@/features/projects/decision-room";
 import { EvidenceTab } from "@/features/projects/evidence-tab";
 import { ExperimentsTab } from "@/features/projects/experiments-tab";
+import { GuidePanel } from "@/features/projects/guide-panel";
 import { MarkdownContent } from "@/features/projects/markdown-content";
 import { StructuredIntakeWizard } from "@/features/projects/structured-intake-wizard";
+import { ThesisTab } from "@/features/projects/thesis-tab";
 import { WorkflowTrace } from "@/features/projects/workflow-trace";
+import { cn } from "@/lib/utils";
+import {
+  hashShouldRemainAnchor,
+  projectNavigationItems,
+  recordSurfaceForTab,
+  type ProjectNavigationItem,
+  type ProjectTab,
+  tabForActionType as routeTabForActionType,
+  tabForGuideAction as routeTabForGuideAction,
+  tabFromAnchor,
+  tabFromHash,
+  tabHash,
+} from "@/features/projects/project-overview-routing";
 
-const tabs = [
-  "Decision",
-  "Intelligence",
-  "Validation",
-  "Record",
-] as const;
-type ProjectTab = (typeof tabs)[number];
 type IntelligenceDetailMode = "evidence" | "competitors" | "review" | "brief";
 type ValidationDetailMode = "tests" | "blockers";
-type RecordDetailMode = "history" | "brief";
+type RecordDetailMode = "brief";
 
 type EvidenceReviewQueueItem =
   | { id: string; kind: "source"; source: DiscoveredSource }
   | { id: string; kind: "competitor"; candidate: CompetitorCandidate }
   | { artifact: Artifact; id: string; kind: "memo"; version: ArtifactVersion };
 
-const projectSections: {
-  tab: ProjectTab;
-  label: string;
-  description: string;
-  icon: LucideIcon;
-}[] = [
-  {
-    tab: "Decision",
-    label: "Decision",
-    description: "Verdict and next step",
-    icon: Lightbulb,
-  },
-  {
-    tab: "Intelligence",
-    label: "Intelligence",
-    description: "Sources and market",
-    icon: FileSearch,
-  },
-  {
-    tab: "Validation",
-    label: "Validation",
-    description: "Blockers and tests",
-    icon: Beaker,
-  },
-  {
-    tab: "Record",
-    label: "Record",
-    description: "Decisions and history",
-    icon: ScrollText,
-  },
-];
+const playbookIcons: Record<string, LucideIcon> = {
+  "current-step": Target,
+  decide: ClipboardCheck,
+  decision: ClipboardCheck,
+  guide: Lightbulb,
+  history: ScrollText,
+  research: FileSearch,
+  shape: GitBranch,
+  test: Beaker,
+  thesis: GitBranch,
+};
 
 export function ProjectOverview() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
-  const [activeTab, setActiveTab] = useState<ProjectTab>("Decision");
+  const [activeTab, setActiveTab] = useState<ProjectTab>("Current Step");
   const [activeAnchor, setActiveAnchor] = useState<string | null>(null);
   const overviewQuery = useQuery({
     queryKey: ["projects", projectId, "overview"],
@@ -167,11 +162,12 @@ export function ProjectOverview() {
     const syncTabFromHash = () => {
       const hash = window.location.hash;
       const rawAnchor = hash.replace("#", "") || null;
-      const tab = tabFromHash(hash) ?? tabFromAnchor(rawAnchor);
+      const tabFromAlias = tabFromHash(hash);
+      const tab = tabFromAlias ?? tabFromAnchor(rawAnchor);
       if (tab) {
         setActiveTab(tab);
       }
-      setActiveAnchor(tabFromHash(hash) ? null : rawAnchor);
+      setActiveAnchor(tabFromAlias && hashShouldRemainAnchor(rawAnchor) ? rawAnchor : tabFromAlias ? null : rawAnchor);
     };
     syncTabFromHash();
     window.addEventListener("hashchange", syncTabFromHash);
@@ -180,13 +176,10 @@ export function ProjectOverview() {
 
   const overview = overviewQuery.data;
   const project = overview?.project;
+  const recordSurface = recordSurfaceForTab(activeTab);
 
-  function selectTab(tab: ProjectTab) {
-    setActiveTab(tab);
-    setActiveAnchor(null);
-    if (typeof window !== "undefined") {
-      window.history.replaceState(null, "", `#${tab.toLowerCase()}`);
-    }
+  function openNavigationItem(item: ProjectNavigationItem) {
+    openWorkspace(item.label, item.anchor);
   }
 
   function runAction(action: NextBestAction) {
@@ -194,6 +187,13 @@ export function ProjectOverview() {
     if (action.primary) {
       nextActionMutation.mutate();
     }
+  }
+
+  function runGuideAction(action: GuideAction) {
+    const hash = action.target_route?.split("#")[1] ?? null;
+    const tab = tabFromHash(hash ? `#${hash}` : "") ?? tabFromAnchor(hash) ?? routeTabForGuideAction(action);
+    const anchor = hash && !tabFromHash(`#${hash}`) ? hash : action.target_modal;
+    openWorkspace(tab, anchor ?? null);
   }
 
   function activateAction(action: NextBestAction) {
@@ -206,7 +206,7 @@ export function ProjectOverview() {
     setActiveTab(tab);
     setActiveAnchor(anchor);
     if (typeof window !== "undefined") {
-      window.history.replaceState(null, "", `#${anchor ?? tab.toLowerCase()}`);
+      window.history.replaceState(null, "", `#${anchor ?? tabHash(tab)}`);
     }
     if (anchor) {
       window.setTimeout(() => {
@@ -218,6 +218,11 @@ export function ProjectOverview() {
           }
         }
         const target = document.getElementById(anchor);
+        if (target?.tagName === "DETAILS") {
+          const drawer = target as HTMLDetailsElement;
+          drawer.open = true;
+          drawer.dispatchEvent(new Event("toggle"));
+        }
         if (target) {
           window.scrollTo({
             top: target.getBoundingClientRect().top + window.scrollY - 16,
@@ -236,7 +241,7 @@ export function ProjectOverview() {
 
   return (
     <main className="min-h-screen px-4 py-5 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[1500px]">
+      <div className="mx-auto max-w-[1280px]">
         <div className="flex items-center justify-between gap-3">
           <Link
             className="-ml-2 inline-flex min-h-11 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
@@ -245,7 +250,10 @@ export function ProjectOverview() {
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             Projects
           </Link>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <MobileProjectMenu activeTab={activeTab} onOpen={openNavigationItem} />
+          </div>
         </div>
 
         {overviewQuery.isLoading ? (
@@ -301,44 +309,51 @@ export function ProjectOverview() {
               overview={overview}
             />
 
-            <div className="mt-5 grid gap-5 lg:grid-cols-[270px_minmax(0,1fr)]">
+            <div className="mt-5 grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[250px_minmax(0,1fr)]">
               <ProjectMap
+                activeAnchor={activeAnchor}
                 activeTab={activeTab}
-                onSelect={selectTab}
+                onOpen={openNavigationItem}
+                overview={overview}
               />
 
               <div className="min-w-0">
-                {activeTab === "Decision" ? (
+                {activeTab === "Current Step" ? (
                   <GuidedOverview
                     actionPending={nextActionMutation.isPending}
                     onAction={runAction}
+                    onGuideAction={runGuideAction}
                     onIntakeFinalized={refreshOverviewAfterIntake}
+                    onOpenWorkspace={openWorkspace}
                     overview={overview}
                   />
-                ) : activeTab === "Intelligence" ? (
+                ) : activeTab === "Shape" ? (
+                  <ThesisTab activeAnchor={activeAnchor} projectId={project.id} />
+                ) : activeTab === "Research" ? (
                   <IntelligenceWorkspace
                     activeAnchor={activeAnchor}
                     overview={overview}
                     projectId={project.id}
                   />
-                ) : activeTab === "Validation" ? (
+                ) : activeTab === "Test" ? (
                   <ValidationWorkspace
                     activeAnchor={activeAnchor}
                     onAction={runAction}
                     overview={overview}
                     projectId={project.id}
                   />
-                ) : (
+                ) : recordSurface === "decision" ? (
                   <RecordWorkspace
                     activeAnchor={activeAnchor}
-                    onOpenValidation={() => openWorkspace("Validation", "validation-tests")}
-                    overview={overview}
+                    onOpenValidation={() => openWorkspace("Test", "validation-mission")}
                     projectId={project.id}
                   />
-                )}
-                <MobileWorkspaceSwitcher
-                  activeTab={activeTab}
-                  onSelect={selectTab}
+                ) : recordSurface === "history" ? (
+                  <HistoryWorkspace overview={overview} />
+                ) : null}
+                <GuideActionDrawer
+                  onAction={runGuideAction}
+                  projectId={project.id}
                 />
               </div>
             </div>
@@ -392,50 +407,67 @@ function ProjectOverviewSkeleton() {
 }
 
 function ProjectMap({
+  activeAnchor,
   activeTab,
-  onSelect,
+  onOpen,
+  overview,
 }: {
+  activeAnchor: string | null;
   activeTab: ProjectTab;
-  onSelect: (tab: ProjectTab) => void;
+  onOpen: (item: ProjectNavigationItem) => void;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
   return (
-    <aside className="hidden min-w-0 max-w-full self-start overflow-hidden rounded-lg border border-border bg-card p-2 lg:sticky lg:top-5 lg:block lg:p-3">
-      <div className="hidden px-2 py-2 lg:block">
-        <h2 className="text-sm font-semibold">Workspaces</h2>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          Start with the verdict. Open details only when you need the evidence trail.
-        </p>
+    <aside className="hidden min-w-0 max-w-full self-start overflow-hidden lg:sticky lg:top-5 lg:block">
+      <div className="px-1 pb-2">
+        <h2 className="text-xs font-medium text-muted-foreground">Guided mode</h2>
       </div>
       <nav
-        className="grid w-full grid-cols-2 gap-1 sm:grid-cols-4 lg:mt-2 lg:grid-cols-1"
-        aria-label="Project workspace"
+        className="grid w-full grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-1"
+        aria-label="Project navigation"
       >
-        {projectSections.map((section) => {
-          const Icon = section.icon;
-          const selected = activeTab === section.tab;
+        {projectNavigationItems.map((item) => {
+          const Icon = playbookIcons[item.key] ?? Route;
+          const selected = item.label === activeTab;
+          const current = item.label === "Current Step";
           return (
             <button
-              aria-label={`Open ${section.label} workspace: ${section.description}`}
+              aria-label={`Open ${item.label}: ${item.detail}.`}
               aria-current={selected ? "page" : undefined}
               className={[
-                "flex min-h-12 cursor-pointer flex-col items-center justify-center gap-1 rounded-md px-1.5 py-2 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:min-h-0 lg:w-full lg:flex-row lg:items-start lg:justify-start lg:gap-3 lg:px-2 lg:py-2.5 lg:text-left",
-                selected ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                "flex min-h-12 cursor-pointer flex-col items-center justify-center gap-1 rounded-md border px-1.5 py-2 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:min-h-0 lg:w-full lg:flex-row lg:items-start lg:justify-start lg:gap-3 lg:px-2 lg:py-2.5 lg:text-left",
+                selected
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : current
+                    ? "border-border bg-card text-foreground hover:bg-muted"
+                    : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
               ].join(" ")}
-              key={section.tab}
-              onClick={() => onSelect(section.tab)}
+              key={item.key}
+              onClick={() => onOpen(item)}
               type="button"
             >
               <Icon
-                className={selected ? "h-4 w-4 shrink-0 text-primary lg:mt-0.5" : "h-4 w-4 shrink-0 lg:mt-0.5"}
+                className={
+                  selected || current
+                    ? "h-4 w-4 shrink-0 text-primary lg:mt-0.5"
+                    : "h-4 w-4 shrink-0 lg:mt-0.5"
+                }
                 aria-hidden="true"
               />
               <span className="min-w-0">
-                <span className="block truncate text-xs font-medium lg:text-sm">{section.label}</span>
+                <span className="flex min-w-0 flex-wrap items-center justify-center gap-1.5 lg:justify-start">
+                  <span className="block truncate text-xs font-medium lg:text-sm">{item.label}</span>
+                  {current ? (
+                    <span className="hidden rounded-md bg-primary/10 px-1.5 py-0.5 text-[0.68rem] font-medium text-primary lg:inline-flex">
+                      now
+                    </span>
+                  ) : null}
+                </span>
                 <span
                   aria-hidden="true"
-                  className="mt-0.5 hidden text-xs leading-5 text-muted-foreground lg:block"
+                  className="mt-0.5 hidden text-xs leading-5 text-muted-foreground xl:block"
                 >
-                  {section.description}
+                  {item.detail}
                 </span>
               </span>
             </button>
@@ -446,51 +478,179 @@ function ProjectMap({
   );
 }
 
-function MobileWorkspaceSwitcher({
+function MobileProjectMenu({
   activeTab,
-  onSelect,
+  onOpen,
 }: {
   activeTab: ProjectTab;
-  onSelect: (tab: ProjectTab) => void;
+  onOpen: (item: ProjectNavigationItem) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const selectedItem =
+    projectNavigationItems.find((item) => item.label === activeTab) ?? projectNavigationItems[0];
   return (
-    <details className="mt-5 rounded-lg border border-border bg-card p-2 lg:hidden">
-      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md px-2 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-        <span>Switch workspace</span>
-        <span className="inline-flex items-center gap-2 text-muted-foreground">
-          <span>{activeTab}</span>
-          <ChevronDown className="h-4 w-4" aria-hidden="true" />
-        </span>
-      </summary>
-      <nav
-        aria-label="Project workspace"
-        className="mt-2 grid grid-cols-2 gap-1 border-t border-border pt-2"
+    <>
+      <button
+        aria-controls="mobile-project-menu"
+        aria-expanded={open}
+        aria-label="Open project menu"
+        className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-md border border-border bg-card text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:hidden"
+        onClick={() => setOpen((value) => !value)}
+        type="button"
       >
-        {projectSections.map((section) => {
-          const Icon = section.icon;
-          const selected = activeTab === section.tab;
-          return (
-            <button
-              aria-current={selected ? "page" : undefined}
-              aria-label={`Open ${section.label} workspace: ${section.description}`}
-              className={[
-                "flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-md px-2 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
-                selected ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
-              ].join(" ")}
-              key={section.tab}
-              onClick={() => onSelect(section.tab)}
-              type="button"
-            >
-              <Icon
-                className={selected ? "h-4 w-4 shrink-0 text-primary" : "h-4 w-4 shrink-0"}
-                aria-hidden="true"
+        <Menu className="h-5 w-5 text-primary" aria-hidden="true" />
+      </button>
+      {open ? (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button
+            aria-label="Close project menu backdrop"
+            className="absolute inset-0 cursor-default bg-background/60 backdrop-blur-sm"
+            onClick={() => setOpen(false)}
+            type="button"
+          />
+          <aside
+            aria-label="Project menu"
+            aria-modal="true"
+            className="absolute right-0 top-0 flex h-full w-[min(22rem,calc(100vw-2rem))] flex-col border-l border-border bg-card shadow-2xl"
+            id="mobile-project-menu"
+            role="dialog"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-4">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-muted-foreground">Project menu</p>
+                <h2 className="truncate text-base font-semibold">{selectedItem.label}</h2>
+              </div>
+              <button
+                aria-label="Close project menu"
+                className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                onClick={() => setOpen(false)}
+                type="button"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+            <nav aria-label="Project navigation" className="grid gap-1 p-3">
+              {projectNavigationItems.map((item) => {
+                const Icon = playbookIcons[item.key] ?? Route;
+                const selected = item.label === activeTab;
+                const current = item.label === "Current Step";
+                return (
+                  <button
+                    aria-current={selected ? "page" : undefined}
+                    aria-label={`Open ${item.label}: ${item.detail}.`}
+                    className={[
+                      "flex min-h-14 cursor-pointer items-start gap-3 rounded-md border px-3 py-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+                      selected
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : current
+                          ? "border-warning-border bg-warning-muted text-foreground"
+                          : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
+                    ].join(" ")}
+                    key={item.key}
+                    onClick={() => {
+                      onOpen(item);
+                      setOpen(false);
+                    }}
+                    type="button"
+                  >
+                    <Icon
+                      className={
+                        selected || current
+                          ? "mt-0.5 h-4 w-4 shrink-0 text-primary"
+                          : "mt-0.5 h-4 w-4 shrink-0"
+                      }
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0">
+                      <span className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="block truncate font-medium">{item.label}</span>
+                        {current ? (
+                          <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[0.68rem] font-medium text-primary">
+                            now
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                        {item.detail}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </nav>
+          </aside>
+        </div>
+      ) : null}
+    </>
+  );
+}
+function GuideActionDrawer({
+  onAction,
+  projectId,
+}: {
+  onAction: (action: GuideAction) => void;
+  projectId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  function routeAction(action: GuideAction) {
+    onAction(action);
+    setOpen(false);
+  }
+
+  return (
+    <>
+      <Button
+        aria-controls="project-guide-drawer"
+        aria-expanded={open}
+        aria-label={open ? "Hide Thesys guide" : "Open Thesys guide"}
+        className="fixed bottom-4 right-4 z-40 min-h-12 rounded-full px-4 shadow-lg print:hidden"
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+      >
+        <Compass className="h-4 w-4" aria-hidden="true" />
+        Ask Thesys
+      </Button>
+
+      {open ? (
+        <div className="fixed inset-0 z-50 print:hidden">
+          <button
+            aria-label="Close Thesys guide backdrop"
+            className="absolute inset-0 cursor-default bg-background/60 backdrop-blur-sm"
+            onClick={() => setOpen(false)}
+            type="button"
+          />
+          <section
+            aria-label="Thesys guide action drawer"
+            aria-modal="true"
+            className="absolute inset-x-3 bottom-3 mx-auto max-h-[82vh] max-w-3xl overflow-hidden rounded-xl border border-border bg-card shadow-2xl sm:inset-x-6"
+            id="project-guide-drawer"
+            role="dialog"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-muted-foreground">Thesys Guide</p>
+                <h2 className="text-base font-semibold">Tell me where to go next</h2>
+              </div>
+              <button
+                aria-label="Close Thesys guide"
+                className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                onClick={() => setOpen(false)}
+                type="button"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="max-h-[calc(82vh-64px)] overflow-y-auto p-4">
+              <GuidePanel
+                className="border-0 bg-transparent p-0 lg:static lg:top-auto"
+                onAction={routeAction}
+                projectId={projectId}
               />
-              <span className="truncate">{section.label}</span>
-            </button>
-          );
-        })}
-      </nav>
-    </details>
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -510,7 +670,7 @@ function MobileWorkspaceAction({
   const nextActionLabel = clarifyActionLabel(overview.next_best_action.label);
   const decisionReady = decisionGradeEvidence(overview).value === "Ready to decide";
   const config =
-    activeTab === "Decision"
+    activeTab === "Current Step"
       ? {
           action: () => onAction(overview.next_best_action),
           button: nextActionLabel,
@@ -518,33 +678,49 @@ function MobileWorkspaceAction({
           icon: Target,
           title: "Next move",
         }
-      : activeTab === "Intelligence"
+      : activeTab === "Shape"
         ? {
-            action: () => onOpenWorkspace("Intelligence", "research-sprint"),
-            button: "Plan evidence review",
+            action: () => onOpenWorkspace("Shape", "thesis-canvas"),
+            button: "Open thesis",
+            description: "Review the current thesis, rejected directions, and evolution trail.",
+            icon: GitBranch,
+            title: "Idea shape",
+          }
+      : activeTab === "Research"
+        ? {
+            action: () => onOpenWorkspace("Research", "research-sprint"),
+            button: "Inspect research",
             description: "Open the evidence workbench only when the current basis needs review.",
             icon: FileSearch,
-            title: "Evidence review",
+            title: "Research details",
           }
-        : activeTab === "Validation"
+        : activeTab === "Test"
           ? {
-              action: () => onOpenWorkspace("Validation", "validation-tests"),
-              button: "Open test bench",
-              description: "Run or log the one validation loop that can change the verdict.",
+              action: () => onOpenWorkspace("Test", "validation-mission"),
+              button: "Open mission",
+              description: "Run or log the one proof that can change the verdict.",
               icon: Beaker,
-              title: "Test bench",
+              title: "Active test",
             }
+          : activeTab === "History"
+            ? {
+                action: () => onOpenWorkspace("History", "history"),
+                button: "Inspect history",
+                description: "Review lifecycle status, risks, and recent decision updates.",
+                icon: ScrollText,
+                title: "History",
+              }
           : decisionReady
             ? {
-                action: () => onOpenWorkspace("Record", "record-decision-panel"),
+                action: () => onOpenWorkspace("Decide", "record-decision-panel"),
                 button: "Prepare record",
                 description: "Validation is ready enough to draft the durable decision record.",
                 icon: ScrollText,
                 title: "Decision record",
               }
             : {
-                action: () => onOpenWorkspace("Validation", "validation-tests"),
-                button: "Log validation result",
+                action: () => onOpenWorkspace("Test", "validation-mission"),
+                button: "Log mission result",
                 description: "Record is guarded until validation evidence exists. Complete the proof first.",
                 icon: Beaker,
                 title: "Guardrail",
@@ -578,12 +754,16 @@ function MobileWorkspaceAction({
 function GuidedOverview({
   actionPending,
   onAction,
+  onGuideAction,
   onIntakeFinalized,
+  onOpenWorkspace,
   overview,
 }: {
   actionPending: boolean;
   onAction: (action: NextBestAction) => void;
+  onGuideAction: (action: GuideAction) => void;
   onIntakeFinalized: () => Promise<string | null>;
+  onOpenWorkspace: (tab: ProjectTab, anchor?: string | null) => void;
   overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
   const { current_recommendation, next_best_action } = overview;
@@ -609,23 +789,19 @@ function GuidedOverview({
           overview={overview}
         />
         <div className="hidden lg:block">
-          <OverviewStatusPanel
+          <CurrentStepPanel
             actionPending={actionPending}
             currentRecommendation={current_recommendation}
+            missingContextCount={missingContextCount}
             nextBestAction={next_best_action}
             onAction={onAction}
+            onOpenWorkspace={onOpenWorkspace}
+            overview={overview}
           />
         </div>
       </div>
 
-      <div className="hidden lg:block">
-        <RiskiestAssumptionCard overview={overview} onAction={onAction} />
-      </div>
-
-      <div className="hidden gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_360px]">
-        <StageAwareSummary overview={overview} />
-        <EvidenceHealthCard health={overview.evidence_health} />
-      </div>
+      <OverviewNudges onAction={onGuideAction} projectId={overview.project.id} />
 
       <DecisionContextDrawer
         contextGaps={contextGaps}
@@ -642,12 +818,12 @@ function GuidedOverview({
         <summary className="cursor-pointer list-none">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-                <h2 className="text-base font-semibold">Project history</h2>
+              <h2 className="text-base font-semibold">Decision history</h2>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 Lifecycle status, active risks, and recent decision updates.
               </p>
             </div>
-            <DisclosureLabel closedLabel="Show history" open={recordOpen} openLabel="Hide history" />
+            <DisclosureLabel closedLabel="Inspect history" open={recordOpen} openLabel="Hide history" />
           </div>
         </summary>
         <div className="mt-5 grid gap-5 border-t border-border pt-5">
@@ -658,6 +834,106 @@ function GuidedOverview({
       </details>
     </section>
   );
+}
+
+function OverviewNudges({
+  onAction,
+  projectId,
+}: {
+  onAction: (action: GuideAction) => void;
+  projectId: string;
+}) {
+  const queryClient = useQueryClient();
+  const nudgesQuery = useQuery({
+    queryKey: ["projects", projectId, "nudges"],
+    queryFn: () => getProjectNudges(projectId),
+  });
+  const dismissMutation = useMutation({
+    mutationFn: (nudgeId: string) => dismissProjectNudge(projectId, nudgeId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "nudges"] });
+    },
+  });
+  const nudges = nudgesQuery.data ?? [];
+  if (nudges.length === 0) {
+    return null;
+  }
+  return (
+    <section aria-label="Project nudges" className="grid gap-2 lg:grid-cols-2">
+      {nudges.slice(0, 2).map((nudge) => (
+        <CompactNudge
+          disabled={dismissMutation.isPending}
+          key={nudge.id}
+          nudge={nudge}
+          onAction={() => onAction(nudge.action)}
+          onDismiss={() => dismissMutation.mutate(nudge.id)}
+        />
+      ))}
+    </section>
+  );
+}
+
+function CompactNudge({
+  disabled,
+  nudge,
+  onAction,
+  onDismiss,
+}: {
+  disabled: boolean;
+  nudge: ProjectNudge;
+  onAction: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <section className={cn("rounded-lg border p-3", compactNudgeClass(nudge.severity))}>
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 rounded-md bg-background p-2 text-primary">
+          <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold">{nudge.title}</h2>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">{nudge.message}</p>
+            </div>
+            <button
+              aria-label={`Dismiss ${nudge.title}`}
+              className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              disabled={disabled}
+              onClick={onDismiss}
+              type="button"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
+              {nudge.why_it_matters}
+            </p>
+            <Button
+              className="min-h-10 shrink-0"
+              onClick={onAction}
+              size="sm"
+              type="button"
+              variant={nudge.severity === "action_required" ? "default" : "secondary"}
+            >
+              {nudge.action.label}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function compactNudgeClass(severity: ProjectNudge["severity"]) {
+  if (severity === "action_required") {
+    return "border-warning-border bg-warning-muted";
+  }
+  if (severity === "warning") {
+    return "border-warning-border bg-card";
+  }
+  return "border-border bg-card";
 }
 
 function MobileDecisionSpine({
@@ -825,7 +1101,7 @@ function DecisionContextDrawer({
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               {missingContextCount > 0
                 ? `${missingContextCount} context item${missingContextCount === 1 ? "" : "s"} still need detail.`
-                : "Thesis, project context, history, and progress stay behind this secondary drawer on mobile."}
+                : "Thesis, project context, history, and progress stay behind this secondary drawer."}
             </p>
           </div>
           <DisclosureLabel
@@ -900,7 +1176,7 @@ function MobileDecisionSupport({
 
       <MobileSupportSection
         icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
-        title="Evidence basis"
+        title="Evidence summary"
       >
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
           <MobileMetric label="Sources" value={health.source_count} />
@@ -1069,7 +1345,7 @@ function ProjectStatusBar({
   return (
     <section
       aria-label="Project status"
-      className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-card-foreground sm:mt-5 sm:px-5 sm:py-3"
+      className="mt-3 border-b border-border pb-3 text-card-foreground sm:mt-4 sm:pb-4"
     >
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
@@ -1090,57 +1366,63 @@ function ProjectStatusBar({
   );
 }
 
-function OverviewStatusPanel({
+function CurrentStepPanel({
   actionPending,
   currentRecommendation,
+  missingContextCount,
   nextBestAction,
   onAction,
+  onOpenWorkspace,
+  overview,
 }: {
   actionPending: boolean;
   currentRecommendation: StrategicRecommendation;
+  missingContextCount: number;
   nextBestAction: NextBestAction;
   onAction: (action: NextBestAction) => void;
+  onOpenWorkspace: (tab: ProjectTab, anchor?: string | null) => void;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
   const nextActionLabel = clarifyActionLabel(nextBestAction.label);
+  const blocker = riskiestAssumption(overview);
+  const decisionGrade = decisionGradeEvidence(overview);
+  const health = overview.evidence_health;
+  const recovery = recoveryGuidance(overview, missingContextCount);
+  const status = canonicalProjectStatus(overview);
+  const biggestUnknown = blocker
+    ? assumptionBeliefText(blocker.text)
+    : overview.strategic_snapshot.main_risk ?? health.weakest_evidence_area;
+  const nextProof = blocker?.recommended_test
+    ? stripLeadingSignalLabel(nextProofText(blocker))
+    : clarifyActionText(nextBestAction.description);
+  const [signalsOpen, setSignalsOpen] = useState(false);
+  const ideaStoryQuery = useQuery({
+    queryKey: ["projects", overview.project.id, "idea-story"],
+    queryFn: () => getIdeaStory(overview.project.id),
+  });
 
   return (
-    <div className="rounded-lg border border-border bg-card">
-      <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2">
-              <Lightbulb className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h2 className="text-base font-semibold">Decision basis</h2>
+    <section className="rounded-lg border border-border bg-card">
+      <div className="p-5 lg:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <Lightbulb className="h-4 w-4 text-primary" aria-hidden="true" />
+                <span>Current Step</span>
+              </div>
+              <span className={tonePillClass(status.tone)}>{status.label}</span>
+              <span className={tonePillClass(decisionGrade.tone)}>{decisionGrade.value}</span>
             </div>
+            <h2 className="mt-4 max-w-4xl text-2xl font-semibold tracking-normal">
+              {nextActionLabel}
+            </h2>
+            <p className="mt-3 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+              {clarifyActionText(nextBestAction.why_it_matters)}
+            </p>
           </div>
-          <h3 className="mt-4 text-lg font-semibold tracking-normal">
-            {currentRecommendation.recommendation}
-          </h3>
-          <p className="mt-4 text-xs font-medium text-muted-foreground">
-            Rationale
-          </p>
-          <MarkdownContent
-            className="mt-2 max-w-[72ch] space-y-2 text-sm leading-6 text-muted-foreground"
-            markdown={clarifyDecisionNarrative(currentRecommendation.rationale)}
-          />
-        </div>
-
-        <aside className="border-t border-border p-5 lg:border-l lg:border-t-0">
-          <div className="flex items-center gap-2">
-            <Route className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-sm font-semibold">Next step</h2>
-          </div>
-          <h3 className="mt-4 text-lg font-semibold tracking-normal">
-            {nextActionLabel}
-          </h3>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            {clarifyActionText(nextBestAction.description)}
-          </p>
-          <p className="mt-3 rounded-md bg-primary/10 px-3 py-2 text-sm leading-6 text-muted-foreground">
-            {clarifyActionText(nextBestAction.why_it_matters)}
-          </p>
           <Button
-            className="mt-4 w-full"
+            className="min-h-11 shrink-0"
             disabled={actionPending}
             onClick={() => onAction(nextBestAction)}
             type="button"
@@ -1148,9 +1430,272 @@ function OverviewStatusPanel({
             <Target className="h-4 w-4" aria-hidden="true" />
             {actionPending ? "Opening step..." : nextActionLabel}
           </Button>
-        </aside>
+        </div>
+
+        <IdeaStorySection
+          currentRecommendation={currentRecommendation}
+          fallbackBiggestUnknown={biggestUnknown}
+          fallbackNextProof={nextProof}
+          ideaStory={ideaStoryQuery.data ?? null}
+          isError={ideaStoryQuery.isError}
+          isLoading={ideaStoryQuery.isLoading}
+          onOpenWorkspace={onOpenWorkspace}
+          overview={overview}
+        />
+
+        <details
+          className="mt-5 border-t border-border pt-4"
+          onToggle={(event) => setSignalsOpen(event.currentTarget.open)}
+        >
+          <summary className="cursor-pointer list-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-sm font-semibold">Inspect supporting signals</h3>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Evidence, recovery, and blocker details stay available when you need the receipts.
+                </p>
+              </div>
+              <DisclosureLabel closedLabel="Inspect details" open={signalsOpen} openLabel="Hide details" />
+            </div>
+          </summary>
+          <div className="mt-4 grid gap-5 xl:grid-cols-3">
+            <DecisionSignal
+              body={
+                blocker
+                  ? decisionBlockerText(blocker)
+                  : "No ranked blocker yet. Structure context or extract assumptions before treating the verdict as durable."
+              }
+              icon={<ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />}
+              label="Biggest unknown"
+              title={blocker ? assumptionBeliefText(blocker.text) : "Blocker missing"}
+            />
+            <DecisionSignal
+              body={`Weakest area: ${health.weakest_evidence_area}`}
+              icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
+              label="Evidence summary"
+              meta={
+                <div className="flex flex-wrap gap-2">
+                  <DecisionMetric label="Sources" value={health.source_count} />
+                  <DecisionMetric label="Open" value={health.unsupported_claim_count} />
+                  <DecisionMetric label="Validated" value={health.validated_assumption_count} />
+                </div>
+              }
+              title={decisionGrade.detail}
+            />
+            <DecisionSignal
+              body={recovery.detail}
+              icon={<ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />}
+              label="After this step"
+              meta={<span className={tonePillClass(recovery.tone)}>{recovery.label}</span>}
+              title={recovery.title}
+            />
+          </div>
+        </details>
+
+        <div className="mt-6 flex flex-wrap gap-2 border-t border-border pt-5">
+          <Button
+            onClick={() => onOpenWorkspace("Test", "validation-mission")}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            <Beaker className="h-4 w-4" aria-hidden="true" />
+            Show test plan
+          </Button>
+          <Button
+            onClick={() => onOpenWorkspace("Research", "evidence")}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            <Database className="h-4 w-4" aria-hidden="true" />
+            Show evidence
+          </Button>
+          <Button
+            onClick={() => onOpenWorkspace("Shape", "wedge-explorer")}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            <GitBranch className="h-4 w-4" aria-hidden="true" />
+            Compare wedges
+          </Button>
+          <Button
+            onClick={() => onOpenWorkspace("Current Step", "project-guide")}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            <Compass className="h-4 w-4" aria-hidden="true" />
+            Ask Thesys
+          </Button>
+        </div>
       </div>
+    </section>
+  );
+}
+
+function IdeaStorySection({
+  currentRecommendation,
+  fallbackBiggestUnknown,
+  fallbackNextProof,
+  ideaStory,
+  isError,
+  isLoading,
+  onOpenWorkspace,
+  overview,
+}: {
+  currentRecommendation: StrategicRecommendation;
+  fallbackBiggestUnknown: string;
+  fallbackNextProof: string;
+  ideaStory: NonNullable<Awaited<ReturnType<typeof getIdeaStory>>> | null;
+  isError: boolean;
+  isLoading: boolean;
+  onOpenWorkspace: (tab: ProjectTab, anchor?: string | null) => void;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const story = ideaStory ?? {
+    current_blocker: fallbackBiggestUnknown,
+    current_thesis: overview.strategic_snapshot.current_thesis ?? currentRecommendation.recommendation,
+    latest_change_reason: null,
+    latest_change_title: null,
+    next_proof: fallbackNextProof,
+    original_idea: overview.project.short_description ?? overview.project.name,
+    project_id: overview.project.id,
+    rejected_directions: [] as string[],
+    selected_wedge:
+      overview.strategic_snapshot.proposed_wedge ??
+      "Choose or refine the wedge before expanding validation.",
+    why_it_changed:
+      "The idea story is being assembled from thesis, wedge, evidence, validation, and decision history.",
+  };
+  const rejectedDirection = story.rejected_directions[0] ?? "No rejected direction yet.";
+  const [storyOpen, setStoryOpen] = useState(false);
+
+  return (
+    <section className="mt-5 border-t border-border pt-5" id="idea-story">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <GitBranch className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h3 className="text-base font-semibold">Current test path</h3>
+          </div>
+          <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+            {isLoading
+              ? "Loading thesis, wedge, blocker, and next proof..."
+              : isError
+                ? "Showing the available project story while the evolution trail reloads."
+                : `Started as: ${truncate(story.original_idea, 180)}`}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <IdeaStoryRow label="Current thesis" value={story.current_thesis} emphasis />
+        <IdeaStoryRow label="Selected wedge" value={story.selected_wedge} emphasis />
+        <IdeaStoryRow label="Biggest unknown" value={story.current_blocker} />
+        <IdeaStoryRow label="Next proof" value={story.next_proof} emphasis />
+      </div>
+
+      <details
+        className="mt-4 border-t border-border pt-4"
+        onToggle={(event) => setStoryOpen(event.currentTarget.open)}
+      >
+        <summary className="cursor-pointer list-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h4 className="text-sm font-semibold">Inspect idea growth</h4>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                See what changed, what was rejected, and why this wedge is the current path.
+              </p>
+            </div>
+            <DisclosureLabel closedLabel="Inspect story" open={storyOpen} openLabel="Hide story" />
+          </div>
+        </summary>
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          <IdeaStoryRow label="Original idea" value={story.original_idea} />
+          <IdeaStoryRow label="Rejected direction" value={rejectedDirection} />
+          <IdeaStoryRow label="Why it changed" value={story.why_it_changed} />
+          <IdeaStoryRow
+            label={story.latest_change_title ?? "Latest change"}
+            value={story.latest_change_reason ?? "No additional change reason recorded yet."}
+          />
+        </div>
+        <Button
+          className="mt-4 min-h-10"
+          onClick={() => onOpenWorkspace("Shape", "thesis-evolution")}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          <ScrollText className="h-4 w-4" aria-hidden="true" />
+          Inspect full evolution
+        </Button>
+      </details>
+    </section>
+  );
+}
+
+function IdeaStoryRow({
+  emphasis = false,
+  label,
+  value,
+}: {
+  emphasis?: boolean;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <MarkdownContent
+        className={[
+          "mt-1 line-clamp-4 space-y-2 text-sm leading-6 text-foreground",
+          emphasis ? "font-semibold" : "",
+        ].join(" ")}
+        markdown={value}
+      />
     </div>
+  );
+}
+
+function DecisionSignal({
+  body,
+  icon,
+  label,
+  meta,
+  title,
+}: {
+  body: string;
+  icon: ReactNode;
+  label: string;
+  meta?: ReactNode;
+  title: string;
+}) {
+  return (
+    <section className="min-w-0">
+      <div className="flex items-center gap-2">
+        {icon}
+        <h3 className="text-xs font-medium text-muted-foreground">{label}</h3>
+      </div>
+      <MarkdownContent
+        className="mt-2 line-clamp-3 space-y-2 text-sm font-semibold leading-6 text-foreground"
+        markdown={title}
+      />
+      <MarkdownContent
+        className="mt-2 line-clamp-3 space-y-2 text-sm leading-6 text-muted-foreground"
+        markdown={body}
+      />
+      {meta ? <div className="mt-3">{meta}</div> : null}
+    </section>
+  );
+}
+
+function DecisionMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+      {label}: {value}
+    </span>
   );
 }
 
@@ -1172,7 +1717,7 @@ function RiskiestAssumptionCard({
         <div className="max-w-[72ch]">
           <div className="flex items-center gap-2">
             <ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">Decision Blocker</h2>
+            <h2 className="text-base font-semibold">Assumptions behind the decision</h2>
           </div>
           <p className="mt-3 text-xs font-medium text-muted-foreground">
             Belief to validate
@@ -1286,13 +1831,11 @@ function IntelligenceWorkspace({
         }
         description="Inspect the sources, competitors, and findings only when the current evidence basis needs review."
         icon={<FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />}
-        question="Review the evidence basis"
-        title="Intelligence"
+        question="Inspect research details"
+        title="Research"
       />
 
       <ResearchResultCard overview={overview} />
-
-      <ResearchSprintSummary projectId={overview.project.id} />
 
       <WorkbenchAccessPanel<IntelligenceDetailMode>
         activeMode={detailMode}
@@ -1301,13 +1844,13 @@ function IntelligenceWorkspace({
           {
             description: "Source coverage, citations, and open questions.",
             icon: Database,
-            label: "Evidence basis",
+            label: "Evidence summary",
             mode: "evidence",
           },
           {
             description: "Direct competitors, substitutes, and incumbents.",
             icon: Building2,
-            label: "Competitor map",
+            label: "Competitors and substitutes",
             mode: "competitors",
           },
           {
@@ -1319,11 +1862,11 @@ function IntelligenceWorkspace({
           {
             description: "Longer generated thesis record.",
             icon: FileText,
-            label: "Opportunity brief",
+            label: "Full research memo",
             mode: "brief",
           },
         ]}
-        title="Advanced evidence work"
+        title="Inspect research details"
         onSelect={setDetailMode}
       />
 
@@ -1339,7 +1882,10 @@ function IntelligenceWorkspace({
           ) : detailMode === "competitors" ? (
             <CompetitorsTab projectId={projectId} />
           ) : detailMode === "review" ? (
-            <ResearchSprintCard projectId={projectId} />
+            <>
+              <ResearchSprintSummary projectId={overview.project.id} />
+              <ResearchSprintCard projectId={projectId} />
+            </>
           ) : (
             <BriefTab projectId={projectId} />
           )}
@@ -1383,13 +1929,13 @@ function ValidationWorkspace({
         action={
           <Button onClick={() => setDetailMode("tests")} type="button">
             <Beaker className="h-4 w-4" aria-hidden="true" />
-            Open test bench
+            Open mission
           </Button>
         }
-        description="Run or log the one blocker test that can change the project decision."
+        description="Run or log the current proof that can change the project decision."
         icon={<Beaker className="h-4 w-4 text-primary" aria-hidden="true" />}
-        question="Run the blocker test"
-        title="Validation"
+        question="Run the current proof"
+        title="Validation Mission"
       />
 
       <RiskiestAssumptionCard overview={overview} onAction={onAction} />
@@ -1399,28 +1945,28 @@ function ValidationWorkspace({
         description="Keep validation focused on the current blocker. Open one supporting surface only when you are ready to plan, log, or re-rank."
         options={[
           {
-            description: "Plan the active test and log real-world results.",
+            description: "Open the active proof, assets, steps, and result logging.",
             icon: Beaker,
-            label: "Test bench",
+            label: "Active test",
             mode: "tests",
           },
           {
             description: "Review and re-rank the beliefs behind the verdict.",
             icon: ShieldAlert,
-            label: "Decision blockers",
+            label: "Assumptions behind the decision",
             mode: "blockers",
           },
         ]}
-        title="Validation workbench"
+        title="Inspect test details"
         onSelect={setDetailMode}
       />
 
       {detailMode ? (
         <ActiveWorkbenchPanel
           description={detailMode === "tests" ? "Plan or log the one validation loop that can change the verdict." : "Inspect the ranked beliefs only when the active blocker needs review."}
-          id={detailMode === "tests" ? "validation-tests" : undefined}
+          id={detailMode === "tests" ? "validation-mission" : undefined}
           onClose={() => setDetailMode(null)}
-          title={detailMode === "tests" ? "Test bench" : "Decision blockers"}
+          title={detailMode === "tests" ? "Active test" : "Assumptions behind the decision"}
         >
           {detailMode === "tests" ? (
             <ExperimentsTab projectId={projectId} />
@@ -1447,12 +1993,10 @@ function ValidationWorkspace({
 function RecordWorkspace({
   activeAnchor,
   onOpenValidation,
-  overview,
   projectId,
 }: {
   activeAnchor: string | null;
   onOpenValidation: () => void;
-  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
   projectId: string;
 }) {
   const [detailMode, setDetailMode] = useState<RecordDetailMode | null>(null);
@@ -1463,8 +2007,6 @@ function RecordWorkspace({
     }
     if (activeAnchor.includes("brief")) {
       setDetailMode("brief");
-    } else if (activeAnchor.includes("history")) {
-      setDetailMode("history");
     }
   }, [activeAnchor]);
 
@@ -1478,44 +2020,55 @@ function RecordWorkspace({
 
       <WorkbenchAccessPanel<RecordDetailMode>
         activeMode={detailMode}
-        description="Record the decision first. Open history or the longer brief only when you need provenance."
+        description="Record the decision first. Open the longer brief only when you need supporting narrative."
         options={[
-          {
-            description: "Lifecycle status, risks, and recent updates.",
-            icon: Route,
-            label: "Project history",
-            mode: "history",
-          },
           {
             description: "Generated thesis record and supporting narrative.",
             icon: FileText,
-            label: "Opportunity brief",
+            label: "Full research memo",
             mode: "brief",
           },
         ]}
-        title="Record context"
+        title="Inspect record details"
         onSelect={setDetailMode}
       />
 
       {detailMode ? (
         <ActiveWorkbenchPanel
-          description={detailMode === "history" ? "Use history to audit how the project reached its current decision state." : "Use the brief as the longer record after the decision work is clear."}
+          description="Use the brief as the longer record after the decision work is clear."
           onClose={() => setDetailMode(null)}
-          title={detailMode === "history" ? "Project history" : "Opportunity brief"}
+          title="Full research memo"
         >
-          {detailMode === "history" ? (
-            <>
-              <LifecycleProgressCard overview={overview} />
-              <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-                <TopRisksCard risks={overview.key_risks} />
-                <RecentUpdatesCard updates={overview.recent_strategic_updates} />
-              </div>
-            </>
-          ) : (
-            <BriefTab projectId={projectId} />
-          )}
+          <BriefTab projectId={projectId} />
         </ActiveWorkbenchPanel>
       ) : null}
+    </section>
+  );
+}
+
+function HistoryWorkspace({
+  overview,
+}: {
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  return (
+    <section className="space-y-6">
+      <DomainHeader
+        description="Audit how the project reached its current decision state."
+        icon={<ScrollText className="h-4 w-4 text-primary" aria-hidden="true" />}
+        question="Review the evidence trail"
+        signals={[
+          { label: "Workflow", value: `${overview.idea_readiness.score}% complete` },
+          { label: "Risks", value: overview.key_risks.length },
+          { label: "Updates", value: overview.recent_strategic_updates.length },
+        ]}
+        title="History"
+      />
+      <LifecycleProgressCard overview={overview} />
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <TopRisksCard risks={overview.key_risks} />
+        <RecentUpdatesCard updates={overview.recent_strategic_updates} />
+      </div>
     </section>
   );
 }
@@ -1538,22 +2091,39 @@ function WorkbenchAccessPanel<TMode extends string>({
   title: string;
   onSelect: (mode: TMode) => void;
 }) {
+  const [open, setOpen] = useState(Boolean(activeMode));
+
+  useEffect(() => {
+    if (activeMode) {
+      setOpen(true);
+    }
+  }, [activeMode]);
+
   return (
-    <section className="rounded-lg border border-border bg-card p-5">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h3 className="text-base font-semibold">{title}</h3>
-          <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
-            {description}
-          </p>
+    <details
+      className="rounded-lg border border-border bg-card p-5"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      open={open}
+    >
+      <summary className="cursor-pointer list-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 className="text-base font-semibold">{title}</h3>
+            <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+              {description}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {activeMode ? (
+              <span className="w-fit rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+                {options.find((option) => option.mode === activeMode)?.label}
+              </span>
+            ) : null}
+            <DisclosureLabel closedLabel="Inspect details" open={open} openLabel="Hide details" />
+          </div>
         </div>
-        {activeMode ? (
-          <span className="w-fit rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
-            {options.find((option) => option.mode === activeMode)?.label}
-          </span>
-        ) : null}
-      </div>
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      </summary>
+      <div className="mt-4 grid gap-2 border-t border-border pt-4 sm:grid-cols-2 xl:grid-cols-4">
         {options.map((option) => {
           const Icon = option.icon;
           const selected = option.mode === activeMode;
@@ -1584,7 +2154,7 @@ function WorkbenchAccessPanel<TMode extends string>({
           );
         })}
       </div>
-    </section>
+    </details>
   );
 }
 
@@ -1621,15 +2191,15 @@ function ActiveWorkbenchPanel({
 
 function intelligenceDetailTitle(mode: IntelligenceDetailMode) {
   if (mode === "evidence") {
-    return "Evidence basis";
+    return "Evidence summary";
   }
   if (mode === "competitors") {
-    return "Competitor map";
+    return "Competitors and substitutes";
   }
   if (mode === "review") {
     return "Evidence review controls";
   }
-  return "Opportunity brief";
+  return "Full research memo";
 }
 
 function intelligenceDetailDescription(mode: IntelligenceDetailMode) {
@@ -1642,7 +2212,7 @@ function intelligenceDetailDescription(mode: IntelligenceDetailMode) {
   if (mode === "review") {
     return "Plan an evidence review, approve discovered sources, inspect source checks, and review the generated memo.";
   }
-  return "Review the generated opportunity brief when you need the longer thesis record.";
+  return "Review the full generated research memo when you need the longer thesis record.";
 }
 
 function DisclosureLabel({
@@ -1680,15 +2250,15 @@ function ResearchResultCard({
     <DomainPanel>
       <div className="flex items-center gap-2">
         <FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />
-        <h3 className="text-base font-semibold">Evidence basis</h3>
+        <h3 className="text-base font-semibold">Evidence summary</h3>
       </div>
       <div className="mt-4 grid gap-x-8 lg:grid-cols-2">
         <ResultBlock title="Verdict" value={overview.current_recommendation.recommendation} />
         <ResultBlock title="Possible wedge" value={overview.strategic_snapshot.proposed_wedge ?? "Wedge still needs evidence."} />
         <ResultBlock title="Competitive pressure" value={topSubstitute} />
         <ResultBlock title="Main risk" value={overview.strategic_snapshot.main_risk ?? "The largest risk has not been identified yet."} />
-        <ResultBlock title="Decision Blocker" value={assumption ? decisionBlockerText(assumption) : "No decision blocker ranked yet."} />
-        <ResultBlock title="First test" value={assumption ? nextProofText(assumption) : clarifyActionText(overview.next_best_action.description)} />
+        <ResultBlock title="Assumptions behind the decision" value={assumption ? decisionBlockerText(assumption) : "No decision blocker ranked yet."} />
+        <ResultBlock title="Next proof" value={assumption ? nextProofText(assumption) : clarifyActionText(overview.next_best_action.description)} />
         <ResultBlock title="Scope guardrail" value="Do not expand product scope until the decision blocker has real validation evidence." />
         <ResultBlock title="Decision rationale" value={clarifyDecisionNarrative(overview.current_recommendation.rationale)} />
       </div>
@@ -4584,79 +5154,6 @@ function LifecycleProgressCard({
   );
 }
 
-function IdeaReadinessCard({ readiness }: { readiness: IdeaReadiness }) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-5">
-      <div className="flex items-center gap-2">
-        <ClipboardCheck className="h-4 w-4 text-primary" aria-hidden="true" />
-        <h2 className="text-base font-semibold">Idea Readiness</h2>
-      </div>
-      <div className="mt-4 flex items-end gap-2">
-        <span className="text-3xl font-semibold">{readiness.score}%</span>
-        <span className="pb-1 text-sm text-muted-foreground">
-          {formatLabel(readiness.status)}
-        </span>
-      </div>
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
-        <div className="h-full bg-primary" style={{ width: `${readiness.score}%` }} />
-      </div>
-      <p className="mt-4 text-sm leading-6 text-muted-foreground">
-        Weakest area: {readiness.weakest_area}
-      </p>
-      <p className="mt-1 text-sm leading-6 text-muted-foreground">
-        Recommended next action: {readiness.recommended_next_action}
-      </p>
-
-      <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-        <ReadinessList
-          emptyLabel="No completed items yet."
-          items={readiness.completed_items.slice(0, 6)}
-          title="Ready"
-        />
-        <ReadinessList
-          emptyLabel="Nothing missing."
-          items={readiness.missing_items.slice(0, 6)}
-          title="Missing or Needs Work"
-        />
-      </div>
-    </div>
-  );
-}
-
-function ReadinessList({
-  emptyLabel,
-  items,
-  title,
-}: {
-  emptyLabel: string;
-  items: IdeaReadiness["completed_items"];
-  title: string;
-}) {
-  return (
-    <div>
-      <h3 className="text-xs font-medium text-muted-foreground">
-        {title}
-      </h3>
-      {items.length === 0 ? (
-        <p className="mt-2 text-sm text-muted-foreground">{emptyLabel}</p>
-      ) : (
-        <div className="mt-2 space-y-2">
-          {items.map((item) => (
-            <div className="flex items-start gap-2 text-sm" key={item.key}>
-              {item.status === "complete" ? (
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success-foreground" />
-              ) : (
-                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground" />
-              )}
-              <span className="text-muted-foreground">{item.label}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function TopRisksCard({
   risks,
 }: {
@@ -4704,70 +5201,6 @@ function TopRisksCard({
   );
 }
 
-function StrategicSnapshotCard({ snapshot }: { snapshot: StrategicSnapshot }) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-5">
-      <div className="flex items-center gap-2">
-        <ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />
-        <h2 className="text-base font-semibold">Strategic Snapshot</h2>
-      </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <SnapshotField label="Current thesis" value={snapshot.current_thesis} />
-        <SnapshotField label="Target user" value={snapshot.target_user} />
-        <SnapshotField label="Primary problem" value={snapshot.primary_problem} />
-        <SnapshotField label="Possible wedge" value={snapshot.proposed_wedge} />
-        <SnapshotField label="Main risk" value={snapshot.main_risk} />
-        <SnapshotField label="Current confidence" value={formatLabel(snapshot.current_confidence)} />
-      </div>
-    </div>
-  );
-}
-
-function StageAwareSummary({
-  overview,
-}: {
-  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
-}) {
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const stage = overview.strategic_snapshot.current_stage;
-  const { summary, title } = stageFocusCopy(stage);
-
-  return (
-    <div className="rounded-lg border border-border bg-card p-5">
-      <div className="flex items-center gap-2">
-        <ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />
-        <h2 className="text-base font-semibold">{title}</h2>
-      </div>
-      <p className="mt-3 max-w-[72ch] text-sm leading-6 text-muted-foreground">{summary}</p>
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <SnapshotField label="Target user" value={overview.strategic_snapshot.target_user} />
-        <SnapshotField label="Primary problem" value={overview.strategic_snapshot.primary_problem} />
-        <SnapshotField label="Possible wedge" value={overview.strategic_snapshot.proposed_wedge} />
-        <SnapshotField label="Main risk" value={overview.strategic_snapshot.main_risk} />
-      </div>
-      <details
-        className="mt-4 border-t border-border pt-4"
-        onToggle={(event) => setDetailsOpen(event.currentTarget.open)}
-      >
-        <summary className="cursor-pointer list-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-          <DisclosureLabel
-            closedLabel="Show thesis details"
-            open={detailsOpen}
-            openLabel="Hide thesis details"
-          />
-        </summary>
-        <div className="mt-3 grid gap-4 md:grid-cols-2">
-          <SnapshotField label="Current thesis" value={overview.strategic_snapshot.current_thesis} />
-          <SnapshotField
-            label="Idea confidence"
-            value={formatConfidenceValue(overview.strategic_snapshot.current_confidence)}
-          />
-        </div>
-      </details>
-    </div>
-  );
-}
-
 function SnapshotField({ label, value }: { label: string; value: string | null }) {
   return (
     <div>
@@ -4784,44 +5217,6 @@ function SnapshotField({ label, value }: { label: string; value: string | null }
           Add in project context
         </a>
       )}
-    </div>
-  );
-}
-
-function EvidenceHealthCard({
-  health,
-}: {
-  health: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>["evidence_health"];
-}) {
-  const metrics = [
-    ["Sources", health.source_count],
-    ["Competitors", health.competitor_count],
-    ["Supported findings", health.cited_claim_count],
-    ["Open questions", health.unsupported_claim_count],
-    ["Validated assumptions", health.validated_assumption_count],
-  ] as const;
-  return (
-    <div className="rounded-lg border border-border bg-card p-5">
-      <div className="flex items-center gap-2">
-        <Database className="h-4 w-4 text-primary" aria-hidden="true" />
-        <h2 className="text-base font-semibold">Evidence basis</h2>
-      </div>
-      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4">
-        {metrics.map(([label, value]) => (
-          <div key={label}>
-            <dt className="text-xs text-muted-foreground">{label}</dt>
-            <dd className="mt-1 text-lg font-semibold">{value}</dd>
-          </div>
-        ))}
-      </dl>
-      <p className="mt-4 text-sm leading-6 text-muted-foreground">
-        Weakest evidence area: {health.weakest_evidence_area}
-      </p>
-      {health.last_evidence_update ? (
-        <p className="mt-1 text-xs text-muted-foreground">
-          Last updated: {new Date(health.last_evidence_update).toLocaleString()}
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -4866,90 +5261,9 @@ function RecentUpdatesCard({
   );
 }
 
-function KeyAssumptionsAndRisks({
-  assumptions,
-  risks,
-}: {
-  assumptions: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>["key_assumptions"];
-  risks: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>["key_risks"];
-}) {
-  return (
-    <div className="grid gap-5 lg:grid-cols-2">
-      <div className="rounded-lg border border-border bg-card p-5">
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />
-          <h2 className="text-base font-semibold">Key Assumptions</h2>
-        </div>
-        {assumptions.length === 0 ? (
-          <p className="mt-4 text-sm leading-6 text-muted-foreground">
-            No assumptions identified yet. Assumptions are the beliefs that must be true for
-            this idea to work.
-          </p>
-        ) : (
-          <div className="mt-4 divide-y divide-border">
-            {assumptions.slice(0, 4).map((assumption) => (
-              <div key={assumption.id} className="py-3 first:pt-0">
-                <div className="flex flex-wrap gap-2 text-xs">
-                  <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-                    {assumption.importance}
-                  </span>
-                  <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-                    uncertainty {assumption.uncertainty}
-                  </span>
-                  {assumption.kill_risk ? (
-                    <span className="rounded-md bg-danger-muted px-2 py-1 text-danger-foreground">
-                      kill risk
-                    </span>
-                  ) : null}
-                </div>
-                <MarkdownContent
-                  className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
-                  markdown={assumptionBeliefText(assumption.text)}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-lg border border-border bg-card p-5">
-        <div className="flex items-center gap-2">
-          <Beaker className="h-4 w-4 text-primary" aria-hidden="true" />
-          <h2 className="text-base font-semibold">Key Risks</h2>
-        </div>
-        {risks.length === 0 ? (
-          <p className="mt-4 text-sm leading-6 text-muted-foreground">
-            No risks recorded yet. Risks show why the idea might fail and what should be
-            tested or mitigated.
-          </p>
-        ) : (
-          <div className="mt-4 divide-y divide-border">
-            {risks.slice(0, 4).map((risk) => (
-              <div key={risk.id} className="py-3 first:pt-0">
-                <div className="flex flex-wrap gap-2 text-xs">
-                  <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-                    {risk.severity}
-                  </span>
-                  <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-                    likelihood {risk.likelihood}
-                  </span>
-                </div>
-                <MarkdownContent
-                  className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
-                  markdown={risk.text}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function tabForAction(action: NextBestAction): ProjectTab {
   const hash = action.target_route?.split("#")[1];
-  return tabFromHash(hash ? `#${hash}` : "") ?? tabFromAnchor(hash ?? "") ?? tabForActionType(action.action_type);
+  return tabFromHash(hash ? `#${hash}` : "") ?? tabFromAnchor(hash ?? "") ?? routeTabForActionType(action.action_type);
 }
 
 function anchorForAction(action: NextBestAction): string | null {
@@ -4959,86 +5273,6 @@ function anchorForAction(action: NextBestAction): string | null {
   }
   if (action.action_type === "structure_idea") {
     return "structured-intake";
-  }
-  return null;
-}
-
-function tabForActionType(actionType: string): ProjectTab {
-  if (
-    actionType.includes("brief") ||
-    actionType.includes("research") ||
-    actionType.includes("competitor") ||
-    actionType.includes("evidence") ||
-    actionType.includes("source")
-  ) {
-    return "Intelligence";
-  }
-  if (
-    actionType.includes("assumption") ||
-    actionType.includes("experiment") ||
-    actionType.includes("validation") ||
-    actionType.includes("result")
-  ) {
-    return "Validation";
-  }
-  if (
-    actionType.includes("decision") ||
-    actionType.includes("record") ||
-    actionType.includes("history")
-  ) {
-    return "Record";
-  }
-  return "Decision";
-}
-
-function tabFromHash(hash: string): ProjectTab | null {
-  const normalized = hash.replace("#", "").toLowerCase();
-  const aliases: Record<string, ProjectTab> = {
-    assumption: "Validation",
-    assumptions: "Validation",
-    brief: "Intelligence",
-    competitor: "Intelligence",
-    competitors: "Intelligence",
-    decision: "Decision",
-    decisions: "Record",
-    evidence: "Intelligence",
-    experiment: "Validation",
-    experiments: "Validation",
-    history: "Record",
-    intelligence: "Intelligence",
-    market: "Intelligence",
-    overview: "Decision",
-    record: "Record",
-    research: "Intelligence",
-    validation: "Validation",
-  };
-  return aliases[normalized] ?? null;
-}
-
-function tabFromAnchor(anchor: string | null): ProjectTab | null {
-  if (!anchor) {
-    return null;
-  }
-  if (
-    anchor.includes("research") ||
-    anchor.includes("evidence") ||
-    anchor.includes("source") ||
-    anchor.includes("competitor") ||
-    anchor.includes("brief")
-  ) {
-    return "Intelligence";
-  }
-  if (
-    anchor.includes("experiment") ||
-    anchor.includes("validation") ||
-    anchor.includes("result") ||
-    anchor.includes("assumption") ||
-    anchor.includes("blocker")
-  ) {
-    return "Validation";
-  }
-  if (anchor.includes("history") || anchor.includes("decision-record")) {
-    return "Record";
   }
   return null;
 }
@@ -5195,7 +5429,7 @@ function recoveryGuidance(
 
   if (overview.evidence_health.source_count === 0) {
     return {
-      detail: "Plan an evidence review before treating the verdict as durable. The workspace needs source coverage before it can support a strategic decision.",
+      detail: "Plan an evidence review before treating the verdict as durable. The project needs source coverage before it can support a strategic decision.",
       label: "No sources",
       title: "Recover by adding evidence",
       tone: "warning",
@@ -5633,6 +5867,10 @@ function clarifyActionLabel(value: string) {
     .replace(/^Run Research$/i, "Plan evidence review")
     .replace(/^Review Research$/i, "Review evidence")
     .replace(/^View activity trace$/i, "Review activity trace");
+}
+
+function stripLeadingSignalLabel(value: string) {
+  return value.replace(/^(Decision blocker|Next proof):\s*/i, "");
 }
 
 function clarifyWorkspaceTerm(value: string) {

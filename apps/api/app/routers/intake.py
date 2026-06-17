@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.ai.prompts import (
+    CONVERSATIONAL_INVESTIGATION_PROMPT_VERSION,
     STRUCTURED_INTAKE_FINALIZE_PROMPT_VERSION,
     STRUCTURED_INTAKE_PROMPT_VERSION,
 )
@@ -13,6 +14,8 @@ from app.core.errors import public_error_detail
 from app.db.models import Project
 from app.db.session import get_db
 from app.schemas.intake import (
+    ConversationalInvestigationPreviewCreate,
+    ConversationalInvestigationPreviewRead,
     ProjectIntakeRead,
     StructuredIntakeAnalyzeCreate,
     StructuredIntakeAnswerCreate,
@@ -24,6 +27,7 @@ from app.schemas.projects import ProjectRead
 from app.services import intake_service, project_service
 
 router = APIRouter(prefix="/api/projects/{project_id}/intake", tags=["intake"])
+investigation_router = APIRouter(prefix="/api/intake", tags=["intake"])
 DbDep = Annotated[Session, Depends(get_db)]
 
 
@@ -64,6 +68,47 @@ def analyze_intake(
         total_tokens=result.total_tokens,
         total_cost=result.total_cost,
         intake=result.intake,
+    )
+
+
+@investigation_router.post(
+    "/investigation/preview",
+    response_model=ConversationalInvestigationPreviewRead,
+)
+def preview_conversational_investigation(
+    payload: ConversationalInvestigationPreviewCreate,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> ConversationalInvestigationPreviewRead:
+    try:
+        result = intake_service.preview_investigation(db, auth, settings, payload)
+    except intake_service.IntakeWorkflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=public_error_detail("Conversational investigation preview failed.", exc),
+        ) from exc
+
+    return ConversationalInvestigationPreviewRead(
+        ai_run_id=result.run.id,
+        ai_step_id=result.step.id,
+        prompt_version=CONVERSATIONAL_INVESTIGATION_PROMPT_VERSION,
+        model_provider=result.model_provider,
+        model_name=result.model_name,
+        used_stub=result.used_stub,
+        total_tokens=result.total_tokens,
+        total_cost=result.total_cost,
+        raw_idea=payload.raw_idea,
+        structured_intake=result.structured_intake,
+        thesis_draft=result.thesis_draft,
+        missing_context=result.missing_context,
+        clarifying_questions=result.clarifying_questions,
+        assumptions_made=result.assumptions_made,
+        recommended_mode=result.recommended_mode,
+        modes=result.modes,
+        ready_to_create=result.ready_to_create,
+        next_action_label=result.next_action_label,
+        next_action_description=result.next_action_description,
     )
 
 

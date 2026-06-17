@@ -2,14 +2,13 @@
 
 ## Current Phase
 
-V1 Sprint 17 implements Temporal durable research sprint orchestration.
-Temporal now owns the long-running research sprint business workflow boundary:
-durable execution metadata, approval waits, retry/cancel controls, worker
-execution, and local Docker orchestration. LangGraph remains responsible for
-agent reasoning and synthesis, LangSmith remains the observability/eval layer,
-and MCP/tool services remain the governed capability boundary. Watchlists,
-monitoring, collaboration, portfolio dashboards, integrations, and multi-segment
-workflow packs remain V2 scope.
+V1 Sprint 32 implementation is complete. Thesys now opens around a less busy
+validation workflow: the homepage emphasizes rough idea to wedge to unknown to
+next proof, the default queue hides disposable QA/demo clutter, new
+investigations route to Current Step, and the project workspace keeps thesis,
+wedge, biggest unknown, next proof, and one primary action visible before
+supporting details. Watchlists, monitoring, collaboration, portfolio
+dashboards, integrations, and multi-segment workflow packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -998,6 +997,567 @@ Notes:
   sprint, and the web service bind-mounts `apps/web`, so the existing web image
   was restarted and served the updated source successfully.
 
+## V1 Sprint 18 Scope
+
+- [x] Add guide schema contracts for context, action cards, recommendation
+  responses, chat requests, chat responses, and related project entities.
+- [x] Add `GuideService` that loads project overview state, derives current
+  focus, missing context, biggest unknown, confidence/risk, evidence summary,
+  and stage-aware next actions.
+- [x] Add guide API routes for:
+  - `GET /api/projects/{project_id}/guide/context`
+  - `POST /api/projects/{project_id}/guide/recommend`
+  - `POST /api/projects/{project_id}/guide/actions/{action_id}/execute`
+- [x] Map guide actions to existing project tabs/forms through stable deep
+  links and action metadata.
+- [x] Cover guide output across at least five project stages.
+
+## V1 Sprint 18 Verification
+
+Checks run:
+
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_guide.py`
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_guide.py apps/api/app/tests/test_project_overview.py`
+- [x] `apps/api/.venv/bin/ruff check apps/api/app/services/guide_service.py apps/api/app/schemas/guide.py apps/api/app/routers/projects.py apps/api/app/tests/test_guide.py`
+- [x] `apps/api/.venv/bin/pytest`
+- [x] Runtime check:
+  `GET /api/projects/53002617-c8bc-4335-bc4d-9ac43a338390/guide/context`
+  returned stage-aware context with missing evidence, assumptions, validation,
+  and decision context.
+- [x] Runtime check:
+  `POST /api/projects/53002617-c8bc-4335-bc4d-9ac43a338390/guide/recommend`
+  returned the expected current focus, recommended action, secondary actions,
+  and suggested questions.
+- [x] Runtime check:
+  `POST /api/projects/53002617-c8bc-4335-bc4d-9ac43a338390/guide/actions/generate_brief/execute`
+  returned the executable action and target route.
+
+## V1 Sprint 19 Scope
+
+- [x] Add a persistent `GuidePanel` to project pages in both mobile and desktop
+  layouts.
+- [x] Render current focus, why it matters, the primary recommended action,
+  secondary actions, suggested questions, and constrained Ask Thesys responses.
+- [x] Wire guide panel actions to existing project navigation and workspace
+  affordances.
+- [x] Add frontend API client types and calls for guide context,
+  recommendations, action execution, and guide chat.
+- [x] Add backend guide chat that stays constrained to thesis, evidence,
+  blockers, validation, and decisions.
+
+## V1 Sprint 19 Verification
+
+Checks run:
+
+- [x] `PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/usr/bin:/bin node_modules/.bin/next typegen`
+  from `apps/web`
+- [x] `PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/usr/bin:/bin node_modules/.bin/tsc --noEmit`
+  from `apps/web`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Runtime check:
+  `POST /api/projects/53002617-c8bc-4335-bc4d-9ac43a338390/guide/chat`
+  returned a project-scoped answer, action cards, and related thesis/research
+  entities.
+- [x] Browser QA in the Codex in-app browser against
+  `/projects/53002617-c8bc-4335-bc4d-9ac43a338390#intelligence`: the Guide
+  rendered current focus, why it matters, primary action, secondary actions,
+  suggested questions, and Ask Thesys; the Guide stayed visible across
+  Decision, Intelligence/Evidence, Validation, and Record workspaces; the
+  Improve thesis action opened the structured project context form; Ask Thesys
+  returned a project-scoped answer with action cards and related entities; the
+  browser console reported no errors.
+
+## V1 Sprint 20 Scope
+
+- [x] Add a standalone conversational investigation preview API:
+  - `POST /api/intake/investigation/preview`
+- [x] Add Sprint 20 response contracts for thesis drafts, investigation modes,
+  missing context, assumptions made, clarifying questions, and first next
+  action.
+- [x] Keep the existing project-bound structured intake APIs intact.
+- [x] Add backend preview generation that asks only 2-4 clarifying questions,
+  supports continuing with assumptions, and returns a first testable thesis.
+- [x] Rebuild the new investigation UI around a guided flow:
+  - paste rough idea
+  - shape idea
+  - answer or skip clarifying questions
+  - review first testable thesis
+  - choose Quick Orientation, Evidence Review, or Validation Sprint
+  - create and finalize the structured project
+- [x] Route new projects to the recommended investigation path after creation.
+
+## V1 Sprint 20 Verification
+
+Checks run:
+
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_intake.py`
+- [x] `apps/api/.venv/bin/pytest`
+- [x] `apps/api/.venv/bin/ruff check apps/api/app`
+- [x] `/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node node_modules/next/dist/bin/next typegen`
+  from `apps/web`
+- [x] `/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node node_modules/typescript/bin/tsc --noEmit`
+  from `apps/web`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects/new`
+- [x] Runtime check:
+  `POST /api/intake/investigation/preview` returned a live LLM thesis draft,
+  2-4 clarifying questions, investigation modes, and a recommended path.
+- [x] Runtime check:
+  preview -> create project -> finalize structured intake -> overview returned
+  project `b4706caa-f785-4bd3-9f64-11af9e60f3f5` at stage
+  `structured_intake` with next action `Run first research pass`.
+- [x] Browser QA: opened `/projects/new`, pasted a rough idea, clicked
+  `Shape idea`, verified the first testable thesis appeared, used `Continue
+  with assumptions`, created the investigation, and confirmed the project
+  opened at `/projects/c1c642a5-f52b-4722-a9f4-25d483c13ccf#research`.
+  Captured screenshots in `/private/tmp/thesys-sprint20-qa`; the run reported
+  no failed HTTP responses and no browser console errors.
+
+## V1 Sprint 21 Scope
+
+- [x] Add `ThesisCanvas` and `ThesisEvolutionEvent` persistence with project and
+  workspace scoping.
+- [x] Add Alembic migration for the thesis canvas and evolution timeline tables.
+- [x] Add project APIs:
+  - `GET /api/projects/{project_id}/thesis-canvas`
+  - `PATCH /api/projects/{project_id}/thesis-canvas`
+  - `GET /api/projects/{project_id}/thesis-evolution`
+- [x] Seed thesis canvases from existing project descriptions, current theses,
+  structured intake, assumptions, problems, and validation state.
+- [x] Record thesis edits as manual evolution events and create a new project
+  thesis version when the current thesis changes.
+- [x] Add derived evolution events for research artifacts, validation blockers,
+  experiment results, and decisions.
+- [x] Teach Ask Thesys to answer how an idea changed and expose `Show evolution`
+  and thesis editing actions.
+- [x] Add the frontend Thesis tab with editable canvas fields and a chronological
+  evolution timeline.
+
+## V1 Sprint 21 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_thesis_canvas.py app/tests/test_guide.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `cd apps/web && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/Users/cgable/Repos/thesys/node_modules/.bin:$PATH ./node_modules/.bin/next typegen && ./node_modules/.bin/tsc --noEmit`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose config`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Runtime check: `POST /api/demo/seed`, then
+  `GET /api/projects/244d865c-b270-4df7-83ff-746a90912b39/thesis-canvas`
+  returned a seeded thesis canvas with original idea, current thesis, target
+  user, problem, workaround, wedge, biggest unknown, proof needed, and evolution
+  events derived from assumptions, research, validation, and decisions.
+- [x] Runtime check: created a disposable project, loaded its thesis canvas,
+  patched the canvas, confirmed one manual evolution event and thesis version 2,
+  then deleted the disposable project.
+- [x] Browser QA in the Codex in-app browser: opened the demo project at
+  `#thesis`, verified the Thesis workspace rendered seeded canvas fields,
+  derived evolution events, and the `Show evolution` guide action; opened a
+  disposable project, edited and saved the thesis canvas through the UI,
+  confirmed rejected direction/open question counts, manual timeline event, and
+  thesis version 2, then deleted the disposable project. Browser console
+  reported no errors.
+
+## V1 Sprint 22 Scope
+
+- [x] Add `WedgeOption` persistence with project/workspace scoping.
+- [x] Add Alembic migration for the `wedge_options` table.
+- [x] Add project APIs:
+  - `GET /api/projects/{project_id}/wedges`
+  - `POST /api/projects/{project_id}/wedges/generate`
+  - `POST /api/projects/{project_id}/wedges/{wedge_id}/select`
+  - `POST /api/projects/{project_id}/wedges/{wedge_id}/test`
+  - `POST /api/projects/{project_id}/wedges/{wedge_id}/research-more`
+  - `POST /api/projects/{project_id}/wedges/{wedge_id}/reject`
+- [x] Generate wedge options from the current Thesis Canvas, evidence source
+  count, supported claims, competitors, and top assumptions.
+- [x] Support `Select wedge`, `Test this wedge`, `Research more`, and `Reject`
+  actions.
+- [x] Update the Thesis Canvas and create `wedge_change` evolution events when
+  a wedge is selected, moved to validation, or rejected.
+- [x] Preserve rejected wedges in the Thesis Canvas rejected directions.
+- [x] Add a focused Wedge Explorer comparison panel inside the Thesis workspace.
+- [x] Update Guide actions and Ask Thesys wedge answers to point to the Wedge
+  Explorer instead of the competitor map.
+
+## V1 Sprint 22 Verification
+
+Checks run:
+
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_wedge_explorer.py -q`
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_wedge_explorer.py apps/api/app/tests/test_guide.py apps/api/app/tests/test_thesis_canvas.py -q`
+- [x] `apps/api/.venv/bin/pytest`
+- [x] `apps/api/.venv/bin/ruff check apps/api/app`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `cd apps/web && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/next typegen && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/tsc --noEmit`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Browser QA in the Codex in-app browser after restarting containers:
+  created a disposable QA project, opened `#thesis`, generated wedges, selected
+  `Manual workaround replacement`, confirmed it became the single recommended
+  wedge, moved it to validation, rejected the broad concept wedge, and confirmed
+  Ask Thesys answered the wedge question with the recommended wedge, why it
+  might work, main risk, and first test. Browser logs reported no app warnings
+  or errors.
+
+## V1 Sprint 23 Scope
+
+- [x] Add `ValidationMission` persistence with project/workspace scoping,
+  assumption link, optional experiment link, mission status, steps, criteria,
+  and validation assets.
+- [x] Add Alembic migration for the `validation_missions` table.
+- [x] Add mission APIs:
+  - `GET /api/projects/{project_id}/experiments/missions`
+  - `GET /api/projects/{project_id}/experiments/missions/current`
+  - `POST /api/projects/{project_id}/experiments/missions/{mission_id}/start`
+  - `POST /api/projects/{project_id}/experiments/missions/{mission_id}/interpret`
+- [x] Create validation missions when validation plans generate experiments.
+- [x] Advance mission state when a mission starts, results are logged, and
+  results are interpreted.
+- [x] Update demo seeding so the fitness coach demo includes a validation
+  mission.
+- [x] Update Guide actions and related entities to route to the current
+  validation mission.
+- [x] Redesign the Validation workspace front door around a mission-first
+  current proof with steps, progress, primary CTA, criteria, assets, result
+  logging, and interpretation.
+
+## V1 Sprint 23 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_validation.py app/tests/test_guide.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `cd apps/web && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/next typegen && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/tsc --noEmit`
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Browser QA in the Codex in-app browser after restarting containers:
+  created a disposable QA project, generated and started a validation mission,
+  pasted raw interview/pricing/workaround notes, confirmed the interpreted
+  signal summary, pain/urgency/WTP/switching fields, strengthened/weakened
+  bullets, recommended next action, and pending-approval copy, then approved the
+  pending memory update from Intelligence > Evidence review and confirmed the
+  governance panel cleared to 0 pending with audit events recorded.
+- [x] `/Applications/Docker.app/Contents/Resources/bin/docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Browser QA in the Codex in-app browser after restarting containers:
+  created a disposable QA project, extracted assumptions, generated a
+  validation plan, opened `#validation-mission`, started the mission, logged a
+  result, interpreted the result, and confirmed the final CTA routes to
+  `#decisions`. Checked desktop and mobile mission-panel viewports for
+  horizontal overflow.
+
+## V1 Sprint 24 Scope
+
+- [x] Add persisted `ValidationResultInterpretation` records linked to
+  project, mission, experiment, assumption, AI run, and approval request.
+- [x] Add Alembic migration for validation result interpretations.
+- [x] Replace the status-only mission interpretation endpoint with a structured
+  interpretation workflow that accepts pasted validation notes or uses logged
+  results.
+- [x] Extract pain severity, urgency, willingness-to-pay signal, switching
+  signal, objections, quotes, confidence change, next action, and decision
+  recommendation.
+- [x] Create a pending `memory_update` approval before applying major project
+  state changes.
+- [x] Apply approved interpretation updates to assumption confidence/status,
+  project confidence, audit trail, and thesis evolution.
+- [x] Show the latest interpretation inside the Validation Mission UI.
+- [x] Add a paste-notes interpretation form with a pending-approval message.
+- [x] Treat validation interpretations as decision evidence in overview
+  readiness/stage logic.
+
+## V1 Sprint 24 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_validation.py -q`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `cd apps/web && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/next typegen && PATH=/Users/cgable/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH ./node_modules/.bin/tsc --noEmit`
+
+## V1 Sprint 25 Scope
+
+- [x] Add backend Decision Coach response contracts for recommendation,
+  supporting evidence, missing evidence, risks, action cards, and suggested
+  decision record prefill.
+- [x] Add decision APIs:
+  - `GET /api/projects/{project_id}/decisions/recommendation`
+  - `POST /api/projects/{project_id}/decisions/coach`
+- [x] Derive recommendations from interpreted validation results when present,
+  with deterministic fallbacks for projects that still need evidence.
+- [x] Generate suggested decision records with trace links to the key blocker,
+  evidence sources, and validation experiment tied to the mission.
+- [x] Route decision-related Guide chat questions through Decision Coach.
+- [x] Update the Decisions workspace to show a Decision Coach panel with the
+  recommended decision, rationale, missing proof, supporting evidence, risks,
+  constrained Q&A, and prefilled record action.
+- [x] Preserve the existing durable decision record form and evidence-link
+  workflow.
+
+## V1 Sprint 25 Verification
+
+Checks run:
+
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_validation.py apps/api/app/tests/test_guide.py -q`
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests -q`
+- [x] `apps/api/.venv/bin/ruff check apps/api/app/services/validation_service.py apps/api/app/routers/decisions.py apps/api/app/services/guide_service.py apps/api/app/schemas/validation.py apps/api/app/tests/test_validation.py`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I http://localhost:3000/projects`
+- [ ] Browser QA in the Codex in-app browser is blocked because Computer Use
+  is not allowed to access `com.openai.codex`. Per the sprint request, no
+  external browser QA was attempted.
+
+## V1 Sprint 26 Scope
+
+- [x] Add a typed playbook navigation contract to the project overview API.
+- [x] Compute stage-aware playbook steps for Guide, Thesis, Research, Test,
+  Decision, and History.
+- [x] Mark each playbook step as available, blocked, complete, or current.
+- [x] Highlight the current lifecycle step based on project stage:
+  - draft idea -> Thesis
+  - structured/researched stages -> Research
+  - assumption/validation stages -> Test
+  - results logged -> Decision
+  - recorded/paused/killed stages -> History
+- [x] Replace the project page "Workspaces" navigation with "Idea Playbook."
+- [x] Show each playbook item with user-facing purpose text and status.
+- [x] Replace mobile "Switch workspace" copy with "Switch playbook step."
+- [x] Preserve existing internal tab routes while exposing guided playbook
+  labels and deep links.
+- [x] Rename the visible Intelligence surface to Research.
+
+## V1 Sprint 26 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_project_overview.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [ ] Browser QA in the Codex in-app browser is blocked because Computer Use
+  is not allowed to access `com.openai.codex`. Per the sprint request, no
+  external browser QA was attempted.
+
+## V1 Sprint 27 Scope
+
+- [x] Add persisted `ProjectNudge` records with severity, message,
+  why-it-matters copy, embedded `GuideAction`, and dismissed state.
+- [x] Add Alembic migration for `project_nudges`.
+- [x] Add deterministic `NudgeService` that derives project-specific nudges
+  from current project state instead of generating generic chat output.
+- [x] Generate proactive nudges for:
+  - broad ideas that need wedge comparison
+  - projects with enough research for a first validation test
+  - validation plans/missions with no logged results
+  - weak evidence areas such as willingness to pay or unsupported claims
+- [x] Cap visible nudges to at most two active nudges.
+- [x] Add nudge APIs:
+  - `GET /api/projects/{project_id}/nudges`
+  - `POST /api/projects/{project_id}/nudges/{nudge_id}/dismiss`
+- [x] Add nudge display in the persistent Guide panel.
+- [x] Add a compact nudge surface to the project overview.
+- [x] Let users dismiss nudges and keep dismissal persisted.
+- [x] Route nudge action cards through existing guide action navigation.
+
+## V1 Sprint 27 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_nudges.py`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_nudges.py app/tests/test_guide.py app/tests/test_project_overview.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test created a disposable project, added evidence,
+  extracted assumptions, confirmed two project-specific nudges, dismissed one,
+  and confirmed it no longer appeared in active nudges.
+- [ ] Browser QA in the Codex in-app browser is blocked because Computer Use
+  is not allowed to access `com.openai.codex`. Per the sprint request, no
+  external browser QA was attempted.
+
+## V1 Sprint 28 Scope
+
+- [x] Refresh the primary fitness-coach demo into a guided strategic journey
+  rather than a generic seeded data project.
+- [x] Seed a messy original idea, structured intake, Thesis Canvas, thesis
+  evolution events, and rejected directions.
+- [x] Seed Wedge Explorer options with a recommended narrow wedge and explicit
+  avoid/research-later alternatives.
+- [x] Seed a validation mission with interpreted results so the project reaches
+  the Decision Coach instead of stopping at raw experiment output.
+- [x] Seed a Decision Coach-aligned decision record recommendation that
+  preserves the "continue research" path and trace links to the relevant
+  assumption and experiment.
+- [x] Reset demo nudges on refresh so the guided project is repeatable.
+- [x] Update the project list demo entry point and API response so the demo
+  opens at the Guide panel.
+- [x] Extend demo seed counts and tests to verify the Sprint 28 journey objects.
+
+## V1 Sprint 28 Verification
+
+Checks run:
+
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_demo_eval_workflows.py -q`
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/test_demo_eval_workflows.py apps/api/app/tests/test_thesis_canvas.py apps/api/app/tests/test_wedge_explorer.py apps/api/app/tests/test_validation.py apps/api/app/tests/test_guide.py apps/api/app/tests/test_project_overview.py -q`
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests -q`
+- [x] `apps/api/.venv/bin/ruff check apps/api/app`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test: `POST /api/demo/seed` created the guided demo
+  project and returned `#guide` with seeded thesis canvas, thesis evolution,
+  wedges, validation mission, interpretation, and decision counts.
+- [x] Browser QA in the Codex in-app browser: clicked `Load guided demo`,
+  verified redirect to `#guide`, checked Guide, Thesis, Validation, Decision,
+  and History markers, confirmed no browser console warnings/errors, and ran
+  desktop/mobile layout probes for horizontal overflow and button text overflow.
+
+## V1 Sprint 30 Scope
+
+- [x] Add `after_that` to guide recommendations so the Guide explains what
+  happens after the primary action.
+- [x] Add `recommended_action` to guide chat responses.
+- [x] Cap guide secondary actions to three.
+- [x] Replace vague guide action labels with specific routing commands such as
+  "Show evidence behind the blocker," "Rewrite thesis with current wedge,"
+  "Compare wedge options," "Open validation result form," and "Prepare decision
+  record."
+- [x] Keep backward-compatible aliases for older guide action IDs.
+- [x] Align project nudges and Decision Coach evidence actions with the new
+  guide action-router vocabulary.
+- [x] Replace the inline guide disclosure with a bottom-right `Ask Thesys`
+  button and bottom drawer.
+- [x] Update the Guide panel copy to the Sprint 30 structure: what matters now,
+  why, do this next, after that, and actions.
+- [x] Update prompt chips to be action-oriented.
+
+## V1 Sprint 30 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_guide.py app/tests/test_nudges.py app/tests/test_wedge_explorer.py app/tests/test_thesis_canvas.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test: `POST /api/demo/seed` refreshed the guided demo
+  project successfully.
+- [ ] Browser QA in the Codex in-app browser is blocked because Computer Use
+  is not allowed to access `com.openai.codex`. Per the sprint request, no
+  external browser QA was attempted.
+
+## V1 Sprint 31 Scope
+
+- [x] Add a derived `GET /api/projects/{project_id}/idea-story` API that
+  summarizes original idea, current thesis, selected wedge, rejected
+  directions, why the idea changed, current blocker, and next proof from
+  existing Thesis Canvas, wedge, and evolution records.
+- [x] Add a compact "How this idea has changed" section to Current Step.
+- [x] Replace the Current Step peer-field grid with a storyline that keeps
+  original idea, thesis, selected wedge, rejected direction, blocker, and next
+  proof visible together.
+- [x] Simplify Wedge Explorer's default view to show the recommended wedge, one
+  avoid-for-now/rejected direction, and one research-later/promising direction.
+- [x] Keep the full Wedge Explorer available behind "Compare all wedges."
+- [x] Extend Guide chat so it can answer idea evolution, wedge rationale,
+  rejected broad-direction, and next-proof questions.
+- [x] Add tests for Idea Story derivation and Sprint 31 Guide prompts.
+
+## V1 Sprint 31 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_thesis_canvas.py app/tests/test_guide.py`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `pnpm --filter thesys-web test`
+- [x] `docker compose config`
+- [x] `docker compose restart api web temporal-worker`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test: `POST /api/demo/seed` refreshed the guided
+  demo project and `GET /api/projects/{project_id}/idea-story` returned the
+  original idea, current thesis, selected wedge, rejected directions, blocker,
+  and next proof.
+- [ ] Browser QA in the Codex in-app browser is blocked because Computer Use
+  is not allowed to access `com.openai.codex`. Per the sprint request, no
+  external browser QA was attempted.
+
+## V1 Sprint 32 Scope
+
+- [x] Update the homepage headline/subheading around the Sprint 32 promise:
+  rough idea → wedge → biggest unknown → next proof.
+- [x] Rename the default queue to "Ideas in progress" and reduce project rows
+  to the allowed essentials: thesis/description, verdict, next action, stage,
+  and evidence summary.
+- [x] Hide disposable smoke, QA, and browser-test projects from the homepage by
+  default while keeping the guided fitness-coach demo visible.
+- [x] Add a "Show test projects" filter for inspecting hidden QA projects.
+- [x] Keep new-investigation intake focused after preview by showing one
+  recommended path and collapsing alternate paths.
+- [x] Route newly created investigations to Current Step by default, with
+  explicit actions for Current Step, research, or wedge comparison.
+- [x] Compress Current Step so the primary job, CTA, thesis, selected wedge,
+  biggest unknown, and next proof are visible first.
+- [x] Move supporting evidence, recovery, blocker details, and idea-history
+  details behind Inspect sections.
+- [x] Apply Sprint 32 terminology across visible detail labels: evidence
+  summary, competitors and substitutes, full research memo, active test, and
+  assumptions behind the decision.
+- [x] Add frontend tests for homepage test-project filtering.
+
+## V1 Sprint 32 Verification
+
+Checks run:
+
+- [x] `pnpm --filter thesys-web test`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `docker compose config`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test: `POST /api/demo/seed` refreshed the guided
+  demo project and returned `#current-step` with seeded thesis canvas, thesis
+  evolution, wedges, validation mission, interpretation, and decision counts.
+- [x] Browser QA in the Codex in-app browser: verified homepage copy, "Ideas in
+  progress," default hiding of QA/browser/endpoint-audit/demo clutter, "Show
+  test projects" reveal behavior, guided demo visibility, direct Current Step
+  landing on `#current-step`, compact thesis/wedge/biggest unknown/next proof
+  story, collapsed Inspect sections, and no browser warn/error console logs.
+
 ## Next Work
 
-V2 planning, unless another V1 hardening sprint is added to the brief.
+Begin the next planned sprint from the implementation brief.

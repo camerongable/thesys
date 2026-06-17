@@ -9,12 +9,16 @@ from app.core.config import get_settings
 from app.db.models import (
     AIRun,
     AIStep,
+    ApprovalRequest,
     Artifact,
     ArtifactVersion,
     Decision,
     DecisionLink,
     Experiment,
     ExperimentResult,
+    ThesisEvolutionEvent,
+    ValidationMission,
+    ValidationResultInterpretation,
 )
 
 
@@ -149,9 +153,17 @@ def test_generate_validation_plan_and_log_result_updates_confidence(
     assert plan_structured["result_interpretation_rubric"]
     assert "Landing Page Copy" in plan_body["artifact"]["current_version"]["markdown_content"]
     assert len(plan_body["experiments"]) == 1
+    assert len(plan_body["missions"]) == 1
     experiment = plan_body["experiments"][0]
+    mission = plan_body["missions"][0]
     assert experiment["assumption_id"] == assumption["id"]
     assert experiment["status"] == "planned"
+    assert mission["assumption_id"] == assumption["id"]
+    assert mission["experiment_id"] == experiment["id"]
+    assert mission["status"] == "planned"
+    assert mission["result_count"] == 0
+    assert mission["steps"]
+    assert mission["assets"]
 
     artifact = db_session.scalar(
         select(Artifact).where(Artifact.artifact_type == "validation_plan")
@@ -165,6 +177,19 @@ def test_generate_validation_plan_and_log_result_updates_confidence(
     assert version.langsmith_trace_url
     persisted_experiment = db_session.scalar(select(Experiment))
     assert persisted_experiment is not None
+    assert db_session.scalar(select(ValidationMission)) is not None
+
+    current_mission_response = client.get(
+        f"/api/projects/{project_id}/experiments/missions/current"
+    )
+    assert current_mission_response.status_code == 200
+    assert current_mission_response.json()["mission"]["id"] == mission["id"]
+
+    start_response = client.post(
+        f"/api/projects/{project_id}/experiments/missions/{mission['id']}/start"
+    )
+    assert start_response.status_code == 200
+    assert start_response.json()["status"] == "running"
 
     result_response = client.post(
         f"/api/projects/{project_id}/experiments/{experiment['id']}/results",
@@ -184,6 +209,114 @@ def test_generate_validation_plan_and_log_result_updates_confidence(
     assert float(result_body["assumption"]["confidence_score"]) > old_confidence
     assert result_body["project_confidence_score"] is not None
     assert db_session.scalar(select(ExperimentResult)) is not None
+
+    missions_response = client.get(f"/api/projects/{project_id}/experiments/missions")
+    assert missions_response.status_code == 200
+    logged_mission = missions_response.json()["missions"][0]
+    assert logged_mission["status"] == "results_logged"
+    assert logged_mission["result_count"] == 1
+
+    interpret_response = client.post(
+        f"/api/projects/{project_id}/experiments/missions/{mission['id']}/interpret"
+    )
+    assert interpret_response.status_code == 200
+    interpret_body = interpret_response.json()
+    assert interpret_body["mission"]["status"] == "interpreted"
+    assert interpret_body["interpretation"]["signal_summary"]
+    assert (
+        interpret_body["interpretation"]["approval_request_id"]
+        == interpret_body["approval_request_id"]
+    )
+    assert interpret_body["interpretation"]["confidence_change"] in {
+        "increase",
+        "no_change",
+        "decrease",
+    }
+    assert db_session.scalar(select(ValidationResultInterpretation)) is not None
+    approval = db_session.scalar(select(ApprovalRequest))
+    assert approval is not None
+    assert approval.request_type == "memory_update"
+    assert approval.entity_type == "validation_interpretation"
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/approvals/{interpret_body['approval_request_id']}/approve"
+    )
+    assert approve_response.status_code == 200
+    assert approve_response.json()["approval"]["status"] == "approved"
+    assert db_session.scalar(select(ThesisEvolutionEvent)) is not None
+
+
+def test_interpret_validation_notes_creates_pending_memory_update(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    create_response = client.post("/api/projects", json={"name": "Raw notes interpretation"})
+    project_id = create_response.json()["id"]
+    extract_response = client.post(f"/api/projects/{project_id}/assumptions/extract")
+    assumption = extract_response.json()["assumptions"][0]
+    old_confidence = float(assumption["confidence_score"])
+    plan_response = client.post(
+        f"/api/projects/{project_id}/experiments/validation-plan",
+        json={"assumption_ids": [assumption["id"]], "max_plans": 1},
+    )
+    mission = plan_response.json()["missions"][0]
+
+    start_response = client.post(
+        f"/api/projects/{project_id}/experiments/missions/{mission['id']}/start"
+    )
+    assert start_response.status_code == 200
+
+    interpret_response = client.post(
+        f"/api/projects/{project_id}/experiments/missions/{mission['id']}/interpret",
+        json={
+            "raw_notes": (
+                "Interviewed 5 target users. 4 described the problem as painful and "
+                "urgent. 3 asked for a pilot. 2 said they would pay $49/month. "
+                "Main objection: setup time."
+            )
+        },
+    )
+
+    assert interpret_response.status_code == 200
+    body = interpret_response.json()
+    interpretation = body["interpretation"]
+    assert body["used_stub"] is True
+    assert body["mission"]["status"] == "interpreted"
+    assert body["mission"]["result_count"] == 1
+    assert body["mission"]["latest_interpretation"]["id"] == interpretation["id"]
+    assert interpretation["pain_severity"] == "high"
+    assert interpretation["willingness_to_pay"] == "strong"
+    assert interpretation["recommended_next_action"]
+    assert interpretation["proposed_updates"]["assumption_id"] == assumption["id"]
+    assert body["approval_request_id"]
+
+    unchanged_assumption = client.get(f"/api/projects/{project_id}/assumptions").json()[
+        "assumptions"
+    ][0]
+    assert float(unchanged_assumption["confidence_score"]) == old_confidence
+
+    approval = db_session.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.id == uuid.UUID(body["approval_request_id"])
+        )
+    )
+    assert approval is not None
+    assert approval.status == "pending"
+    assert approval.proposed_change["decision_recommendation"] in {
+        "proceed",
+        "continue_research",
+    }
+
+    approve_response = client.post(
+        f"/api/projects/{project_id}/approvals/{body['approval_request_id']}/approve"
+    )
+    assert approve_response.status_code == 200
+    assert approve_response.json()["approval"]["status"] == "approved"
+    updated_assumption = client.get(f"/api/projects/{project_id}/assumptions").json()[
+        "assumptions"
+    ][0]
+    assert float(updated_assumption["confidence_score"]) > old_confidence
+    assert updated_assumption["status"] == "validated"
 
 
 def test_validation_plan_can_force_local_fallback_with_always_policy(
@@ -302,3 +435,102 @@ def test_create_decision_with_links(client: TestClient, db_session: Session) -> 
     list_response = client.get(f"/api/projects/{project_id}/decisions")
     assert list_response.status_code == 200
     assert list_response.json()["decisions"][0]["id"] == body["id"]
+
+
+def test_decision_coach_recommends_research_before_validation(client: TestClient) -> None:
+    create_response = client.post("/api/projects", json={"name": "Decision coach early"})
+    project_id = create_response.json()["id"]
+
+    response = client.get(f"/api/projects/{project_id}/decisions/recommendation")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recommendation"] == "continue_research"
+    assert body["suggested_decision_record"]["decision_type"] == "run_experiment"
+    assert any("validation" in item.casefold() for item in body["missing_evidence"])
+    assert body["action_cards"]
+
+    chat_response = client.post(
+        f"/api/projects/{project_id}/decisions/coach",
+        json={"message": "What evidence is missing?"},
+    )
+
+    assert chat_response.status_code == 200
+    chat = chat_response.json()
+    assert chat["recommendation"] == "continue_research"
+    assert "missing proof" in chat["answer"].casefold()
+    assert chat["missing_evidence"]
+
+
+def test_decision_coach_uses_interpreted_results_and_prefills_record(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    create_response = client.post("/api/projects", json={"name": "Decision coach proceed"})
+    project_id = create_response.json()["id"]
+    evidence_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={
+            "title": "Validation interview notes",
+            "text": "Target users described urgent pain and asked for a paid pilot.",
+        },
+    )
+    extract_response = client.post(f"/api/projects/{project_id}/assumptions/extract")
+    assumption_id = extract_response.json()["assumptions"][0]["id"]
+    plan_response = client.post(
+        f"/api/projects/{project_id}/experiments/validation-plan",
+        json={"assumption_ids": [assumption_id], "max_plans": 1},
+    )
+    mission = plan_response.json()["missions"][0]
+
+    interpret_response = client.post(
+        f"/api/projects/{project_id}/experiments/missions/{mission['id']}/interpret",
+        json={
+            "raw_notes": (
+                "Interviewed 5 target users. 4 described urgent painful workflow pain. "
+                "3 asked for a paid pilot and said yes to switching. 2 would pay $99/month."
+            )
+        },
+    )
+    assert interpret_response.status_code == 200
+
+    response = client.get(f"/api/projects/{project_id}/decisions/recommendation")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recommendation"] == "proceed"
+    record = body["suggested_decision_record"]
+    assert record["decision_type"] == "build"
+    assert record["linked_assumption_ids"] == [assumption_id]
+    assert record["linked_evidence_source_ids"] == [evidence_response.json()["id"]]
+    assert record["linked_experiment_ids"] == [mission["experiment_id"]]
+    assert record["validation_mission_id"] == mission["id"]
+    assert body["supporting_evidence"]
+
+    decision_response = client.post(
+        f"/api/projects/{project_id}/decisions",
+        json={
+            "decision_type": record["decision_type"],
+            "title": record["title"],
+            "rationale": record["rationale"],
+            "expected_outcome": record["expected_outcome"],
+            "linked_assumption_ids": record["linked_assumption_ids"],
+            "linked_evidence_source_ids": record["linked_evidence_source_ids"],
+            "linked_experiment_ids": record["linked_experiment_ids"],
+        },
+    )
+
+    assert decision_response.status_code == 201
+    assert {link["linked_type"] for link in decision_response.json()["links"]} == {
+        "assumption",
+        "evidence",
+        "experiment",
+    }
+    assert db_session.scalar(select(Decision)) is not None
+
+    guide_response = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={"message": "Can I build now?"},
+    )
+    assert guide_response.status_code == 200
+    assert "proceed" in guide_response.json()["answer"].casefold()

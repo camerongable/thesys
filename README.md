@@ -583,7 +583,24 @@ python3 scripts/eval_research_sprints.py --project-id <project-id>
 
 ## Suggested Demo Flow
 
-Use this flow when reviewing the project:
+Use the guided demo for the fastest review path:
+
+1. Start the local stack and open `http://localhost:3000/projects`.
+2. Choose `Load guided demo`.
+3. Review the Current Step first. The seeded project opens directly at
+   `#current-step`.
+4. Use Ask Thesys and the inspect panels to move through Thesis, Test,
+   Decision, and History.
+5. Inspect the seeded Thesis Canvas, recommended wedge, validation mission,
+   interpreted result, Decision Coach recommendation, and thesis evolution log.
+
+The guided demo can also be seeded through the API:
+
+```bash
+curl -X POST http://localhost:8000/api/demo/seed
+```
+
+Use this longer flow when reviewing the full workflow from scratch:
 
 1. Create a project from a rough idea.
 2. Run an autonomous research sprint.

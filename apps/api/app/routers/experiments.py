@@ -4,18 +4,26 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.ai.prompts import VALIDATION_PLAN_PROMPT_VERSION
+from app.ai.prompts import (
+    VALIDATION_PLAN_PROMPT_VERSION,
+    VALIDATION_RESULT_INTERPRETATION_PROMPT_VERSION,
+)
 from app.core.auth import AuthContextDep, SettingsDep
 from app.db.models import Artifact
 from app.db.session import get_db
 from app.schemas.artifacts import ArtifactRead
 from app.schemas.validation import (
+    CurrentValidationMissionRead,
     ExperimentListRead,
     ExperimentRead,
     ExperimentResultCreate,
     ExperimentResultCreateRead,
+    ValidationMissionListRead,
+    ValidationMissionRead,
     ValidationPlanGenerateCreate,
     ValidationPlanGenerateRead,
+    ValidationResultInterpretationCreate,
+    ValidationResultInterpretationRunRead,
 )
 from app.services import validation_service
 
@@ -42,6 +50,73 @@ def list_experiments(
     )
 
 
+@router.get("/missions", response_model=ValidationMissionListRead)
+def list_validation_missions(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> ValidationMissionListRead:
+    return ValidationMissionListRead(
+        missions=validation_service.list_validation_missions(db, auth, project_id)
+    )
+
+
+@router.get("/missions/current", response_model=CurrentValidationMissionRead)
+def get_current_validation_mission(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> CurrentValidationMissionRead:
+    return CurrentValidationMissionRead(
+        mission=validation_service.get_current_validation_mission(db, auth, project_id)
+    )
+
+
+@router.post("/missions/{mission_id}/start", response_model=ValidationMissionRead)
+def start_validation_mission(
+    project_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> ValidationMissionRead:
+    return validation_service.start_validation_mission(db, auth, project_id, mission_id)
+
+
+@router.post(
+    "/missions/{mission_id}/interpret",
+    response_model=ValidationResultInterpretationRunRead,
+)
+def interpret_validation_mission(
+    project_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+    payload: ValidationResultInterpretationCreate | None = None,
+) -> ValidationResultInterpretationRunRead:
+    result = validation_service.interpret_validation_results(
+        db,
+        auth,
+        settings,
+        project_id,
+        mission_id,
+        payload,
+    )
+    return ValidationResultInterpretationRunRead(
+        ai_run_id=result.run.id,
+        ai_step_id=result.step.id,
+        prompt_version=VALIDATION_RESULT_INTERPRETATION_PROMPT_VERSION,
+        model_provider=result.model_provider,
+        model_name=result.model_name,
+        used_stub=result.used_stub,
+        total_tokens=result.total_tokens,
+        total_cost=result.total_cost,
+        mission=result.mission,
+        interpretation=result.interpretation,
+        approval_request_id=result.approval_request.id if result.approval_request else None,
+    )
+
+
 @router.post("/validation-plan", response_model=ValidationPlanGenerateRead)
 def generate_validation_plan(
     project_id: uuid.UUID,
@@ -64,6 +139,7 @@ def generate_validation_plan(
         experiments=[
             ExperimentRead.model_validate(experiment) for experiment in result.experiments
         ],
+        missions=result.missions,
     )
 
 

@@ -28,7 +28,14 @@ from app.db.models import (
     ExperimentResult,
     Problem,
     Project,
+    ProjectIntake,
+    ProjectNudge,
     Risk,
+    ThesisCanvas,
+    ThesisEvolutionEvent,
+    ValidationMission,
+    ValidationResultInterpretation,
+    WedgeOption,
 )
 from app.schemas.demo import DemoSeedCounts, DemoSeedRead
 from app.schemas.evidence import EvidenceNoteCreate
@@ -36,10 +43,15 @@ from app.schemas.projects import ProjectCreate, ProjectRead
 from app.schemas.validation import ExperimentResultCreate
 from app.services import ai_run_service, evidence_service, project_service, validation_service
 
-DEMO_PROJECT_NAME = "[Demo] Fitness Coach Intelligence OS"
+DEMO_PROJECT_NAME = "AI Assistant for Independent Fitness Coaches"
 DEMO_IDEA = (
     "An AI platform for independent fitness coaches that turns client check-ins, wearable "
     "data, and workout logs into adaptive training recommendations and client communication drafts."
+)
+DEMO_RAW_IDEA = (
+    "I want an AI assistant for independent fitness coaches that can read messy client "
+    "check-ins, workout logs, and wearable notes, then tell the coach who needs attention "
+    "and what to say next."
 )
 
 
@@ -57,6 +69,8 @@ def seed_demo_project(
 ) -> DemoSeedRead:
     existing = _find_demo_project(db, auth)
     if existing is not None:
+        project = project_service.get_project(db, auth, existing.id)
+        _ensure_guided_demo_state(db, auth, project)
         project = project_service.get_project(db, auth, existing.id)
         return _read_result(db, auth, project, created=False)
 
@@ -84,6 +98,7 @@ def seed_demo_project(
     _complete_demo_run(
         db, run, evidence, assumptions, risks, competitors, artifacts, experiment, decision
     )
+    _ensure_guided_demo_state(db, auth, project)
     project = project_service.get_project(db, auth, project.id)
     return _read_result(db, auth, project, created=True)
 
@@ -99,6 +114,47 @@ def _find_demo_project(db: Session, auth: AuthContext) -> Project | None:
 
 def _write_structured_project_state(db: Session, auth: AuthContext, project: Project) -> None:
     project.confidence_score = Decimal("0.52")
+    db.add(
+        ProjectIntake(
+            workspace_id=auth.workspace_id,
+            project_id=project.id,
+            project_name=DEMO_PROJECT_NAME,
+            one_sentence_summary=(
+                "Independent online fitness coaches need a cited check-in triage assistant "
+                "that helps them decide who needs attention before weekly client reviews."
+            ),
+            target_users=["Independent online fitness coaches"],
+            buyer_type="prosumer",
+            problem_hypotheses=[
+                "Coaches lose weekly time synthesizing client check-ins spread across forms, DMs, workout logs, and wearable notes.",
+                "Coaches need recommendations they can inspect and edit rather than fully automated programming changes.",
+            ],
+            proposed_solution=(
+                "A coach-controlled assistant that summarizes weekly check-ins, flags at-risk "
+                "clients, drafts communication, and cites the source signals behind each suggestion."
+            ),
+            market_category="Fitness coaching workflow software",
+            business_model_guess="Subscription or paid pilot for solo online coaches",
+            suspected_competitors=["Trainerize", "TrueCoach", "Everfit", "Google Sheets plus ChatGPT"],
+            key_uncertainties=[
+                "Will coaches trust cited AI recommendations enough to use them with clients?",
+                "Will independent coaches pay for check-in synthesis before broader coaching automation?",
+                "Can a narrow triage workflow differentiate from existing coaching platforms?",
+            ],
+            clarifying_questions=[
+                "Which coaching niche has the most painful weekly check-in workflow?",
+                "What proof would show willingness to pay before building the full product?",
+            ],
+            user_answers=[
+                {
+                    "question": "Are you testing demand, competition, pricing, or positioning first?",
+                    "answer": "Start with demand and trust: prove coaches would use and pay for cited check-in triage.",
+                }
+            ],
+            raw_idea=DEMO_RAW_IDEA,
+            created_by=auth.user_id,
+        )
+    )
     online = CustomerSegment(
         workspace_id=auth.workspace_id,
         project_id=project.id,
@@ -530,6 +586,57 @@ def _write_experiment_result(
         status="planned",
     )
     db.add(experiment)
+    db.flush()
+    mission = ValidationMission(
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        assumption_id=assumption.id,
+        experiment_id=experiment.id,
+        mission_title="Prove: coaches will trust cited AI recommendations",
+        why_it_matters=(
+            "This is the highest-risk decision blocker. Without proof that coaches "
+            "trust and use the workflow, building the product is premature."
+        ),
+        target_user="Independent online fitness coaches",
+        test_type="customer_interview",
+        steps=[
+            "Recruit five independent online fitness coaches.",
+            "Show a mocked weekly check-in recommendation with cited rationale.",
+            "Ask what they trust, what they would edit, and what they would reject.",
+            "Test whether rationale/citations change willingness to use the draft.",
+            "Log objections, willingness-to-pay signals, and switching concerns.",
+            "Review whether the result supports continue, pivot, pause, or proceed.",
+        ],
+        success_criteria=experiment.success_criteria or "Three of five coaches show usage intent.",
+        failure_criteria=experiment.failure_threshold or "Fewer than two coaches show usage intent.",
+        assets=[
+            {
+                "type": "interview_script",
+                "title": "Interview script",
+                "content": experiment.plan or "Show the recommendation mock and ask for trust signals.",
+            },
+            {
+                "type": "outreach_message",
+                "title": "Outreach message",
+                "content": (
+                    "I am testing a workflow that turns client check-ins into cited "
+                    "recommendation drafts for independent coaches. Would you be open "
+                    "to a short feedback call?"
+                ),
+            },
+            {
+                "type": "results_rubric",
+                "title": "Result interpretation rubric",
+                "content": (
+                    f"Success: {experiment.success_criteria}\n\n"
+                    f"Failure: {experiment.failure_threshold}"
+                ),
+            },
+        ],
+        status="planned",
+        created_by=auth.user_id,
+    )
+    db.add(mission)
     db.commit()
     validation_service.log_experiment_result(
         db,
@@ -562,15 +669,17 @@ def _write_decision(
     decision = Decision(
         workspace_id=auth.workspace_id,
         project_id=project_id,
-        decision_type="change_icp",
-        title="Focus initial validation on independent online coaches",
+        decision_type="run_experiment",
+        title="Continue research before building the full assistant",
         rationale=(
             "The strongest current evidence points to solo online coaches with repeated weekly "
-            "check-in pain. Gyms and clinics should wait until the first workflow is validated."
+            "check-in pain, but the validation signal is not strong enough to justify a broad "
+            "build. Keep the wedge narrow around cited check-in triage and run a paid-pilot or "
+            "pricing-specific test next."
         ),
         expected_outcome=(
-            "Narrower discovery should clarify trust requirements, weekly time savings, and "
-            "willingness to pay before product scope expands."
+            "A second validation pass should clarify whether coaches will pay for the triage "
+            "workflow and switch from spreadsheets, DMs, and generic AI drafts."
         ),
         review_date=date(2026, 6, 30),
         created_by=auth.user_id,
@@ -628,6 +737,578 @@ def _complete_demo_run(
     )
 
 
+def _ensure_guided_demo_state(db: Session, auth: AuthContext, project: Project) -> None:
+    evidence = _demo_evidence_sources(db, auth, project.id)
+    assumptions = _demo_assumptions(db, auth, project.id)
+    experiment = _demo_experiment(db, auth, project.id)
+    mission = _demo_mission(db, auth, project.id)
+    _ensure_demo_intake(db, auth, project)
+    _ensure_demo_thesis_canvas(db, auth, project, assumptions)
+    _ensure_demo_wedges(db, auth, project, evidence)
+    if mission is not None and experiment is not None:
+        _ensure_demo_interpretation(db, auth, mission, experiment)
+    _ensure_demo_decision_record(db, auth, project.id, assumptions, experiment)
+    _reset_demo_nudges(db, auth, project.id)
+    db.commit()
+
+
+def _ensure_demo_intake(db: Session, auth: AuthContext, project: Project) -> None:
+    existing = db.scalar(
+        select(ProjectIntake).where(
+            ProjectIntake.workspace_id == auth.workspace_id,
+            ProjectIntake.project_id == project.id,
+        )
+    )
+    if existing is not None:
+        if not existing.raw_idea:
+            existing.raw_idea = DEMO_RAW_IDEA
+        return
+    db.add(
+        ProjectIntake(
+            workspace_id=auth.workspace_id,
+            project_id=project.id,
+            project_name=DEMO_PROJECT_NAME,
+            one_sentence_summary=(
+                "Independent online fitness coaches need a cited check-in triage assistant "
+                "that helps them decide who needs attention before weekly client reviews."
+            ),
+            target_users=["Independent online fitness coaches"],
+            buyer_type="prosumer",
+            problem_hypotheses=[
+                "Weekly check-ins are scattered across forms, DMs, workout logs, and wearable notes.",
+                "Coaches need inspectable recommendations that keep them in control.",
+            ],
+            proposed_solution=(
+                "A coach-controlled assistant that summarizes check-ins, flags at-risk "
+                "clients, drafts communication, and cites the source signals behind each suggestion."
+            ),
+            market_category="Fitness coaching workflow software",
+            business_model_guess="Subscription or paid pilot",
+            suspected_competitors=["Trainerize", "TrueCoach", "Everfit", "Google Sheets plus ChatGPT"],
+            key_uncertainties=[
+                "Will coaches trust cited AI recommendations enough to use them with clients?",
+                "Will independent coaches pay for check-in synthesis?",
+            ],
+            clarifying_questions=[
+                "Which coaching niche has the strongest weekly check-in pain?",
+                "What proof would justify building the first version?",
+            ],
+            user_answers=[],
+            raw_idea=DEMO_RAW_IDEA,
+            created_by=auth.user_id,
+        )
+    )
+
+
+def _ensure_demo_thesis_canvas(
+    db: Session,
+    auth: AuthContext,
+    project: Project,
+    assumptions: list[Assumption],
+) -> None:
+    canvas = db.scalar(
+        select(ThesisCanvas).where(
+            ThesisCanvas.workspace_id == auth.workspace_id,
+            ThesisCanvas.project_id == project.id,
+        )
+    )
+    thesis_text = (
+        "Independent online fitness coaches need a cited check-in triage assistant that "
+        "flags at-risk clients, explains why, and drafts coach-controlled follow-up before "
+        "weekly reviews."
+    )
+    if canvas is None:
+        canvas = ThesisCanvas(
+            workspace_id=auth.workspace_id,
+            project_id=project.id,
+            original_idea=DEMO_RAW_IDEA,
+            current_thesis=thesis_text,
+            target_user="Independent online fitness coaches",
+            problem=(
+                "Coaches lose weekly time translating scattered check-ins, messages, workout "
+                "adherence, and wearable notes into client-specific decisions."
+            ),
+            current_workaround=(
+                "Manual review across Typeform or Google Forms, Instagram DMs, SMS, spreadsheets, "
+                "Trainerize or TrueCoach, and generic ChatGPT drafts."
+            ),
+            proposed_solution=(
+                "A triage workspace that summarizes each weekly check-in, cites source signals, "
+                "flags clients needing attention, and drafts editable follow-up messages."
+            ),
+            wedge="Cited weekly check-in triage",
+            biggest_unknown=(
+                assumptions[0].text
+                if assumptions
+                else "Will coaches trust and pay for cited AI recommendations?"
+            ),
+            proof_needed=(
+                "At least three of five target coaches would use an edited cited recommendation "
+                "draft and at least two show paid-pilot or pricing intent."
+            ),
+            rejected_directions=[
+                "Generic workout plan generator",
+                "Broad all-in-one coaching platform",
+                "Fully automated programming engine",
+            ],
+            open_questions=[
+                "Which coaching niche has the strongest willingness-to-pay signal?",
+                "How much evidence does a coach need before trusting a recommendation?",
+                "What integrations matter after the manual triage workflow is proven?",
+            ],
+            created_by=auth.user_id,
+        )
+        db.add(canvas)
+        db.flush()
+    else:
+        canvas.original_idea = DEMO_RAW_IDEA
+        canvas.current_thesis = thesis_text
+        canvas.target_user = "Independent online fitness coaches"
+        canvas.problem = (
+            "Coaches lose weekly time translating scattered check-ins, messages, workout "
+            "adherence, and wearable notes into client-specific decisions."
+        )
+        canvas.current_workaround = (
+            "Manual review across Typeform or Google Forms, Instagram DMs, SMS, spreadsheets, "
+            "Trainerize or TrueCoach, and generic ChatGPT drafts."
+        )
+        canvas.proposed_solution = (
+            "A triage workspace that summarizes each weekly check-in, cites source signals, "
+            "flags clients needing attention, and drafts editable follow-up messages."
+        )
+        canvas.wedge = "Cited weekly check-in triage"
+        canvas.biggest_unknown = (
+            assumptions[0].text
+            if assumptions
+            else "Will coaches trust and pay for cited AI recommendations?"
+        )
+        canvas.proof_needed = (
+            "At least three of five target coaches would use an edited cited recommendation "
+            "draft and at least two show paid-pilot or pricing intent."
+        )
+        canvas.rejected_directions = [
+            "Generic workout plan generator",
+            "Broad all-in-one coaching platform",
+            "Fully automated programming engine",
+        ]
+        canvas.open_questions = [
+            "Which coaching niche has the strongest willingness-to-pay signal?",
+            "How much evidence does a coach need before trusting a recommendation?",
+            "What integrations matter after the manual triage workflow is proven?",
+        ]
+    _ensure_demo_event(
+        db,
+        auth,
+        project,
+        event_type="original_idea",
+        title="Original idea captured",
+        change_summary=DEMO_RAW_IDEA,
+        reason="The demo starts with a messy founder-style idea instead of a polished specification.",
+        source_entity_type="project",
+        source_entity_id=project.id,
+        origin="system",
+    )
+    _ensure_demo_event(
+        db,
+        auth,
+        project,
+        event_type="structured_thesis",
+        title="Thesis Canvas generated",
+        change_summary=thesis_text,
+        reason=(
+            "Thesys shaped the rough idea into a testable thesis with a target user, "
+            "problem, workaround, wedge, and proof needed."
+        ),
+        source_entity_type="thesis_canvas",
+        source_entity_id=canvas.id,
+        origin="agent",
+    )
+    _ensure_demo_event(
+        db,
+        auth,
+        project,
+        event_type="wedge_change",
+        title="Narrow wedge selected",
+        change_summary="Selected cited weekly check-in triage over broader coaching automation.",
+        reason=(
+            "The broad assistant concept was too hard to validate. A cited triage workflow "
+            "is narrower, easier to test, and more differentiated from program-delivery tools."
+        ),
+        source_entity_type="thesis_canvas",
+        source_entity_id=canvas.id,
+        origin="agent",
+    )
+
+
+def _ensure_demo_wedges(
+    db: Session,
+    auth: AuthContext,
+    project: Project,
+    evidence: list[EvidenceSource],
+) -> None:
+    source_ids = [str(source.id) for source in evidence[:3]]
+    specs = [
+        {
+            "name": "Cited weekly check-in triage",
+            "description": (
+                "Summarize weekly check-ins, flag at-risk clients, and draft coach-reviewed "
+                "follow-up with citations to the source signals."
+            ),
+            "target_user": "Independent online fitness coaches",
+            "problem_focus": "Weekly check-in review and at-risk client triage",
+            "why_it_might_work": (
+                "It maps directly to the repeated workflow pain in the seeded interviews and "
+                "does not require replacing the full coaching platform."
+            ),
+            "main_risk": "Coaches may trust the summary but still resist paying for the workflow.",
+            "competitor_pressure": "medium",
+            "evidence_strength": "partial",
+            "validation_test": (
+                "Show five coaches a cited check-in recommendation mock and ask whether they "
+                "would use it, edit it, and pay for a pilot."
+            ),
+            "recommendation": "recommended",
+        },
+        {
+            "name": "Client communication draft assistant",
+            "description": (
+                "Focus only on drafting messages from coach notes and client check-ins."
+            ),
+            "target_user": "Solo online coaches with high message volume",
+            "problem_focus": "Time spent writing recurring client follow-up",
+            "why_it_might_work": "The value is easy to understand and quick to prototype.",
+            "main_risk": "Generic AI tools may already be good enough for draft messaging.",
+            "competitor_pressure": "medium",
+            "evidence_strength": "weak",
+            "validation_test": "Run a side-by-side draft review against the coach's current ChatGPT workflow.",
+            "recommendation": "promising",
+        },
+        {
+            "name": "Wearable-driven program adjustment",
+            "description": (
+                "Use wearable and workout data to suggest training changes."
+            ),
+            "target_user": "Data-heavy online fitness coaches",
+            "problem_focus": "Adapting training from sleep, HRV, soreness, and adherence signals",
+            "why_it_might_work": "It could become differentiated if data access and trust are solved.",
+            "main_risk": "Integrations and liability concerns can expand scope before demand is proven.",
+            "competitor_pressure": "high",
+            "evidence_strength": "weak",
+            "validation_test": "Interview coaches about which wearable signals actually change programming.",
+            "recommendation": "research_later",
+        },
+        {
+            "name": "Broad all-in-one AI coaching platform",
+            "description": (
+                "Replace programming, check-ins, messaging, analytics, and client management in one product."
+            ),
+            "target_user": "All fitness coaches",
+            "problem_focus": "General coaching operations",
+            "why_it_might_work": "The broad idea is appealing if users want one product for everything.",
+            "main_risk": "Too broad to validate and directly collides with established coaching platforms.",
+            "competitor_pressure": "high",
+            "evidence_strength": "weak",
+            "validation_test": "Only revisit after the narrow triage wedge produces strong paid intent.",
+            "recommendation": "avoid_for_now",
+        },
+    ]
+    existing = {
+        wedge.name.casefold(): wedge
+        for wedge in db.scalars(
+            select(WedgeOption).where(
+                WedgeOption.workspace_id == auth.workspace_id,
+                WedgeOption.project_id == project.id,
+            )
+        )
+    }
+    for spec in specs:
+        wedge = existing.get(spec["name"].casefold())
+        if wedge is None:
+            db.add(
+                WedgeOption(
+                    workspace_id=auth.workspace_id,
+                    project_id=project.id,
+                    created_by=auth.user_id,
+                    source_ids=source_ids,
+                    **spec,
+                )
+            )
+            continue
+        for key, value in spec.items():
+            setattr(wedge, key, value)
+        wedge.source_ids = source_ids
+
+
+def _ensure_demo_interpretation(
+    db: Session,
+    auth: AuthContext,
+    mission: ValidationMission,
+    experiment: Experiment,
+) -> None:
+    mission.status = "interpreted"
+    existing = db.scalar(
+        select(ValidationResultInterpretation).where(
+            ValidationResultInterpretation.workspace_id == auth.workspace_id,
+            ValidationResultInterpretation.project_id == mission.project_id,
+            ValidationResultInterpretation.mission_id == mission.id,
+        )
+    )
+    raw_notes = (
+        "Five coach conversations: four described weekly check-in review as painful. "
+        "Three wanted cited rationale before using recommendations with clients. Two said "
+        "they would consider a paid pilot around $49-$99/month if it saved two hours weekly. "
+        "One coach rejected fully automated programming changes and wanted tone control."
+    )
+    values = {
+        "experiment_id": experiment.id,
+        "assumption_id": mission.assumption_id,
+        "ai_run_id": None,
+        "approval_request_id": None,
+        "raw_notes": raw_notes,
+        "signal_summary": (
+            "Mixed but useful: pain and trust improved, but willingness to pay still needs "
+            "a paid-pilot test before building a full product."
+        ),
+        "what_strengthened": [
+            "Coaches confirmed that weekly check-in review is recurring and time-consuming.",
+            "Citations and visible rationale increased trust in recommendation drafts.",
+            "The narrow triage workflow was easier for coaches to understand than a broad AI assistant.",
+        ],
+        "what_weakened": [
+            "Only two coaches gave clear paid-pilot or pricing interest.",
+            "Fully automated program changes triggered trust and control objections.",
+        ],
+        "pain_severity": "high",
+        "current_workaround": (
+            "Coaches manually review forms, DMs, spreadsheets, coaching platforms, and generic AI drafts."
+        ),
+        "urgency": "high",
+        "willingness_to_pay": "medium",
+        "switching_signal": "weak",
+        "objections": [
+            "Coaches want final control over tone and programming decisions.",
+            "Pricing is only credible if the assistant saves meaningful weekly review time.",
+        ],
+        "quotes": [
+            "I would use this if I can see exactly why it recommends that message.",
+            "Do not change programming for me, but flag who needs attention and draft what I should say.",
+        ],
+        "confidence_change": "increase",
+        "confidence_rationale": (
+            "Pain and trust signals improved, but switching and paid-pilot proof remain incomplete."
+        ),
+        "recommended_next_action": (
+            "Run a pricing-specific paid-pilot test with coaches who manage at least 25 online clients."
+        ),
+        "decision_recommendation": "continue_research",
+        "proposed_confidence_delta": Decimal("0.08"),
+        "proposed_assumption_status": "inconclusive",
+        "proposed_updates": {
+            "recommended_decision": "continue_research",
+            "next_test": "paid_pilot_or_pricing_test",
+            "wedge": "cited_weekly_check_in_triage",
+        },
+        "created_by": auth.user_id,
+    }
+    if existing is None:
+        db.add(
+            ValidationResultInterpretation(
+                workspace_id=auth.workspace_id,
+                project_id=mission.project_id,
+                mission_id=mission.id,
+                **values,
+            )
+        )
+    else:
+        for key, value in values.items():
+            setattr(existing, key, value)
+
+    project = project_service.get_project(db, auth, mission.project_id)
+    _ensure_demo_event(
+        db,
+        auth,
+        project,
+        event_type="validation_blocker",
+        title="Validation result interpreted",
+        change_summary=values["signal_summary"],
+        reason=(
+            "Thesys interpreted raw validation notes and converted them into confidence, "
+            "missing proof, and a decision recommendation."
+        ),
+        source_entity_type="validation_mission",
+        source_entity_id=mission.id,
+        origin="agent",
+    )
+
+
+def _ensure_demo_decision_record(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    assumptions: list[Assumption],
+    experiment: Experiment | None,
+) -> None:
+    decision = db.scalar(
+        select(Decision)
+        .where(Decision.workspace_id == auth.workspace_id, Decision.project_id == project_id)
+        .order_by(Decision.created_at.desc())
+        .limit(1)
+    )
+    if decision is None:
+        decision = Decision(
+            workspace_id=auth.workspace_id,
+            project_id=project_id,
+            created_by=auth.user_id,
+        )
+        db.add(decision)
+        db.flush()
+    decision.decision_type = "run_experiment"
+    decision.title = "Continue research before building the full assistant"
+    decision.rationale = (
+        "The cited check-in triage wedge has real pain and trust signal, but willingness "
+        "to pay and switching proof remain incomplete. Run a paid-pilot or pricing-specific "
+        "test before committing to a full product build."
+    )
+    decision.expected_outcome = (
+        "The next test should produce a clearer proceed/pivot decision by measuring paid "
+        "intent from coaches with enough active online clients."
+    )
+    decision.review_date = date(2026, 6, 30)
+    existing_links = {
+        (link.linked_type, str(link.linked_id))
+        for link in db.scalars(select(DecisionLink).where(DecisionLink.decision_id == decision.id))
+    }
+    link_targets: list[tuple[str, uuid.UUID]] = []
+    if assumptions:
+        link_targets.append(("assumption", assumptions[0].id))
+    if experiment is not None:
+        link_targets.append(("experiment", experiment.id))
+    for linked_type, linked_id in link_targets:
+        key = (linked_type, str(linked_id))
+        if key not in existing_links:
+            db.add(DecisionLink(decision_id=decision.id, linked_type=linked_type, linked_id=linked_id))
+    project = project_service.get_project(db, auth, project_id)
+    _ensure_demo_event(
+        db,
+        auth,
+        project,
+        event_type="decision",
+        title="Decision Coach recommended continuing research",
+        change_summary=decision.title,
+        reason=decision.rationale or "The Decision Coach produced a demo-ready recommendation.",
+        source_entity_type="decision",
+        source_entity_id=decision.id,
+        origin="agent",
+    )
+
+
+def _ensure_demo_event(
+    db: Session,
+    auth: AuthContext,
+    project: Project,
+    *,
+    event_type: str,
+    title: str,
+    change_summary: str,
+    reason: str,
+    source_entity_type: str | None,
+    source_entity_id: uuid.UUID | None,
+    origin: str,
+) -> None:
+    existing = db.scalar(
+        select(ThesisEvolutionEvent).where(
+            ThesisEvolutionEvent.workspace_id == auth.workspace_id,
+            ThesisEvolutionEvent.project_id == project.id,
+            ThesisEvolutionEvent.title == title,
+        )
+    )
+    if existing is None:
+        db.add(
+            ThesisEvolutionEvent(
+                workspace_id=auth.workspace_id,
+                project_id=project.id,
+                event_type=event_type,
+                title=title,
+                change_summary=change_summary,
+                reason=reason,
+                source_entity_type=source_entity_type,
+                source_entity_id=source_entity_id,
+                origin=origin,
+                created_by=auth.user_id if origin == "user" else None,
+            )
+        )
+        return
+    existing.event_type = event_type
+    existing.change_summary = change_summary
+    existing.reason = reason
+    existing.source_entity_type = source_entity_type
+    existing.source_entity_id = source_entity_id
+    existing.origin = origin
+
+
+def _reset_demo_nudges(db: Session, auth: AuthContext, project_id: uuid.UUID) -> None:
+    for nudge in db.scalars(
+        select(ProjectNudge).where(
+            ProjectNudge.workspace_id == auth.workspace_id,
+            ProjectNudge.project_id == project_id,
+        )
+    ):
+        nudge.dismissed = False
+
+
+def _demo_evidence_sources(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> list[EvidenceSource]:
+    return list(
+        db.scalars(
+            select(EvidenceSource)
+            .where(
+                EvidenceSource.workspace_id == auth.workspace_id,
+                EvidenceSource.project_id == project_id,
+            )
+            .order_by(EvidenceSource.created_at)
+        )
+    )
+
+
+def _demo_assumptions(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> list[Assumption]:
+    return list(
+        db.scalars(
+            select(Assumption)
+            .where(Assumption.workspace_id == auth.workspace_id, Assumption.project_id == project_id)
+            .order_by(Assumption.kill_risk.desc(), Assumption.created_at)
+        )
+    )
+
+
+def _demo_experiment(db: Session, auth: AuthContext, project_id: uuid.UUID) -> Experiment | None:
+    return db.scalar(
+        select(Experiment)
+        .where(Experiment.workspace_id == auth.workspace_id, Experiment.project_id == project_id)
+        .order_by(Experiment.created_at.desc())
+        .limit(1)
+    )
+
+
+def _demo_mission(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> ValidationMission | None:
+    return db.scalar(
+        select(ValidationMission)
+        .where(ValidationMission.workspace_id == auth.workspace_id, ValidationMission.project_id == project_id)
+        .order_by(ValidationMission.created_at.desc())
+        .limit(1)
+    )
+
+
 def _read_result(
     db: Session, auth: AuthContext, project: Project, *, created: bool
 ) -> DemoSeedRead:
@@ -643,9 +1324,11 @@ def _read_result(
         ),
         created=created,
         counts=counts,
-        next_url=f"/projects/{project.id}",
+        next_url=f"/projects/{project.id}#current-step",
         message=(
-            "Created demo project." if created else "Demo project already exists; returned it."
+            "Created guided demo project."
+            if created
+            else "Guided demo project already exists; refreshed it."
         ),
     )
 
@@ -653,6 +1336,11 @@ def _read_result(
 def _counts(db: Session, auth: AuthContext, project_id: uuid.UUID) -> DemoSeedCounts:
     filters = {"workspace_id": auth.workspace_id, "project_id": project_id}
     return DemoSeedCounts(
+        thesis_canvas=_model_count(db, ThesisCanvas, filters),
+        thesis_evolution_events=_model_count(db, ThesisEvolutionEvent, filters),
+        wedge_options=_model_count(db, WedgeOption, filters),
+        validation_missions=_model_count(db, ValidationMission, filters),
+        validation_interpretations=_model_count(db, ValidationResultInterpretation, filters),
         evidence_sources=_model_count(db, EvidenceSource, filters),
         artifacts=_model_count(db, Artifact, filters),
         competitors=_model_count(db, Competitor, filters),

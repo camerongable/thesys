@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ChevronDown, Link2, Plus, ScrollText, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, Link2, MessageSquare, Plus, ScrollText, Send, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -13,15 +13,22 @@ import {
 import { DomainError, DomainHeader, DomainPanel } from "@/features/projects/decision-room";
 import {
   Assumption,
+  askDecisionCoach,
   createDecision,
+  DecisionCoachAction,
+  DecisionCoachChatResponse,
+  DecisionCoachRecommendation,
+  DecisionRecommendation,
   DecisionType,
   Experiment,
+  getDecisionRecommendation,
   getProjectOverview,
   listArtifacts,
   listAssumptions,
   listDecisions,
   listEvidenceSources,
   listExperiments,
+  SuggestedDecisionRecord,
 } from "@/lib/api";
 import { MarkdownContent } from "@/features/projects/markdown-content";
 
@@ -53,13 +60,20 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
   const [linkedEvidence, setLinkedEvidence] = useState<string[]>([]);
   const [linkedArtifacts, setLinkedArtifacts] = useState<string[]>([]);
   const [linkedExperiments, setLinkedExperiments] = useState<string[]>([]);
+  const [linkedRisks, setLinkedRisks] = useState<string[]>([]);
   const [recordStepActive, setRecordStepActive] = useState(false);
   const [overrideWithoutValidation, setOverrideWithoutValidation] = useState(false);
   const [overrideReason, setOverrideReason] = useState("");
+  const [coachQuestion, setCoachQuestion] = useState("");
+  const [coachAnswer, setCoachAnswer] = useState<DecisionCoachChatResponse | null>(null);
 
   const decisionsQuery = useQuery({
     queryKey: ["projects", projectId, "decisions"],
     queryFn: () => listDecisions(projectId),
+  });
+  const decisionCoachQuery = useQuery({
+    queryKey: ["projects", projectId, "decisions", "recommendation"],
+    queryFn: () => getDecisionRecommendation(projectId),
   });
   const assumptionsQuery = useQuery({
     queryKey: ["projects", projectId, "assumptions"],
@@ -81,6 +95,12 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
     queryKey: ["projects", projectId, "overview", "decision-recommendation"],
     queryFn: () => getProjectOverview(projectId),
   });
+  const coachMutation = useMutation({
+    mutationFn: (message: string) => askDecisionCoach(projectId, message),
+    onSuccess: (response) => {
+      setCoachAnswer(response);
+    },
+  });
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -93,6 +113,7 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
         expected_outcome: emptyToUndefined(expectedOutcome),
         review_date: emptyToUndefined(reviewDate),
         linked_assumption_ids: linkedAssumptions,
+        linked_risk_ids: linkedRisks,
         linked_evidence_source_ids: linkedEvidence,
         linked_artifact_ids: linkedArtifacts,
         linked_experiment_ids: linkedExperiments,
@@ -101,6 +122,9 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
       resetDecisionDraft();
       setRecordStepActive(false);
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "decisions"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["projects", projectId, "decisions", "recommendation"],
+      });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] });
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "evals", "mvp"] });
     },
@@ -117,12 +141,15 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
     0,
   );
   const decisionGradeReady = evidence.length > 0 && assumptions.length > 0 && hasLoggedResults;
-  const suggestedDecision = buildDecisionSuggestion({
-    assumptions,
-    evidenceCount: evidence.length,
-    experiments,
-    overview: overviewQuery.data,
-  });
+  const suggestedDecision =
+    decisionCoachQuery.data
+      ? mapDecisionCoachRecommendation(decisionCoachQuery.data)
+      : buildDecisionSuggestion({
+          assumptions,
+          evidenceCount: evidence.length,
+          experiments,
+          overview: overviewQuery.data,
+        });
   const alternateOutcomes: {
     disabled?: boolean;
     label: string;
@@ -142,15 +169,18 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
   ];
   const error =
     decisionsQuery.error ??
+    decisionCoachQuery.error ??
     assumptionsQuery.error ??
     evidenceQuery.error ??
     artifactsQuery.error ??
     experimentsQuery.error ??
     overviewQuery.error ??
+    coachMutation.error ??
     createMutation.error ??
     null;
   const draftLinkCount =
     linkedAssumptions.length +
+    linkedRisks.length +
     linkedEvidence.length +
     linkedArtifacts.length +
     linkedExperiments.length;
@@ -178,6 +208,7 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
     setExpectedOutcome("");
     setReviewDate("");
     setLinkedAssumptions([]);
+    setLinkedRisks([]);
     setLinkedEvidence([]);
     setLinkedArtifacts([]);
     setLinkedExperiments([]);
@@ -190,7 +221,28 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
     setRecordStepActive(false);
   }
 
-  function applyDecisionSuggestion(type: DecisionType, label: string) {
+  function applyDecisionRecord(record: SuggestedDecisionRecord) {
+    setDecisionType(record.decision_type);
+    setTitle(record.title);
+    setRationale(record.rationale);
+    setExpectedOutcome(record.expected_outcome);
+    setLinkedAssumptions(record.linked_assumption_ids);
+    setLinkedRisks(record.linked_risk_ids);
+    setLinkedEvidence(record.linked_evidence_source_ids);
+    setLinkedArtifacts(record.linked_artifact_ids);
+    setLinkedExperiments(record.linked_experiment_ids);
+    openDecisionForm();
+  }
+
+  function applyDecisionSuggestion(
+    type: DecisionType,
+    label: string,
+    record?: SuggestedDecisionRecord,
+  ) {
+    if (record && record.decision_type === type) {
+      applyDecisionRecord(record);
+      return;
+    }
     const suggestion = buildDecisionSuggestion({
       assumptions,
       decisionType: type,
@@ -204,10 +256,37 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
     setRationale(suggestion.rationale);
     setExpectedOutcome(suggestion.expectedOutcome);
     setLinkedAssumptions(suggestion.linkedAssumptionId ? [suggestion.linkedAssumptionId] : []);
+    setLinkedRisks([]);
     setLinkedEvidence([]);
     setLinkedArtifacts([]);
     setLinkedExperiments(suggestion.linkedExperimentIds);
     openDecisionForm();
+  }
+
+  function askCoach(message: string) {
+    const trimmed = message.trim();
+    if (!trimmed) {
+      return;
+    }
+    setCoachQuestion("");
+    coachMutation.mutate(trimmed);
+  }
+
+  function handleCoachAction(action: DecisionCoachAction) {
+    if (action.id === "prepare_recommended_record") {
+      if (suggestedDecision.suggestedRecord) {
+        applyDecisionRecord(suggestedDecision.suggestedRecord);
+      }
+      return;
+    }
+    const hash = action.target_route?.split("#")[1];
+    if (hash === "validation-mission" && onOpenValidation) {
+      onOpenValidation();
+      return;
+    }
+    if (hash) {
+      window.location.hash = hash;
+    }
   }
 
   return (
@@ -241,10 +320,13 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
           <div className="max-w-[72ch]">
             <div className="flex items-center gap-2">
               <ScrollText className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h3 className="text-base font-semibold">Decision ritual</h3>
+              <h3 className="text-base font-semibold">Decision Coach</h3>
             </div>
+            <p className="mt-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+              Recommended decision
+            </p>
             <p className="mt-3 text-lg font-semibold leading-7 text-foreground">
-              {suggestedDecision.title}
+              {decisionRecommendationLabel(suggestedDecision.recommendation)}
             </p>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               {suggestedDecision.rationale}
@@ -260,7 +342,11 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
               <Button
                 className="w-full"
                 onClick={() =>
-                  applyDecisionSuggestion(suggestedDecision.type, suggestedDecision.actionLabel)
+                  applyDecisionSuggestion(
+                    suggestedDecision.type,
+                    suggestedDecision.actionLabel,
+                    suggestedDecision.suggestedRecord,
+                  )
                 }
                 type="button"
               >
@@ -272,7 +358,11 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
               <Button
                 className="mt-2 w-full"
                 onClick={() =>
-                  applyDecisionSuggestion(suggestedDecision.type, suggestedDecision.actionLabel)
+                  applyDecisionSuggestion(
+                    suggestedDecision.type,
+                    suggestedDecision.actionLabel,
+                    suggestedDecision.suggestedRecord,
+                  )
                 }
                 type="button"
                 variant="secondary"
@@ -295,7 +385,7 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground" aria-hidden="true" />
               <div className="min-w-0 max-w-[72ch]">
                 <h4 className="text-sm font-semibold text-warning-foreground">
-                  Evidence warning
+                  Do not proceed until
                 </h4>
                 <ul className="mt-2 space-y-1 text-sm leading-6 text-warning-foreground">
                   {suggestedDecision.missingEvidence.map((item) => (
@@ -307,9 +397,105 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
           </div>
         ) : (
           <p className="mt-5 border-t border-border pt-3 text-sm leading-6 text-muted-foreground">
-            No major missing evidence is flagged. Review the rationale before recording the decision.
+            No major missing proof is flagged. Keep the decision narrow and tied to the
+            validation signal that supports it.
           </p>
         )}
+
+        {suggestedDecision.supportingEvidence.length > 0 || suggestedDecision.risks.length > 0 ? (
+          <div className="mt-5 grid gap-4 border-t border-border pt-4 md:grid-cols-2">
+            {suggestedDecision.supportingEvidence.length > 0 ? (
+              <div>
+                <h4 className="text-sm font-semibold">Supporting evidence</h4>
+                <ul className="mt-2 space-y-1 text-sm leading-6 text-muted-foreground">
+                  {suggestedDecision.supportingEvidence.slice(0, 4).map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {suggestedDecision.risks.length > 0 ? (
+              <div>
+                <h4 className="text-sm font-semibold">Risks</h4>
+                <ul className="mt-2 space-y-1 text-sm leading-6 text-muted-foreground">
+                  {suggestedDecision.risks.slice(0, 4).map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="mt-5 rounded-md border border-border bg-surface p-4">
+          <div className="flex items-start gap-2">
+            <MessageSquare className="mt-0.5 h-4 w-4 text-primary" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <h4 className="text-sm font-semibold">Ask Decision Coach</h4>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Ask why this decision is recommended, what proof is missing, or what
+                would change the decision.
+              </p>
+              <form
+                className="mt-3 flex flex-col gap-2 sm:flex-row"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  askCoach(coachQuestion);
+                }}
+              >
+                <input
+                  className="min-h-11 flex-1 rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-focus"
+                  onChange={(event) => setCoachQuestion(event.target.value)}
+                  placeholder="Why not proceed? What evidence is missing?"
+                  value={coachQuestion}
+                />
+                <Button disabled={coachMutation.isPending || !coachQuestion.trim()} type="submit">
+                  <Send className="h-4 w-4" aria-hidden="true" />
+                  Ask
+                </Button>
+              </form>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[
+                  "Why not proceed?",
+                  "What evidence is missing?",
+                  "What would make this a pivot?",
+                  "Summarize the decision for my notes.",
+                ].map((question) => (
+                  <Button
+                    key={question}
+                    onClick={() => askCoach(question)}
+                    type="button"
+                    variant="secondary"
+                  >
+                    {question}
+                  </Button>
+                ))}
+              </div>
+              {coachMutation.isPending ? (
+                <p className="mt-3 text-sm text-muted-foreground">Thinking through the decision...</p>
+              ) : null}
+              {coachAnswer ? (
+                <div className="mt-4 rounded-md border border-border bg-card p-3">
+                  <p className="text-sm leading-6 text-muted-foreground">{coachAnswer.answer}</p>
+                  {coachAnswer.action_cards.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {coachAnswer.action_cards.map((action) => (
+                        <Button
+                          key={action.id}
+                          onClick={() => handleCoachAction(action)}
+                          type="button"
+                          variant="secondary"
+                        >
+                          {action.label}
+                        </Button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
 
         {!validationGuardActive ? (
           <details className="mt-4 border-t border-border pt-3">
@@ -685,10 +871,34 @@ type DecisionSuggestion = {
   linkedAssumptionId: string | null;
   linkedExperimentIds: string[];
   missingEvidence: string[];
+  recommendation: DecisionRecommendation;
   rationale: string;
+  risks: string[];
+  suggestedRecord?: SuggestedDecisionRecord;
+  supportingEvidence: string[];
   title: string;
   type: DecisionType;
 };
+
+function mapDecisionCoachRecommendation(
+  recommendation: DecisionCoachRecommendation,
+): DecisionSuggestion {
+  const record = recommendation.suggested_decision_record;
+  return {
+    actionLabel: decisionLabel(record.decision_type),
+    expectedOutcome: record.expected_outcome,
+    linkedAssumptionId: record.linked_assumption_ids[0] ?? null,
+    linkedExperimentIds: record.linked_experiment_ids,
+    missingEvidence: recommendation.missing_evidence,
+    recommendation: recommendation.recommendation,
+    rationale: recommendation.rationale,
+    risks: recommendation.risks,
+    suggestedRecord: record,
+    supportingEvidence: recommendation.supporting_evidence,
+    title: record.title,
+    type: record.decision_type,
+  };
+}
 
 function buildDecisionSuggestion({
   assumptions,
@@ -741,9 +951,12 @@ function buildDecisionSuggestion({
       linkedAssumptionId: riskiestAssumption?.id ?? null,
       linkedExperimentIds: experiments.slice(0, 1).map((experiment) => experiment.id),
       missingEvidence,
+      recommendation: "proceed",
       rationale: hasLoggedResults
         ? `Proceed only with a narrow scope. Current recommendation: ${currentRecommendation}`
         : `Proceed is premature. ${currentRationale} Log validation evidence before committing build effort.`,
+      risks: riskiestAssumption ? [decisionBlockerText(riskiestAssumption)] : [],
+      supportingEvidence: [],
       title: hasLoggedResults ? "Proceed with narrow scope" : "Proceed with validation warning",
       type,
     };
@@ -757,7 +970,10 @@ function buildDecisionSuggestion({
       linkedAssumptionId: riskiestAssumption?.id ?? null,
       linkedExperimentIds: experiments.slice(0, 1).map((experiment) => experiment.id),
       missingEvidence,
+      recommendation: "pivot",
       rationale: `A pivot is justified only if the current decision blocker is weak or invalidated. Current recommendation: ${currentRecommendation}`,
+      risks: riskiestAssumption ? [decisionBlockerText(riskiestAssumption)] : [],
+      supportingEvidence: [],
       title: "Pivot based on validation signal",
       type,
     };
@@ -773,7 +989,10 @@ function buildDecisionSuggestion({
       linkedAssumptionId: riskiestAssumption?.id ?? null,
       linkedExperimentIds: experiments.slice(0, 1).map((experiment) => experiment.id),
       missingEvidence,
+      recommendation: type === "kill" ? "kill" : "pause",
       rationale: `Use this only when the missing evidence is material enough to stop momentum. Current recommendation: ${currentRecommendation}`,
+      risks: riskiestAssumption ? [decisionBlockerText(riskiestAssumption)] : [],
+      supportingEvidence: [],
       title: type === "kill" ? "Kill the idea" : "Pause until evidence improves",
       type,
     };
@@ -789,7 +1008,10 @@ function buildDecisionSuggestion({
       .slice(0, 1)
       .map((experiment) => experiment.id),
     missingEvidence,
+    recommendation: "continue_research",
     rationale: `${currentRationale} The next decision should wait until the validation loop has real evidence.`,
+    risks: riskiestAssumption ? [decisionBlockerText(riskiestAssumption)] : [],
+    supportingEvidence: [],
     title: explicitRecommendedDecision
       ? sentenceCase(explicitRecommendedDecision)
       : hasLoggedResults
@@ -855,6 +1077,17 @@ function decisionLabel(value: DecisionType) {
     change_positioning: "Change positioning",
     run_experiment: "Continue research",
     other: "Other",
+  };
+  return labels[value] ?? formatLabel(value);
+}
+
+function decisionRecommendationLabel(value: DecisionRecommendation) {
+  const labels: Record<DecisionRecommendation, string> = {
+    proceed: "Proceed",
+    pivot: "Pivot",
+    pause: "Pause",
+    kill: "Kill",
+    continue_research: "Continue research",
   };
   return labels[value] ?? formatLabel(value);
 }

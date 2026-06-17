@@ -18,6 +18,7 @@ from app.routers.evidence import router as evidence_router
 from app.routers.experiments import router as experiments_router
 from app.routers.governance import router as governance_router
 from app.routers.health import router as health_router
+from app.routers.intake import investigation_router
 from app.routers.intake import router as intake_router
 from app.routers.me import router as me_router
 from app.routers.projects import router as projects_router
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
     app.include_router(projects_router)
     app.include_router(governance_router)
     app.include_router(research_sprints_router)
+    app.include_router(investigation_router)
     app.include_router(intake_router)
     app.include_router(evidence_router)
     app.include_router(artifacts_router)
