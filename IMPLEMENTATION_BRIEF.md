@@ -10135,3 +10135,896 @@ The user experience should make this obvious:
 The product should be able to support this statement:
 
 > Thesys is not an AI idea generator. It is a stateful validation copilot that turns a rough idea into a sharper thesis, a focused wedge, a validation mission, and a decision trail.
+
+# V1 Sprint 29–32: Guided Experience Polish and Usability Consolidation
+
+## Purpose
+
+Thesys now has impressive functionality:
+
+- messy idea intake
+- thesis shaping
+- evidence review
+- competitor mapping
+- Wedge Explorer
+- decision blockers
+- validation missions
+- result interpretation
+- Decision Coach
+- project history
+- persistent Guide panel
+- structured project memory
+- evidence-backed recommendations
+
+However, the app still feels overwhelming because too many product concepts are visible at once.
+
+The problem is not lack of functionality. The problem is that the UI exposes too many internal surfaces before the user understands the simple journey.
+
+The user should not feel like they are navigating a strategic operating system.
+
+The user should feel like:
+
+> I gave Thesys a rough idea, and it told me the one thing I need to prove next.
+
+This polish phase should consolidate the experience around one dominant path:
+
+```text
+Shape the idea
+→ choose a wedge
+→ find the biggest unknown
+→ run one proof
+→ interpret results
+→ decide
+```
+
+The app should preserve advanced functionality but hide it behind progressive disclosure.
+
+---
+
+# Core UX Principle
+
+Every project should answer four questions immediately:
+
+1. What is the current thesis?
+2. What is blocking the decision?
+3. What should I do next?
+4. Why does that action matter?
+
+Everything else is supporting detail.
+
+---
+
+# Non-Goals
+
+Do not add V2 features.
+
+Do not add:
+
+- recurring monitoring
+- collaboration
+- billing
+- external integrations
+- enterprise workspaces
+- multi-segment workflows
+- more advanced research workflows
+- more visible dashboards
+- more default cards
+
+This phase is about subtraction, consolidation, routing, and clarity.
+
+---
+
+# V1 Sprint 29: Guided Mode vs Inspect Mode
+
+## Goal
+
+Create a clear separation between the normal user experience and the advanced inspection experience.
+
+The default project experience should be **Guided Mode**.
+
+Advanced details should move into **Inspect Mode**.
+
+---
+
+## Problem
+
+The current app shows too many concepts at once:
+
+- Guide
+- Thesis
+- Research
+- Evidence basis
+- Competitor map
+- Evidence review
+- Opportunity brief
+- Test
+- Decision blockers
+- Current proof
+- Decision Coach
+- History
+- Strategic updates
+
+Each feature is useful, but seeing them all creates cognitive overload.
+
+---
+
+## Required Conceptual Split
+
+### Guided Mode
+
+For normal users.
+
+Show only:
+
+- current thesis
+- current wedge
+- biggest unknown
+- next proof
+- primary action
+- short explanation
+- Ask Thesys / Guide
+- minimal evidence summary
+
+### Inspect Mode
+
+For power users, debugging, portfolio demos, and evidence review.
+
+Show:
+
+- sources
+- competitor map
+- opportunity brief
+- evidence review
+- research trace
+- validation details
+- decision history
+- strategic updates
+- citations
+- raw findings
+
+---
+
+## Required UI Behavior
+
+Each project should default to a new primary screen:
+
+```text
+Current Step
+```
+
+This replaces the need for users to decide between Guide, Thesis, Research, Test, Decision, and History immediately.
+
+The Current Step page should show:
+
+```text
+Current Step:
+Run the blocker test.
+
+Current Thesis:
+Independent online fitness coaches need cited weekly check-in triage.
+
+Current Wedge:
+Cited weekly check-in triage.
+
+Biggest Unknown:
+Will coaches trust and pay for AI-generated recommendations?
+
+Next Proof:
+Show 5 coaches a cited check-in recommendation and ask whether they would use, edit, and pay for it.
+
+Primary Action:
+Log validation result.
+
+Secondary Actions:
+- Show test plan
+- Show evidence
+- Compare wedges
+- Ask Thesys
+```
+
+---
+
+## Navigation Changes
+
+Replace or simplify the current playbook navigation.
+
+Preferred navigation:
+
+```text
+Current Step
+Shape
+Research
+Wedge
+Test
+Decide
+History
+```
+
+Alternative if fewer tabs are easier:
+
+```text
+Current Step
+Thesis
+Research
+Test
+Decision
+History
+```
+
+Important: **Guide should not be a navigation item.** Guide should be available everywhere.
+
+---
+
+## Inspect Mode Entry Points
+
+On each page, add a clear but secondary link:
+
+```text
+Inspect details
+```
+
+Examples:
+
+- Inspect research details
+- Inspect evidence
+- Inspect competitors
+- Inspect history
+- Inspect opportunity brief
+- Inspect trace
+
+The default view should not show advanced panels.
+
+---
+
+## Sections to Collapse by Default
+
+Collapse or hide these by default:
+
+- Advanced evidence work
+- Opportunity brief
+- View brief trace
+- Evidence checks
+- Governance approvals
+- Evidence history
+- Project history
+- Recent strategic updates
+- Raw research traces
+- Full competitor details
+- Full risk matrix
+- Raw source records
+
+They remain accessible through Inspect Mode.
+
+---
+
+## Acceptance Criteria
+
+- A project opens to a clear Current Step page.
+- User sees one primary action immediately.
+- Advanced details are hidden by default.
+- Navigation has one dominant journey.
+- Guide is always available but not treated as a separate workspace.
+- The user can still inspect all existing data when needed.
+- A new user can understand the project state in under 15 seconds.
+
+---
+
+# V1 Sprint 30: Guide as Action Router
+
+## Goal
+
+Make the Guide the primary routing layer for the app.
+
+The Guide should not just explain. It should open the correct screen, form, or action for the user.
+
+---
+
+## Problem
+
+The current Guide panel is helpful, but it still feels like a sidebar. The user still has to figure out where to go.
+
+The Guide should behave like:
+
+```text
+You are here.
+This is the blocker.
+Do this next.
+I’ll open the right place.
+```
+
+---
+
+## New Style
+
+The Guide panel is now a collapsible panel the user has access to on each page. Instead, make it a bottom drawer opened by an action button in the bottom right corner. 
+
+---
+
+## Required Guide Behavior
+
+The Guide should always provide:
+
+1. current focus
+2. why it matters
+3. one primary recommended action
+4. one-click route to the correct UI
+5. up to three secondary helper actions
+
+---
+
+## Guide Response Format
+
+Use this structure for every Guide response:
+
+```text
+What matters now:
+[plain English current focus]
+
+Why:
+[short explanation]
+
+Do this next:
+[primary action]
+
+After that:
+[what happens once the user completes it]
+
+Actions:
+[Primary CTA]
+[Secondary CTA]
+[Secondary CTA]
+```
+
+---
+
+## Example
+
+```text
+What matters now:
+You need to log validation results.
+
+Why:
+The idea has a narrow wedge and a validation mission, but the decision is still blocked by unproven willingness to pay.
+
+Do this next:
+Run the test with 5 target users and log the results.
+
+After that:
+I’ll interpret the signal and recommend continue, pivot, pause, or proceed.
+
+Actions:
+[Log result]
+[Open test plan]
+[Draft outreach]
+[Show evidence]
+```
+
+---
+
+## Guide Action Requirements
+
+Guide actions should deep-link to:
+
+- edit thesis
+- compare wedges
+- run research
+- inspect evidence
+- open validation mission
+- log result
+- interpret result
+- prepare decision record
+- show project history
+
+Guide actions should never be vague.
+
+Bad:
+
+```text
+Review validation evidence
+```
+
+Better:
+
+```text
+Open logged validation results
+```
+
+Bad:
+
+```text
+Improve thesis
+```
+
+Better:
+
+```text
+Rewrite thesis with current wedge
+```
+
+Bad:
+
+```text
+Show evidence
+```
+
+Better:
+
+```text
+Show evidence behind the current blocker
+```
+
+---
+
+## Chat Input Behavior
+
+The Ask Thesys box should support these intents:
+
+```text
+what_should_i_do_next
+why_is_this_blocked
+open_the_right_form
+improve_the_thesis
+compare_wedges
+show_evidence_for_blocker
+draft_outreach
+interpret_notes
+summarize_decision
+what_would_change_the_decision
+```
+
+For each supported intent, return:
+
+- answer
+- recommended action
+- action card
+- linked object if relevant
+
+---
+
+## Suggested Prompt Chips
+
+Update prompt chips to be more action-oriented.
+
+Examples:
+
+```text
+What should I do next?
+Why is this blocked?
+Open the right form.
+What evidence is missing?
+Rewrite the thesis.
+Compare wedges.
+Draft outreach.
+Interpret notes.
+What would make this worth building?
+```
+
+---
+
+## Acceptance Criteria
+
+- Guide always has exactly one primary recommendation.
+- Guide actions route the user to the correct surface.
+- Guide explains why the action matters.
+- Guide can open relevant forms or views.
+- Prompt chips are action-oriented.
+- Guide feels like the app’s command layer, not a passive sidebar.
+
+---
+
+# V1 Sprint 31: Idea Growth Storyline
+
+## Goal
+
+Make “how the idea is growing” the central storyline of the app.
+
+The user should be able to see how a messy idea became a sharper thesis, a chosen wedge, a blocker, a proof, and a decision.
+
+---
+
+## Problem
+
+The current app has Thesis Canvas and Wedge Explorer, but the idea’s evolution is still split across multiple pages.
+
+Users need one simple story:
+
+```text
+Original idea
+→ current thesis
+→ selected wedge
+→ rejected directions
+→ biggest unknown
+→ next proof
+→ decision
+```
+
+---
+
+## Required New Surface
+
+Add a compact “Idea Story” or “Idea Evolution” section to the Current Step page.
+
+Example:
+
+```text
+How this idea has changed
+
+Original idea:
+AI assistant for independent fitness coaches.
+
+Current thesis:
+Cited weekly check-in triage for independent online fitness coaches.
+
+Selected wedge:
+Cited weekly check-in triage.
+
+Rejected direction:
+Broad all-in-one AI coaching platform.
+
+Why it changed:
+The broad product is too hard to validate and competes with established coaching platforms. The check-in triage wedge maps to repeated weekly pain and can be tested with a lightweight prototype.
+
+Current blocker:
+Will coaches trust and pay for AI-generated recommendations?
+
+Next proof:
+Show 5 coaches a cited check-in recommendation and ask whether they would use, edit, and pay for it.
+```
+
+---
+
+## Wedge Explorer Simplification
+
+The Wedge Explorer should become a core step, but should not overwhelm the user.
+
+Default view should show:
+
+- recommended wedge
+- one avoid-for-now wedge
+- one research-later wedge
+
+Hide the full list behind:
+
+```text
+Compare all wedges
+```
+
+---
+
+## Wedge Card Format
+
+Each wedge card should show:
+
+```text
+Wedge name
+Recommendation status
+Why it might work
+Main risk
+First test
+Action
+```
+
+Do not show too many metrics by default.
+
+---
+
+## Required Guide Integration
+
+Guide should be able to answer:
+
+```text
+How has this idea changed?
+Why did you recommend this wedge?
+Why did we reject the broad version?
+What should this idea become?
+What is the next proof?
+```
+
+---
+
+## Acceptance Criteria
+
+- Current Step page includes idea evolution.
+- User can see original idea and current thesis together.
+- Selected wedge is obvious.
+- Rejected directions are visible but not dominant.
+- Wedge Explorer is simplified by default.
+- Full Wedge Explorer remains inspectable.
+- Guide can explain idea evolution.
+- User feels the app is helping grow the idea, not only validate it.
+
+---
+
+# V1 Sprint 32: Usability Compression and Demo Polish
+
+## Goal
+
+Do a final usability compression pass so the app feels intuitive and demo-ready.
+
+This sprint is explicitly about removing clutter, improving copy, and validating the first-session experience.
+
+---
+
+## Core Rule
+
+Each major screen should have:
+
+```text
+1 primary job
+1 primary CTA
+1 short explanation
+Supporting details collapsed
+```
+
+If a screen has more than one major job, split or collapse content.
+
+---
+
+## Homepage Polish
+
+Update homepage headline if needed.
+
+Preferred headline:
+
+```text
+Turn a rough idea into the next validation test.
+```
+
+Preferred subheading:
+
+```text
+Thesys shapes the idea, finds the wedge, identifies the biggest unknown, and tells you what proof to run next.
+```
+
+Rename:
+
+```text
+Validation queue
+```
+
+to either:
+
+```text
+Ideas in progress
+```
+
+or:
+
+```text
+Idea validation queue
+```
+
+Project cards should show only:
+
+- project name
+- current thesis or short description
+- current verdict
+- next action
+- stage
+- evidence summary
+
+Do not show too many secondary details.
+
+---
+
+## New Investigation Polish
+
+The intake page is strong. Keep the current framing:
+
+```text
+Paste the messy version. Thesys will shape it.
+```
+
+But ensure the post-submit flow does not dump the user into the full workspace.
+
+After submission, show a focused result:
+
+```text
+First thesis
+Possible wedge
+Biggest unknown
+Recommended path
+Primary action
+```
+
+Then:
+
+```text
+[Continue to Current Step]
+[Run research]
+[Compare wedges]
+```
+
+---
+
+## Project Page Polish
+
+Default project landing page should be Current Step.
+
+Current Step must fit mostly above the fold on a laptop.
+
+It should include:
+
+```text
+Current step
+Current thesis
+Selected wedge
+Biggest unknown
+Next proof
+Primary action
+Guide prompt
+```
+
+Secondary details move below or behind Inspect.
+
+---
+
+## Detail View Polish
+
+Rename detail/advanced sections:
+
+| Current | Better |
+|---|---|
+| Advanced evidence work | Inspect research details |
+| Evidence basis | Evidence summary |
+| Competitor map | Competitors and substitutes |
+| Opportunity brief | Full research memo |
+| Decision blockers | Assumptions behind the decision |
+| Current proof | Active test |
+| Proof path | Test path |
+| Project history | Decision history |
+
+---
+
+## Empty State Polish
+
+Every empty state should say:
+
+1. what is missing
+2. why it matters
+3. what to do next
+
+Example:
+
+```text
+No validation results yet.
+
+This idea is blocked until real user evidence is logged.
+
+[Log result]
+```
+
+---
+
+## Demo Project Polish
+
+Use one polished demo project as the main demo:
+
+```text
+AI Assistant for Independent Fitness Coaches
+```
+
+Make sure it demonstrates:
+
+- messy original idea
+- shaped thesis
+- selected wedge
+- rejected broad direction
+- research evidence
+- competitor/substitute map
+- biggest unknown
+- validation mission
+- interpreted result
+- recommended decision
+- decision record
+- history
+
+Archive or hide disposable QA/smoke projects from the default homepage.
+
+The homepage should not show many sprint QA projects to a new user.
+
+Add a filter or default view that hides:
+
+- Sprint smoke projects
+- disposable QA projects
+- browser test projects
+
+unless user selects:
+
+```text
+Show test projects
+```
+
+---
+
+## Usability QA Tests
+
+Run these manually.
+
+### Test 1: Homepage clarity
+
+Can a new user explain the app in 30 seconds?
+
+Expected answer:
+
+```text
+It turns a rough idea into a validation test by shaping the thesis, finding the wedge, and identifying the biggest unknown.
+```
+
+### Test 2: Project clarity
+
+Can a new user open a project and know what to do in 15 seconds?
+
+Pass if they can identify:
+
+- current thesis
+- biggest unknown
+- next proof
+- primary action
+
+### Test 3: Guide usefulness
+
+Can the user ask “What should I do next?” and get a useful answer with a button that opens the right place?
+
+### Test 4: Idea growth
+
+Can the user see how the idea changed from original idea to current thesis?
+
+### Test 5: Wedge clarity
+
+Can the user identify the selected wedge and why broad alternatives were rejected?
+
+### Test 6: Detail containment
+
+Can the user avoid seeing traces, raw evidence, opportunity brief, and history unless they explicitly inspect details?
+
+### Test 7: Demo flow
+
+Can the demo project be explained in 3 minutes?
+
+The demo should show:
+
+```text
+messy idea
+→ shaped thesis
+→ selected wedge
+→ biggest unknown
+→ validation mission
+→ interpreted result
+→ decision
+```
+
+---
+
+## Acceptance Criteria
+
+- Default project experience is Current Step.
+- App has one dominant journey.
+- Guide acts as the command layer.
+- Advanced details are hidden by default.
+- Wedge and thesis evolution are central.
+- Homepage hides test clutter by default.
+- Demo project is polished and understandable.
+- New users are not exposed to every subsystem at once.
+- Every primary screen has one job and one primary CTA.
+- The app feels more like a guided copilot than a strategic records database.
+
+---
+
+# Final Definition of Done
+
+After Sprint 32, Thesys should no longer feel like:
+
+```text
+A set of powerful workspaces.
+```
+
+It should feel like:
+
+```text
+A guided copilot that turns a rough idea into a sharper thesis, selected wedge, biggest unknown, next proof, and decision.
+```
+
+The desired first-session user reaction:
+
+> I pasted a messy idea, and Thesys told me what it could become, what might kill it, and exactly what to test next.
