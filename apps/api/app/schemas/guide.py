@@ -71,6 +71,7 @@ class GuideResponseRead(BaseModel):
     summary: str
     current_focus: str
     why_this_matters: str
+    after_that: str
     recommended_action: GuideActionRead
     secondary_actions: list[GuideActionRead] = Field(default_factory=list)
     suggested_questions: list[str] = Field(default_factory=list)
@@ -88,5 +89,6 @@ class GuideRelatedEntityRead(BaseModel):
 
 class GuideChatResponseRead(BaseModel):
     answer: str
+    recommended_action: GuideActionRead | None = None
     action_cards: list[GuideActionRead] = Field(default_factory=list)
     related_entities: list[GuideRelatedEntityRead] = Field(default_factory=list)

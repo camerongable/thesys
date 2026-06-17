@@ -140,8 +140,9 @@ def recommend(
         summary=stage_copy.summary,
         current_focus=stage_copy.focus,
         why_this_matters=stage_copy.why,
+        after_that=_after_that_for_action(context, recommended_action),
         recommended_action=recommended_action,
-        secondary_actions=context.available_actions[1:5],
+        secondary_actions=context.available_actions[1:4],
         suggested_questions=_suggested_questions(context),
     )
 
@@ -155,6 +156,10 @@ def execute_action(
     context = get_guide_context(db, auth, project_id)
     for action in context.available_actions:
         if action.id == action_id:
+            return action
+    canonical_action_id = _canonical_action_id(action_id)
+    for action in context.available_actions:
+        if action.id == canonical_action_id:
             return action
     raise GuideActionNotFoundError(action_id)
 
@@ -174,15 +179,27 @@ def chat(
                 "and decisions. Try asking what to validate next or why the current "
                 "verdict is blocked."
             ),
+            recommended_action=_action_by_id(context, "explain_current_focus"),
             action_cards=[_action_by_id(context, "explain_current_focus")],
             related_entities=_related_entities(context),
         )
 
-    if any(term in normalized for term in ("what next", "next", "do now", "should i do")):
+    if any(
+        term in normalized
+        for term in (
+            "what next",
+            "next",
+            "do now",
+            "should i do",
+            "open the right form",
+            "right form",
+            "open form",
+        )
+    ):
         action = context.available_actions[0]
         answer = (
-            f"You should {action.label.lower()}. {action.why_it_matters} "
-            f"The current focus is: {context.next_action}."
+            f"Do this next: {action.label}. {action.why_it_matters} "
+            f"After that: {_after_that_for_action(context, action)}"
         )
         return _chat_response(answer, context, [action, *_support_actions(context)])
 
@@ -201,7 +218,11 @@ def chat(
             f"competitors or substitutes, {evidence.supported_findings} supported findings, "
             f"and {evidence.open_questions} open questions."
         )
-        return _chat_response(answer, context, [_action_by_id(context, "show_evidence")])
+        return _chat_response(
+            answer,
+            context,
+            [_action_by_id(context, "show_blocker_evidence")],
+        )
 
     if any(
         term in normalized
@@ -220,7 +241,10 @@ def chat(
         return _chat_response(
             answer,
             context,
-            [_action_by_id(context, "show_evolution"), _action_by_id(context, "update_thesis")],
+            [
+                _action_by_id(context, "show_project_history"),
+                _action_by_id(context, "rewrite_thesis_with_wedge"),
+            ],
         )
 
     if any(term in normalized for term in ("thesis", "improve", "sharper", "shape")):
@@ -230,7 +254,11 @@ def chat(
             "A sharper thesis should name one target user, one painful moment, the current "
             "workaround, and the proof that would change the decision."
         )
-        return _chat_response(answer, context, [_action_by_id(context, "update_thesis")])
+        return _chat_response(
+            answer,
+            context,
+            [_action_by_id(context, "rewrite_thesis_with_wedge")],
+        )
 
     if any(term in normalized for term in ("wedge", "compare", "alternative")):
         wedges = wedge_service.list_wedge_options(db, auth, project_id)
@@ -256,7 +284,7 @@ def chat(
                 "Open Wedge Explorer to compare possible directions before committing "
                 "to a validation path."
             )
-        return _chat_response(answer, context, [_action_by_id(context, "compare_wedges")])
+        return _chat_response(answer, context, [_action_by_id(context, "compare_wedge_options")])
 
     if any(term in normalized for term in ("outreach", "draft", "interview", "message")):
         target = context.target_user or "the target user"
@@ -266,14 +294,22 @@ def chat(
             f"around {unknown}. Would you be open to a 20-minute conversation about how "
             "you handle this today?"
         )
-        return _chat_response(answer, context, [_action_by_id(context, "draft_outreach")])
+        return _chat_response(
+            answer,
+            context,
+            [_action_by_id(context, "draft_validation_outreach")],
+        )
 
     if any(term in normalized for term in ("interpret", "result", "notes", "validate")):
         answer = (
             "Paste validation notes into the current mission, then compare the signal "
             "against the mission's success and failure criteria before changing confidence."
         )
-        return _chat_response(answer, context, [_action_by_id(context, "log_results")])
+        return _chat_response(
+            answer,
+            context,
+            [_action_by_id(context, "interpret_validation_notes")],
+        )
 
     if any(
         term in normalized
@@ -282,6 +318,12 @@ def chat(
         coach = validation_service.chat_decision_coach(db, auth, project_id, message)
         return GuideChatResponseRead(
             answer=coach.answer,
+            recommended_action=_guide_action_from_decision_coach(
+                project_id,
+                coach.action_cards[0],
+            )
+            if coach.action_cards
+            else context.available_actions[0],
             action_cards=[
                 _guide_action_from_decision_coach(project_id, action)
                 for action in coach.action_cards
@@ -349,11 +391,12 @@ def _available_actions(overview: ProjectOverviewRead) -> list[GuideActionRead]:
 
 
 def _guide_action_from_next_best(action: NextBestActionRead) -> GuideActionRead:
+    label, description = _router_copy_for_next_best(action)
     return GuideActionRead(
         id=action.action_type,
         type=_action_type_for_next_best(action.action_type),
-        label=action.label,
-        description=action.description,
+        label=label,
+        description=description,
         why_it_matters=action.why_it_matters,
         target_route=action.target_route,
         target_modal=_target_modal_for_next_best(action.action_type),
@@ -390,8 +433,8 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
         GuideActionRead(
             id="explain_current_focus",
             type="explain",
-            label="Explain focus",
-            description="Explain why this is the right thing to focus on now.",
+            label="Explain why this is next",
+            description="Show why this is the highest-leverage move right now.",
             why_it_matters=(
                 "A clear reason helps the next step feel intentional instead of procedural."
             ),
@@ -400,20 +443,22 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
             requires_confirmation=False,
         ),
         GuideActionRead(
-            id="show_evidence",
+            id="show_blocker_evidence",
             type="navigate",
-            label="Show evidence",
-            description="Open the research and evidence trail.",
-            why_it_matters="Evidence is what keeps the recommendation grounded.",
+            label="Show evidence behind the blocker",
+            description="Open the research details that support the current blocker.",
+            why_it_matters=(
+                "The decision should stay tied to the evidence behind the current blocker."
+            ),
             target_route=f"/projects/{project_id}#evidence",
             risk_level="low",
             requires_confirmation=False,
         ),
         GuideActionRead(
-            id="update_thesis",
+            id="rewrite_thesis_with_wedge",
             type="update_thesis",
-            label="Improve thesis",
-            description="Open the thesis intake area to sharpen the idea.",
+            label="Rewrite thesis with current wedge",
+            description="Open the thesis canvas to tighten the idea around the selected wedge.",
             why_it_matters=(
                 "A sharper thesis makes research, validation, and decisions more useful."
             ),
@@ -423,14 +468,14 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
             requires_confirmation=False,
         ),
         GuideActionRead(
-            id="show_evolution",
+            id="show_project_history",
             type="navigate",
-            label="Show evolution",
-            description="Open the thesis timeline and rejected directions.",
+            label="Show project history",
+            description="Open the idea evolution timeline and decision trail.",
             why_it_matters=(
                 "The idea is easier to trust when you can see what changed and why."
             ),
-            target_route=f"/projects/{project_id}#thesis-evolution",
+            target_route=f"/projects/{project_id}#history",
             risk_level="low",
             requires_confirmation=False,
         ),
@@ -447,10 +492,10 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
     }:
         actions.append(
             GuideActionRead(
-                id="compare_wedges",
+                id="compare_wedge_options",
                 type="compare_wedges",
-                label="Compare wedges",
-                description="Compare possible strategic directions before choosing a test.",
+                label="Compare wedge options",
+                description="Open Wedge Explorer to compare possible strategic directions.",
                 why_it_matters="A narrow wedge is easier to validate than a broad product idea.",
                 target_route=f"/projects/{project_id}#wedge-explorer",
                 target_modal="wedge-explorer",
@@ -464,7 +509,7 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
                 GuideActionRead(
                     id="open_validation_mission",
                     type="navigate",
-                    label="Open mission",
+                    label="Open current validation mission",
                     description="Open the current proof with steps, assets, and result logging.",
                     why_it_matters=(
                         "The mission keeps validation focused on the one proof that can "
@@ -476,9 +521,9 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
                     requires_confirmation=False,
                 ),
                 GuideActionRead(
-                    id="draft_outreach",
+                    id="draft_validation_outreach",
                     type="generate_draft",
-                    label="Draft outreach",
+                    label="Draft outreach for this proof",
                     description="Use the current blocker to draft validation outreach.",
                     why_it_matters="Outreach turns a plan into real user evidence.",
                     target_route=f"/projects/{project_id}#validation-mission",
@@ -487,9 +532,9 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
                     requires_confirmation=False,
                 ),
                 GuideActionRead(
-                    id="log_results",
+                    id="open_validation_result_form",
                     type="log_result",
-                    label="Log results",
+                    label="Open validation result form",
                     description="Open the mission result form.",
                     why_it_matters="Logged results are what should change confidence and verdicts.",
                     target_route=f"/projects/{project_id}#validation-mission",
@@ -498,9 +543,22 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
                     requires_confirmation=False,
                 ),
                 GuideActionRead(
+                    id="interpret_validation_notes",
+                    type="log_result",
+                    label="Interpret validation notes",
+                    description="Open the result area so pasted notes can be interpreted.",
+                    why_it_matters=(
+                        "Interpreting notes closes the loop from proof to confidence and decision."
+                    ),
+                    target_route=f"/projects/{project_id}#validation-mission",
+                    target_modal="interpret-result",
+                    risk_level="medium",
+                    requires_confirmation=False,
+                ),
+                GuideActionRead(
                     id="explain_success_criteria",
                     type="explain",
-                    label="Explain success criteria",
+                    label="Explain this proof's success criteria",
                     description="Explain what result would make the proof strong enough.",
                     why_it_matters=(
                         "Validation is only useful when success and failure are explicit "
@@ -515,10 +573,10 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
     if stage in {"decision_ready", "proceeding", "paused", "killed"}:
         actions.append(
             GuideActionRead(
-                id="record_decision",
+                id="prepare_decision_record",
                 type="record_decision",
-                label="Review decision",
-                description="Open the decision record area.",
+                label="Prepare decision record",
+                description="Open the decision area with the recommendation context.",
                 why_it_matters="Decision records preserve what changed and why.",
                 target_route=f"/projects/{project_id}#record-decision-panel",
                 target_modal="record-decision-panel",
@@ -543,11 +601,66 @@ def _action_type_for_next_best(action_type: str) -> str:
     return "navigate"
 
 
+def _router_copy_for_next_best(action: NextBestActionRead) -> tuple[str, str]:
+    labels = {
+        "structure_idea": (
+            "Open thesis structure form",
+            "Open the form that turns the rough idea into a testable thesis.",
+        ),
+        "generate_brief": (
+            "Generate evidence-backed brief",
+            "Run the brief workflow to ground the thesis in evidence and open questions.",
+        ),
+        "analyze_competitors": (
+            "Run competitor analysis",
+            "Open the research surface that maps direct competitors, substitutes, and wedges.",
+        ),
+        "review_assumptions": (
+            "Open blocker assumptions",
+            "Open the assumptions that explain what must be true before building.",
+        ),
+        "create_validation_plan": (
+            "Create validation mission",
+            "Open the test-planning surface for the riskiest assumption.",
+        ),
+        "start_experiment": (
+            "Open current validation mission",
+            "Open the proof that should produce the next real signal.",
+        ),
+        "log_results": (
+            "Open validation result form",
+            "Open the result form so real validation evidence can update confidence.",
+        ),
+        "add_results": (
+            "Open validation result form",
+            "Open the result form so real validation evidence can update confidence.",
+        ),
+        "use_suggested_decision": (
+            "Prepare decision record",
+            "Open the decision surface with the suggested proceed, pivot, pause, or kill path.",
+        ),
+        "record_decision": (
+            "Prepare decision record",
+            "Open the decision record form with the current evidence context.",
+        ),
+        "view_decision": (
+            "Open recorded decision",
+            "Open the decision trail that explains what was decided and why.",
+        ),
+        "resume_or_archive": (
+            "Choose resume or archive path",
+            "Open the decision area to decide whether this idea deserves another proof.",
+        ),
+    }
+    return labels.get(action.action_type, (action.label, action.description))
+
+
 def _target_modal_for_next_best(action_type: str) -> str | None:
     return {
         "structure_idea": "structured-intake",
         "log_results": "log-result",
         "add_results": "log-result",
+        "record_decision": "record-decision-panel",
         "use_suggested_decision": "record-decision-panel",
     }.get(action_type)
 
@@ -643,38 +756,48 @@ def _latest_research_sprint_id(
 
 
 def _suggested_questions(context: GuideContextRead) -> list[str]:
+    default_questions = [
+        "What should I do next?",
+        "Why is this blocked?",
+        "Open the right form.",
+        "What evidence is missing?",
+        "Rewrite the thesis.",
+        "Compare wedges.",
+        "Draft outreach.",
+        "Interpret notes.",
+        "What would make this worth building?",
+    ]
     stage_questions = {
         "draft_idea": [
-            "What context is missing?",
-            "How should I sharpen the thesis?",
-            "How has this idea changed?",
             "What should I do next?",
+            "Open the right form.",
+            "Rewrite the thesis.",
+            "What evidence is missing?",
         ],
         "structured_intake": [
-            "What should the first research pass look for?",
+            "What should I do next?",
+            "Why is this blocked?",
             "What evidence is missing?",
-            "Why not build yet?",
+            "Compare wedges.",
         ],
         "validation_plan_created": [
             "Why is this the blocker?",
-            "Draft outreach for this test.",
+            "Open the right form.",
+            "Draft outreach.",
             "What results would change the decision?",
         ],
         "experiment_running": [
-            "How should I log these results?",
-            "What signal would be strong enough?",
-            "What happens after validation?",
+            "Open the right form.",
+            "Interpret notes.",
+            "What would make this worth building?",
         ],
         "decision_ready": [
-            "Should I proceed?",
+            "What would make this worth building?",
             "What evidence is missing?",
             "Summarize the decision for my notes.",
         ],
     }
-    return stage_questions.get(
-        context.stage,
-        ["What should I do next?", "Why does this matter?", "What evidence is missing?"],
-    )
+    return stage_questions.get(context.stage, default_questions)
 
 
 def _is_in_scope(message: str) -> bool:
@@ -687,6 +810,7 @@ def _is_in_scope(message: str) -> bool:
         "evidence",
         "experiment",
         "focus",
+        "form",
         "idea",
         "changed",
         "directions",
@@ -706,6 +830,7 @@ def _is_in_scope(message: str) -> bool:
         "rejected",
         "research",
         "result",
+        "right",
         "risk",
         "source",
         "stage",
@@ -716,6 +841,7 @@ def _is_in_scope(message: str) -> bool:
         "validation",
         "verdict",
         "wedge",
+        "worth",
     }
     return any(term in message for term in allowed_terms)
 
@@ -725,9 +851,11 @@ def _chat_response(
     context: GuideContextRead,
     actions: list[GuideActionRead],
 ) -> GuideChatResponseRead:
+    recommended_action = actions[0] if actions else context.available_actions[0]
     return GuideChatResponseRead(
         answer=answer,
-        action_cards=actions[:5],
+        recommended_action=recommended_action,
+        action_cards=actions[:4],
         related_entities=_related_entities(context),
     )
 
@@ -758,14 +886,16 @@ def _related_entities(context: GuideContextRead) -> list[GuideRelatedEntityRead]
 def _support_actions(context: GuideContextRead) -> list[GuideActionRead]:
     preferred = [
         "explain_current_focus",
-        "show_evidence",
-        "update_thesis",
-        "compare_wedges",
+        "show_blocker_evidence",
+        "rewrite_thesis_with_wedge",
+        "compare_wedge_options",
         "open_validation_mission",
-        "draft_outreach",
-        "log_results",
+        "draft_validation_outreach",
+        "open_validation_result_form",
+        "interpret_validation_notes",
         "explain_success_criteria",
-        "record_decision",
+        "prepare_decision_record",
+        "show_project_history",
     ]
     return [
         action
@@ -779,7 +909,23 @@ def _action_by_id(context: GuideContextRead, action_id: str) -> GuideActionRead:
     for action in context.available_actions:
         if action.id == action_id:
             return action
+    canonical_action_id = _canonical_action_id(action_id)
+    for action in context.available_actions:
+        if action.id == canonical_action_id:
+            return action
     return context.available_actions[0]
+
+
+def _canonical_action_id(action_id: str) -> str:
+    return {
+        "show_evidence": "show_blocker_evidence",
+        "update_thesis": "rewrite_thesis_with_wedge",
+        "show_evolution": "show_project_history",
+        "compare_wedges": "compare_wedge_options",
+        "draft_outreach": "draft_validation_outreach",
+        "log_results": "open_validation_result_form",
+        "record_decision": "prepare_decision_record",
+    }.get(action_id, action_id)
 
 
 def _fallback_stage_copy(stage: str) -> _StageGuideCopy:
@@ -790,6 +936,31 @@ def _fallback_stage_copy(stage: str) -> _StageGuideCopy:
             "highest-leverage action."
         ),
         summary="Use the next recommended action to keep the idea moving.",
+    )
+
+
+def _after_that_for_action(context: GuideContextRead, action: GuideActionRead) -> str:
+    if action.type == "open_form" or "thesis" in action.id:
+        return (
+            "I will use the sharper thesis to route you toward research, wedge choice, "
+            "or a proof."
+        )
+    if action.type == "compare_wedges" or "wedge" in action.id:
+        return "The selected wedge becomes the basis for the current thesis and validation mission."
+    if action.type == "run_workflow" or "research" in action.id or "evidence" in action.id:
+        return "I will use the evidence to update the blocker, recommendation, and next proof."
+    if action.type == "log_result" or "result" in action.id or "validation" in action.id:
+        return "I will interpret the signal and recommend continue, pivot, pause, kill, or proceed."
+    if action.type == "record_decision" or "decision" in action.id:
+        return (
+            "The decision trail will preserve what changed, what evidence mattered, "
+            "and what to revisit."
+        )
+    if context.stage == "decision_ready":
+        return "I will help translate the current proof into a decision record."
+    return (
+        "I will route you to the next focused step and keep the project history tied "
+        "to the action."
     )
 
 

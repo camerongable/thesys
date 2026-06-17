@@ -1476,6 +1476,7 @@ export type GuideResponse = {
   summary: string;
   current_focus: string;
   why_this_matters: string;
+  after_that: string;
   recommended_action: GuideAction;
   secondary_actions: GuideAction[];
   suggested_questions: string[];
@@ -1489,6 +1490,7 @@ export type GuideRelatedEntity = {
 
 export type GuideChatResponse = {
   answer: string;
+  recommended_action: GuideAction | null;
   action_cards: GuideAction[];
   related_entities: GuideRelatedEntity[];
 };

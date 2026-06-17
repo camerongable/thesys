@@ -90,7 +90,7 @@ export function GuidePanel({
         </div>
         <div className="min-w-0">
           <p className="text-xs font-medium text-muted-foreground">Guide</p>
-          <h2 className="text-base font-semibold">What matters now</h2>
+          <h2 className="text-base font-semibold">Action router</h2>
         </div>
       </div>
 
@@ -116,9 +116,15 @@ export function GuidePanel({
         <div className="mt-4 space-y-4">
           <section>
             <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
-              Current focus
+              What matters now
             </p>
             <p className="mt-1 text-sm font-medium leading-6">{guideQuery.data.current_focus}</p>
+          </section>
+
+          <section>
+            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+              Why
+            </p>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               {guideQuery.data.why_this_matters}
             </p>
@@ -145,7 +151,7 @@ export function GuidePanel({
           ) : null}
 
           <section className="rounded-md border border-border bg-background p-3">
-            <p className="text-xs font-medium text-muted-foreground">Recommended next move</p>
+            <p className="text-xs font-medium text-muted-foreground">Do this next</p>
             <button
               className="mt-2 flex w-full cursor-pointer items-start justify-between gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               disabled={actionMutation.isPending}
@@ -159,9 +165,21 @@ export function GuidePanel({
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                   {guideQuery.data.recommended_action.description}
                 </span>
+                <span className="mt-2 block text-xs leading-5 text-muted-foreground">
+                  {guideQuery.data.recommended_action.why_it_matters}
+                </span>
               </span>
               <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
             </button>
+          </section>
+
+          <section>
+            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+              After that
+            </p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              {guideQuery.data.after_that}
+            </p>
           </section>
 
           {guideQuery.data.secondary_actions.length > 0 ? (
@@ -203,7 +221,7 @@ export function GuidePanel({
             </form>
 
             <div className="mt-2 flex flex-wrap gap-2">
-              {guideQuery.data.suggested_questions.slice(0, 3).map((question) => (
+              {guideQuery.data.suggested_questions.slice(0, 6).map((question) => (
                 <button
                   className="rounded-md border border-border px-2 py-1 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                   disabled={chatMutation.isPending}
@@ -228,16 +246,29 @@ export function GuidePanel({
                 <p className="text-xs font-medium text-muted-foreground">Guide answer</p>
               </div>
               <p className="mt-2 text-sm leading-6">{chatResponse.answer}</p>
+              {chatResponse.recommended_action ? (
+                <div className="mt-3 rounded-md border border-primary/30 bg-primary/10 p-3">
+                  <p className="text-xs font-medium text-primary">Recommended action</p>
+                  <GuideActionButton
+                    action={chatResponse.recommended_action}
+                    disabled={actionMutation.isPending}
+                    onClick={() => actionMutation.mutate(chatResponse.recommended_action!)}
+                  />
+                </div>
+              ) : null}
               {chatResponse.action_cards.length > 0 ? (
                 <div className="mt-3 grid gap-2">
-                  {chatResponse.action_cards.slice(0, 3).map((action) => (
-                    <GuideActionButton
-                      action={action}
-                      disabled={actionMutation.isPending}
-                      key={action.id}
-                      onClick={() => actionMutation.mutate(action)}
-                    />
-                  ))}
+                  {chatResponse.action_cards
+                    .filter((action) => action.id !== chatResponse.recommended_action?.id)
+                    .slice(0, 3)
+                    .map((action) => (
+                      <GuideActionButton
+                        action={action}
+                        disabled={actionMutation.isPending}
+                        key={action.id}
+                        onClick={() => actionMutation.mutate(action)}
+                      />
+                    ))}
                 </div>
               ) : null}
               {chatResponse.related_entities.length > 0 ? (

@@ -2,11 +2,10 @@
 
 ## Current Phase
 
-V1 Sprint 28 implementation is complete. Thesys now has a refreshed guided demo
-that opens directly into the Guide-led project experience and shows the full
-first-session path: messy idea intake, thesis shaping, wedge selection,
-validation mission, interpreted result, Decision Coach recommendation, and
-strategy history.
+V1 Sprint 30 implementation is complete. Thesys now treats the Guide as the
+primary action router: users open it from a bottom-right drawer, see one primary
+recommendation, get an explicit "after that" explanation, and route directly to
+the relevant form or project surface through specific action cards.
 Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
 multi-segment workflow packs remain V2 scope.
 
@@ -1439,7 +1438,43 @@ Checks run:
   and History markers, confirmed no browser console warnings/errors, and ran
   desktop/mobile layout probes for horizontal overflow and button text overflow.
 
+## V1 Sprint 30 Scope
+
+- [x] Add `after_that` to guide recommendations so the Guide explains what
+  happens after the primary action.
+- [x] Add `recommended_action` to guide chat responses.
+- [x] Cap guide secondary actions to three.
+- [x] Replace vague guide action labels with specific routing commands such as
+  "Show evidence behind the blocker," "Rewrite thesis with current wedge,"
+  "Compare wedge options," "Open validation result form," and "Prepare decision
+  record."
+- [x] Keep backward-compatible aliases for older guide action IDs.
+- [x] Align project nudges and Decision Coach evidence actions with the new
+  guide action-router vocabulary.
+- [x] Replace the inline guide disclosure with a bottom-right `Ask Thesys`
+  button and bottom drawer.
+- [x] Update the Guide panel copy to the Sprint 30 structure: what matters now,
+  why, do this next, after that, and actions.
+- [x] Update prompt chips to be action-oriented.
+
+## V1 Sprint 30 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_guide.py app/tests/test_nudges.py app/tests/test_wedge_explorer.py app/tests/test_thesis_canvas.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+- [x] `docker compose restart api web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test: `POST /api/demo/seed` refreshed the guided demo
+  project successfully.
+- [ ] Browser QA in the Codex in-app browser is blocked because Computer Use
+  is not allowed to access `com.openai.codex`. Per the sprint request, no
+  external browser QA was attempted.
+
 ## Next Work
 
-V1 Sprint 28 is complete. Next work is V2 planning or production-hardening
-cleanup.
+V1 Sprint 30 is complete. Next work is V1 Sprint 31: Idea Growth Storyline.

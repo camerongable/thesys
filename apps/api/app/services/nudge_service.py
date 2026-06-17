@@ -155,9 +155,9 @@ def _too_broad_nudge(overview: ProjectOverviewRead) -> _NudgeCandidate | None:
         ),
         action=_guide_action(
             project_id=overview.project.id,
-            action_id="compare_wedges",
+            action_id="compare_wedge_options",
             action_type="compare_wedges",
-            label="Compare wedges",
+            label="Compare wedge options",
             description="Compare possible strategic directions before choosing a proof.",
             why_it_matters="A narrow wedge is easier to test than a general product idea.",
             target_hash="wedge-explorer",
@@ -229,9 +229,9 @@ def _no_validation_results_nudge(
         ),
         action=_guide_action(
             project_id=overview.project.id,
-            action_id="log_results",
+            action_id="open_validation_result_form",
             action_type="log_result",
-            label="Log results",
+            label="Open validation result form",
             description="Open the validation mission result form.",
             why_it_matters=(
                 "Logged results are what change confidence and unlock decision coaching."

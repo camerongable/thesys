@@ -83,12 +83,14 @@ def test_testing_wedge_sets_proof_and_guide_can_explain_recommendation(
     assert guide.status_code == 200
     body = guide.json()
     assert "Recommended wedge" in body["answer"]
-    assert any(action["id"] == "compare_wedges" for action in body["action_cards"])
+    assert body["recommended_action"]["id"] == "compare_wedge_options"
+    assert any(action["id"] == "compare_wedge_options" for action in body["action_cards"])
 
     context = client.get(f"/api/projects/{project_id}/guide/context").json()
     compare = next(
-        action for action in context["available_actions"] if action["id"] == "compare_wedges"
+        action for action in context["available_actions"] if action["id"] == "compare_wedge_options"
     )
+    assert compare["label"] == "Compare wedge options"
     assert compare["target_route"].endswith("#wedge-explorer")
 
 

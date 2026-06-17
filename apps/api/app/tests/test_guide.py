@@ -16,6 +16,9 @@ def test_guide_context_and_recommendation_are_stage_aware(client: TestClient) ->
     draft_recommend = _guide_recommend(client, project_id)
     assert draft_recommend["current_focus"] == "Shape the rough idea into a testable thesis."
     assert draft_recommend["recommended_action"]["target_route"].endswith("#structured-intake")
+    assert draft_recommend["recommended_action"]["label"] == "Open thesis structure form"
+    assert draft_recommend["after_that"]
+    assert len(draft_recommend["secondary_actions"]) <= 3
     assert draft_recommend["suggested_questions"]
 
     extract_response = client.post(f"/api/projects/{project_id}/assumptions/extract")
@@ -35,9 +38,15 @@ def test_guide_context_and_recommendation_are_stage_aware(client: TestClient) ->
     assert validation["stage"] == "validation_plan_created"
     assert validation["active_validation_plan_id"] is not None
     assert validation["available_actions"][0]["id"] == "log_results"
+    assert validation["available_actions"][0]["label"] == "Open validation result form"
     assert any(
         action["id"] == "open_validation_mission"
         and action["target_route"].endswith("#validation-mission")
+        for action in validation["available_actions"]
+    )
+    assert any(
+        action["id"] == "interpret_validation_notes"
+        and action["target_modal"] == "interpret-result"
         for action in validation["available_actions"]
     )
 
@@ -72,10 +81,41 @@ def test_guide_action_execution_routes_known_actions(client: TestClient) -> None
     assert response.status_code == 200
     action = response.json()
     assert action["type"] == "open_form"
+    assert action["label"] == "Open thesis structure form"
     assert action["target_route"].endswith("#structured-intake")
 
     missing = client.post(f"/api/projects/{project_id}/guide/actions/not-real/execute")
     assert missing.status_code == 404
+
+
+def test_guide_action_router_uses_specific_commands_and_aliases(
+    client: TestClient,
+) -> None:
+    seed_response = client.post("/api/demo/seed")
+    assert seed_response.status_code == 200
+    project_id = seed_response.json()["project"]["id"]
+
+    recommend = _guide_recommend(client, project_id)
+    assert recommend["recommended_action"]["id"] == "use_suggested_decision"
+    assert recommend["recommended_action"]["label"] == "Prepare decision record"
+    assert recommend["recommended_action"]["target_modal"] == "record-decision-panel"
+    assert len(recommend["secondary_actions"]) <= 3
+    assert recommend["after_that"].startswith("The decision trail")
+
+    actions_response = client.get(f"/api/projects/{project_id}/guide/context")
+    assert actions_response.status_code == 200
+    action_labels = {
+        action["id"]: action["label"] for action in actions_response.json()["available_actions"]
+    }
+    assert action_labels["show_blocker_evidence"] == "Show evidence behind the blocker"
+    assert action_labels["rewrite_thesis_with_wedge"] == "Rewrite thesis with current wedge"
+    assert action_labels["compare_wedge_options"] == "Compare wedge options"
+    assert "Show evidence" not in action_labels.values()
+    assert "Improve thesis" not in action_labels.values()
+
+    old_alias = client.post(f"/api/projects/{project_id}/guide/actions/show_evidence/execute")
+    assert old_alias.status_code == 200
+    assert old_alias.json()["id"] == "show_blocker_evidence"
 
 
 def test_guide_chat_is_project_scoped_and_rejects_generic_questions(client: TestClient) -> None:
@@ -87,9 +127,17 @@ def test_guide_chat_is_project_scoped_and_rejects_generic_questions(client: Test
     )
     assert next_response.status_code == 200
     next_body = next_response.json()
-    assert "define the thesis" in next_body["answer"].lower()
+    assert "open thesis structure form" in next_body["answer"].lower()
+    assert next_body["recommended_action"]["id"] == "structure_idea"
     assert next_body["action_cards"]
     assert next_body["related_entities"][0]["type"] == "thesis"
+
+    form_response = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={"message": "Open the right form."},
+    )
+    assert form_response.status_code == 200
+    assert form_response.json()["recommended_action"]["target_modal"] == "structured-intake"
 
     off_topic = client.post(
         f"/api/projects/{project_id}/guide/chat",

@@ -110,4 +110,5 @@ def test_thesis_evolution_includes_validation_and_guide_can_explain_change(
     assert chat.status_code == 200
     body = chat.json()
     assert "The idea started as" in body["answer"]
-    assert any(action["id"] == "show_evolution" for action in body["action_cards"])
+    assert body["recommended_action"]["id"] == "show_project_history"
+    assert any(action["id"] == "show_project_history" for action in body["action_cards"])

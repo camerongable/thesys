@@ -84,5 +84,6 @@ def test_validation_plan_without_results_surfaces_log_results_nudge(
         if nudge["title"] == "Your plan exists, but no results are logged."
     )
     assert result_nudge["severity"] == "action_required"
-    assert result_nudge["action"]["id"] == "log_results"
+    assert result_nudge["action"]["id"] == "open_validation_result_form"
+    assert result_nudge["action"]["label"] == "Open validation result form"
     assert result_nudge["action"]["target_modal"] == "log-result"

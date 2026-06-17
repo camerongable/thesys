@@ -18,6 +18,7 @@ import {
   Globe2,
   Lightbulb,
   ListChecks,
+  Menu,
   Route,
   ScrollText,
   ShieldCheck,
@@ -248,7 +249,10 @@ export function ProjectOverview() {
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             Projects
           </Link>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <MobileProjectMenu activeTab={activeTab} onOpen={openNavigationItem} />
+          </div>
         </div>
 
         {overviewQuery.isLoading ? (
@@ -346,13 +350,7 @@ export function ProjectOverview() {
                 ) : recordSurface === "history" ? (
                   <HistoryWorkspace overview={overview} />
                 ) : null}
-                <MobileWorkspaceSwitcher
-                  activeAnchor={activeAnchor}
-                  activeTab={activeTab}
-                  onOpen={openNavigationItem}
-                  overview={overview}
-                />
-                <GuideDisclosure
+                <GuideActionDrawer
                   onAction={runGuideAction}
                   projectId={project.id}
                 />
@@ -479,71 +477,113 @@ function ProjectMap({
   );
 }
 
-function MobileWorkspaceSwitcher({
-  activeAnchor,
+function MobileProjectMenu({
   activeTab,
   onOpen,
-  overview,
 }: {
-  activeAnchor: string | null;
   activeTab: ProjectTab;
   onOpen: (item: ProjectNavigationItem) => void;
-  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
 }) {
+  const [open, setOpen] = useState(false);
   const selectedItem =
     projectNavigationItems.find((item) => item.label === activeTab) ?? projectNavigationItems[0];
   return (
-    <details className="mt-5 rounded-lg border border-border bg-card p-2 lg:hidden">
-      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md px-2 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-        <span>Switch mode</span>
-        <span className="inline-flex items-center gap-2 text-muted-foreground">
-          <span>{selectedItem.label}</span>
-          <ChevronDown className="h-4 w-4" aria-hidden="true" />
-        </span>
-      </summary>
-      <nav
-        aria-label="Project navigation"
-        className="mt-2 grid grid-cols-2 gap-1 border-t border-border pt-2"
+    <>
+      <button
+        aria-controls="mobile-project-menu"
+        aria-expanded={open}
+        aria-label="Open project menu"
+        className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-md border border-border bg-card text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:hidden"
+        onClick={() => setOpen((value) => !value)}
+        type="button"
       >
-        {projectNavigationItems.map((item) => {
-          const Icon = playbookIcons[item.key] ?? Route;
-          const selected = item.label === activeTab;
-          const current = item.label === "Current Step";
-          return (
-            <button
-              aria-current={selected ? "page" : undefined}
-              aria-label={`Open ${item.label}: ${item.detail}.`}
-              className={[
-                "flex min-h-14 cursor-pointer items-center justify-center gap-2 rounded-md border px-2 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
-                selected
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : current
-                    ? "border-warning-border bg-warning-muted text-foreground"
-                    : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
-              ].join(" ")}
-              key={item.key}
-              onClick={() => onOpen(item)}
-              type="button"
-            >
-              <Icon
-                className={selected || current ? "h-4 w-4 shrink-0 text-primary" : "h-4 w-4 shrink-0"}
-                aria-hidden="true"
-              />
-              <span className="min-w-0">
-                <span className="block truncate">{item.label}</span>
-                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                  {current ? "Now" : item.detail}
-                </span>
-              </span>
-            </button>
-          );
-        })}
-      </nav>
-    </details>
+        <Menu className="h-5 w-5 text-primary" aria-hidden="true" />
+      </button>
+      {open ? (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button
+            aria-label="Close project menu backdrop"
+            className="absolute inset-0 cursor-default bg-background/60 backdrop-blur-sm"
+            onClick={() => setOpen(false)}
+            type="button"
+          />
+          <aside
+            aria-label="Project menu"
+            aria-modal="true"
+            className="absolute right-0 top-0 flex h-full w-[min(22rem,calc(100vw-2rem))] flex-col border-l border-border bg-card shadow-2xl"
+            id="mobile-project-menu"
+            role="dialog"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-4">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-muted-foreground">Project menu</p>
+                <h2 className="truncate text-base font-semibold">{selectedItem.label}</h2>
+              </div>
+              <button
+                aria-label="Close project menu"
+                className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                onClick={() => setOpen(false)}
+                type="button"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+            <nav aria-label="Project navigation" className="grid gap-1 p-3">
+              {projectNavigationItems.map((item) => {
+                const Icon = playbookIcons[item.key] ?? Route;
+                const selected = item.label === activeTab;
+                const current = item.label === "Current Step";
+                return (
+                  <button
+                    aria-current={selected ? "page" : undefined}
+                    aria-label={`Open ${item.label}: ${item.detail}.`}
+                    className={[
+                      "flex min-h-14 cursor-pointer items-start gap-3 rounded-md border px-3 py-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+                      selected
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : current
+                          ? "border-warning-border bg-warning-muted text-foreground"
+                          : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
+                    ].join(" ")}
+                    key={item.key}
+                    onClick={() => {
+                      onOpen(item);
+                      setOpen(false);
+                    }}
+                    type="button"
+                  >
+                    <Icon
+                      className={
+                        selected || current
+                          ? "mt-0.5 h-4 w-4 shrink-0 text-primary"
+                          : "mt-0.5 h-4 w-4 shrink-0"
+                      }
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0">
+                      <span className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="block truncate font-medium">{item.label}</span>
+                        {current ? (
+                          <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[0.68rem] font-medium text-primary">
+                            now
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                        {item.detail}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </nav>
+          </aside>
+        </div>
+      ) : null}
+    </>
   );
 }
-
-function GuideDisclosure({
+function GuideActionDrawer({
   onAction,
   projectId,
 }: {
@@ -551,34 +591,65 @@ function GuideDisclosure({
   projectId: string;
 }) {
   const [open, setOpen] = useState(false);
+  function routeAction(action: GuideAction) {
+    onAction(action);
+    setOpen(false);
+  }
+
   return (
-    <details
-      className="mt-5 rounded-lg border border-border bg-card p-4"
-      id="project-guide"
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary className="cursor-pointer list-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3">
-            <div className="rounded-md bg-primary/10 p-2 text-primary">
-              <Compass className="h-4 w-4" aria-hidden="true" />
+    <>
+      <Button
+        aria-controls="project-guide-drawer"
+        aria-expanded={open}
+        aria-label={open ? "Hide Thesys guide" : "Open Thesys guide"}
+        className="fixed bottom-4 right-4 z-40 min-h-12 rounded-full px-4 shadow-lg print:hidden"
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+      >
+        <Compass className="h-4 w-4" aria-hidden="true" />
+        Ask Thesys
+      </Button>
+
+      {open ? (
+        <div className="fixed inset-0 z-50 print:hidden">
+          <button
+            aria-label="Close Thesys guide backdrop"
+            className="absolute inset-0 cursor-default bg-background/60 backdrop-blur-sm"
+            onClick={() => setOpen(false)}
+            type="button"
+          />
+          <section
+            aria-label="Thesys guide action drawer"
+            aria-modal="true"
+            className="absolute inset-x-3 bottom-3 mx-auto max-h-[82vh] max-w-3xl overflow-hidden rounded-xl border border-border bg-card shadow-2xl sm:inset-x-6"
+            id="project-guide-drawer"
+            role="dialog"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-muted-foreground">Thesys Guide</p>
+                <h2 className="text-base font-semibold">Tell me where to go next</h2>
+              </div>
+              <button
+                aria-label="Close Thesys guide"
+                className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                onClick={() => setOpen(false)}
+                type="button"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
             </div>
-            <div>
-              <h2 className="text-sm font-semibold">Guide</h2>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Open when you want help choosing the next supporting action.
-              </p>
+            <div className="max-h-[calc(82vh-64px)] overflow-y-auto p-4">
+              <GuidePanel
+                className="border-0 bg-transparent p-0 lg:static lg:top-auto"
+                onAction={routeAction}
+                projectId={projectId}
+              />
             </div>
-          </div>
-          <DisclosureLabel closedLabel="Open guide" open={open} openLabel="Hide guide" />
+          </section>
         </div>
-      </summary>
-      <GuidePanel
-        className="mt-4 border-0 bg-transparent p-0 lg:static lg:top-auto"
-        onAction={onAction}
-        projectId={projectId}
-      />
-    </details>
+      ) : null}
+    </>
   );
 }
 

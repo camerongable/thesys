@@ -1448,8 +1448,8 @@ def _decision_action_cards(
             target_modal="record-decision-panel",
         ),
         DecisionCoachActionRead(
-            id="show_evidence",
-            label="Show evidence",
+            id="show_blocker_evidence",
+            label="Show evidence behind the blocker",
             description="Review the evidence and validation trail behind this decision.",
             target_route=f"/projects/{project_id}#evidence",
         ),
