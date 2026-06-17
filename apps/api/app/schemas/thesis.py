@@ -68,3 +68,16 @@ class ThesisEvolutionEventRead(BaseModel):
 class ThesisCanvasDetailRead(BaseModel):
     canvas: ThesisCanvasRead
     evolution: list[ThesisEvolutionEventRead] = Field(default_factory=list)
+
+
+class IdeaStoryRead(BaseModel):
+    project_id: uuid.UUID
+    original_idea: str
+    current_thesis: str
+    selected_wedge: str
+    rejected_directions: list[str] = Field(default_factory=list)
+    why_it_changed: str
+    current_blocker: str
+    next_proof: str
+    latest_change_title: str | None = None
+    latest_change_reason: str | None = None

@@ -23,6 +23,7 @@ from app.schemas.overview import (
 )
 from app.schemas.projects import ProjectCreate, ProjectListRead, ProjectRead, ProjectUpdate
 from app.schemas.thesis import (
+    IdeaStoryRead,
     ThesisCanvasDetailRead,
     ThesisCanvasUpdate,
     ThesisEvolutionEventRead,
@@ -158,6 +159,15 @@ def get_project_thesis_canvas(
     auth: AuthContextDep,
 ) -> ThesisCanvasDetailRead:
     return thesis_service.get_thesis_canvas(db, auth, project_id)
+
+
+@router.get("/{project_id}/idea-story", response_model=IdeaStoryRead)
+def get_project_idea_story(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> IdeaStoryRead:
+    return thesis_service.get_idea_story(db, auth, project_id)
 
 
 @router.patch("/{project_id}/thesis-canvas", response_model=ThesisCanvasDetailRead)

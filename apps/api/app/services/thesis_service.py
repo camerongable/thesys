@@ -18,8 +18,10 @@ from app.db.models import (
     ProjectThesis,
     ThesisCanvas,
     ThesisEvolutionEvent,
+    WedgeOption,
 )
 from app.schemas.thesis import (
+    IdeaStoryRead,
     ThesisCanvasDetailRead,
     ThesisCanvasRead,
     ThesisCanvasUpdate,
@@ -52,6 +54,41 @@ def get_thesis_canvas(
     return ThesisCanvasDetailRead(
         canvas=ThesisCanvasRead.model_validate(canvas),
         evolution=list_thesis_evolution(db, auth, project_id),
+    )
+
+
+def get_idea_story(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> IdeaStoryRead:
+    detail = get_thesis_canvas(db, auth, project_id)
+    canvas = detail.canvas
+    latest_change = _latest_story_event(detail.evolution)
+    selected_wedge = _selected_wedge(db, auth, project_id)
+    rejected_directions = _story_rejected_directions(
+        db,
+        auth,
+        project_id,
+        canvas.rejected_directions,
+    )
+    why_it_changed = _story_change_reason(
+        canvas=canvas,
+        latest_change=latest_change,
+        selected_wedge=selected_wedge,
+        rejected_directions=rejected_directions,
+    )
+    return IdeaStoryRead(
+        project_id=project_id,
+        original_idea=canvas.original_idea,
+        current_thesis=canvas.current_thesis,
+        selected_wedge=selected_wedge or canvas.wedge or "No wedge has been selected yet.",
+        rejected_directions=rejected_directions,
+        why_it_changed=why_it_changed,
+        current_blocker=canvas.biggest_unknown or "The biggest unknown has not been named yet.",
+        next_proof=canvas.proof_needed or "Define the next proof that would change the decision.",
+        latest_change_title=latest_change.title if latest_change else None,
+        latest_change_reason=latest_change.reason if latest_change else None,
     )
 
 
@@ -485,6 +522,83 @@ def _latest_experiment(db: Session, auth: AuthContext, project_id: uuid.UUID) ->
         .order_by(Experiment.updated_at.desc())
         .limit(1)
     )
+
+
+def _latest_story_event(
+    events: list[ThesisEvolutionEventRead],
+) -> ThesisEvolutionEventRead | None:
+    priority = {
+        "decision": 5,
+        "validation_blocker": 4,
+        "wedge_change": 3,
+        "research_update": 2,
+        "manual_update": 2,
+        "structured_thesis": 1,
+        "original_idea": 0,
+    }
+    ranked = sorted(
+        events,
+        key=lambda event: (priority.get(event.event_type, 0), event.created_at),
+        reverse=True,
+    )
+    return ranked[0] if ranked else None
+
+
+def _selected_wedge(db: Session, auth: AuthContext, project_id: uuid.UUID) -> str:
+    wedge = db.scalar(
+        select(WedgeOption)
+        .where(
+            WedgeOption.workspace_id == auth.workspace_id,
+            WedgeOption.project_id == project_id,
+            WedgeOption.recommendation == "recommended",
+        )
+        .order_by(WedgeOption.updated_at.desc())
+        .limit(1)
+    )
+    return wedge.name if wedge else ""
+
+
+def _story_rejected_directions(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    canvas_rejected: list[str],
+) -> list[str]:
+    wedge_directions = list(
+        db.scalars(
+            select(WedgeOption.name)
+            .where(
+                WedgeOption.workspace_id == auth.workspace_id,
+                WedgeOption.project_id == project_id,
+                WedgeOption.recommendation.in_(["rejected", "avoid_for_now"]),
+            )
+            .order_by(WedgeOption.updated_at.desc())
+            .limit(3)
+        )
+    )
+    return _unique([*canvas_rejected, *wedge_directions])[:4]
+
+
+def _story_change_reason(
+    *,
+    canvas: ThesisCanvasRead,
+    latest_change: ThesisEvolutionEventRead | None,
+    selected_wedge: str,
+    rejected_directions: list[str],
+) -> str:
+    if latest_change and latest_change.reason:
+        return latest_change.reason
+    if selected_wedge and rejected_directions:
+        return (
+            f"The idea narrowed toward {selected_wedge} while keeping "
+            f"{rejected_directions[0]} out of the default path for now."
+        )
+    if selected_wedge:
+        return (
+            f"The current story centers on {selected_wedge} because a narrower wedge is "
+            "easier to validate than the broad original idea."
+        )
+    return "The idea has been captured, but it still needs a clearer wedge and proof path."
 
 
 def _next_thesis_version(db: Session, project_id: uuid.UUID) -> int:

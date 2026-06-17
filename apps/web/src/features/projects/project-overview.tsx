@@ -53,6 +53,7 @@ import {
   dismissProjectNudge,
   executeNextAction,
   GuideAction,
+  getIdeaStory,
   getDurableResearchStatus,
   getProjectResearchHistory,
   getProjectOverview,
@@ -1394,6 +1395,10 @@ function CurrentStepPanel({
   const nextProof = blocker?.recommended_test
     ? stripLeadingSignalLabel(nextProofText(blocker))
     : clarifyActionText(nextBestAction.description);
+  const ideaStoryQuery = useQuery({
+    queryKey: ["projects", overview.project.id, "idea-story"],
+    queryFn: () => getIdeaStory(overview.project.id),
+  });
 
   return (
     <section className="rounded-lg border border-border bg-card">
@@ -1426,24 +1431,16 @@ function CurrentStepPanel({
           </Button>
         </div>
 
-        <div className="mt-6 grid gap-5 border-t border-border pt-5 lg:grid-cols-2">
-          <CurrentStepField
-            label="Current thesis"
-            value={overview.strategic_snapshot.current_thesis ?? currentRecommendation.recommendation}
-          />
-          <CurrentStepField
-            label="Current wedge"
-            value={overview.strategic_snapshot.proposed_wedge ?? "Choose or refine the wedge before expanding validation."}
-          />
-          <CurrentStepField
-            label="Biggest unknown"
-            value={biggestUnknown}
-          />
-          <CurrentStepField
-            label="Next proof"
-            value={nextProof}
-          />
-        </div>
+        <IdeaStorySection
+          currentRecommendation={currentRecommendation}
+          fallbackBiggestUnknown={biggestUnknown}
+          fallbackNextProof={nextProof}
+          ideaStory={ideaStoryQuery.data ?? null}
+          isError={ideaStoryQuery.isError}
+          isLoading={ideaStoryQuery.isLoading}
+          onOpenWorkspace={onOpenWorkspace}
+          overview={overview}
+        />
 
         <div className="mt-6 grid gap-5 border-t border-border pt-5 xl:grid-cols-3">
           <DecisionSignal
@@ -1498,7 +1495,7 @@ function CurrentStepPanel({
             Show evidence
           </Button>
           <Button
-            onClick={() => onOpenWorkspace("Shape", "wedge-options")}
+            onClick={() => onOpenWorkspace("Shape", "wedge-explorer")}
             size="sm"
             type="button"
             variant="secondary"
@@ -1521,12 +1518,99 @@ function CurrentStepPanel({
   );
 }
 
-function CurrentStepField({ label, value }: { label: string; value: string }) {
+function IdeaStorySection({
+  currentRecommendation,
+  fallbackBiggestUnknown,
+  fallbackNextProof,
+  ideaStory,
+  isError,
+  isLoading,
+  onOpenWorkspace,
+  overview,
+}: {
+  currentRecommendation: StrategicRecommendation;
+  fallbackBiggestUnknown: string;
+  fallbackNextProof: string;
+  ideaStory: NonNullable<Awaited<ReturnType<typeof getIdeaStory>>> | null;
+  isError: boolean;
+  isLoading: boolean;
+  onOpenWorkspace: (tab: ProjectTab, anchor?: string | null) => void;
+  overview: NonNullable<Awaited<ReturnType<typeof getProjectOverview>>>;
+}) {
+  const story = ideaStory ?? {
+    current_blocker: fallbackBiggestUnknown,
+    current_thesis: overview.strategic_snapshot.current_thesis ?? currentRecommendation.recommendation,
+    latest_change_reason: null,
+    latest_change_title: null,
+    next_proof: fallbackNextProof,
+    original_idea: overview.project.short_description ?? overview.project.name,
+    project_id: overview.project.id,
+    rejected_directions: [] as string[],
+    selected_wedge:
+      overview.strategic_snapshot.proposed_wedge ??
+      "Choose or refine the wedge before expanding validation.",
+    why_it_changed:
+      "The idea story is being assembled from thesis, wedge, evidence, validation, and decision history.",
+  };
+  const rejectedDirection = story.rejected_directions[0] ?? "No rejected direction yet.";
+
+  return (
+    <section className="mt-6 border-t border-border pt-5" id="idea-story">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <GitBranch className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h3 className="text-base font-semibold">How this idea has changed</h3>
+          </div>
+          <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted-foreground">
+            {isLoading
+              ? "Loading the idea story from thesis, wedge, and validation history..."
+              : isError
+                ? "Showing the available project story while the full evolution trail reloads."
+                : story.why_it_changed}
+          </p>
+        </div>
+        <Button
+          className="min-h-10 shrink-0"
+          onClick={() => onOpenWorkspace("Shape", "thesis-evolution")}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          <ScrollText className="h-4 w-4" aria-hidden="true" />
+          Inspect evolution
+        </Button>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <IdeaStoryRow label="Original idea" value={story.original_idea} />
+        <IdeaStoryRow label="Current thesis" value={story.current_thesis} emphasis />
+        <IdeaStoryRow label="Selected wedge" value={story.selected_wedge} emphasis />
+        <IdeaStoryRow label="Rejected direction" value={rejectedDirection} />
+        <IdeaStoryRow label="Biggest unknown" value={story.current_blocker} />
+        <IdeaStoryRow label="Next proof" value={story.next_proof} emphasis />
+      </div>
+    </section>
+  );
+}
+
+function IdeaStoryRow({
+  emphasis = false,
+  label,
+  value,
+}: {
+  emphasis?: boolean;
+  label: string;
+  value: string;
+}) {
   return (
     <div className="min-w-0">
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
       <MarkdownContent
-        className="mt-1 line-clamp-4 space-y-2 text-sm font-semibold leading-6 text-foreground"
+        className={[
+          "mt-1 line-clamp-4 space-y-2 text-sm leading-6 text-foreground",
+          emphasis ? "font-semibold" : "",
+        ].join(" ")}
         markdown={value}
       />
     </div>

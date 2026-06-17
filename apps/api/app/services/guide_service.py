@@ -187,6 +187,30 @@ def chat(
     if any(
         term in normalized
         for term in (
+            "next proof",
+            "what proof",
+            "proof next",
+            "proof should",
+            "test next",
+        )
+    ):
+        story = thesis_service.get_idea_story(db, auth, project_id)
+        answer = (
+            f"The next proof is: {story.next_proof} "
+            f"It matters because the current blocker is: {story.current_blocker}"
+        )
+        return _chat_response(
+            answer,
+            context,
+            [
+                _action_by_id(context, "open_validation_mission"),
+                _action_by_id(context, "show_idea_story"),
+            ],
+        )
+
+    if any(
+        term in normalized
+        for term in (
             "what next",
             "next",
             "do now",
@@ -226,23 +250,31 @@ def chat(
 
     if any(
         term in normalized
-        for term in ("changed", "evolved", "evolution", "rejected", "directions", "history")
+        for term in (
+            "broad",
+            "changed",
+            "evolved",
+            "evolution",
+            "reject",
+            "rejected",
+            "directions",
+            "history",
+        )
     ):
-        detail = thesis_service.get_thesis_canvas(db, auth, project_id)
-        rejected = _join_list(detail.canvas.rejected_directions) or "No rejected directions yet."
-        latest = detail.evolution[-1] if detail.evolution else None
-        latest_summary = latest.change_summary if latest else detail.canvas.current_thesis
+        story = thesis_service.get_idea_story(db, auth, project_id)
+        rejected = _join_list(story.rejected_directions) or "No rejected directions yet."
         answer = (
-            f"The idea started as: {detail.canvas.original_idea} "
-            f"The current thesis is: {detail.canvas.current_thesis} "
-            f"Latest change: {latest_summary} "
+            f"The idea started as: {story.original_idea} "
+            f"The current thesis is: {story.current_thesis} "
+            f"Selected wedge: {story.selected_wedge} "
+            f"Why it changed: {story.why_it_changed} "
             f"Rejected directions: {rejected}"
         )
         return _chat_response(
             answer,
             context,
             [
-                _action_by_id(context, "show_project_history"),
+                _action_by_id(context, "show_idea_story"),
                 _action_by_id(context, "rewrite_thesis_with_wedge"),
             ],
         )
@@ -260,7 +292,8 @@ def chat(
             [_action_by_id(context, "rewrite_thesis_with_wedge")],
         )
 
-    if any(term in normalized for term in ("wedge", "compare", "alternative")):
+    if any(term in normalized for term in ("wedge", "compare", "alternative", "become")):
+        story = thesis_service.get_idea_story(db, auth, project_id)
         wedges = wedge_service.list_wedge_options(db, auth, project_id)
         recommended = next(
             (
@@ -271,16 +304,17 @@ def chat(
             None,
         )
         if recommended:
+            rejected = _join_list(story.rejected_directions)
             answer = (
                 f"Recommended wedge: {recommended.name}. "
                 f"Why it might work: {recommended.why_it_might_work} "
                 f"Main risk: {recommended.main_risk} "
-                f"First test: {recommended.validation_test}"
+                f"First test: {recommended.validation_test} "
+                f"{'Avoid for now: ' + rejected if rejected else ''}"
             )
         else:
-            wedge = context.current_wedge or "No clear wedge has been selected yet."
             answer = (
-                f"Current wedge: {wedge} "
+                f"Current wedge: {story.selected_wedge} "
                 "Open Wedge Explorer to compare possible directions before committing "
                 "to a validation path."
             )
@@ -439,6 +473,19 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
                 "A clear reason helps the next step feel intentional instead of procedural."
             ),
             target_route=f"/projects/{project_id}#overview",
+            risk_level="low",
+            requires_confirmation=False,
+        ),
+        GuideActionRead(
+            id="show_idea_story",
+            type="navigate",
+            label="Show idea story",
+            description="Open the compact story from original idea to current proof.",
+            why_it_matters=(
+                "Seeing the original idea, selected wedge, rejected directions, blocker, "
+                "and next proof makes the validation path easier to trust."
+            ),
+            target_route=f"/projects/{project_id}#current-step",
             risk_level="low",
             requires_confirmation=False,
         ),
@@ -758,11 +805,13 @@ def _latest_research_sprint_id(
 def _suggested_questions(context: GuideContextRead) -> list[str]:
     default_questions = [
         "What should I do next?",
+        "How has this idea changed?",
         "Why is this blocked?",
         "Open the right form.",
         "What evidence is missing?",
         "Rewrite the thesis.",
         "Compare wedges.",
+        "What is the next proof?",
         "Draft outreach.",
         "Interpret notes.",
         "What would make this worth building?",
@@ -805,6 +854,8 @@ def _is_in_scope(message: str) -> bool:
         "action",
         "assumption",
         "blocker",
+        "become",
+        "broad",
         "build",
         "decision",
         "evidence",
@@ -827,11 +878,14 @@ def _is_in_scope(message: str) -> bool:
         "pivot",
         "proceed",
         "proof",
+        "recommend",
+        "recommended",
         "rejected",
         "research",
         "result",
         "right",
         "risk",
+        "selected",
         "source",
         "stage",
         "test",
@@ -895,6 +949,7 @@ def _support_actions(context: GuideContextRead) -> list[GuideActionRead]:
         "interpret_validation_notes",
         "explain_success_criteria",
         "prepare_decision_record",
+        "show_idea_story",
         "show_project_history",
     ]
     return [
@@ -920,6 +975,7 @@ def _canonical_action_id(action_id: str) -> str:
     return {
         "show_evidence": "show_blocker_evidence",
         "update_thesis": "rewrite_thesis_with_wedge",
+        "idea_story": "show_idea_story",
         "show_evolution": "show_project_history",
         "compare_wedges": "compare_wedge_options",
         "draft_outreach": "draft_validation_outreach",

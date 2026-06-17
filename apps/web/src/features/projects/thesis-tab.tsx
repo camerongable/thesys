@@ -343,6 +343,7 @@ function WedgeExplorer({ projectId }: { projectId: string }) {
 
   const wedges = query.data?.wedges ?? [];
   const recommended = wedges.find((wedge) => wedge.id === query.data?.recommended_wedge_id);
+  const defaultWedges = defaultWedgeOptions(wedges, query.data?.recommended_wedge_id ?? null);
 
   return (
     <DomainPanel id="wedge-explorer">
@@ -404,9 +405,9 @@ function WedgeExplorer({ projectId }: { projectId: string }) {
             </div>
           ) : null}
 
-          <div className="divide-y divide-border rounded-md border border-border">
-            {wedges.map((wedge) => (
-              <WedgeRow
+          <div className="grid gap-3">
+            {defaultWedges.map((wedge) => (
+              <WedgeFocusCard
                 disabled={actionMutation.isPending || generateMutation.isPending}
                 key={wedge.id}
                 onAction={(action) => actionMutation.mutate({ action, wedgeId: wedge.id })}
@@ -414,6 +415,34 @@ function WedgeExplorer({ projectId }: { projectId: string }) {
               />
             ))}
           </div>
+
+          {wedges.length > defaultWedges.length ? (
+            <details className="rounded-md border border-border bg-background p-3">
+              <summary className="cursor-pointer list-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold">Compare all wedges</p>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                      Inspect every generated direction, including pressure and evidence details.
+                    </p>
+                  </div>
+                  <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+                    {wedges.length} options
+                  </span>
+                </div>
+              </summary>
+              <div className="mt-4 divide-y divide-border rounded-md border border-border">
+                {wedges.map((wedge) => (
+                  <WedgeRow
+                    disabled={actionMutation.isPending || generateMutation.isPending}
+                    key={wedge.id}
+                    onAction={(action) => actionMutation.mutate({ action, wedgeId: wedge.id })}
+                    wedge={wedge}
+                  />
+                ))}
+              </div>
+            </details>
+          ) : null}
         </div>
       )}
 
@@ -434,6 +463,86 @@ function WedgeExplorer({ projectId }: { projectId: string }) {
 }
 
 type WedgeActionKind = "select" | "test" | "research" | "reject";
+
+function WedgeFocusCard({
+  disabled,
+  onAction,
+  wedge,
+}: {
+  disabled: boolean;
+  onAction: (action: WedgeActionKind) => void;
+  wedge: WedgeOption;
+}) {
+  const isRecommended = wedge.recommendation === "recommended";
+  const isAvoided = wedge.recommendation === "avoid_for_now" || wedge.recommendation === "rejected";
+  const primaryAction: WedgeActionKind = isAvoided
+    ? "reject"
+    : wedge.recommendation === "research_later"
+      ? "research"
+      : isRecommended
+        ? "test"
+        : "select";
+  return (
+    <article
+      className={[
+        "grid gap-4 rounded-md border px-3 py-4 lg:grid-cols-[minmax(0,1fr)_180px]",
+        isRecommended ? "border-success-border bg-success-muted" : "border-border bg-background",
+      ].join(" ")}
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold">{wedge.name}</h3>
+          <span className={recommendationPillClass(wedge.recommendation)}>
+            {formatRecommendation(wedge.recommendation)}
+          </span>
+        </div>
+        <dl className="mt-3 grid gap-3 text-sm">
+          <WedgeFact label="Why it might work" value={wedge.why_it_might_work} />
+          <WedgeFact label="Main risk" value={wedge.main_risk} />
+          <WedgeFact label="First test" value={wedge.validation_test} />
+        </dl>
+      </div>
+      <div className="grid content-start gap-2">
+        <Button
+          disabled={disabled || wedge.recommendation === "rejected"}
+          onClick={() => onAction(primaryAction)}
+          size="sm"
+          type="button"
+          variant={isRecommended ? "default" : "secondary"}
+        >
+          {primaryAction === "test" ? (
+            <Target className="h-4 w-4" aria-hidden="true" />
+          ) : primaryAction === "research" ? (
+            <Search className="h-4 w-4" aria-hidden="true" />
+          ) : primaryAction === "reject" ? (
+            <X className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <Check className="h-4 w-4" aria-hidden="true" />
+          )}
+          {primaryAction === "test"
+            ? "Test this wedge"
+            : primaryAction === "research"
+              ? "Research later"
+              : primaryAction === "reject"
+                ? "Avoid for now"
+                : "Select wedge"}
+        </Button>
+        {!isRecommended && wedge.recommendation !== "rejected" ? (
+          <Button
+            disabled={disabled}
+            onClick={() => onAction("select")}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            <Check className="h-4 w-4" aria-hidden="true" />
+            Select instead
+          </Button>
+        ) : null}
+      </div>
+    </article>
+  );
+}
 
 function WedgeRow({
   disabled,
@@ -509,6 +618,37 @@ function WedgeRow({
       </div>
     </article>
   );
+}
+
+export function defaultWedgeOptions(
+  wedges: WedgeOption[],
+  recommendedWedgeId: string | null,
+) {
+  const selected: WedgeOption[] = [];
+  const pushUnique = (wedge: WedgeOption | undefined) => {
+    if (!wedge || selected.some((item) => item.id === wedge.id)) {
+      return;
+    }
+    selected.push(wedge);
+  };
+
+  pushUnique(wedges.find((wedge) => wedge.id === recommendedWedgeId));
+  pushUnique(wedges.find((wedge) => wedge.recommendation === "recommended"));
+  pushUnique(
+    wedges.find((wedge) =>
+      wedge.recommendation === "avoid_for_now" || wedge.recommendation === "rejected",
+    ),
+  );
+  pushUnique(wedges.find((wedge) => wedge.recommendation === "research_later"));
+  pushUnique(wedges.find((wedge) => wedge.recommendation === "promising"));
+
+  for (const wedge of wedges) {
+    if (selected.length >= 3) {
+      break;
+    }
+    pushUnique(wedge);
+  }
+  return selected.slice(0, 3);
 }
 
 function WedgeFact({ label, value }: { label: string; value: string }) {

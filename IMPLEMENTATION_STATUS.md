@@ -2,10 +2,12 @@
 
 ## Current Phase
 
-V1 Sprint 30 implementation is complete. Thesys now treats the Guide as the
-primary action router: users open it from a bottom-right drawer, see one primary
-recommendation, get an explicit "after that" explanation, and route directly to
-the relevant form or project surface through specific action cards.
+V1 Sprint 31 implementation is complete. Thesys now surfaces a compact Idea
+Story on Current Step that connects the messy original idea to the current
+thesis, selected wedge, rejected directions, blocker, and next proof. Wedge
+Explorer defaults to the recommended/avoid/research-later storyline while
+keeping the full comparison inspectable, and the Guide can explain idea
+evolution, wedge rationale, broad-direction rejection, and the next proof.
 Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
 multi-segment workflow packs remain V2 scope.
 
@@ -1475,6 +1477,44 @@ Checks run:
   is not allowed to access `com.openai.codex`. Per the sprint request, no
   external browser QA was attempted.
 
+## V1 Sprint 31 Scope
+
+- [x] Add a derived `GET /api/projects/{project_id}/idea-story` API that
+  summarizes original idea, current thesis, selected wedge, rejected
+  directions, why the idea changed, current blocker, and next proof from
+  existing Thesis Canvas, wedge, and evolution records.
+- [x] Add a compact "How this idea has changed" section to Current Step.
+- [x] Replace the Current Step peer-field grid with a storyline that keeps
+  original idea, thesis, selected wedge, rejected direction, blocker, and next
+  proof visible together.
+- [x] Simplify Wedge Explorer's default view to show the recommended wedge, one
+  avoid-for-now/rejected direction, and one research-later/promising direction.
+- [x] Keep the full Wedge Explorer available behind "Compare all wedges."
+- [x] Extend Guide chat so it can answer idea evolution, wedge rationale,
+  rejected broad-direction, and next-proof questions.
+- [x] Add tests for Idea Story derivation and Sprint 31 Guide prompts.
+
+## V1 Sprint 31 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_thesis_canvas.py app/tests/test_guide.py`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `pnpm --filter thesys-web test`
+- [x] `docker compose config`
+- [x] `docker compose restart api web temporal-worker`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test: `POST /api/demo/seed` refreshed the guided
+  demo project and `GET /api/projects/{project_id}/idea-story` returned the
+  original idea, current thesis, selected wedge, rejected directions, blocker,
+  and next proof.
+- [ ] Browser QA in the Codex in-app browser is blocked because Computer Use
+  is not allowed to access `com.openai.codex`. Per the sprint request, no
+  external browser QA was attempted.
+
 ## Next Work
 
-V1 Sprint 30 is complete. Next work is V1 Sprint 31: Idea Growth Storyline.
+V1 Sprint 31 is complete. Next work is V1 Sprint 32: Usability Compression and Demo Polish.

@@ -110,5 +110,62 @@ def test_thesis_evolution_includes_validation_and_guide_can_explain_change(
     assert chat.status_code == 200
     body = chat.json()
     assert "The idea started as" in body["answer"]
-    assert body["recommended_action"]["id"] == "show_project_history"
-    assert any(action["id"] == "show_project_history" for action in body["action_cards"])
+    assert body["recommended_action"]["id"] == "show_idea_story"
+    assert any(action["id"] == "show_idea_story" for action in body["action_cards"])
+
+
+def test_idea_story_summarizes_growth_from_original_to_next_proof(
+    client: TestClient,
+) -> None:
+    project_id = client.post("/api/projects", json={"name": "Fitness coach assistant"}).json()[
+        "id"
+    ]
+    finalize = client.post(
+        f"/api/projects/{project_id}/intake/finalize",
+        json={
+            "raw_idea": "A broad AI platform for online fitness coaches.",
+            "answers": [],
+            "structured_intake": {
+                "project_name": "Fitness coach assistant",
+                "one_sentence_summary": (
+                    "Independent online fitness coaches need faster at-risk client triage."
+                ),
+                "target_users": ["Independent online fitness coaches"],
+                "buyer_type": "prosumer",
+                "problem_hypotheses": [
+                    "Coaches lose time reviewing check-ins across DMs and spreadsheets."
+                ],
+                "proposed_solution": "Cited weekly check-in triage for coaches.",
+                "market_category": "Fitness coaching software",
+                "business_model_guess": "Subscription",
+                "suspected_competitors": ["Trainerize", "TrueCoach"],
+                "key_uncertainties": ["Will coaches trust and pay for AI recommendations?"],
+                "clarifying_questions": [],
+            },
+        },
+    )
+    assert finalize.status_code == 200
+
+    generated = client.post(f"/api/projects/{project_id}/wedges/generate")
+    assert generated.status_code == 200
+    wedges = generated.json()["wedges"]
+    recommended = next(wedge for wedge in wedges if wedge["recommendation"] == "recommended")
+    avoid = next(wedge for wedge in wedges if wedge["recommendation"] == "avoid_for_now")
+
+    test_response = client.post(f"/api/projects/{project_id}/wedges/{recommended['id']}/test")
+    assert test_response.status_code == 200
+    reject_response = client.post(f"/api/projects/{project_id}/wedges/{avoid['id']}/reject")
+    assert reject_response.status_code == 200
+
+    story = client.get(f"/api/projects/{project_id}/idea-story")
+    assert story.status_code == 200
+    body = story.json()
+    assert body["original_idea"] == "A broad AI platform for online fitness coaches."
+    assert body["current_thesis"] == (
+        "Independent online fitness coaches need faster at-risk client triage."
+    )
+    assert body["selected_wedge"] == recommended["name"]
+    assert avoid["name"] in body["rejected_directions"]
+    assert body["current_blocker"] == recommended["main_risk"]
+    assert body["next_proof"] == recommended["validation_test"]
+    assert body["why_it_changed"]

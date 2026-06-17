@@ -108,6 +108,19 @@ export type ThesisCanvasDetail = {
   evolution: ThesisEvolutionEvent[];
 };
 
+export type IdeaStory = {
+  project_id: string;
+  original_idea: string;
+  current_thesis: string;
+  selected_wedge: string;
+  rejected_directions: string[];
+  why_it_changed: string;
+  current_blocker: string;
+  next_proof: string;
+  latest_change_title: string | null;
+  latest_change_reason: string | null;
+};
+
 export type CompetitorPressure = "low" | "medium" | "high";
 export type EvidenceStrength = "none" | "weak" | "partial" | "strong";
 export type WedgeRecommendation =
@@ -1717,6 +1730,10 @@ export function getProject(projectId: string) {
 
 export function getThesisCanvas(projectId: string) {
   return apiFetch<ThesisCanvasDetail>(`/api/projects/${projectId}/thesis-canvas`);
+}
+
+export function getIdeaStory(projectId: string) {
+  return apiFetch<IdeaStory>(`/api/projects/${projectId}/idea-story`);
 }
 
 export function updateThesisCanvas(projectId: string, input: UpdateThesisCanvasInput) {

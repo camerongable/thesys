@@ -149,6 +149,39 @@ def test_guide_chat_is_project_scoped_and_rejects_generic_questions(client: Test
     assert off_topic_body["action_cards"]
 
 
+def test_guide_explains_idea_story_wedge_and_next_proof(client: TestClient) -> None:
+    project_id = _project_with_story(client)
+
+    wedge_response = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={"message": "Why did you recommend this wedge?"},
+    )
+    assert wedge_response.status_code == 200
+    wedge_body = wedge_response.json()
+    assert "Recommended wedge" in wedge_body["answer"]
+    assert "First test" in wedge_body["answer"]
+    assert wedge_body["recommended_action"]["id"] == "compare_wedge_options"
+
+    rejected_response = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={"message": "Why did we reject the broad version?"},
+    )
+    assert rejected_response.status_code == 200
+    rejected_body = rejected_response.json()
+    assert "Rejected directions" in rejected_body["answer"]
+    assert rejected_body["recommended_action"]["id"] == "show_idea_story"
+
+    proof_response = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={"message": "What is the next proof?"},
+    )
+    assert proof_response.status_code == 200
+    proof_body = proof_response.json()
+    assert "The next proof is" in proof_body["answer"]
+    assert "current blocker" in proof_body["answer"]
+    assert any(action["id"] == "show_idea_story" for action in proof_body["action_cards"])
+
+
 def _guide_context(client: TestClient, project_id: str) -> dict:
     response = client.get(f"/api/projects/{project_id}/guide/context")
     assert response.status_code == 200
@@ -159,3 +192,45 @@ def _guide_recommend(client: TestClient, project_id: str) -> dict:
     response = client.post(f"/api/projects/{project_id}/guide/recommend")
     assert response.status_code == 200
     return response.json()
+
+
+def _project_with_story(client: TestClient) -> str:
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Story guide idea"},
+    ).json()["id"]
+    finalize = client.post(
+        f"/api/projects/{project_id}/intake/finalize",
+        json={
+            "raw_idea": "A broad AI platform for independent fitness coaches.",
+            "answers": [],
+            "structured_intake": {
+                "project_name": "Story guide idea",
+                "one_sentence_summary": (
+                    "Independent online fitness coaches need cited weekly check-in triage."
+                ),
+                "target_users": ["Independent online fitness coaches"],
+                "buyer_type": "prosumer",
+                "problem_hypotheses": [
+                    "Coaches lose time finding which clients need attention first."
+                ],
+                "proposed_solution": "Cited weekly check-in triage for coaches.",
+                "market_category": "Fitness coaching software",
+                "business_model_guess": "Subscription",
+                "suspected_competitors": ["Trainerize", "TrueCoach"],
+                "key_uncertainties": ["Will coaches trust and pay for AI recommendations?"],
+                "clarifying_questions": [],
+            },
+        },
+    )
+    assert finalize.status_code == 200
+    generated = client.post(f"/api/projects/{project_id}/wedges/generate")
+    assert generated.status_code == 200
+    wedges = generated.json()["wedges"]
+    recommended = next(wedge for wedge in wedges if wedge["recommendation"] == "recommended")
+    avoid = next(wedge for wedge in wedges if wedge["recommendation"] == "avoid_for_now")
+    test_response = client.post(f"/api/projects/{project_id}/wedges/{recommended['id']}/test")
+    assert test_response.status_code == 200
+    reject_response = client.post(f"/api/projects/{project_id}/wedges/{avoid['id']}/reject")
+    assert reject_response.status_code == 200
+    return project_id
