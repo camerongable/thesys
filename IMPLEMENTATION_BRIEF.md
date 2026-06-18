@@ -11225,3 +11225,290 @@ Where can I inspect the reasoning?
 The desired user reaction:
 
 > I know exactly what to do next, and I can inspect the supporting evidence when I need it.
+
+---
+
+# V1 Sprints 37-40: AI Engineering Upgrade Track
+
+## Goal
+
+Sprints 33-36 simplify the product experience. The next upgrade track should make the underlying AI system more technically impressive and more production-like.
+
+This project is currently a portfolio project, so these sprints should explicitly showcase AI engineering depth:
+
+- production embedding architecture
+- SQL-level vector search with pgvector
+- higher-quality retrieval and reranking
+- LLM-grounded conversational guidance
+- governed tool use
+- external research connectors
+- multimodal/document evidence ingestion
+- observability, cost control, and eval coverage
+
+These sprints should preserve the existing product principle:
+
+```text
+The model can reason, retrieve, synthesize, and propose.
+The user approves important strategic state changes.
+```
+
+Do not weaken governance to make the AI feel more autonomous. Improve autonomy inside bounded, inspectable workflows.
+
+---
+
+# V1 Sprint 37: Production Embeddings and pgvector Retrieval Path
+
+## Goal
+
+Replace the current deterministic hash-only retrieval implementation with a production-ready embedding architecture while preserving deterministic local mode for tests and offline demos.
+
+This sprint should make retrieval credible to an AI engineering reviewer.
+
+## Scope
+
+- Add an embedding provider abstraction with at least:
+  - deterministic hash embeddings for tests/local fallback
+  - provider-backed embeddings for live mode
+  - embedding model name, dimension, and version metadata
+- Add configuration for embedding provider selection:
+  - `EMBEDDING_PROVIDER`
+  - `EMBEDDING_MODEL`
+  - `EMBEDDING_DIMENSION`
+  - provider timeout and retry settings
+- Add migration support for embedding model/version tracking on chunks.
+- Add a chunk re-embedding/backfill job:
+  - dry-run mode
+  - project-scoped mode
+  - all-workspace mode for local/demo use
+  - clear progress and failure reporting
+- Move primary vector retrieval into SQL using pgvector operators instead of loading all candidate vectors into Python.
+- Add pgvector index support:
+  - HNSW by default when available
+  - IVFFlat fallback if needed
+  - documented local migration path
+- Preserve metadata filtering by:
+  - project
+  - source type
+  - source freshness
+  - competitor
+  - assumption
+  - research sprint
+- Keep deterministic Python scoring as a fallback path only, not the default production retrieval path.
+- Add retrieval diagnostics to the API:
+  - selected embedding provider
+  - embedding model
+  - index availability
+  - candidate count
+  - query latency
+  - fallback path used or not used
+
+## Acceptance Criteria
+
+- Live mode can embed new chunks with a provider-backed model.
+- Existing deterministic tests still pass without provider credentials.
+- Retrieval uses SQL-level pgvector nearest-neighbor search by default.
+- Metadata filters are applied before or during vector ranking, not only after loading all chunks.
+- The app can re-embed existing evidence for a project.
+- Retrieval responses include embedding model/version metadata for traceability.
+- README and `.env.example` document deterministic and live embedding modes.
+- Eval output reports retrieval latency and whether production vector search was used.
+
+---
+
+# V1 Sprint 38: Retrieval Quality, Reranking, and Context Assembly
+
+## Goal
+
+Improve answer quality by turning retrieval from a simple hybrid scorer into a multi-stage retrieval pipeline.
+
+This sprint should demonstrate practical RAG engineering: query understanding, retrieval fusion, reranking, context budgeting, citation preservation, and evals.
+
+## Scope
+
+- Add query planning for strategic questions:
+  - classify query intent
+  - extract target entities
+  - identify needed evidence types
+  - optionally decompose broad questions into subqueries
+- Upgrade hybrid retrieval:
+  - vector retrieval
+  - Postgres full-text keyword retrieval
+  - metadata filters
+  - recency/freshness boosts
+  - source credibility boosts
+- Add reranking:
+  - provider-backed reranker if configured
+  - local/cross-encoder-compatible adapter as a future extension point
+  - deterministic fallback reranker for tests
+- Add context assembly:
+  - deduplicate near-identical chunks
+  - diversify by source
+  - enforce token budgets
+  - preserve source IDs and chunk IDs
+  - avoid stuffing weak evidence into synthesis prompts
+- Add retrieval eval cases:
+  - expected source coverage
+  - expected competitor coverage
+  - expected assumption coverage
+  - irrelevant-source rejection
+  - citation-support checks
+- Add a retrieval quality report to the existing eval flow:
+  - recall proxy
+  - precision proxy
+  - citation coverage
+  - unsupported claim count
+  - average retrieval latency
+  - reranker usage
+  - context token count
+
+## Acceptance Criteria
+
+- Research memos and opportunity briefs use the new retrieval pipeline.
+- Broad strategic questions can be decomposed into multiple retrieval calls.
+- Reranking can be enabled or disabled by config.
+- Prompt context is assembled through a reusable context builder.
+- Generated artifacts preserve citation links after reranking and context compression.
+- Eval output makes retrieval quality visible, not just generation quality.
+- The UI or workflow trace shows the retrieval strategy used for a research sprint.
+
+---
+
+# V1 Sprint 39: LLM-Grounded Ask Thesys
+
+## Goal
+
+Upgrade Ask Thesys from a deterministic guide into a grounded conversational AI guide while keeping its current product discipline.
+
+Ask Thesys should not become a generic chatbot. It should answer questions using project memory, retrieved evidence, and governed tools, then propose next actions when useful.
+
+## Scope
+
+- Keep the existing guide intent layer as a guardrail:
+  - in-scope classification
+  - out-of-scope refusal
+  - action-card routing
+  - deterministic fallback
+- Add an LLM-grounded guide response workflow:
+  - classify user intent
+  - retrieve project context
+  - retrieve supporting evidence
+  - call read-only tools where appropriate
+  - generate a concise answer with citations
+  - generate proposed action cards
+- Use structured response schemas for guide answers:
+  - answer text
+  - cited evidence IDs
+  - assumptions referenced
+  - suggested actions
+  - confidence level
+  - unsupported or missing evidence
+- Add strict safety boundaries:
+  - no state mutation directly from chat
+  - proposed changes must go through existing proposal/approval tools
+  - retrieved content remains untrusted
+  - project-scope enforcement on every tool call
+- Add conversation memory only as bounded session context:
+  - recent turns
+  - active project
+  - active workflow step
+  - no unbounded transcript stuffing
+- Add streaming response support if it can be implemented without destabilizing the existing guide panel.
+- Add guide-specific evals:
+  - answer groundedness
+  - citation validity
+  - refusal behavior
+  - action-card relevance
+  - no unauthorized state mutation
+
+## Acceptance Criteria
+
+- Ask Thesys can answer project-specific questions using citations.
+- Ask Thesys can explain why the current recommendation exists.
+- Ask Thesys can compare wedges, assumptions, or validation results using project evidence.
+- Ask Thesys can propose a research sprint, validation plan, memory update, or decision without applying it directly.
+- Out-of-scope questions still receive a bounded response.
+- The deterministic guide path remains available when LLM mode is disabled.
+- Guide interactions are recorded as AI runs/steps with cost, latency, model, and trace metadata.
+
+---
+
+# V1 Sprint 40: External Research Connectors and Multimodal Evidence
+
+## Goal
+
+Make source discovery and evidence ingestion more realistic by adding governed external research connectors and richer document/media parsing.
+
+This sprint should close two current portfolio gaps:
+
+- source discovery currently proposes candidate URLs but does not perform real search
+- evidence ingestion is mostly text/PDF oriented and does not demonstrate multimodal AI/document intelligence
+
+## Scope
+
+- Add an external search connector boundary:
+  - provider adapter interface
+  - search query schema
+  - result normalization
+  - per-provider rate limit settings
+  - source provenance metadata
+- Support at least one search provider in live mode.
+- Keep deterministic fake search results for tests and offline demos.
+- Add governed search behavior:
+  - research plan approval before broad search
+  - project-scope logging
+  - query and result redaction
+  - source approval before ingestion when risk is medium/high
+- Upgrade source discovery to use real search when enabled:
+  - competitor searches
+  - substitute behavior searches
+  - pricing/review/forum searches
+  - market trend searches
+- Add richer evidence ingestion support:
+  - screenshots or page snapshots
+  - OCR-ready document pipeline
+  - table extraction extension point
+  - image/document metadata extraction
+  - citation links back to extracted page/section/snippet
+- Add clear UI states for:
+  - discovered but not ingested
+  - approved for ingestion
+  - ingested and embedded
+  - rejected
+- Add eval cases for external research:
+  - search result relevance
+  - source diversity
+  - duplicate detection
+  - provenance retention
+  - prompt-injection handling from fetched pages
+
+## Acceptance Criteria
+
+- A research sprint can perform real external search when enabled.
+- External search is disabled by default in deterministic local mode.
+- Search results are logged with provider, query, rank, URL, title, snippet, and retrieval timestamp.
+- User approval gates are preserved before broad ingestion or strategic memory updates.
+- Ingested external sources become normal evidence sources with chunks, embeddings, provenance, and citations.
+- The system can extract usable text from at least one richer document/media path beyond plain text and basic PDF text extraction.
+- Eval output reports search relevance, source diversity, and provenance coverage.
+
+---
+
+## AI Engineering Upgrade Track Definition of Done
+
+After Sprint 40, Thesys should demonstrate a stronger production AI architecture:
+
+```text
+real embeddings
+SQL-level vector retrieval
+multi-stage RAG
+reranking
+context budgeting
+LLM-grounded guide answers
+governed external research
+richer evidence ingestion
+observable cost, quality, and safety behavior
+```
+
+The desired reviewer reaction:
+
+> This is not just an AI app demo. This shows the engineering patterns behind production RAG, agent workflows, evaluation, governance, and AI product UX.

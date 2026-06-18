@@ -4,7 +4,7 @@
 
 Thesys helps founders and builders turn rough business ideas into structured validation decisions. Given a rough idea, the system can run an autonomous research sprint, discover sources and competitors, ingest evidence, generate a cited research memo, identify risky assumptions, create validation plans, and guide build / pivot / pause / kill decisions.
 
-This project demonstrates production-style AI software engineering patterns: **agentic RAG**, **retrieval-grounded generation**, **persistent project memory**, **human-in-the-loop workflows**, **source traceability**, and **decision-oriented AI UX**.
+This is currently a **portfolio project**, not a launched commercial product. It is intentionally built to demonstrate production-style AI software engineering patterns: **agentic RAG**, **retrieval-grounded generation**, **structured LLM outputs**, **persistent project memory**, **human-in-the-loop workflows**, **source traceability**, **AI observability**, and **decision-oriented AI UX**.
 
 ---
 
@@ -195,23 +195,25 @@ Decisions can include:
 
 ---
 
-## AI Engineering Concepts Demonstrated
+## AI Concepts Demonstrated
 
-This project demonstrates several modern AI engineering patterns:
+Thesys is built to show the difference between a thin LLM wrapper and a durable AI application. The AI layer is visible in the architecture, data model, workflow records, governance model, and UX.
 
-- Agentic RAG workflows
-- Retrieval-grounded generation
-- Source discovery and evidence ingestion
-- Competitor and substitute discovery
-- Persistent memory beyond chat history
-- Human-in-the-loop approval
-- Cited findings and open-question tracking
-- Assumption and risk scoring
-- Validation experiment generation
-- Decision logging and recommendation history
-- Stage-aware AI product UX
-- Multi-step workflow orchestration
-- Evidence traceability
+| AI concept | How it is demonstrated in this repo | Technologies and libraries |
+|---|---|---|
+| Agentic RAG | Autonomous research sprints plan work, call bounded tools, retrieve evidence, detect gaps, synthesize a memo, critique citations, and wait for human approval before updating project memory. | LangGraph, FastAPI, SQLAlchemy, Temporal, internal tool registry |
+| Retrieval-grounded generation | Opportunity briefs, competitor analysis, research memos, assumptions, and validation plans are generated from retrieved project evidence rather than prompt-only model knowledge. | PostgreSQL, pgvector, deterministic embedding service, retrieval service, Pydantic schemas |
+| Evidence ingestion and chunking | URLs, notes, discovered source snapshots, uploads, and PDFs are normalized into evidence sources and chunks with metadata and citation IDs. | httpx, pypdf, boto3, MinIO/S3-compatible storage, SQLAlchemy |
+| Hybrid retrieval | Project-scoped retrieval combines semantic similarity, keyword overlap, and metadata filters for source type, freshness, competitors, assumptions, and research context. | pgvector, PostgreSQL, custom retrieval service |
+| Structured LLM outputs | LLM responses are requested as JSON, validated against typed schemas, repaired when possible, and persisted as structured project objects. | Pydantic v2, LiteLLM-compatible chat completions, structured output helper |
+| Model gateway and local fallback | Model calls go through a single gateway that can route to local Ollama, OpenAI, or Gemini models, while deterministic stub mode keeps local demos and tests repeatable. | LiteLLM Proxy, httpx, Ollama, OpenAI-compatible APIs, Gemini |
+| Persistent AI memory | The product stores thesis versions, evidence, artifacts, claims, assumptions, validation missions, decisions, AI runs, AI steps, tool calls, and approval requests instead of relying on chat history. | PostgreSQL, SQLAlchemy, Alembic |
+| Human-in-the-loop agents | AI workflows can propose research plans, memory updates, validation plans, and decisions, but important state changes require approval. | Tool registry, approval requests, audit events, role-based project permissions |
+| Prompt-injection boundaries | Retrieved content is treated as untrusted evidence, wrapped before synthesis, and prevented from acting as model instructions. | Shared prompt rules, cited synthesis prompts, secret redaction utilities |
+| AI observability | AI runs and steps track model, prompt version, latency, token usage, cost, trace IDs, failures, and generated artifact provenance. | LangSmith, AI run/step tables, LiteLLM cost headers, eval service |
+| Evaluation | Research sprint evals check citation coverage, unsupported claims, agentic traceability, gap detection, cost visibility, and secret redaction. | Custom eval scripts, JSON eval cases, pytest-compatible service checks |
+| Durable orchestration | Long-running research sprints can survive retries, approval waits, and worker restarts through a durable workflow layer. | Temporal, Temporal Python SDK, FastAPI service layer |
+| AI product UX | The UI exposes AI reasoning as current verdicts, next actions, evidence, assumptions, validation missions, decisions, traces, and Ask Thesys guidance. | Next.js, React, TanStack Query, project guide service |
 
 ---
 
@@ -421,11 +423,13 @@ Interview 5–10 independent coaches and test willingness to pay for automated c
 
 ### AI / Orchestration
 
-- LangGraph-style workflow orchestration
-- LiteLLM-style model abstraction
-- LLM provider APIs
-- Embeddings
-- Vector retrieval
+- LangGraph stateful workflow orchestration
+- LiteLLM Proxy model gateway
+- Pydantic structured outputs
+- LangSmith tracing
+- Temporal durable workflows
+- pgvector-backed evidence storage
+- deterministic local embeddings today, provider-backed embeddings planned
 
 ### Infrastructure
 
@@ -444,7 +448,7 @@ Interview 5–10 independent coaches and test willingness to pay for automated c
 - Docker
 - Docker Compose
 - PostgreSQL with pgvector support
-- LLM provider API key
+- Optional LLM provider API key for live mode
 
 ---
 
@@ -472,15 +476,18 @@ FRONTEND_URL=http://localhost:3000
 BACKEND_URL=http://localhost:8000
 
 # Database
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/thesys
+DATABASE_URL=postgresql+psycopg://thesys:thesys@localhost:5432/thesys
 
 # LLM / Model Gateway
-OPENAI_API_KEY=your_key_here
-ANTHROPIC_API_KEY=your_key_here
-LITELLM_API_KEY=your_key_here
+LLM_STUB_MODE=always
+LITELLM_MODEL=dev-local-qwen
+LITELLM_API_KEY=sk-local-dev
+OPENAI_API_KEY=
+GEMINI_API_KEY=
+ANTHROPIC_API_KEY=
 
 # Embeddings
-EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_MODEL=deterministic-hash-embedding-1536
 
 # Optional LangSmith observability
 LANGSMITH_TRACING=false
@@ -671,6 +678,9 @@ Implemented or demonstrated:
 
 Planned future work:
 
+- production embedding providers and SQL-level pgvector nearest-neighbor retrieval
+- reranking, query expansion, context compression, and retrieval-quality evals
+- LLM-grounded Ask Thesys with citations and tool-governed proposals
 - recurring market monitoring
 - team collaboration
 - multi-project portfolio dashboard
