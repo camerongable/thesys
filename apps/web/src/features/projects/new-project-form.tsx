@@ -22,6 +22,10 @@ import {
 
 const RAW_IDEA_MAX_LENGTH = 10000;
 type CreateLandingTarget = "current" | "research" | "wedge";
+type CreateProjectMutationInput = {
+  continueWithAssumptions?: boolean;
+  target: CreateLandingTarget;
+};
 
 export function NewProjectForm() {
   const router = useRouter();
@@ -57,18 +61,32 @@ export function NewProjectForm() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async (target: CreateLandingTarget) => {
-      if (!preview) {
+    mutationFn: async ({ continueWithAssumptions, target }: CreateProjectMutationInput) => {
+      let previewForCreate = preview;
+      if (!previewForCreate) {
         throw new Error("Shape the idea before creating the investigation.");
       }
+      if (!previewForCreate.ready_to_create && continueWithAssumptions) {
+        previewForCreate = await previewInvestigation({
+          raw_idea: trimmedRawIdea,
+          answers: filledAnswers(answers),
+          continue_with_assumptions: true,
+          mode_preference: selectedMode,
+        });
+        setPreview(previewForCreate);
+        setSelectedMode(previewForCreate.recommended_mode.mode);
+      }
+      if (!previewForCreate.ready_to_create) {
+        throw new Error("Answer the missing pieces or continue with assumptions before creating.");
+      }
       const project = await createProject({
-        name: preview.structured_intake.project_name,
-        short_description: preview.structured_intake.one_sentence_summary,
-        initial_thesis: preview.structured_intake.one_sentence_summary,
+        name: previewForCreate.structured_intake.project_name,
+        short_description: previewForCreate.structured_intake.one_sentence_summary,
+        initial_thesis: previewForCreate.structured_intake.one_sentence_summary,
       });
       await finalizeProjectIntake(project.id, {
-        structured_intake: preview.structured_intake,
-        raw_idea: preview.raw_idea,
+        structured_intake: previewForCreate.structured_intake,
+        raw_idea: previewForCreate.raw_idea,
         answers: filledAnswers(answers),
       });
       return { project, target };
@@ -81,7 +99,8 @@ export function NewProjectForm() {
 
   const pending = previewMutation.isPending || createMutation.isPending;
   const canPreview = trimmedRawIdea.length > 0 && !rawIdeaError && !pending;
-  const canCreate = Boolean(preview?.ready_to_create) && !pending;
+  const canContinue = Boolean(preview) && !pending;
+  const canCreateDeepLink = Boolean(preview?.ready_to_create) && !pending;
 
   function useSampleIdea() {
     previewMutation.reset();
@@ -94,7 +113,7 @@ export function NewProjectForm() {
     );
   }
 
-  function shapeIdea(options?: { continueWithAssumptions?: boolean }) {
+  function shapeIdea() {
     setSubmitted(true);
     if (!canPreview && trimmedRawIdea.length === 0) {
       return;
@@ -102,15 +121,18 @@ export function NewProjectForm() {
     previewMutation.mutate({
       raw_idea: trimmedRawIdea,
       answers: filledAnswers(answers),
-      continue_with_assumptions: options?.continueWithAssumptions ?? false,
+      continue_with_assumptions: false,
       mode_preference: selectedMode,
     });
   }
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (preview?.ready_to_create) {
-      createMutation.mutate("current");
+    if (preview) {
+      createMutation.mutate({
+        continueWithAssumptions: !preview.ready_to_create,
+        target: "current",
+      });
       return;
     }
     shapeIdea();
@@ -120,7 +142,7 @@ export function NewProjectForm() {
 
   return (
     <main className="min-h-screen px-4 py-5 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-6xl">
+      <div className="mx-auto max-w-3xl">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <Link
             className="-ml-2 inline-flex min-h-11 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
@@ -137,7 +159,7 @@ export function NewProjectForm() {
           </div>
         </div>
 
-        <section className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <section className="mt-6">
           <div className="min-w-0">
             <header className="border-b border-border pb-5">
               <p className="text-sm text-muted-foreground">New investigation</p>
@@ -152,14 +174,14 @@ export function NewProjectForm() {
                 <Button onClick={useSampleIdea} type="button" variant="secondary">
                   Use sample
                 </Button>
-                <Button disabled={!canPreview && !canCreate} form="new-project-form" type="submit">
-                  {preview?.ready_to_create ? "Create" : "Shape"}
+                <Button disabled={!canPreview && !canContinue} form="new-project-form" type="submit">
+                  {preview ? "Continue" : "Shape"}
                 </Button>
               </div>
             </header>
 
             <form
-              className="mt-6 space-y-5 rounded-lg border border-border bg-card p-5"
+              className="mt-6 space-y-5 border-y border-border py-5"
               id="new-project-form"
               onSubmit={onSubmit}
             >
@@ -209,7 +231,7 @@ export function NewProjectForm() {
                     </p>
                   </div>
                   <button
-                    className="inline-flex min-h-11 w-fit items-center justify-center rounded-md border border-border bg-card px-3 py-2 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus:ring-focus sm:min-h-9 sm:py-1.5"
+                    className="inline-flex min-h-11 w-fit items-center justify-center rounded-md border border-border bg-surface px-3 py-2 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus:ring-focus sm:min-h-9 sm:py-1.5"
                     onClick={useSampleIdea}
                     type="button"
                   >
@@ -267,14 +289,6 @@ export function NewProjectForm() {
                     >
                       Answer questions
                     </Button>
-                    <Button
-                      disabled={pending}
-                      onClick={() => shapeIdea({ continueWithAssumptions: true })}
-                      type="button"
-                      variant="secondary"
-                    >
-                      Continue with assumptions
-                    </Button>
                   </div>
                 </section>
               ) : null}
@@ -287,7 +301,7 @@ export function NewProjectForm() {
                   <h2 id="thesis-title" className="mt-1 text-lg font-semibold">
                     {preview.structured_intake.project_name}
                   </h2>
-                  <div className="mt-4 grid gap-3">
+                  <div className="mt-4 divide-y divide-border border-y border-border">
                     <DraftRow label="Target user" value={preview.thesis_draft.target_user} />
                     <DraftRow label="Problem" value={preview.thesis_draft.problem} />
                     <DraftRow label="Current workaround" value={preview.thesis_draft.current_workaround} />
@@ -296,7 +310,7 @@ export function NewProjectForm() {
                     <DraftRow label="First proof" value={preview.thesis_draft.proof_needed} />
                   </div>
                   {preview.assumptions_made.length > 0 ? (
-                    <div className="mt-4 rounded-md border border-warning-border bg-warning-muted p-3">
+                    <div className="mt-4 border border-warning-border bg-warning-muted px-3 py-2">
                       <h3 className="text-sm font-semibold text-warning-foreground">
                         Continuing with assumptions
                       </h3>
@@ -349,7 +363,14 @@ export function NewProjectForm() {
                     <Button
                       className="w-fit border-danger-border text-danger-foreground hover:bg-danger-muted"
                       disabled={pending}
-                      onClick={() => (preview ? createMutation.mutate("current") : shapeIdea())}
+                      onClick={() =>
+                        preview
+                          ? createMutation.mutate({
+                              continueWithAssumptions: !preview.ready_to_create,
+                              target: "current",
+                            })
+                          : shapeIdea()
+                      }
                       size="sm"
                       type="button"
                       variant="secondary"
@@ -361,41 +382,70 @@ export function NewProjectForm() {
                 />
               ) : null}
 
-              <div className="flex flex-col gap-3 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs leading-5 text-muted-foreground">
+              <div className="flex flex-col gap-3 border-t border-border pt-5">
+                <p className="max-w-[65ch] text-xs leading-5 text-muted-foreground">
                   {preview?.ready_to_create
                     ? "Choose where to start. The project opens on a focused Current Step unless you pick a deeper path."
-                    : preview?.next_action_description ??
-                      "Thesys will draft the thesis before anything is saved to project memory."}
+                    : preview
+                      ? "Continue to Current Step with the open questions preserved as assumptions, or answer the missing pieces first."
+                    : "Thesys will draft the thesis before anything is saved to project memory."}
                 </p>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  {!preview?.ready_to_create ? (
-                    <Button disabled={!canPreview} type="submit" variant={preview ? "secondary" : "default"}>
-                      <FileSearch className="h-4 w-4" aria-hidden="true" />
-                      {previewMutation.isPending ? "Shaping idea..." : preview ? "Refresh thesis" : "Shape idea"}
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                  {!preview ? (
+                    <Button
+                      className="w-full whitespace-nowrap sm:w-auto"
+                      disabled={!canPreview}
+                      type="submit"
+                    >
+                      <FileSearch className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      {previewMutation.isPending ? "Shaping idea..." : "Shape idea"}
                     </Button>
                   ) : (
                     <>
-                      <Button disabled={!canCreate} onClick={() => createMutation.mutate("current")} type="button">
-                        <Save className="h-4 w-4" aria-hidden="true" />
+                      <Button
+                        className="w-full whitespace-nowrap sm:w-auto"
+                        disabled={!canContinue}
+                        onClick={() =>
+                          createMutation.mutate({
+                            continueWithAssumptions: !preview.ready_to_create,
+                            target: "current",
+                          })
+                        }
+                        type="button"
+                      >
+                        <Save className="h-4 w-4 shrink-0" aria-hidden="true" />
                         {createMutation.isPending ? "Creating..." : "Continue to Current Step"}
                       </Button>
+                      {!preview.ready_to_create ? (
+                        <Button
+                          className="w-full whitespace-nowrap sm:w-auto"
+                          disabled={!canPreview}
+                          onClick={() => shapeIdea()}
+                          type="button"
+                          variant="secondary"
+                        >
+                          <FileSearch className="h-4 w-4 shrink-0" aria-hidden="true" />
+                          Refresh thesis
+                        </Button>
+                      ) : null}
                       <Button
-                        disabled={!canCreate}
-                        onClick={() => createMutation.mutate("research")}
+                        className="w-full whitespace-nowrap sm:w-auto"
+                        disabled={!canCreateDeepLink}
+                        onClick={() => createMutation.mutate({ target: "research" })}
                         type="button"
                         variant="secondary"
                       >
-                        <FileSearch className="h-4 w-4" aria-hidden="true" />
+                        <FileSearch className="h-4 w-4 shrink-0" aria-hidden="true" />
                         Run research
                       </Button>
                       <Button
-                        disabled={!canCreate}
-                        onClick={() => createMutation.mutate("wedge")}
+                        className="w-full whitespace-nowrap sm:w-auto"
+                        disabled={!canCreateDeepLink}
+                        onClick={() => createMutation.mutate({ target: "wedge" })}
                         type="button"
                         variant="secondary"
                       >
-                        <GitBranch className="h-4 w-4" aria-hidden="true" />
+                        <GitBranch className="h-4 w-4 shrink-0" aria-hidden="true" />
                         Compare wedges
                       </Button>
                     </>
@@ -404,28 +454,6 @@ export function NewProjectForm() {
               </div>
             </form>
           </div>
-
-          <aside className="space-y-4 lg:sticky lg:top-5 lg:self-start">
-            <div className="rounded-lg border border-border bg-card p-4">
-              <div className="flex items-center gap-2">
-                <FileSearch className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h2 className="text-sm font-semibold">How this starts</h2>
-              </div>
-              <div className="mt-4 space-y-4">
-                <ProcessStep title="Shape the idea" text="Turn messy notes into a first testable thesis." />
-                <ProcessStep title="Clarify only gaps" text="Answer 2-4 useful questions, or skip and keep assumptions visible." />
-                <ProcessStep title="Pick a path" text="Choose quick orientation, evidence review, or validation sprint." />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border bg-card p-4">
-              <h2 className="text-sm font-semibold">You do not need all the answers.</h2>
-              <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                Unknowns are part of the workflow. Continue with assumptions when the idea is
-                still early; Thesys will keep those assumptions visible in the project.
-              </p>
-            </div>
-          </aside>
         </section>
       </div>
     </main>
@@ -458,7 +486,7 @@ function QuestionInput({
 
 function DraftRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-border bg-muted/30 p-3">
+    <div className="p-3">
       <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
       <p className="mt-1 text-sm leading-6 text-foreground">{value}</p>
     </div>
@@ -567,18 +595,6 @@ function FieldLimit({
     >
       {formatNumber(current)} of {formatNumber(max)} characters
     </p>
-  );
-}
-
-function ProcessStep({ text, title }: { text: string; title: string }) {
-  return (
-    <div className="flex gap-3">
-      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
-      <div className="min-w-0">
-        <div className="text-sm font-medium">{title}</div>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">{text}</p>
-      </div>
-    </div>
   );
 }
 

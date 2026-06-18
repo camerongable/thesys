@@ -338,11 +338,20 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
           ) : sources.length === 0 ? (
             <div className="mt-4 border-t border-dashed border-border pt-4">
               <h3 className="text-sm font-semibold">No sources yet.</h3>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Evidence keeps this from becoming generic AI advice. Plan an evidence review
-                or add competitor pages, customer notes, market research, reviews, forum
-                threads, or interview notes.
-              </p>
+              <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+                <p>
+                  <span className="font-medium text-foreground">Missing:</span> source material
+                  for the current idea.
+                </p>
+                <p>
+                  <span className="font-medium text-foreground">Why it matters:</span> evidence
+                  keeps the recommendation grounded instead of turning into generic AI advice.
+                </p>
+                <p>
+                  <span className="font-medium text-foreground">Next:</span> add a URL, upload a
+                  file, paste notes, or plan an evidence review.
+                </p>
+              </div>
               <Button
                 className="mt-3"
                 onClick={openAddEvidence}

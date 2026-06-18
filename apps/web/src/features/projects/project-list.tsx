@@ -10,7 +10,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { AiModeIndicator } from "@/features/ai/ai-mode-indicator";
 import { filterHomepageProjects, isDisposableProject } from "@/features/projects/project-list-utils";
-import { getMe, getProjectOverview, listProjects, seedDemoProject } from "@/lib/api";
+import { getProjectOverview, listProjects, seedDemoProject } from "@/lib/api";
 
 type ProjectOverviewResult = Awaited<ReturnType<typeof getProjectOverview>>;
 type ProjectListItem = Awaited<ReturnType<typeof listProjects>>[number];
@@ -27,7 +27,6 @@ export function ProjectList() {
   const [sortMode, setSortMode] = useState<QueueSortMode>("updated");
   const [compactRows, setCompactRows] = useState(false);
   const [showTestProjects, setShowTestProjects] = useState(false);
-  const meQuery = useQuery({ queryKey: ["me"], queryFn: getMe });
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: listProjects });
   const seedMutation = useMutation({
     mutationFn: seedDemoProject,
@@ -53,7 +52,11 @@ export function ProjectList() {
       }
       if (event.key === "/") {
         event.preventDefault();
-        document.getElementById("project-search")?.focus();
+        const filterPanel = document.getElementById("project-filter-panel") as HTMLDetailsElement | null;
+        if (filterPanel && !filterPanel.open) {
+          filterPanel.open = true;
+        }
+        requestAnimationFrame(() => document.getElementById("project-search")?.focus());
       } else if (event.key.toLowerCase() === "n") {
         event.preventDefault();
         router.push("/projects/new");
@@ -100,13 +103,10 @@ export function ProjectList() {
       <div className="mx-auto min-h-screen w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
         <header className="flex flex-col gap-5 border-b border-border pb-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <p className="text-sm text-muted-foreground">
-              {meQuery.data?.workspace.name ?? "Local workspace"}
-            </p>
-            <h1 className="mt-2 max-w-[68ch] text-2xl font-semibold tracking-normal sm:text-3xl">
+            <h1 className="max-w-[52ch] text-2xl font-semibold tracking-normal sm:text-3xl">
               Turn a rough idea into the next validation test.
             </h1>
-            <p className="mt-3 max-w-[68ch] text-sm leading-6 text-muted-foreground">
+            <p className="mt-3 max-w-[62ch] text-sm leading-6 text-muted-foreground">
               Thesys shapes the idea, finds the wedge, identifies the biggest unknown,
               and tells you what proof to run next.
             </p>
@@ -123,12 +123,31 @@ export function ProjectList() {
               <FileSearch className="h-4 w-4" aria-hidden="true" />
               Start investigation
             </Link>
+            <Button
+              className="col-span-2 w-full shrink-0 whitespace-nowrap sm:w-auto"
+              disabled={seedMutation.isPending}
+              onClick={() => seedMutation.mutate()}
+              type="button"
+              variant="secondary"
+            >
+              <Database className="h-4 w-4" aria-hidden="true" />
+              {seedMutation.isPending ? "Loading demo..." : "Load guided demo"}
+            </Button>
           </div>
         </header>
+        {seedMutation.error ? (
+          <div className="mt-4">
+            <ErrorNotice
+              actionLabel="Retry demo"
+              message={(seedMutation.error as Error).message}
+              onAction={() => seedMutation.mutate()}
+            />
+          </div>
+        ) : null}
 
-        <section className="grid gap-5 py-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <section className="py-6">
           <div className="min-w-0">
-            <div className="rounded-lg border border-border bg-card">
+            <div className="border-y border-border">
               <div className="flex flex-col gap-4 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h2 className="text-base font-semibold">Ideas in progress</h2>
@@ -176,10 +195,7 @@ export function ProjectList() {
               ) : projects.length === 0 ? (
                 <EmptyProjectQueue onSeed={() => seedMutation.mutate()} pending={seedMutation.isPending} />
               ) : homepageRows.length === 0 ? (
-                <EmptyHiddenQueue
-                  hiddenCount={hiddenTestProjectCount}
-                  onShow={() => setShowTestProjects(true)}
-                />
+                <EmptyHiddenQueue hiddenCount={hiddenTestProjectCount} />
               ) : filteredRows.length === 0 ? (
                 <EmptyFilteredQueue />
               ) : (
@@ -197,52 +213,6 @@ export function ProjectList() {
               )}
             </div>
           </div>
-
-          <aside className="space-y-4 lg:sticky lg:top-5 lg:self-start">
-            <div className="rounded-lg border border-border bg-card p-4">
-              <div className="flex items-center gap-2">
-                <Search className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h2 className="text-sm font-semibold">Start an investigation</h2>
-              </div>
-              <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                Add a rough idea. Thesys will ask for missing context before it plans research.
-              </p>
-              <Link className={buttonVariants({ className: "mt-4 w-full" })} href="/projects/new">
-                <FileSearch className="h-4 w-4" aria-hidden="true" />
-                Start investigation
-              </Link>
-            </div>
-
-            <div className="rounded-lg border border-border bg-card p-4">
-              <div className="flex items-center gap-2">
-                <Database className="h-4 w-4 text-primary" aria-hidden="true" />
-                <h2 className="text-sm font-semibold">Guided demo</h2>
-              </div>
-              <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                Load the fitness coach scenario to walk through the full path: messy idea,
-                thesis, wedge choice, validation mission, interpreted result, and Decision Coach.
-              </p>
-              <Button
-                className="mt-4 w-full"
-                disabled={seedMutation.isPending}
-                onClick={() => seedMutation.mutate()}
-                type="button"
-                variant="secondary"
-              >
-                <Database className="h-4 w-4" aria-hidden="true" />
-                {seedMutation.isPending ? "Loading demo..." : "Load guided demo"}
-              </Button>
-              {seedMutation.error ? (
-                <div className="mt-3">
-                  <ErrorNotice
-                    actionLabel="Retry demo"
-                    message={(seedMutation.error as Error).message}
-                    onAction={() => seedMutation.mutate()}
-                  />
-                </div>
-              ) : null}
-            </div>
-          </aside>
         </section>
       </div>
     </main>
@@ -284,53 +254,41 @@ function QueueToolbar({
     sortMode !== "updated",
     compactRows,
     showTestProjects,
+    searchQuery.trim().length > 0,
   ].filter(Boolean).length;
 
   return (
     <div className="border-b border-border px-4 py-3">
-      <div className="grid gap-2 min-[1200px]:grid-cols-[minmax(16rem,1fr)_9rem_9rem_9rem_auto_auto]">
-        <label className="relative block min-w-0">
-          <span className="sr-only">Search projects</span>
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <input
-            aria-keyshortcuts="/"
-            className="min-h-11 w-full rounded-md border border-border bg-input pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-focus sm:h-10 sm:min-h-10"
-            id="project-search"
-            onChange={(event) => onSearchQueryChange(event.target.value)}
-            placeholder="Search ideas, verdicts, or next actions"
-            title="Shortcut: /"
-            value={searchQuery}
-          />
-        </label>
-        <QueueAdvancedFilters
-          className="hidden min-[1200px]:contents"
-          compactRows={compactRows}
-          hiddenTestProjectCount={hiddenTestProjectCount}
-          riskFilter={riskFilter}
-          showTestProjects={showTestProjects}
-          sortMode={sortMode}
-          statusFilter={statusFilter}
-          onCompactRowsChange={onCompactRowsChange}
-          onRiskFilterChange={onRiskFilterChange}
-          onShowTestProjectsChange={onShowTestProjectsChange}
-          onSortModeChange={onSortModeChange}
-          onStatusFilterChange={onStatusFilterChange}
-        />
-      </div>
-      <details className="group mt-2 min-[1200px]:hidden">
-        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus sm:min-h-10">
+      <details className="group" id="project-filter-panel">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus sm:min-h-10">
           <span className="inline-flex items-center gap-2">
             <SlidersHorizontal className="h-4 w-4 text-primary" aria-hidden="true" />
-            Filters and view
+            Filter
           </span>
           {activeControlCount > 0 ? (
             <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
               {activeControlCount} active
             </span>
-          ) : null}
+          ) : (
+            <span className="text-xs text-muted-foreground">Search, sort, and view options</span>
+          )}
         </summary>
+        <div className="mt-3 hidden gap-2 group-open:grid lg:grid-cols-[minmax(16rem,1fr)_9rem_9rem_9rem_auto_auto]">
+          <label className="relative block min-w-0">
+            <span className="sr-only">Search projects</span>
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <input
+              aria-keyshortcuts="/"
+              className="min-h-11 w-full rounded-md border border-border bg-input pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-focus sm:h-10 sm:min-h-10"
+              id="project-search"
+              onChange={(event) => onSearchQueryChange(event.target.value)}
+              placeholder="Search ideas, verdicts, or next actions"
+              title="Shortcut: /"
+              value={searchQuery}
+            />
+          </label>
         <QueueAdvancedFilters
-          className="mt-2 hidden gap-2 group-open:grid"
+          className="grid gap-2 lg:contents"
           compactRows={compactRows}
           hiddenTestProjectCount={hiddenTestProjectCount}
           riskFilter={riskFilter}
@@ -343,6 +301,7 @@ function QueueToolbar({
           onSortModeChange={onSortModeChange}
           onStatusFilterChange={onStatusFilterChange}
         />
+        </div>
       </details>
     </div>
   );
@@ -524,10 +483,19 @@ function EmptyProjectQueue({ onSeed, pending }: { onSeed: () => void; pending: b
     <div className="px-4 py-10">
       <div className="max-w-2xl">
         <h3 className="text-base font-semibold">No ideas in progress.</h3>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Start with a rough idea. Thesys will shape it into a thesis, identify the
-          biggest unknown, and recommend the next proof to run.
-        </p>
+        <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Missing:</span> a rough idea to shape.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Why it matters:</span> Thesys needs
+            the messy version before it can name the wedge, biggest unknown, and next proof.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Next:</span> start an investigation or
+            load the guided demo.
+          </p>
+        </div>
         <div className="mt-5 flex flex-col gap-2 sm:flex-row">
           <Link className={buttonVariants()} href="/projects/new">
             <FileSearch className="h-4 w-4" aria-hidden="true" />
@@ -543,23 +511,25 @@ function EmptyProjectQueue({ onSeed, pending }: { onSeed: () => void; pending: b
   );
 }
 
-function EmptyHiddenQueue({
-  hiddenCount,
-  onShow,
-}: {
-  hiddenCount: number;
-  onShow: () => void;
-}) {
+function EmptyHiddenQueue({ hiddenCount }: { hiddenCount: number }) {
   return (
     <div className="px-4 py-8">
       <h3 className="text-sm font-semibold">Only test/demo projects are hidden.</h3>
-      <p className="mt-2 max-w-[65ch] text-sm leading-6 text-muted-foreground">
-        {formatNumber(hiddenCount)} test, demo, or audit project{hiddenCount === 1 ? "" : "s"} are
-        hidden so the default queue stays focused on real ideas and the guided demo.
-      </p>
-      <Button className="mt-4" onClick={onShow} type="button" variant="secondary">
-        Show test projects
-      </Button>
+      <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+        <p>
+          <span className="font-medium text-foreground">Missing:</span> a non-test idea in the
+          default queue.
+        </p>
+        <p>
+          <span className="font-medium text-foreground">Why it matters:</span>{" "}
+          {formatNumber(hiddenCount)} test, demo, or audit project{hiddenCount === 1 ? "" : "s"}{" "}
+          are hidden so repeated QA rows do not crowd real work.
+        </p>
+        <p>
+          <span className="font-medium text-foreground">Next:</span> open Filter and enable Show
+          test projects if you need those rows.
+        </p>
+      </div>
     </div>
   );
 }
@@ -568,9 +538,20 @@ function EmptyFilteredQueue() {
   return (
     <div className="px-4 py-8">
       <h3 className="text-sm font-semibold">No projects match those filters.</h3>
-      <p className="mt-2 max-w-[65ch] text-sm leading-6 text-muted-foreground">
-        Change the search, stage, or risk filter to bring projects back into the queue.
-      </p>
+      <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+        <p>
+          <span className="font-medium text-foreground">Missing:</span> an idea matching the
+          current search, stage, and risk filters.
+        </p>
+        <p>
+          <span className="font-medium text-foreground">Why it matters:</span> the queue is still
+          scoped down, so the next validation item may be hidden.
+        </p>
+        <p>
+          <span className="font-medium text-foreground">Next:</span> clear search or loosen the
+          filters.
+        </p>
+      </div>
     </div>
   );
 }

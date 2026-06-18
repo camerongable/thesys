@@ -41,6 +41,8 @@ test("guided navigation starts with Current Step and excludes Guide", () => {
     routing.projectNavigationItems.some((item) => item.label === "Guide"),
     false,
   );
+  assert.equal(routing.projectNavigationItems.find((item) => item.label === "Shape").anchor, null);
+  assert.equal(routing.projectNavigationItems.find((item) => item.label === "Decide").anchor, null);
 });
 
 test("legacy hashes and deep links route into guided or inspect modes", () => {

@@ -7,6 +7,7 @@ const disposableProjectPatterns = [
   /^\[demo\]/i,
   /\[[^\]]*\bqa\b[^\]]*\]/i,
   /\bdisposable\b/i,
+  /\baudit\b/i,
   /\bendpoint\s+audit\b/i,
   /\bsprint\s+\d+.*\b(smoke|qa|test|browser)\b/i,
   /\bbrowser\s+(smoke|qa|test|check)\b/i,

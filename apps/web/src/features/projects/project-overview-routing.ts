@@ -25,7 +25,7 @@ export const projectNavigationItems: ProjectNavigationItem[] = [
     label: "Current Step",
   },
   {
-    anchor: "thesis-canvas",
+    anchor: null,
     detail: "Thesis and wedge",
     key: "shape",
     label: "Shape",
@@ -43,7 +43,7 @@ export const projectNavigationItems: ProjectNavigationItem[] = [
     label: "Test",
   },
   {
-    anchor: "record-decision-panel",
+    anchor: null,
     detail: "Record the call",
     key: "decide",
     label: "Decide",

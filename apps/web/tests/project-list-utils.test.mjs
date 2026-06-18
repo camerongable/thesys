@@ -31,6 +31,7 @@ test("homepage hides disposable QA and browser projects by default", () => {
   const rows = [
     { project: { name: "AI Assistant for Independent Fitness Coaches" } },
     { project: { name: "Sprint 32 smoke project" } },
+    { project: { name: "Sprint 35 Browser Test Project" } },
     { project: { name: "Browser test project" } },
     { project: { name: "Sprint 24 Browser QA 1781575206366" } },
     { project: { name: "[QA] Sprint 22 Final Browser Smoke" } },
@@ -42,6 +43,8 @@ test("homepage hides disposable QA and browser projects by default", () => {
       },
     },
     { project: { name: "[Demo] Fitness Coach Intelligence OS" } },
+    { project: { name: "Disposable local scratch idea" } },
+    { project: { name: "AI Policy Audit Plant Care" } },
     { project: { name: "Plant parenthood" } },
   ];
 
@@ -53,6 +56,9 @@ test("homepage hides disposable QA and browser projects by default", () => {
   assert.equal(listUtils.isDisposableProject(rows[5].project), true);
   assert.equal(listUtils.isDisposableProject(rows[6].project), true);
   assert.equal(listUtils.isDisposableProject(rows[7].project), true);
+  assert.equal(listUtils.isDisposableProject(rows[8].project), true);
+  assert.equal(listUtils.isDisposableProject(rows[9].project), true);
+  assert.equal(listUtils.isDisposableProject(rows[10].project), true);
   assert.equal(listUtils.isDisposableProject({ name: "[QA] Sprint 22 Wedge Explorer" }), true);
   assert.equal(
     listUtils.isDisposableProject({ name: "Sprint 15 Browser Smoke 2026-06-12T06-19-37-644Z" }),
