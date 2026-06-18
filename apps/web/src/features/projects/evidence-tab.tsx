@@ -23,6 +23,7 @@ import {
   getProjectOverview,
   listArtifacts,
   listEvidenceSources,
+  reembedEvidence,
   RetrievalMode,
   retrieveEvidence,
   reprocessEvidenceSource,
@@ -104,6 +105,20 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
       }),
   });
 
+  const reembedMutation = useMutation({
+    mutationFn: (dryRun: boolean) =>
+      reembedEvidence(projectId, {
+        dry_run: dryRun,
+        force: false,
+        scope: "project",
+      }),
+    onSuccess: async (result) => {
+      if (!result.dry_run) {
+        await invalidateSources();
+      }
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (sourceId: string) => deleteEvidenceSource(projectId, sourceId),
     onSuccess: invalidateSources,
@@ -121,6 +136,7 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
     noteMutation.error ??
     fileMutation.error ??
     retrievalMutation.error ??
+    reembedMutation.error ??
     deleteMutation.error ??
     reprocessMutation.error ??
     null;
@@ -454,6 +470,7 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
 
             {retrievalMutation.data ? (
               <div className="mt-5 divide-y divide-border">
+                <RetrievalDiagnosticsLine diagnostics={retrievalMutation.data.diagnostics} />
                 {retrievalMutation.data.results.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No matching chunks.</p>
                 ) : (
@@ -471,15 +488,78 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
                       <p className="mt-2 border-t border-border pt-2 text-sm leading-6 text-muted-foreground">
                         {truncate(result.text, 440)}
                       </p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Embedded with {result.embedding_provider ?? "unknown"} ·{" "}
+                        {result.embedding_model ?? "unknown model"} ·{" "}
+                        {result.embedding_version ?? "unknown version"}
+                      </p>
                     </details>
                   ))
                 )}
               </div>
             ) : null}
+            <div className="mt-5 border-t border-border pt-4">
+              <p className="text-xs font-medium text-muted-foreground">
+                Embedding maintenance
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Use this after changing embedding provider or model.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  disabled={reembedMutation.isPending}
+                  onClick={() => reembedMutation.mutate(true)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                  Dry run
+                </Button>
+                <Button
+                  disabled={reembedMutation.isPending}
+                  onClick={() => reembedMutation.mutate(false)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                  Re-embed project
+                </Button>
+              </div>
+              {reembedMutation.data ? (
+                <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                  {reembedMutation.data.dry_run ? "Dry run" : "Updated"} · scanned{" "}
+                  {reembedMutation.data.scanned_count}, eligible{" "}
+                  {reembedMutation.data.eligible_count}, updated{" "}
+                  {reembedMutation.data.reembedded_count}, failed{" "}
+                  {reembedMutation.data.failed_count}
+                </p>
+              ) : null}
+            </div>
           </details>
         </aside>
       </div>
     </section>
+  );
+}
+
+function RetrievalDiagnosticsLine({
+  diagnostics,
+}: {
+  diagnostics: NonNullable<Awaited<ReturnType<typeof retrieveEvidence>>>["diagnostics"];
+}) {
+  const path = diagnostics.used_sql_vector_search
+    ? "pgvector SQL"
+    : diagnostics.fallback_path_used
+      ? "fallback"
+      : "keyword";
+  return (
+    <div className="pb-3 text-xs leading-5 text-muted-foreground">
+      Retrieval: {path} · {diagnostics.embedding_provider} · {diagnostics.embedding_model} ·{" "}
+      {diagnostics.candidate_count} candidates · {diagnostics.query_latency_ms}ms
+      {diagnostics.fallback_reason ? ` · ${diagnostics.fallback_reason}` : ""}
+    </div>
   );
 }
 

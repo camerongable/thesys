@@ -2,15 +2,16 @@
 
 ## Current Phase
 
-V1 Sprint 36 implementation is complete. Thesys keeps the Sprint 33-35 simplified
-experience, with quieter launcher/intake/current-step surfaces, standardized
-missing/why/next empty states, fewer non-primary card containers, compact Inspect
-and Explore disclosure, and verified desktop/mobile browser behavior. `/projects`
-keeps one dominant Start investigation CTA, `/projects/new` keeps a single-column
-rough-idea flow with `Continue to Current Step` as the dominant post-preview
-action, and project Current Step keeps advanced detail behind Inspect.
-Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
-multi-segment workflow packs remain V2 scope.
+V1 Sprint 37 implementation is complete. Thesys now supports provider-backed
+embeddings, stores embedding provenance on evidence chunks, uses the pgvector SQL
+retrieval path in Postgres with deterministic Python fallback, returns retrieval
+diagnostics through the API/UI, and exposes project/workspace re-embedding
+maintenance with dry-run support. The Sprint 33-36 simplified project experience
+is preserved: Research keeps the evidence controls behind Inspect, while chunk
+search now shows the retrieval path and embedding metadata only where a user is
+already inspecting source receipts. Watchlists, monitoring, collaboration,
+portfolio dashboards, integrations, and multi-segment workflow packs remain V2
+scope.
 
 ## Sprint 0 Scope
 
@@ -1781,6 +1782,63 @@ Checks run:
   full-screen sheet, Explore opens as a full-screen sheet, and selected Explore
   destinations route correctly.
 
+## V1 Sprint 37 Scope
+
+- [x] Add embedding provider configuration for deterministic local embeddings
+  and LiteLLM/OpenAI-compatible production embeddings, including model,
+  provider, version, timeout, retry, and dimension validation.
+- [x] Store embedding provenance on `evidence_chunks`: provider, model,
+  dimension, version, embedded timestamp, and embedding error.
+- [x] Add a migration for embedding provenance columns plus a pgvector ANN index,
+  preferring HNSW and falling back to IVFFlat where needed.
+- [x] Preserve deterministic dev embeddings while adding provider metadata to
+  ingestion traces and retrieval results.
+- [x] Implement the Postgres pgvector SQL retrieval path for semantic and hybrid
+  evidence search, with project/source/freshness/metadata filters applied before
+  vector ranking.
+- [x] Keep deterministic Python retrieval as the non-Postgres/configured
+  fallback path and return explicit fallback diagnostics.
+- [x] Persist retrieval diagnostics in `ai_steps.output_json` and return them
+  through the evidence retrieval API.
+- [x] Add `POST /api/projects/{project_id}/evidence/reembed` with dry-run,
+  project/workspace scope, current-provider eligibility checks, and per-chunk
+  failure reporting.
+- [x] Surface retrieval path diagnostics, per-result embedding provenance, and
+  re-embedding maintenance controls in the advanced Evidence detail surface.
+- [x] Extend AI status, tool schemas, docs, Docker Compose, `.env.example`, and
+  LiteLLM config for the production embedding/retrieval path.
+
+## V1 Sprint 37 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_embedding_service.py app/tests/test_ai.py`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_agentic_research.py app/tests/test_research_history_eval.py app/tests/test_tool_boundary.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+- [x] `docker compose restart api temporal-worker web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack AI status smoke test: verified embedding provider/model/version,
+  dimension, retrieval vector path, and Python fallback configuration are
+  returned by `/api/ai/status`.
+- [x] Live-stack API fixture smoke test: created `Sprint 37 browser check`,
+  ingested one note source, retrieved one hybrid result through the HNSW
+  pgvector SQL path, and verified diagnostics reported `used_sql_vector_search`
+  with no fallback.
+- [x] Live-stack re-embed API smoke test: dry-run re-embed scanned one chunk,
+  skipped it as already current, and returned zero failures.
+- [x] Desktop Codex in-app browser QA: opened the fixture project, navigated
+  Research -> Inspect -> Evidence summary, ran a hybrid source-chunk search,
+  verified the rendered `Retrieval: pgvector SQL` diagnostics, opened the result
+  receipt, verified retrieved text plus embedding provenance, and confirmed
+  `Dry run` and `Re-embed project` maintenance summaries render correctly.
+- [x] Browser console QA: no app console errors were present after the Sprint 37
+  verification flow.
+
 ## Next Work
 
-V1 Sprint 37: define the next brief-backed scope.
+V1 Sprint 38: define the next brief-backed scope.

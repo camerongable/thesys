@@ -91,6 +91,12 @@ class EvidenceChunk(UUIDPrimaryKeyMixin, Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int | None] = mapped_column(Integer)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
+    embedding_provider: Mapped[str | None] = mapped_column(String(50), index=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(255), index=True)
+    embedding_dimension: Mapped[int | None] = mapped_column(Integer)
+    embedding_version: Mapped[str | None] = mapped_column(String(100))
+    embedded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    embedding_error: Mapped[str | None] = mapped_column(Text)
     chunk_metadata: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
         JSON,

@@ -91,6 +91,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 "source_types": {"type": "array", "maxItems": 5},
                 "competitor_id": {"type": ["string", "null"], "format": "uuid"},
                 "assumption_id": {"type": ["string", "null"], "format": "uuid"},
+                "research_sprint_id": {"type": ["string", "null"], "format": "uuid"},
                 "created_after": {"type": ["string", "null"]},
                 "created_before": {"type": ["string", "null"]},
                 "freshness_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 3650},

@@ -58,7 +58,7 @@ export function AiModeIndicator() {
   return (
     <div
       className={statusClassName}
-      title={`${status.resolved_mode} · ${status.litellm_model} · ${status.litellm_base_url} · ${operationalText}`}
+      title={`${status.resolved_mode} · ${status.litellm_model} · ${status.embedding_provider}/${status.embedding_model} · retrieval ${status.retrieval_vector_path} · ${status.litellm_base_url} · ${operationalText}`}
     >
       <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
       <span className="min-w-0 truncate font-medium">

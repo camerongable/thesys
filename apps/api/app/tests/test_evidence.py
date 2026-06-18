@@ -56,10 +56,18 @@ def test_note_ingestion_chunks_embeds_and_retrieves(
     assert retrieval_response.status_code == 200
     retrieval = retrieval_response.json()
     assert retrieval["mode"] == "hybrid"
+    assert retrieval["diagnostics"]["embedding_provider"] == "deterministic"
+    assert retrieval["diagnostics"]["embedding_model"] == "deterministic-hash-embedding-1536"
+    assert retrieval["diagnostics"]["fallback_path_used"] is True
+    assert retrieval["diagnostics"]["fallback_reason"] == "database dialect is not postgres"
     assert retrieval["results"]
     assert retrieval["results"][0]["source_id"] == source["id"]
     assert retrieval["results"][0]["chunk_id"] == str(chunk.id)
     assert retrieval["results"][0]["keyword_score"] > 0
+    assert retrieval["results"][0]["embedding_provider"] == "deterministic"
+    assert retrieval["results"][0]["embedding_model"] == "deterministic-hash-embedding-1536"
+    assert retrieval["results"][0]["embedding_dimension"] == 1536
+    assert retrieval["results"][0]["embedding_version"] == "v1"
 
     retrieval_run = db_session.scalar(
         select(AIRun).where(AIRun.id == uuid.UUID(retrieval["ai_run_id"]))
@@ -74,6 +82,7 @@ def test_note_ingestion_chunks_embeds_and_retrieves(
     assert retrieval_step is not None
     assert retrieval_step.step_name == "hybrid_retrieval"
     assert retrieval_step.output_json["result_count"] == 1
+    assert retrieval_step.output_json["diagnostics"]["fallback_path_used"] is True
 
 
 def test_url_ingestion_uses_fetcher_and_source_type_filter(
@@ -148,6 +157,55 @@ def test_file_upload_stores_object_and_parses_markdown(
     )
     assert source is not None
     assert source.object_storage_key == body["object_storage_key"]
+
+
+def test_reembed_evidence_dry_run_and_project_update(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    create_response = client.post("/api/projects", json={"name": "Reembed project"})
+    project_id = create_response.json()["id"]
+    note_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={"title": "Source", "text": "A narrow wedge needs proof from customer notes."},
+    )
+    assert note_response.status_code == 201
+    chunk = db_session.scalar(select(EvidenceChunk))
+    assert chunk is not None
+    chunk.embedding_model = "old-model"
+    db_session.commit()
+
+    dry_run_response = client.post(
+        f"/api/projects/{project_id}/evidence/reembed",
+        json={"dry_run": True, "scope": "project"},
+    )
+    assert dry_run_response.status_code == 200
+    dry_run = dry_run_response.json()
+    assert dry_run["dry_run"] is True
+    assert dry_run["scanned_count"] == 1
+    assert dry_run["eligible_count"] == 1
+    assert dry_run["reembedded_count"] == 0
+
+    db_session.refresh(chunk)
+    assert chunk.embedding_model == "old-model"
+
+    update_response = client.post(
+        f"/api/projects/{project_id}/evidence/reembed",
+        json={"dry_run": False, "scope": "project"},
+    )
+    assert update_response.status_code == 200
+    updated = update_response.json()
+    assert updated["dry_run"] is False
+    assert updated["eligible_count"] == 1
+    assert updated["reembedded_count"] == 1
+    assert updated["failed_count"] == 0
+
+    db_session.refresh(chunk)
+    assert chunk.embedding_model == "deterministic-hash-embedding-1536"
+    assert chunk.embedding_provider == "deterministic"
+    assert chunk.embedding_dimension == 1536
+    assert chunk.embedding_version == "v1"
+    assert chunk.embedded_at is not None
 
 
 def test_evidence_endpoints_are_workspace_scoped(client: TestClient) -> None:

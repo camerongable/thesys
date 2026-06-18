@@ -202,11 +202,12 @@ Thesys is built to show the difference between a thin LLM wrapper and a durable 
 | AI concept | How it is demonstrated in this repo | Technologies and libraries |
 |---|---|---|
 | Agentic RAG | Autonomous research sprints plan work, call bounded tools, retrieve evidence, detect gaps, synthesize a memo, critique citations, and wait for human approval before updating project memory. | LangGraph, FastAPI, SQLAlchemy, Temporal, internal tool registry |
-| Retrieval-grounded generation | Opportunity briefs, competitor analysis, research memos, assumptions, and validation plans are generated from retrieved project evidence rather than prompt-only model knowledge. | PostgreSQL, pgvector, deterministic embedding service, retrieval service, Pydantic schemas |
-| Evidence ingestion and chunking | URLs, notes, discovered source snapshots, uploads, and PDFs are normalized into evidence sources and chunks with metadata and citation IDs. | httpx, pypdf, boto3, MinIO/S3-compatible storage, SQLAlchemy |
-| Hybrid retrieval | Project-scoped retrieval combines semantic similarity, keyword overlap, and metadata filters for source type, freshness, competitors, assumptions, and research context. | pgvector, PostgreSQL, custom retrieval service |
+| Retrieval-grounded generation | Opportunity briefs, competitor analysis, research memos, assumptions, and validation plans are generated from retrieved project evidence rather than prompt-only model knowledge. | PostgreSQL, pgvector, provider-backed embeddings, retrieval service, Pydantic schemas |
+| Evidence ingestion and chunking | URLs, notes, discovered source snapshots, uploads, and PDFs are normalized into evidence sources and chunks with metadata, citation IDs, and embedding provenance. | httpx, pypdf, boto3, MinIO/S3-compatible storage, SQLAlchemy |
+| Production embeddings | Evidence chunks record provider, model, dimension, version, timestamp, and errors; deterministic local mode stays available for tests, while LiteLLM-backed embeddings can be used in live mode and re-embedded after model changes. | LiteLLM-compatible embeddings API, pgvector, PostgreSQL, Alembic |
+| Hybrid retrieval | Project-scoped retrieval combines SQL-level vector search, keyword overlap, and metadata filters for source type, freshness, competitors, assumptions, and research context, then returns diagnostics showing the path used. | pgvector HNSW/IVFFlat indexes, PostgreSQL, custom retrieval service |
 | Structured LLM outputs | LLM responses are requested as JSON, validated against typed schemas, repaired when possible, and persisted as structured project objects. | Pydantic v2, LiteLLM-compatible chat completions, structured output helper |
-| Model gateway and local fallback | Model calls go through a single gateway that can route to local Ollama, OpenAI, or Gemini models, while deterministic stub mode keeps local demos and tests repeatable. | LiteLLM Proxy, httpx, Ollama, OpenAI-compatible APIs, Gemini |
+| Model gateway and local fallback | Model and embedding calls go through configurable provider paths, while deterministic stub/embedding modes keep local demos and tests repeatable. | LiteLLM Proxy, httpx, Ollama, OpenAI-compatible APIs, Gemini |
 | Persistent AI memory | The product stores thesis versions, evidence, artifacts, claims, assumptions, validation missions, decisions, AI runs, AI steps, tool calls, and approval requests instead of relying on chat history. | PostgreSQL, SQLAlchemy, Alembic |
 | Human-in-the-loop agents | AI workflows can propose research plans, memory updates, validation plans, and decisions, but important state changes require approval. | Tool registry, approval requests, audit events, role-based project permissions |
 | Prompt-injection boundaries | Retrieved content is treated as untrusted evidence, wrapped before synthesis, and prevented from acting as model instructions. | Shared prompt rules, cited synthesis prompts, secret redaction utilities |
@@ -429,7 +430,8 @@ Interview 5–10 independent coaches and test willingness to pay for automated c
 - LangSmith tracing
 - Temporal durable workflows
 - pgvector-backed evidence storage
-- deterministic local embeddings today, provider-backed embeddings planned
+- deterministic local embeddings for tests/offline demos
+- provider-backed embeddings and pgvector SQL retrieval for live mode
 
 ### Infrastructure
 
@@ -487,7 +489,12 @@ GEMINI_API_KEY=
 ANTHROPIC_API_KEY=
 
 # Embeddings
+EMBEDDING_PROVIDER=deterministic
 EMBEDDING_MODEL=deterministic-hash-embedding-1536
+EMBEDDING_DIMENSION=1536
+EMBEDDING_VERSION=v1
+RETRIEVAL_VECTOR_PATH=auto
+RETRIEVAL_PYTHON_FALLBACK_ENABLED=true
 
 # Optional LangSmith observability
 LANGSMITH_TRACING=false
@@ -498,6 +505,28 @@ LANGSMITH_PUBLIC_URL_BASE=https://smith.langchain.com
 ```
 
 ---
+
+For live provider-backed embeddings through LiteLLM, set:
+
+```bash
+EMBEDDING_PROVIDER=litellm
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSION=1536
+EMBEDDING_VERSION=openai-text-embedding-3-small-v1
+OPENAI_API_KEY=<real provider key>
+```
+
+After changing embedding provider, model, dimension, or version, re-embed existing project evidence:
+
+```bash
+curl -X POST http://localhost:8000/api/projects/<project_id>/evidence/reembed \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run":true,"scope":"project"}'
+
+curl -X POST http://localhost:8000/api/projects/<project_id>/evidence/reembed \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run":false,"scope":"project"}'
+```
 
 ### 3. Start Infrastructure
 
@@ -675,11 +704,11 @@ Implemented or demonstrated:
 - validation planning
 - decision recommendation
 - guided UI around next best action
+- provider-backed embeddings, pgvector SQL retrieval, retrieval diagnostics, and re-embedding
 
 Planned future work:
 
-- production embedding providers and SQL-level pgvector nearest-neighbor retrieval
-- reranking, query expansion, context compression, and retrieval-quality evals
+- retrieval quality, reranking, query expansion, context compression, and retrieval-quality evals
 - LLM-grounded Ask Thesys with citations and tool-governed proposals
 - recurring market monitoring
 - team collaboration

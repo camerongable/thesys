@@ -45,8 +45,14 @@ def get_ai_status(
         litellm_base_url=settings.litellm_base_url,
         litellm_reachability=_check_litellm_reachability(settings),
         provider_keys=provider_keys,
+        embedding_provider=settings.embedding_provider,
         embedding_model=settings.embedding_model,
         embedding_dimension=settings.embedding_dimension,
+        embedding_version=settings.embedding_version,
+        embedding_timeout_seconds=settings.embedding_timeout_seconds,
+        embedding_retry_attempts=settings.embedding_retry_attempts,
+        retrieval_vector_path=settings.retrieval_vector_path,
+        retrieval_python_fallback_enabled=settings.retrieval_python_fallback_enabled,
         structured_output_healthcheck=(
             _run_structured_output_healthcheck(settings)
             if include_structured_output_check

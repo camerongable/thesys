@@ -103,6 +103,12 @@ class AIStatusRead(BaseModel):
     litellm_base_url: str
     litellm_reachability: LiteLLMReachabilityStatus
     provider_keys: AIProviderKeyStatus
+    embedding_provider: Literal["deterministic", "litellm"]
     embedding_model: str
     embedding_dimension: int
+    embedding_version: str
+    embedding_timeout_seconds: float
+    embedding_retry_attempts: int
+    retrieval_vector_path: Literal["auto", "sql", "python"]
+    retrieval_python_fallback_enabled: bool
     structured_output_healthcheck: AIStatusStructuredOutputCheck | None = None

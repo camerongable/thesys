@@ -37,6 +37,29 @@ class ParsedSource:
     content_type: str | None = None
 
 
+@dataclass(frozen=True)
+class ReembedFailure:
+    chunk_id: uuid.UUID
+    source_id: uuid.UUID
+    error: str
+
+
+@dataclass(frozen=True)
+class ReembedResult:
+    dry_run: bool
+    scope: str
+    embedding_provider: str
+    embedding_model: str
+    embedding_dimension: int
+    embedding_version: str
+    scanned_count: int
+    eligible_count: int
+    skipped_count: int
+    reembedded_count: int
+    failed_count: int
+    failures: list[ReembedFailure]
+
+
 def list_sources(db: Session, auth: AuthContext, project_id: uuid.UUID) -> list[EvidenceSource]:
     project_service.get_project(db, auth, project_id)
     return list(
@@ -349,6 +372,72 @@ def delete_source(
     db.commit()
 
 
+def reembed_evidence(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    *,
+    dry_run: bool,
+    force: bool,
+    scope: str,
+) -> ReembedResult:
+    project_service.get_project(db, auth, project_id)
+    stmt = select(EvidenceChunk).where(EvidenceChunk.workspace_id == auth.workspace_id)
+    if scope == "project":
+        stmt = stmt.where(EvidenceChunk.project_id == project_id)
+    elif scope != "workspace":
+        raise ValueError(f"Unsupported re-embedding scope: {scope}")
+
+    chunks = list(db.scalars(stmt.order_by(EvidenceChunk.created_at.asc())))
+    eligible = [chunk for chunk in chunks if force or _chunk_needs_reembedding(chunk, settings)]
+    failures: list[ReembedFailure] = []
+    reembedded_count = 0
+
+    if not dry_run:
+        for chunk in eligible:
+            try:
+                embedding = embedding_service.embed_text_with_metadata(settings, chunk.text)
+                chunk.embedding = embedding.vector
+                chunk.embedding_provider = embedding.provider
+                chunk.embedding_model = embedding.model
+                chunk.embedding_dimension = embedding.dimension
+                chunk.embedding_version = embedding.version
+                chunk.embedded_at = embedding.embedded_at
+                chunk.embedding_error = None
+                chunk.chunk_metadata = _merge_metadata(
+                    chunk.chunk_metadata or {},
+                    embedding_service.embedding_metadata(settings),
+                )
+                reembedded_count += 1
+            except Exception as exc:
+                message = str(exc)
+                chunk.embedding_error = message
+                failures.append(
+                    ReembedFailure(
+                        chunk_id=chunk.id,
+                        source_id=chunk.source_id,
+                        error=message,
+                    )
+                )
+        db.commit()
+
+    return ReembedResult(
+        dry_run=dry_run,
+        scope=scope,
+        embedding_provider=settings.embedding_provider,
+        embedding_model=settings.embedding_model,
+        embedding_dimension=settings.embedding_dimension,
+        embedding_version=settings.embedding_version,
+        scanned_count=len(chunks),
+        eligible_count=len(eligible),
+        skipped_count=len(chunks) - len(eligible),
+        reembedded_count=reembedded_count,
+        failed_count=len(failures),
+        failures=failures,
+    )
+
+
 def serialize_source(source: EvidenceSource) -> dict[str, Any]:
     return {
         "id": source.id,
@@ -371,6 +460,16 @@ def serialize_source(source: EvidenceSource) -> dict[str, Any]:
     }
 
 
+def _chunk_needs_reembedding(chunk: EvidenceChunk, settings: Settings) -> bool:
+    return (
+        chunk.embedding is None
+        or chunk.embedding_provider != settings.embedding_provider
+        or chunk.embedding_model != settings.embedding_model
+        or chunk.embedding_dimension != settings.embedding_dimension
+        or chunk.embedding_version != settings.embedding_version
+    )
+
+
 def _process_source_text(
     db: Session,
     auth: AuthContext,
@@ -389,7 +488,7 @@ def _process_source_text(
         prompt_version=EVIDENCE_INGESTION_PROMPT_VERSION,
         input_summary=(title or source.url or str(source.id))[:500],
         project_id=source.project_id,
-        model_provider="internal",
+        model_provider=settings.embedding_provider,
         model_name=settings.embedding_model,
     )
     step = ai_run_service.start_step(
@@ -425,13 +524,14 @@ def _process_source_text(
 
         content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
         for index, chunk_text in enumerate(chunks):
+            embedding = embedding_service.embed_text_with_metadata(settings, chunk_text)
             chunk_metadata = _merge_metadata(
                 {
                     "source_title": source.title,
                     "source_type": source.source_type,
                     "url": source.url,
                     "content_hash": content_hash,
-                    "embedding_model": settings.embedding_model,
+                    **embedding_service.embedding_metadata(settings),
                 },
                 metadata,
             )
@@ -442,7 +542,13 @@ def _process_source_text(
                 chunk_index=index,
                 text=chunk_text,
                 token_count=len(_tokens(chunk_text)),
-                embedding=embedding_service.embed_text(settings, chunk_text),
+                embedding=embedding.vector,
+                embedding_provider=embedding.provider,
+                embedding_model=embedding.model,
+                embedding_dimension=embedding.dimension,
+                embedding_version=embedding.version,
+                embedded_at=embedding.embedded_at,
+                embedding_error=None,
                 chunk_metadata=chunk_metadata,
             )
             db.add(chunk)
@@ -459,6 +565,10 @@ def _process_source_text(
                 "chunk_count": len(source.chunks),
                 "classification": source.classification,
                 "summary": source.summary,
+                "embedding_provider": settings.embedding_provider,
+                "embedding_model": settings.embedding_model,
+                "embedding_dimension": settings.embedding_dimension,
+                "embedding_version": settings.embedding_version,
             },
             latency_ms=latency_ms,
             tokens=None,
@@ -470,7 +580,7 @@ def _process_source_text(
             output_summary=source.summary or "",
             total_tokens=None,
             total_cost=Decimal("0"),
-            model_provider="internal",
+            model_provider=settings.embedding_provider,
             model_name=settings.embedding_model,
         )
         return source

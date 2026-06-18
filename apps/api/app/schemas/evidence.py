@@ -55,6 +55,7 @@ class EvidenceRetrieveCreate(BaseModel):
     source_types: list[EvidenceSourceType] = Field(default_factory=list, max_length=5)
     competitor_id: uuid.UUID | None = None
     assumption_id: uuid.UUID | None = None
+    research_sprint_id: uuid.UUID | None = None
     created_after: datetime | None = None
     created_before: datetime | None = None
     freshness_days: int | None = Field(default=None, ge=1, le=3650)
@@ -81,7 +82,26 @@ class EvidenceRetrievalResultRead(BaseModel):
     semantic_score: float
     keyword_score: float
     metadata: dict[str, object]
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
+    embedding_dimension: int | None = None
+    embedding_version: str | None = None
+    embedded_at: datetime | None = None
     created_at: datetime
+
+
+class RetrievalDiagnosticsRead(BaseModel):
+    embedding_provider: str
+    embedding_model: str
+    embedding_dimension: int
+    embedding_version: str
+    index_name: str | None
+    index_available: bool
+    candidate_count: int
+    query_latency_ms: int
+    used_sql_vector_search: bool
+    fallback_path_used: bool
+    fallback_reason: str | None
 
 
 class EvidenceRetrieveRead(BaseModel):
@@ -89,4 +109,32 @@ class EvidenceRetrieveRead(BaseModel):
     ai_step_id: uuid.UUID
     mode: RetrievalMode
     query: str
+    diagnostics: RetrievalDiagnosticsRead
     results: list[EvidenceRetrievalResultRead]
+
+
+class ReembedEvidenceCreate(BaseModel):
+    dry_run: bool = True
+    force: bool = False
+    scope: Literal["project", "workspace"] = "project"
+
+
+class ReembedFailureRead(BaseModel):
+    chunk_id: uuid.UUID
+    source_id: uuid.UUID
+    error: str
+
+
+class ReembedEvidenceRead(BaseModel):
+    dry_run: bool
+    scope: Literal["project", "workspace"]
+    embedding_provider: str
+    embedding_model: str
+    embedding_dimension: int
+    embedding_version: str
+    scanned_count: int
+    eligible_count: int
+    skipped_count: int
+    reembedded_count: int
+    failed_count: int
+    failures: list[ReembedFailureRead]

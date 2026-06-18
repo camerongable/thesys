@@ -25,7 +25,10 @@ Sprint 4 adds the first RAG foundation:
 - Parsed text is normalized, summarized, classified, chunked, embedded, and
   stored in Postgres/pgvector.
 - Retrieval is project/workspace-scoped and supports semantic, keyword, and
-  hybrid scoring.
+  hybrid scoring. In Postgres, semantic and hybrid retrieval rank chunks through
+  SQL-level pgvector nearest-neighbor search before context is returned. The
+  deterministic Python scorer remains the fallback for SQLite tests and offline
+  demos.
 - Evidence ingestion and retrieval create `ai_runs` and `ai_steps` traces so
   generated artifacts in later sprints can expose the retrieval context they
   used.

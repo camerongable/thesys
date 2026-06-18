@@ -73,6 +73,29 @@ class Settings(BaseSettings):
         validation_alias="EMBEDDING_MODEL",
     )
     embedding_dimension: int = Field(default=1536, validation_alias="EMBEDDING_DIMENSION")
+    embedding_provider: Literal["deterministic", "litellm"] = Field(
+        default="deterministic",
+        validation_alias="EMBEDDING_PROVIDER",
+    )
+    embedding_version: str = Field(default="v1", validation_alias="EMBEDDING_VERSION")
+    embedding_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias="EMBEDDING_TIMEOUT_SECONDS",
+    )
+    embedding_retry_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        validation_alias="EMBEDDING_RETRY_ATTEMPTS",
+    )
+    retrieval_vector_path: Literal["auto", "sql", "python"] = Field(
+        default="auto",
+        validation_alias="RETRIEVAL_VECTOR_PATH",
+    )
+    retrieval_python_fallback_enabled: bool = Field(
+        default=True,
+        validation_alias="RETRIEVAL_PYTHON_FALLBACK_ENABLED",
+    )
     langsmith_tracing: bool = Field(default=False, validation_alias="LANGSMITH_TRACING")
     langsmith_api_key: str | None = Field(default=None, validation_alias="LANGSMITH_API_KEY")
     langsmith_endpoint: str = Field(

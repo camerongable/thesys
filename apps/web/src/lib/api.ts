@@ -385,7 +385,26 @@ export type EvidenceRetrievalResult = {
   semantic_score: number;
   keyword_score: number;
   metadata: Record<string, unknown>;
+  embedding_provider: string | null;
+  embedding_model: string | null;
+  embedding_dimension: number | null;
+  embedding_version: string | null;
+  embedded_at: string | null;
   created_at: string;
+};
+
+export type RetrievalDiagnostics = {
+  embedding_provider: string;
+  embedding_model: string;
+  embedding_dimension: number;
+  embedding_version: string;
+  index_name: string | null;
+  index_available: boolean;
+  candidate_count: number;
+  query_latency_ms: number;
+  used_sql_vector_search: boolean;
+  fallback_path_used: boolean;
+  fallback_reason: string | null;
 };
 
 export type EvidenceRetrieveResult = {
@@ -393,7 +412,29 @@ export type EvidenceRetrieveResult = {
   ai_step_id: string;
   mode: RetrievalMode;
   query: string;
+  diagnostics: RetrievalDiagnostics;
   results: EvidenceRetrievalResult[];
+};
+
+export type ReembedEvidenceInput = {
+  dry_run?: boolean;
+  force?: boolean;
+  scope?: "project" | "workspace";
+};
+
+export type ReembedEvidenceResult = {
+  dry_run: boolean;
+  scope: "project" | "workspace";
+  embedding_provider: string;
+  embedding_model: string;
+  embedding_dimension: number;
+  embedding_version: string;
+  scanned_count: number;
+  eligible_count: number;
+  skipped_count: number;
+  reembedded_count: number;
+  failed_count: number;
+  failures: { chunk_id: string; source_id: string; error: string }[];
 };
 
 export type ArtifactType =
@@ -1557,8 +1598,14 @@ export type AIStatus = {
   litellm_base_url: string;
   litellm_reachability: LiteLLMReachabilityStatus;
   provider_keys: AIProviderKeyStatus;
+  embedding_provider: "deterministic" | "litellm";
   embedding_model: string;
   embedding_dimension: number;
+  embedding_version: string;
+  embedding_timeout_seconds: number;
+  embedding_retry_attempts: number;
+  retrieval_vector_path: "auto" | "sql" | "python";
+  retrieval_python_fallback_enabled: boolean;
   structured_output_healthcheck: AIStatusStructuredOutputCheck | null;
 };
 
@@ -1889,6 +1936,13 @@ export function uploadEvidenceFile(projectId: string, file: File) {
 
 export function retrieveEvidence(projectId: string, input: RetrieveEvidenceInput) {
   return apiFetch<EvidenceRetrieveResult>(`/api/projects/${projectId}/evidence/retrieve`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function reembedEvidence(projectId: string, input: ReembedEvidenceInput) {
+  return apiFetch<ReembedEvidenceResult>(`/api/projects/${projectId}/evidence/reembed`, {
     method: "POST",
     body: JSON.stringify(input),
   });

@@ -13,6 +13,9 @@ from app.schemas.evidence import (
     EvidenceSourceListRead,
     EvidenceSourceRead,
     EvidenceUrlCreate,
+    ReembedEvidenceCreate,
+    ReembedEvidenceRead,
+    ReembedFailureRead,
 )
 from app.services import evidence_service, retrieval_service
 
@@ -103,7 +106,48 @@ def retrieve_evidence(
         ai_step_id=result.step.id,
         mode=result.mode,
         query=result.query,
+        diagnostics=result.diagnostics,
         results=result.results,
+    )
+
+
+@router.post("/reembed", response_model=ReembedEvidenceRead)
+def reembed_project_evidence(
+    project_id: uuid.UUID,
+    payload: ReembedEvidenceCreate,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> ReembedEvidenceRead:
+    result = evidence_service.reembed_evidence(
+        db,
+        auth,
+        settings,
+        project_id,
+        dry_run=payload.dry_run,
+        force=payload.force,
+        scope=payload.scope,
+    )
+    return ReembedEvidenceRead(
+        dry_run=result.dry_run,
+        scope=result.scope,  # type: ignore[arg-type]
+        embedding_provider=result.embedding_provider,
+        embedding_model=result.embedding_model,
+        embedding_dimension=result.embedding_dimension,
+        embedding_version=result.embedding_version,
+        scanned_count=result.scanned_count,
+        eligible_count=result.eligible_count,
+        skipped_count=result.skipped_count,
+        reembedded_count=result.reembedded_count,
+        failed_count=result.failed_count,
+        failures=[
+            ReembedFailureRead(
+                chunk_id=failure.chunk_id,
+                source_id=failure.source_id,
+                error=failure.error,
+            )
+            for failure in result.failures
+        ],
     )
 
 
