@@ -366,10 +366,20 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
           ) : assumptions.length === 0 ? (
             <div className="mt-4 border-t border-dashed border-border pt-4">
               <h4 className="text-sm font-semibold">No blockers ranked yet.</h4>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Blockers are the beliefs that must be true for this idea to work. Rank them by
-                risk, then turn the riskiest one into a validation test.
-              </p>
+              <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+                <p>
+                  <span className="font-medium text-foreground">Missing:</span> ranked beliefs
+                  that must be true for the idea to work.
+                </p>
+                <p>
+                  <span className="font-medium text-foreground">Why it matters:</span> the
+                  riskiest blocker should determine the next validation mission.
+                </p>
+                <p>
+                  <span className="font-medium text-foreground">Next:</span> rank decision
+                  blockers.
+                </p>
+              </div>
               <Button
                 className="mt-3"
                 disabled={extractMutation.isPending}
@@ -661,10 +671,20 @@ export function AssumptionsTab({ projectId, onOpenExperiments }: AssumptionsTabP
             {risksQuery.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading risks...</p>
             ) : risks.length === 0 ? (
-              <p className="text-sm leading-6 text-muted-foreground">
-                No risks recorded yet. Rank decision blockers to surface likely failure modes and
-                mitigation paths.
-              </p>
+              <div className="grid gap-2 text-sm leading-6 text-muted-foreground">
+                <p>
+                  <span className="font-medium text-foreground">Missing:</span> likely failure
+                  modes.
+                </p>
+                <p>
+                  <span className="font-medium text-foreground">Why it matters:</span> risks show
+                  what could invalidate the current wedge.
+                </p>
+                <p>
+                  <span className="font-medium text-foreground">Next:</span> rank blockers to
+                  surface mitigation paths.
+                </p>
+              </div>
             ) : (
               risks.map((risk) => (
                 <div key={risk.id} className="border-t border-border py-3 first:border-t-0 first:pt-0">

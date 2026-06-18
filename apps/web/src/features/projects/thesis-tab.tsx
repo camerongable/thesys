@@ -387,9 +387,19 @@ function WedgeExplorer({ projectId }: { projectId: string }) {
       ) : wedges.length === 0 ? (
         <div className="mt-5 rounded-md bg-surface px-3 py-3">
           <p className="text-sm font-medium">No wedge options yet.</p>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Generate options to compare the current thesis against narrower, easier-to-test directions.
-          </p>
+          <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+            <p>
+              <span className="font-medium text-foreground">Missing:</span> alternative wedges to
+              compare.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Why it matters:</span> the strongest
+              idea may be a narrower, easier-to-test version of the original.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Next:</span> generate wedge options.
+            </p>
+          </div>
         </div>
       ) : (
         <div className="mt-5 space-y-4">
@@ -747,9 +757,18 @@ function CanvasListBlock({ label, values }: { label: string; values: string[] })
 function ThesisTimeline({ events }: { events: ThesisEvolutionEvent[] }) {
   if (events.length === 0) {
     return (
-      <p className="rounded-md bg-surface px-3 py-3 text-sm leading-6 text-muted-foreground">
-        No thesis evolution events yet. Save a thesis change to start the trail.
-      </p>
+      <div className="rounded-md bg-surface px-3 py-3 text-sm leading-6 text-muted-foreground">
+        <p>
+          <span className="font-medium text-foreground">Missing:</span> thesis evolution events.
+        </p>
+        <p className="mt-2">
+          <span className="font-medium text-foreground">Why it matters:</span> the trail should
+          explain how the idea changed and which directions were rejected.
+        </p>
+        <p className="mt-2">
+          <span className="font-medium text-foreground">Next:</span> save a thesis change.
+        </p>
+      </div>
     );
   }
 

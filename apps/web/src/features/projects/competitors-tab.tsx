@@ -281,10 +281,19 @@ export function CompetitorsTab({ projectId }: CompetitorsTabProps) {
           ) : competitors.length === 0 ? (
             <div className="mt-4 rounded-md border border-dashed border-border p-4">
               <h3 className="text-sm font-semibold">No competitors mapped yet.</h3>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Competitor analysis identifies substitutes, crowded areas, positioning gaps,
-                and possible wedges.
-              </p>
+              <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+                <p>
+                  <span className="font-medium text-foreground">Missing:</span> competitors and
+                  substitutes for this wedge.
+                </p>
+                <p>
+                  <span className="font-medium text-foreground">Why it matters:</span> the idea is
+                  hard to position until crowded areas and alternatives are visible.
+                </p>
+                <p>
+                  <span className="font-medium text-foreground">Next:</span> analyze competitors.
+                </p>
+              </div>
               <Button
                 className="mt-3"
                 disabled={analyzeMutation.isPending}

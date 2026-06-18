@@ -370,29 +370,13 @@ function ProjectOverviewSkeleton() {
         <div className="mt-3 h-4 w-full max-w-2xl rounded bg-muted" />
         <div className="mt-2 h-4 w-72 rounded bg-muted" />
       </div>
-      <div className="mt-5 rounded-lg border border-border bg-card p-4">
-        <div className="h-4 w-36 rounded bg-muted" />
-        <div className="mt-3 h-5 w-full max-w-3xl rounded bg-muted" />
-        <div className="mt-2 hidden h-4 w-full max-w-4xl rounded bg-muted sm:block" />
-      </div>
-      <div className="mt-5 grid gap-5 lg:grid-cols-[270px_minmax(0,1fr)]">
-        <div className="hidden rounded-lg border border-border bg-card p-4 lg:block">
-          <div className="h-4 w-24 rounded bg-muted" />
-          <div className="mt-5 space-y-3">
-            {[0, 1, 2, 3].map((item) => (
-              <div className="h-12 rounded-md bg-muted" key={item} />
-            ))}
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-5">
-          <div className="h-4 w-32 rounded bg-muted" />
-          <div className="mt-4 h-6 w-full max-w-lg rounded bg-muted" />
-          <div className="mt-3 h-4 w-full max-w-2xl rounded bg-muted" />
-          <div className="mt-6 grid gap-3 sm:grid-cols-3">
-            <div className="h-20 rounded-md bg-muted" />
-            <div className="h-20 rounded-md bg-muted" />
-            <div className="h-20 rounded-md bg-muted" />
-          </div>
+      <div className="mt-5 border-y border-border py-5">
+        <div className="h-4 w-32 rounded bg-muted" />
+        <div className="mt-4 h-7 w-full max-w-lg rounded bg-muted" />
+        <div className="mt-3 h-4 w-full max-w-2xl rounded bg-muted" />
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="h-24 rounded-md bg-muted" />
+          <div className="h-24 rounded-md bg-muted" />
         </div>
       </div>
     </div>
@@ -1037,9 +1021,20 @@ function MobileHistoryPreview({
           />
         </div>
       ) : (
-        <p className="text-sm leading-6 text-muted-foreground">
-          No risks recorded yet. Run evidence review or extract assumptions to build the history trail.
-        </p>
+        <div className="grid gap-2 text-sm leading-6 text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Missing:</span> a ranked risk behind
+            the current decision.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Why it matters:</span> the history
+            trail should show what could make the idea fail.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Next:</span> run an evidence review or
+            extract assumptions.
+          </p>
+        </div>
       )}
 
       {updates.length > 0 ? (
@@ -2115,7 +2110,7 @@ function WorkbenchAccessPanel<TMode extends string>({
 
   return (
     <details
-      className="rounded-lg border border-border bg-card p-5"
+      className="border-y border-border py-5"
       onToggle={(event) => setOpen(event.currentTarget.open)}
       open={open}
     >
@@ -2144,11 +2139,11 @@ function WorkbenchAccessPanel<TMode extends string>({
           return (
             <button
               aria-pressed={selected}
-              className={[
-                "min-h-24 rounded-md border px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+            className={[
+                "min-h-24 rounded-md px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
                 selected
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "border-border bg-surface text-foreground hover:bg-muted",
+                  ? "bg-primary/10 text-foreground"
+                  : "bg-surface text-foreground hover:bg-muted",
               ].join(" ")}
               key={option.mode}
               onClick={() => onSelect(option.mode)}
@@ -2463,12 +2458,20 @@ function ResearchSprintSummary({ projectId }: { projectId: string }) {
 
   if (!latestSprint) {
     return (
-      <div className="rounded-lg border border-dashed border-border bg-card p-5">
+      <div className="border-y border-dashed border-border py-5">
         <h3 className="text-sm font-semibold">No evidence review planned yet.</h3>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Plan source review to find sources, identify competitors, gather evidence,
-          and draft an evidence memo.
-        </p>
+        <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Missing:</span> a source review plan.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Why it matters:</span> research should
+            gather evidence and competitors before the verdict becomes durable.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Next:</span> plan an evidence review.
+          </p>
+        </div>
       </div>
     );
   }
@@ -3009,9 +3012,20 @@ function GovernanceApprovalPanel({ projectId }: { projectId: string }) {
       ) : approvalsQuery.isLoading ? (
         <p className="mt-3 text-sm text-muted-foreground">Loading approvals...</p>
       ) : approvals.length === 0 ? (
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          No pending approvals. Recent audit events remain available below.
-        </p>
+        <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Missing:</span> any decision update that
+            needs approval.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Why it matters:</span> human gates only
+            appear when research wants to change project state.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Next:</span> continue the evidence
+            review or inspect recent audit events below.
+          </p>
+        </div>
       ) : (
         <ol className="mt-4 space-y-3" aria-label="Pending governance approvals">
           {approvals.map((approval) => (
@@ -3071,9 +3085,20 @@ function GovernanceApprovalPanel({ projectId }: { projectId: string }) {
         {auditEventsQuery.isLoading ? (
           <p className="mt-3 text-sm text-muted-foreground">Loading audit events...</p>
         ) : events.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            No governance events have been recorded for this project yet.
-          </p>
+          <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+            <p>
+              <span className="font-medium text-foreground">Missing:</span> approval or audit
+              activity.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Why it matters:</span> this trail
+              explains which human-controlled changes happened.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Next:</span> approve a research plan,
+              source, memo, validation update, or decision record when one is proposed.
+            </p>
+          </div>
         ) : (
           <ol className="mt-3 space-y-2" aria-label="Recent audit events">
             {events.slice(0, 8).map((event) => (
@@ -3139,9 +3164,19 @@ function ResearchHistoryPanel({ projectId }: { projectId: string }) {
       ) : historyQuery.isError ? (
         <p className="mt-3 text-sm text-danger-foreground">{(historyQuery.error as Error).message}</p>
       ) : !history || history.sprints.length === 0 ? (
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          No evidence reviews yet. Run an evidence review to create a history trail.
-        </p>
+        <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Missing:</span> a completed evidence
+            review.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Why it matters:</span> this history
+            should show how research changed the thesis, blocker, or next proof.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Next:</span> run an evidence review.
+          </p>
+        </div>
       ) : (
         <div className="mt-4 space-y-4">
           {history.sprints.slice(0, 3).map((sprintHistory) => (
@@ -4250,10 +4285,27 @@ function EvidenceReviewEmptyState({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h5 className="text-sm font-semibold">Review queue clear</h5>
-          <p className="mt-2 max-w-[64ch] text-sm leading-6 text-muted-foreground">
-            There are no pending source, competitor, or memo decisions. Generate the next evidence
-            batch when you need more proof.
-          </p>
+          <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+            <p>
+              <span className="font-medium text-foreground">Missing:</span> pending source,
+              competitor, or memo decisions.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Why it matters:</span> the queue
+              stays empty when every candidate has been handled or the next evidence batch has not
+              been generated.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Next:</span>{" "}
+              {!hasSources
+                ? "find sources."
+                : !hasCompetitors
+                  ? "find competitors."
+                  : citations.length === 0 && !memoReviewed
+                    ? "draft the evidence memo."
+                    : "generate another evidence batch only if the current proof is still weak."}
+            </p>
+          </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           {nextAction === "sources" ? (
@@ -4748,9 +4800,20 @@ function SourceCandidateList({
         </span>
       </div>
       {sources.length === 0 ? (
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          No source candidates yet. Find sources after approving the evidence plan.
-        </p>
+        <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Missing:</span> source candidates to
+            review.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Why it matters:</span> sources are the
+            receipts behind the research memo.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Next:</span> find sources after the
+            evidence plan is approved.
+          </p>
+        </div>
       ) : (
         <div className="mt-3 divide-y divide-border">
           {sources.map((source) => (
@@ -4863,10 +4926,20 @@ function CompetitorCandidateList({
         </span>
       </div>
       {candidates.length === 0 ? (
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          No competitor candidates yet. Find competitors to review direct competitors,
-          substitutes, and incumbents.
-        </p>
+        <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Missing:</span> competitor or
+            substitute candidates.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Why it matters:</span> the wedge is
+            hard to trust until the alternatives are visible.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Next:</span> find competitors and
+            review direct products, substitutes, and incumbents.
+          </p>
+        </div>
       ) : (
         <div className="mt-3 divide-y divide-border">
           {candidates.map((candidate) => (
@@ -5180,10 +5253,20 @@ function TopRisksCard({
         <h2 className="text-base font-semibold">Key Risks</h2>
       </div>
       {risks.length === 0 ? (
-        <p className="mt-4 text-sm leading-6 text-muted-foreground">
-          No risks recorded yet. Run research or extract assumptions to surface likely failure
-          modes and what to test next.
-        </p>
+        <div className="mt-4 grid gap-2 text-sm leading-6 text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Missing:</span> named risks for this
+            idea.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Why it matters:</span> risks explain
+            what could make the current wedge fail.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Next:</span> run research or extract
+            assumptions to surface likely failure modes.
+          </p>
+        </div>
       ) : (
         <div className="mt-4 grid gap-x-5 gap-y-4 border-t border-border pt-4 md:grid-cols-3">
           {risks.slice(0, 3).map((risk) => (
@@ -5247,10 +5330,20 @@ function RecentUpdatesCard({
         <h2 className="text-base font-semibold">Recent Strategic Updates</h2>
       </div>
       {updates.length === 0 ? (
-        <p className="mt-4 text-sm leading-6 text-muted-foreground">
-          No strategic updates yet. Structure the idea, add evidence, or generate the first
-          brief to start building the evidence trail.
-        </p>
+        <div className="mt-4 grid gap-2 text-sm leading-6 text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Missing:</span> changes to the thesis,
+            evidence, blocker, or decision trail.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Why it matters:</span> updates explain
+            how the idea is evolving instead of leaving only raw activity.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Next:</span> structure the idea, add
+            evidence, or generate the first research memo.
+          </p>
+        </div>
       ) : (
         <div className="mt-4 divide-y divide-border">
           {updates.slice(0, 6).map((update) => (

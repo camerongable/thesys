@@ -117,11 +117,21 @@ export function BriefTab({ projectId }: BriefTabProps) {
             <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
             <h3 className="text-sm font-semibold">No opportunity brief yet.</h3>
           </div>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            The opportunity brief turns project state and evidence into a cited thesis,
-            risks, assumptions, validation plan, and recommendation. Add evidence first for
-            a stronger result, then generate the first version.
-          </p>
+          <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+            <p>
+              <span className="font-medium text-foreground">Missing:</span> a cited research
+              brief for the current thesis.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Why it matters:</span> the brief
+              turns project state and evidence into risks, assumptions, validation plan, and
+              recommendation.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Next:</span> add evidence if the idea
+              is still thin, then generate the first brief.
+            </p>
+          </div>
           <Button
             className="mt-4"
             disabled={generateMutation.isPending}

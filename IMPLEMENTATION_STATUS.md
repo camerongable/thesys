@@ -2,13 +2,13 @@
 
 ## Current Phase
 
-V1 Sprint 35 implementation is complete. Thesys now treats `/projects` as a
-quieter homepage launcher with one dominant Start investigation CTA, secondary
-guided-demo access, collapsed filters, and hidden disposable test/demo/audit
-rows by default. `/projects/new` is a single-column creation flow with the rough
-idea, context check, clarifying questions, thesis preview, recommended path, and
-post-preview actions in one sequence; the primary creation action lands on
-`#current-step`, while research and wedge paths remain secondary deep links.
+V1 Sprint 36 implementation is complete. Thesys keeps the Sprint 33-35 simplified
+experience, with quieter launcher/intake/current-step surfaces, standardized
+missing/why/next empty states, fewer non-primary card containers, compact Inspect
+and Explore disclosure, and verified desktop/mobile browser behavior. `/projects`
+keeps one dominant Start investigation CTA, `/projects/new` keeps a single-column
+rough-idea flow with `Continue to Current Step` as the dominant post-preview
+action, and project Current Step keeps advanced detail behind Inspect.
 Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
 multi-segment workflow packs remain V2 scope.
 
@@ -1721,6 +1721,66 @@ Checks run:
   no horizontal overflow, the single-column preview remains usable, and the
   post-preview Current Step/research/wedge action row fits and remains usable.
 
+## V1 Sprint 36 Scope
+
+- [x] Standardize empty states across default project surfaces so they state
+  what is missing, why it matters, and the next action.
+- [x] Reduce non-primary card treatment on `/projects`, `/projects/new`,
+  Current Step supporting sections, Explore, and Inspect by using border bands,
+  dividers, compact rows, and sheet sections.
+- [x] Remove duplicate post-preview intake copy by replacing the old
+  `Continue with assumptions` path with a single dominant
+  `Continue to Current Step` action that preserves assumptions when needed.
+- [x] Keep `/projects` as one dominant `Start investigation` launcher with
+  secondary guided-demo access and collapsed filters.
+- [x] Keep `/projects/new` as a single-column rough-idea flow with stacked
+  mobile actions and no persistent explanatory sidebar.
+- [x] Keep Current Step focused on one current action, current thesis, selected
+  wedge, biggest unknown, next proof, Inspect details, and Ask Thesys.
+- [x] Keep Inspect details advanced and route-local; opening and closing it does
+  not change the hash.
+- [x] Add Sprint 36 source-structure regression tests for quiet launcher/intake
+  structure, stale card/navigation skeleton prevention, empty-state wording, and
+  the Current Step CTA wording.
+
+## V1 Sprint 36 Verification
+
+Checks run:
+
+- [x] `pnpm --filter thesys-web test`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `docker compose config`
+- [x] `docker compose restart web` after the IDE browser showed stale Next.js
+  output for `/projects/new`.
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack API smoke test: `POST /api/demo/seed` refreshed the guided
+  demo project and returned
+  `/projects/3160c9e9-5c3e-491f-9cc5-6e8081c2917c#current-step`.
+- [x] Desktop Codex in-app browser QA: verified `/` redirects to `/projects`;
+  `/projects` has one dominant `Start investigation` CTA, secondary guided demo
+  access, collapsed filters, and no right-rail launcher cards; `/projects/new`
+  is single-column, previews cleanly, and routes `Continue to Current Step` to
+  `/projects/{id}#current-step`; no horizontal overflow or app console
+  warnings/errors were observed.
+- [x] Desktop guided-demo browser QA: verified `#current-step` shows one clear
+  current action, current thesis, selected wedge, biggest unknown, next proof,
+  Inspect details, and Ask Thesys without default status/card clutter.
+- [x] Desktop Inspect and Explore browser QA: verified Inspect opens/closes
+  cleanly without changing the route/hash, advanced details remain grouped in
+  drawer sections, Explore opens Current Step, Shape, Research, Test, Decide,
+  and History, and legacy deep links `#research`, `#validation-mission`,
+  `#record-decision-panel`, and `#history` land on the correct surfaces.
+- [x] Mobile Codex in-app browser QA at 410px width: verified `/projects` has no
+  horizontal overflow, primary CTA remains obvious, and the Filter disclosure is
+  usable; `/projects/new` has no horizontal overflow and post-preview actions
+  wrap cleanly.
+- [x] Mobile guided-demo browser QA at 410px width: verified Current Step places
+  the current action and test path before advanced detail, Inspect opens as a
+  full-screen sheet, Explore opens as a full-screen sheet, and selected Explore
+  destinations route correctly.
+
 ## Next Work
 
-V1 Sprint 36: define the next brief-backed scope.
+V1 Sprint 37: define the next brief-backed scope.

@@ -744,10 +744,20 @@ export function DecisionsTab({ activeAnchor, onOpenValidation, projectId }: Deci
         ) : decisions.length === 0 ? (
           <div className="mt-4 rounded-md border border-dashed border-border p-4">
             <h3 className="text-sm font-semibold">No decisions recorded yet.</h3>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Decisions capture what you chose, why you chose it, what evidence supported
-              it, and when to revisit it.
-            </p>
+            <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+              <p>
+                <span className="font-medium text-foreground">Missing:</span> a durable
+                proceed, pivot, pause, or kill record.
+              </p>
+              <p>
+                <span className="font-medium text-foreground">Why it matters:</span> the decision
+                trail should capture what changed your mind and when to revisit it.
+              </p>
+              <p>
+                <span className="font-medium text-foreground">Next:</span>{" "}
+                {validationGuardActive ? "prepare an override record." : "record the decision."}
+              </p>
+            </div>
             <Button
               className="mt-3"
               onClick={openDecisionForm}

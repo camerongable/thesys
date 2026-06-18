@@ -211,10 +211,23 @@ export function ExperimentsTab({ projectId }: ExperimentsTabProps) {
             <Beaker className="h-4 w-4 text-primary" aria-hidden="true" />
             <h3 className="text-sm font-semibold">No validation mission yet.</h3>
           </div>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            A mission turns the top decision blocker into one proof with exact steps,
-            assets, success criteria, failure criteria, result logging, and interpretation.
-          </p>
+          <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+            <p>
+              <span className="font-medium text-foreground">Missing:</span> the proof that will
+              unblock the next decision.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Why it matters:</span> a mission
+              turns the top blocker into exact steps, assets, success criteria, result logging,
+              and interpretation.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Next:</span>{" "}
+              {assumptions.length === 0
+                ? "rank blockers first."
+                : "create the validation mission."}
+            </p>
+          </div>
           <Button
             className="mt-4 whitespace-nowrap"
             disabled={generateMutation.isPending || assumptions.length === 0}

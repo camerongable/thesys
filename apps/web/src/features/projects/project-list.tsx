@@ -147,7 +147,7 @@ export function ProjectList() {
 
         <section className="py-6">
           <div className="min-w-0">
-            <div className="rounded-lg border border-border bg-card">
+            <div className="border-y border-border">
               <div className="flex flex-col gap-4 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h2 className="text-base font-semibold">Ideas in progress</h2>
@@ -260,7 +260,7 @@ function QueueToolbar({
   return (
     <div className="border-b border-border px-4 py-3">
       <details className="group" id="project-filter-panel">
-        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus sm:min-h-10">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus sm:min-h-10">
           <span className="inline-flex items-center gap-2">
             <SlidersHorizontal className="h-4 w-4 text-primary" aria-hidden="true" />
             Filter
@@ -483,10 +483,19 @@ function EmptyProjectQueue({ onSeed, pending }: { onSeed: () => void; pending: b
     <div className="px-4 py-10">
       <div className="max-w-2xl">
         <h3 className="text-base font-semibold">No ideas in progress.</h3>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Start with a rough idea. Thesys will shape it into a thesis, identify the
-          biggest unknown, and recommend the next proof to run.
-        </p>
+        <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Missing:</span> a rough idea to shape.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Why it matters:</span> Thesys needs
+            the messy version before it can name the wedge, biggest unknown, and next proof.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Next:</span> start an investigation or
+            load the guided demo.
+          </p>
+        </div>
         <div className="mt-5 flex flex-col gap-2 sm:flex-row">
           <Link className={buttonVariants()} href="/projects/new">
             <FileSearch className="h-4 w-4" aria-hidden="true" />
@@ -506,11 +515,21 @@ function EmptyHiddenQueue({ hiddenCount }: { hiddenCount: number }) {
   return (
     <div className="px-4 py-8">
       <h3 className="text-sm font-semibold">Only test/demo projects are hidden.</h3>
-      <p className="mt-2 max-w-[65ch] text-sm leading-6 text-muted-foreground">
-        {formatNumber(hiddenCount)} test, demo, or audit project{hiddenCount === 1 ? "" : "s"} are
-        hidden so the default queue stays focused on real ideas and the guided demo. Open Filter to
-        include them.
-      </p>
+      <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+        <p>
+          <span className="font-medium text-foreground">Missing:</span> a non-test idea in the
+          default queue.
+        </p>
+        <p>
+          <span className="font-medium text-foreground">Why it matters:</span>{" "}
+          {formatNumber(hiddenCount)} test, demo, or audit project{hiddenCount === 1 ? "" : "s"}{" "}
+          are hidden so repeated QA rows do not crowd real work.
+        </p>
+        <p>
+          <span className="font-medium text-foreground">Next:</span> open Filter and enable Show
+          test projects if you need those rows.
+        </p>
+      </div>
     </div>
   );
 }
@@ -519,9 +538,20 @@ function EmptyFilteredQueue() {
   return (
     <div className="px-4 py-8">
       <h3 className="text-sm font-semibold">No projects match those filters.</h3>
-      <p className="mt-2 max-w-[65ch] text-sm leading-6 text-muted-foreground">
-        Change the search, stage, or risk filter to bring projects back into the queue.
-      </p>
+      <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+        <p>
+          <span className="font-medium text-foreground">Missing:</span> an idea matching the
+          current search, stage, and risk filters.
+        </p>
+        <p>
+          <span className="font-medium text-foreground">Why it matters:</span> the queue is still
+          scoped down, so the next validation item may be hidden.
+        </p>
+        <p>
+          <span className="font-medium text-foreground">Next:</span> clear search or loosen the
+          filters.
+        </p>
+      </div>
     </div>
   );
 }
