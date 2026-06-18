@@ -56,6 +56,7 @@ from app.services import (
     governance_service,
     langsmith_observability_service,
     project_service,
+    retrieval_service,
     tool_service,
 )
 
@@ -88,8 +89,10 @@ class AgenticResearchState(TypedDict, total=False):
     project_context: dict[str, Any]
     subquestions: list[str]
     tool_calls: list[ResearchToolCall]
+    retrieval_diagnostics: list[dict[str, Any]]
     retrieval_results: list[EvidenceRetrievalResultRead]
     selected_evidence: list[EvidenceRetrievalResultRead]
+    context_diagnostics: dict[str, Any]
     gaps: list[str]
     follow_up_results: list[EvidenceRetrievalResultRead]
     memo: AgenticResearchMemoDraft
@@ -241,21 +244,25 @@ def run_agentic_research(
         )
         return {
             "tool_calls": results["tool_calls"],
+            "retrieval_diagnostics": results["retrieval_diagnostics"],
             "retrieval_results": results["retrieval_results"],
         }
 
     def evidence_selector(state: AgenticResearchState) -> AgenticResearchState:
-        selected = _step(
+        selection = _step(
             db,
             run,
             "evidence_selector",
             {"retrieval_result_count": len(state["retrieval_results"])},
-            lambda: _select_evidence(state["retrieval_results"]),
+            lambda: _select_evidence(settings, state["retrieval_results"]),
             settings=settings,
             trace=trace,
             span_name="evidence_ingestion_summary",
         )
-        return {"selected_evidence": selected}
+        return {
+            "selected_evidence": selection["selected_evidence"],
+            "context_diagnostics": selection["context_diagnostics"],
+        }
 
     def gap_detector(state: AgenticResearchState) -> AgenticResearchState:
         gaps = _step(
@@ -291,8 +298,12 @@ def run_agentic_research(
             trace=trace,
             span_name="retrieval",
         )
-        selected = _select_evidence([*state["selected_evidence"], *follow_up])
-        return {"follow_up_results": follow_up, "selected_evidence": selected}
+        selection = _select_evidence(settings, [*state["selected_evidence"], *follow_up])
+        return {
+            "follow_up_results": follow_up,
+            "selected_evidence": selection["selected_evidence"],
+            "context_diagnostics": selection["context_diagnostics"],
+        }
 
     def synthesizer(state: AgenticResearchState) -> AgenticResearchState:
         memo, completion = _generate_memo(
@@ -336,7 +347,9 @@ def run_agentic_research(
             state["project_context"],
             state["subquestions"],
             state["tool_calls"],
+            state.get("retrieval_diagnostics", []),
             state["selected_evidence"],
+            state.get("context_diagnostics", {}),
             state["gaps"],
             state["critic"],
             trace,
@@ -1239,6 +1252,7 @@ def _execute_tool_calls(
     tool_calls: list[ResearchToolCall],
 ) -> dict[str, Any]:
     retrieval_results: list[EvidenceRetrievalResultRead] = []
+    retrieval_diagnostics: list[dict[str, Any]] = []
     completed_calls: list[ResearchToolCall] = []
     for call in tool_calls:
         tool = call["tool"]
@@ -1261,6 +1275,9 @@ def _execute_tool_calls(
                 EvidenceRetrievalResultRead.model_validate(result)
                 for result in tool_result.output.get("results", [])
             ]
+            diagnostics = tool_result.output.get("diagnostics")
+            if isinstance(diagnostics, dict):
+                retrieval_diagnostics.append(diagnostics)
             retrieval_results.extend(results)
             completed_calls.append({**call, "result_count": len(results)})
         elif tool == "source_reader":
@@ -1292,7 +1309,11 @@ def _execute_tool_calls(
                 )
             lookup_count = len(_lookup_tool_payload(project_context, tool))
             completed_calls.append({**call, "result_count": lookup_count})
-    return {"tool_calls": completed_calls, "retrieval_results": retrieval_results}
+    return {
+        "tool_calls": completed_calls,
+        "retrieval_diagnostics": retrieval_diagnostics,
+        "retrieval_results": retrieval_results,
+    }
 
 
 def _lookup_tool_name(tool: ResearchTool) -> str | None:
@@ -1363,15 +1384,30 @@ def _source_reader_results(
 
 
 def _select_evidence(
+    settings: Settings,
     results: list[EvidenceRetrievalResultRead],
-) -> list[EvidenceRetrievalResultRead]:
+) -> dict[str, Any]:
     by_chunk: dict[uuid.UUID, EvidenceRetrievalResultRead] = {}
     for result in results:
         existing = by_chunk.get(result.chunk_id)
         if existing is None or result.score > existing.score:
             by_chunk[result.chunk_id] = result
-    selected = sorted(by_chunk.values(), key=lambda result: result.score, reverse=True)
-    return selected[:SELECTED_EVIDENCE_LIMIT]
+    selected = sorted(
+        by_chunk.values(),
+        key=lambda result: (
+            result.rerank_score if result.rerank_score is not None else result.score
+        ),
+        reverse=True,
+    )
+    assembled, diagnostics = retrieval_service.assemble_context_results(
+        settings,
+        selected,
+        top_k=SELECTED_EVIDENCE_LIMIT,
+    )
+    return {
+        "selected_evidence": assembled,
+        "context_diagnostics": diagnostics.model_dump(mode="json"),
+    }
 
 
 def _detect_gaps(
@@ -1616,7 +1652,9 @@ def _write_research_memo_step(
     project_context: dict[str, Any],
     subquestions: list[str],
     tool_calls: list[ResearchToolCall],
+    retrieval_diagnostics: list[dict[str, Any]],
     selected_evidence: list[EvidenceRetrievalResultRead],
+    context_diagnostics: dict[str, Any],
     gaps: list[str],
     critic: dict[str, Any],
     trace: langsmith_observability_service.TraceContext,
@@ -1649,6 +1687,8 @@ def _write_research_memo_step(
                 "project_context": project_context,
                 "subquestions": subquestions,
                 "tool_calls": tool_calls,
+                "retrieval_diagnostics": retrieval_diagnostics,
+                "retrieval_context": context_diagnostics,
                 "selected_evidence": [
                     result.model_dump(mode="json") for result in selected_evidence
                 ],

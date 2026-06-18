@@ -193,6 +193,10 @@ def run_v1_research_eval(
         memo.get("recommended_validation_actions") if isinstance(memo, dict) else []
     )
     tool_calls = structured.get("tool_calls") if isinstance(structured, dict) else []
+    retrieval_diagnostics = (
+        structured.get("retrieval_diagnostics") if isinstance(structured, dict) else []
+    )
+    retrieval_context = structured.get("retrieval_context") if isinstance(structured, dict) else {}
     gaps = structured.get("evidence_gaps") if isinstance(structured, dict) else []
     markdown = latest_memo.markdown_content if latest_memo else ""
     dataset_cases = _research_eval_cases()
@@ -289,6 +293,34 @@ def run_v1_research_eval(
                 f"{len(tool_calls) if isinstance(tool_calls, list) else 0} tool calls"
             ),
             "agentic run, 10+ steps, and stored tool calls",
+        ),
+        _ResearchMetric(
+            "multi_stage_retrieval",
+            "Multi-stage retrieval strategy",
+            _has_multi_stage_retrieval(retrieval_diagnostics),
+            _retrieval_strategy_observed(retrieval_diagnostics),
+            "query plan, subqueries, and retrieval diagnostics are stored",
+        ),
+        _ResearchMetric(
+            "reranker_usage",
+            "Reranker visibility",
+            _has_reranker_diagnostics(retrieval_diagnostics),
+            _reranker_observed(retrieval_diagnostics),
+            "reranker enabled/disabled state is visible",
+        ),
+        _ResearchMetric(
+            "context_assembly",
+            "Context assembly",
+            _has_context_assembly(retrieval_context, retrieval_diagnostics),
+            _context_assembly_observed(retrieval_context, retrieval_diagnostics),
+            "selected context and token budget are visible",
+        ),
+        _ResearchMetric(
+            "retrieval_quality_report",
+            "Retrieval quality report",
+            _has_quality_report(retrieval_diagnostics),
+            _quality_report_observed(retrieval_diagnostics),
+            "recall/precision/citation coverage proxies are reported",
         ),
         _ResearchMetric(
             "gap_detection",
@@ -690,6 +722,93 @@ def _research_memo_section_coverage(markdown: str) -> str:
         if section.casefold() in markdown.casefold()
     )
     return f"{covered}/{len(REQUIRED_RESEARCH_MEMO_SECTIONS)}"
+
+
+def _diagnostic_items(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _has_multi_stage_retrieval(value: Any) -> bool:
+    for item in _diagnostic_items(value):
+        plan = item.get("query_plan")
+        if isinstance(plan, dict) and (
+            plan.get("decomposed") is True or len(plan.get("subqueries") or []) > 1
+        ):
+            return True
+    return False
+
+
+def _retrieval_strategy_observed(value: Any) -> str:
+    items = _diagnostic_items(value)
+    subquery_count = sum(
+        len(item.get("query_plan", {}).get("subqueries") or [])
+        for item in items
+        if isinstance(item.get("query_plan"), dict)
+    )
+    return f"{len(items)} diagnostics, {subquery_count} subqueries"
+
+
+def _has_reranker_diagnostics(value: Any) -> bool:
+    return any(isinstance(item.get("reranker"), dict) for item in _diagnostic_items(value))
+
+
+def _reranker_observed(value: Any) -> str:
+    rerankers = [
+        item.get("reranker")
+        for item in _diagnostic_items(value)
+        if isinstance(item.get("reranker"), dict)
+    ]
+    if not rerankers:
+        return "no reranker diagnostics"
+    enabled_count = sum(1 for reranker in rerankers if reranker.get("enabled") is True)
+    providers = sorted({str(reranker.get("provider")) for reranker in rerankers})
+    return f"{enabled_count}/{len(rerankers)} enabled, providers: {', '.join(providers)}"
+
+
+def _has_context_assembly(context: Any, diagnostics: Any) -> bool:
+    if isinstance(context, dict) and context.get("selected_count", 0) >= 1:
+        return True
+    return any(
+        isinstance(item.get("context"), dict) and item["context"].get("selected_count", 0) >= 1
+        for item in _diagnostic_items(diagnostics)
+    )
+
+
+def _context_assembly_observed(context: Any, diagnostics: Any) -> str:
+    if isinstance(context, dict) and context:
+        return (
+            f"{context.get('selected_count', 0)} selected, "
+            f"{context.get('token_count', 0)}/{context.get('token_budget', 0)} tokens"
+        )
+    contexts = [
+        item.get("context")
+        for item in _diagnostic_items(diagnostics)
+        if isinstance(item.get("context"), dict)
+    ]
+    selected = sum(int(item.get("selected_count") or 0) for item in contexts)
+    tokens = sum(int(item.get("token_count") or 0) for item in contexts)
+    return f"{selected} selected, {tokens} tokens"
+
+
+def _has_quality_report(value: Any) -> bool:
+    return any(isinstance(item.get("quality_report"), dict) for item in _diagnostic_items(value))
+
+
+def _quality_report_observed(value: Any) -> str:
+    reports = [
+        item.get("quality_report")
+        for item in _diagnostic_items(value)
+        if isinstance(item.get("quality_report"), dict)
+    ]
+    if not reports:
+        return "no retrieval quality reports"
+    avg_precision = sum(float(report.get("precision_proxy") or 0) for report in reports) / len(
+        reports
+    )
+    avg_recall = sum(float(report.get("recall_proxy") or 0) for report in reports) / len(reports)
+    return f"{len(reports)} reports, precision {avg_precision:.2f}, recall {avg_recall:.2f}"
 
 
 def _secret_redaction_check() -> bool:

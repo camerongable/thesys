@@ -652,14 +652,17 @@ def _run_tool(
         return _get_project_summary(db, auth, project_id)
     if definition.name == "search_project_evidence":
         payload = EvidenceRetrieveCreate.model_validate(tool_input)
-        results = retrieval_service.retrieve_evidence_results(
+        search = retrieval_service.retrieve_evidence_search(
             db,
             auth,
             settings,
             project_id,
             payload,
         )
-        return {"results": [result.model_dump(mode="json") for result in results]}
+        return {
+            "results": [result.model_dump(mode="json") for result in search.results],
+            "diagnostics": search.diagnostics.model_dump(mode="json"),
+        }
     if definition.name == "list_project_sources":
         return _list_project_sources(db, auth, project_id, research_sprint_id)
     if definition.name == "list_competitors":

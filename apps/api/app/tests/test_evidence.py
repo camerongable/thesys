@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.models import AIRun, AIStep, EvidenceChunk, EvidenceSource
 from app.services import evidence_service
 
@@ -83,6 +84,118 @@ def test_note_ingestion_chunks_embeds_and_retrieves(
     assert retrieval_step.step_name == "hybrid_retrieval"
     assert retrieval_step.output_json["result_count"] == 1
     assert retrieval_step.output_json["diagnostics"]["fallback_path_used"] is True
+    assert retrieval_step.output_json["diagnostics"]["query_plan"]["subqueries"]
+    assert retrieval_step.output_json["diagnostics"]["reranker"]["provider"] == "deterministic"
+    assert retrieval_step.output_json["diagnostics"]["context"]["selected_count"] == 1
+    quality = retrieval_step.output_json["diagnostics"]["quality_report"]
+    assert quality["citation_coverage_proxy"] == 1
+
+
+def test_broad_evidence_retrieval_plans_reranks_and_assembles_context(
+    client: TestClient,
+) -> None:
+    create_response = client.post(
+        "/api/projects",
+        json={
+            "name": "Coach wedge research",
+            "short_description": "Selecting an evidence-backed wedge for coaches.",
+        },
+    )
+    assert create_response.status_code == 201
+    project_id = create_response.json()["id"]
+    source_texts = [
+        (
+            "Strong interview note",
+            "Fitness coaches say weekly client check-ins are the strongest wedge. "
+            "They need proof that wearable data and workout logs can be synthesized "
+            "before calls without losing trust in the rationale.",
+        ),
+        (
+            "Duplicate interview note",
+            "Fitness coaches say weekly client check-ins are the strongest wedge. "
+            "They need proof that wearable data and workout logs can be synthesized "
+            "before calls without losing trust in the rationale.",
+        ),
+        (
+            "Competitor pricing",
+            "Trainerize and TrueCoach pricing pages show coaches already pay for "
+            "messaging, payments, habit tracking, and client management, but not for "
+            "automated check-in synthesis.",
+        ),
+        (
+            "Noisy operations note",
+            "Office snack preferences, desk layout, and printer toner ordering came "
+            "up during an unrelated operations planning meeting.",
+        ),
+    ]
+    for title, text in source_texts:
+        response = client.post(
+            f"/api/projects/{project_id}/evidence/note",
+            json={"title": title, "text": text},
+        )
+        assert response.status_code == 201
+
+    retrieval_response = client.post(
+        f"/api/projects/{project_id}/evidence/retrieve",
+        json={
+            "query": "Which wedge is strongest and what proof is missing for coaches to pay?",
+            "mode": "hybrid",
+            "top_k": 6,
+        },
+    )
+
+    assert retrieval_response.status_code == 200
+    retrieval = retrieval_response.json()
+    diagnostics = retrieval["diagnostics"]
+    assert diagnostics["query_plan"]["decomposed"] is True
+    assert len(diagnostics["query_plan"]["subqueries"]) > 1
+    assert diagnostics["query_plan"]["intent"] in {"wedge_selection", "pricing"}
+    assert diagnostics["reranker"]["enabled"] is True
+    assert diagnostics["reranker"]["provider"] == "deterministic"
+    assert diagnostics["context"]["selected_count"] >= 1
+    assert diagnostics["context"]["token_count"] <= diagnostics["context"]["token_budget"]
+    assert diagnostics["context"]["deduped_count"] >= 1
+    assert diagnostics["quality_report"]["citation_coverage_proxy"] == 1
+    assert diagnostics["quality_report"]["context_token_count"] == (
+        diagnostics["context"]["token_count"]
+    )
+    assert retrieval["results"]
+    assert all(result["context_included"] for result in retrieval["results"])
+    assert all(result["rerank_score"] is not None for result in retrieval["results"])
+    assert all(result["final_rank"] is not None for result in retrieval["results"])
+    assert all(result["selection_reason"] for result in retrieval["results"])
+
+
+def test_retrieval_reranking_can_be_disabled_by_config(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("RETRIEVAL_RERANKING_ENABLED", "false")
+    get_settings.cache_clear()
+    create_response = client.post("/api/projects", json={"name": "No rerank"})
+    assert create_response.status_code == 201
+    project_id = create_response.json()["id"]
+    note_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={
+            "title": "Pricing note",
+            "text": "Coaches mention pricing, paid pilots, and willingness to pay.",
+        },
+    )
+    assert note_response.status_code == 201
+
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/retrieve",
+        json={"query": "pricing willingness to pay", "mode": "keyword", "top_k": 3},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["diagnostics"]["reranker"]["enabled"] is False
+    assert body["diagnostics"]["context"]["selected_count"] == 1
+    result = body["results"][0]
+    assert result["rerank_score"] == result["score"]
+    assert result["final_rank"] == 1
 
 
 def test_url_ingestion_uses_fetcher_and_source_type_filter(

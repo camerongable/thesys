@@ -20,6 +20,17 @@ SENSITIVE_KEY_PARTS = (
     "private_key",
 )
 
+NON_SECRET_TELEMETRY_KEYS = {
+    "completion_tokens",
+    "context_token_count",
+    "max_tokens",
+    "prompt_tokens",
+    "retrieval_context_token_budget",
+    "token_budget",
+    "token_count",
+    "total_tokens",
+}
+
 SECRET_VALUE_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}\b"),
     re.compile(r"\bBearer\s+[A-Za-z0-9._~+\-/]+=*\b", re.IGNORECASE),
@@ -118,4 +129,6 @@ def redact_payload(
 
 def is_sensitive_key(key: str) -> bool:
     normalized = key.casefold().replace("-", "_")
+    if normalized in NON_SECRET_TELEMETRY_KEYS:
+        return False
     return any(part in normalized for part in SENSITIVE_KEY_PARTS)

@@ -390,7 +390,46 @@ export type EvidenceRetrievalResult = {
   embedding_dimension: number | null;
   embedding_version: string | null;
   embedded_at: string | null;
+  rerank_score: number | null;
+  final_rank: number | null;
+  context_included: boolean;
+  selection_reason: string | null;
   created_at: string;
+};
+
+export type RetrievalQueryPlan = {
+  intent: string;
+  target_entities: string[];
+  needed_evidence_types: string[];
+  subqueries: string[];
+  decomposed: boolean;
+};
+
+export type RetrievalRerankerDiagnostics = {
+  enabled: boolean;
+  provider: string;
+  fallback_used: boolean;
+  fallback_reason: string | null;
+};
+
+export type RetrievalContextDiagnostics = {
+  token_budget: number;
+  token_count: number;
+  selected_count: number;
+  dropped_count: number;
+  deduped_count: number;
+  max_chunks_per_source: number;
+  min_context_score: number;
+};
+
+export type RetrievalQualityReport = {
+  recall_proxy: number;
+  precision_proxy: number;
+  citation_coverage_proxy: number;
+  unsupported_claim_count: number;
+  average_retrieval_latency_ms: number;
+  reranker_used: boolean;
+  context_token_count: number;
 };
 
 export type RetrievalDiagnostics = {
@@ -405,6 +444,10 @@ export type RetrievalDiagnostics = {
   used_sql_vector_search: boolean;
   fallback_path_used: boolean;
   fallback_reason: string | null;
+  query_plan: RetrievalQueryPlan | null;
+  reranker: RetrievalRerankerDiagnostics | null;
+  context: RetrievalContextDiagnostics | null;
+  quality_report: RetrievalQualityReport | null;
 };
 
 export type EvidenceRetrieveResult = {
@@ -1606,6 +1649,11 @@ export type AIStatus = {
   embedding_retry_attempts: number;
   retrieval_vector_path: "auto" | "sql" | "python";
   retrieval_python_fallback_enabled: boolean;
+  retrieval_reranking_enabled: boolean;
+  retrieval_reranker_provider: "deterministic" | "litellm";
+  retrieval_context_token_budget: number;
+  retrieval_max_chunks_per_source: number;
+  retrieval_min_context_score: number;
   structured_output_healthcheck: AIStatusStructuredOutputCheck | null;
 };
 

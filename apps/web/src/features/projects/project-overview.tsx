@@ -4215,6 +4215,11 @@ function EvidenceReviewActiveItem({
             evidence gap{evidenceGapCount === 1 ? "" : "s"}. Approve only if the summary should
             update assumptions, risks, and validation actions.
           </p>
+          {retrievalContextSummaryFromArtifact(activeItem.artifact) ? (
+            <p className="mt-2 max-w-[72ch] text-xs leading-5 text-muted-foreground">
+              Retrieval context: {retrievalContextSummaryFromArtifact(activeItem.artifact)}
+            </p>
+          ) : null}
         </div>
         {memoryUpdateStatus ? (
           <span className="w-fit rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
@@ -6152,6 +6157,18 @@ function retrievalToolCallCountFromArtifact(artifact: Artifact | null) {
     const tool = toolCall?.tool;
     return tool === "semantic_search" || tool === "keyword_search" || tool === "source_reader";
   }).length;
+}
+
+function retrievalContextSummaryFromArtifact(artifact: Artifact | null) {
+  const context = asRecord(artifact?.current_version?.structured_content.retrieval_context);
+  if (!context) {
+    return null;
+  }
+  const selected = typeof context.selected_count === "number" ? context.selected_count : 0;
+  const tokenCount = typeof context.token_count === "number" ? context.token_count : 0;
+  const tokenBudget = typeof context.token_budget === "number" ? context.token_budget : 0;
+  const deduped = typeof context.deduped_count === "number" ? context.deduped_count : 0;
+  return `${selected} chunks selected, ${tokenCount}/${tokenBudget} tokens, ${deduped} duplicate${deduped === 1 ? "" : "s"} removed`;
 }
 
 function memoryUpdateStatusFromArtifact(artifact: Artifact | null) {

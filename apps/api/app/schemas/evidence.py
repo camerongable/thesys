@@ -87,7 +87,46 @@ class EvidenceRetrievalResultRead(BaseModel):
     embedding_dimension: int | None = None
     embedding_version: str | None = None
     embedded_at: datetime | None = None
+    rerank_score: float | None = None
+    final_rank: int | None = None
+    context_included: bool = True
+    selection_reason: str | None = None
     created_at: datetime
+
+
+class RetrievalQueryPlanRead(BaseModel):
+    intent: str
+    target_entities: list[str] = Field(default_factory=list)
+    needed_evidence_types: list[str] = Field(default_factory=list)
+    subqueries: list[str] = Field(default_factory=list)
+    decomposed: bool = False
+
+
+class RetrievalRerankerDiagnosticsRead(BaseModel):
+    enabled: bool
+    provider: str
+    fallback_used: bool = False
+    fallback_reason: str | None = None
+
+
+class RetrievalContextDiagnosticsRead(BaseModel):
+    token_budget: int
+    token_count: int
+    selected_count: int
+    dropped_count: int
+    deduped_count: int
+    max_chunks_per_source: int
+    min_context_score: float
+
+
+class RetrievalQualityReportRead(BaseModel):
+    recall_proxy: float
+    precision_proxy: float
+    citation_coverage_proxy: float
+    unsupported_claim_count: int
+    average_retrieval_latency_ms: int
+    reranker_used: bool
+    context_token_count: int
 
 
 class RetrievalDiagnosticsRead(BaseModel):
@@ -102,6 +141,10 @@ class RetrievalDiagnosticsRead(BaseModel):
     used_sql_vector_search: bool
     fallback_path_used: bool
     fallback_reason: str | None
+    query_plan: RetrievalQueryPlanRead | None = None
+    reranker: RetrievalRerankerDiagnosticsRead | None = None
+    context: RetrievalContextDiagnosticsRead | None = None
+    quality_report: RetrievalQualityReportRead | None = None
 
 
 class EvidenceRetrieveRead(BaseModel):

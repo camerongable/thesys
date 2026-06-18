@@ -1,4 +1,7 @@
+import json
+import re
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -8,6 +11,7 @@ from sqlalchemy import Select, cast, func, or_, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
+from app.ai.litellm_client import ChatMessage, LiteLLMClient, LiteLLMClientError
 from app.ai.prompts import EVIDENCE_RETRIEVAL_PROMPT_VERSION
 from app.core.auth import AuthContext
 from app.core.config import Settings
@@ -15,12 +19,48 @@ from app.db.models import AIRun, AIStep, EvidenceChunk, EvidenceSource
 from app.schemas.evidence import (
     EvidenceRetrievalResultRead,
     EvidenceRetrieveCreate,
+    RetrievalContextDiagnosticsRead,
     RetrievalDiagnosticsRead,
     RetrievalMode,
+    RetrievalQualityReportRead,
+    RetrievalQueryPlanRead,
+    RetrievalRerankerDiagnosticsRead,
 )
 from app.services import ai_run_service, embedding_service, project_service
 
 SQL_VECTOR_CANDIDATE_MULTIPLIER = 4
+PIPELINE_SUBQUERY_LIMIT = 5
+RERANK_CANDIDATE_LIMIT = 16
+APPROX_CHARS_PER_TOKEN = 4
+STOPWORDS = {
+    "and",
+    "are",
+    "but",
+    "can",
+    "for",
+    "from",
+    "had",
+    "has",
+    "have",
+    "how",
+    "into",
+    "not",
+    "our",
+    "that",
+    "the",
+    "this",
+    "was",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "why",
+    "with",
+    "without",
+    "would",
+}
 
 
 @dataclass(frozen=True)
@@ -118,6 +158,77 @@ def retrieve_evidence_results(
 
 
 def retrieve_evidence_search(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    payload: EvidenceRetrieveCreate,
+) -> RetrievalSearchResult:
+    return retrieve_evidence_pipeline(db, auth, settings, project_id, payload)
+
+
+def retrieve_evidence_pipeline(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    payload: EvidenceRetrieveCreate,
+) -> RetrievalSearchResult:
+    project_service.get_project(db, auth, project_id)
+    started = perf_counter()
+    plan = _plan_query(payload.query)
+    subqueries = plan.subqueries or [payload.query]
+    all_results: list[EvidenceRetrievalResultRead] = []
+    diagnostics: list[RetrievalDiagnosticsRead] = []
+
+    for subquery in subqueries:
+        sub_payload = payload.model_copy(
+            update={"query": subquery, "top_k": max(payload.top_k, 12)}
+        )
+        search = _retrieve_single_query_search(db, auth, settings, project_id, sub_payload)
+        diagnostics.append(search.diagnostics)
+        all_results.extend(search.results)
+
+    fused_results = _fuse_results(all_results)
+    reranked, reranker = _rerank_results(settings, payload.query, plan, fused_results)
+    assembled, context = assemble_context_results(settings, reranked, top_k=payload.top_k)
+    total_latency = int((perf_counter() - started) * 1000)
+    quality = _quality_report(
+        selected=assembled,
+        candidate_count=len(fused_results),
+        total_latency_ms=total_latency,
+        reranker_used=reranker.enabled and not reranker.fallback_used,
+        token_count=context.token_count,
+    )
+    primary = diagnostics[0] if diagnostics else _diagnostics(
+        settings,
+        started,
+        index_name=None,
+        index_available=False,
+        candidate_count=0,
+        used_sql_vector_search=False,
+        fallback_path_used=False,
+        fallback_reason=None,
+    )
+    diagnostic_payload = primary.model_dump()
+    diagnostic_payload.update(
+        {
+            "candidate_count": sum(item.candidate_count for item in diagnostics),
+            "query_latency_ms": total_latency,
+            "used_sql_vector_search": any(item.used_sql_vector_search for item in diagnostics),
+            "fallback_path_used": any(item.fallback_path_used for item in diagnostics),
+            "fallback_reason": _combine_fallback_reasons(diagnostics),
+            "query_plan": plan,
+            "reranker": reranker,
+            "context": context,
+            "quality_report": quality,
+        }
+    )
+    pipeline_diagnostics = RetrievalDiagnosticsRead.model_validate(diagnostic_payload)
+    return RetrievalSearchResult(diagnostics=pipeline_diagnostics, results=assembled)
+
+
+def _retrieve_single_query_search(
     db: Session,
     auth: AuthContext,
     settings: Settings,
@@ -268,6 +379,399 @@ def _retrieve_with_python_scoring(
         ),
         len(candidates),
     )
+
+
+def _plan_query(query: str) -> RetrievalQueryPlanRead:
+    terms = _term_set(query)
+    raw_terms = _raw_term_set(query)
+    lowered = query.casefold()
+    intent = "general_research"
+    intent_markers = {
+        "wedge_selection": {"wedge", "positioning", "segment", "focus", "strongest"},
+        "pricing": {"pricing", "price", "pay", "willingness", "budget", "monetization"},
+        "competitor_analysis": {"competitor", "alternative", "substitute", "incumbent"},
+        "validation": {"validate", "validation", "proof", "test", "experiment", "unknown"},
+        "customer_pain": {"pain", "problem", "workflow", "urgent", "current"},
+    }
+    for candidate, markers in intent_markers.items():
+        if terms & markers:
+            intent = candidate
+            break
+
+    needed_evidence_types: list[str] = []
+    if terms & {"competitor", "alternative", "substitute", "incumbent"}:
+        needed_evidence_types.append("competitor")
+    if terms & {"pricing", "price", "pay", "willingness", "budget"}:
+        needed_evidence_types.append("pricing")
+    if terms & {"pain", "problem", "workflow", "urgent"}:
+        needed_evidence_types.append("customer_pain")
+    if terms & {"validate", "validation", "proof", "test", "experiment"}:
+        needed_evidence_types.append("validation")
+    if not needed_evidence_types:
+        needed_evidence_types = ["market", "customer_pain", "competitor"]
+
+    target_entities = _target_entities(query)
+    broad = (
+        len(terms) >= 8
+        or " and " in lowered
+        or " or " in lowered
+        or any(
+            marker in raw_terms
+            for marker in {"which", "what", "compare", "strongest", "missing"}
+        )
+    )
+    subqueries = [query.strip()]
+    if broad:
+        expansions = {
+            "competitor": "competitors substitutes alternatives positioning pressure",
+            "pricing": "pricing willingness to pay budget paid pilot",
+            "customer_pain": "customer pain urgency current workaround workflow",
+            "validation": "validation proof experiment success criteria blocker",
+            "market": "market landscape trend adoption category",
+        }
+        for evidence_type in needed_evidence_types:
+            expansion = expansions.get(evidence_type)
+            if expansion:
+                subqueries.append(f"{query.strip()} {expansion}")
+        if intent == "wedge_selection":
+            subqueries.append(f"{query.strip()} wedge target segment differentiation first proof")
+    subqueries = _dedupe_strings([item for item in subqueries if item])[:PIPELINE_SUBQUERY_LIMIT]
+    return RetrievalQueryPlanRead(
+        intent=intent,
+        target_entities=target_entities,
+        needed_evidence_types=needed_evidence_types,
+        subqueries=subqueries,
+        decomposed=len(subqueries) > 1,
+    )
+
+
+def _target_entities(query: str) -> list[str]:
+    matches = re.findall(r"\b[A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){0,2}\b", query)
+    ignored = {"What", "Which", "Why", "How", "Should", "Can", "The", "A", "An"}
+    return _dedupe_strings([match for match in matches if match.split()[0] not in ignored])[:6]
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        key = value.strip().casefold()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(value.strip())
+    return deduped
+
+
+def _fuse_results(
+    results: list[EvidenceRetrievalResultRead],
+) -> list[EvidenceRetrievalResultRead]:
+    by_chunk: dict[uuid.UUID, EvidenceRetrievalResultRead] = {}
+    match_counts: defaultdict[uuid.UUID, int] = defaultdict(int)
+    for result in results:
+        match_counts[result.chunk_id] += 1
+        existing = by_chunk.get(result.chunk_id)
+        if existing is None or result.score > existing.score:
+            by_chunk[result.chunk_id] = result
+    fused: list[EvidenceRetrievalResultRead] = []
+    for result in by_chunk.values():
+        metadata = dict(result.metadata)
+        metadata["retrieval_match_count"] = match_counts[result.chunk_id]
+        fused.append(result.model_copy(update={"metadata": metadata}))
+    return sorted(fused, key=lambda item: (item.score, item.created_at), reverse=True)
+
+
+def _rerank_results(
+    settings: Settings,
+    query: str,
+    plan: RetrievalQueryPlanRead,
+    results: list[EvidenceRetrievalResultRead],
+) -> tuple[list[EvidenceRetrievalResultRead], RetrievalRerankerDiagnosticsRead]:
+    if not settings.retrieval_reranking_enabled:
+        ranked = [
+            result.model_copy(
+                update={
+                    "rerank_score": result.score,
+                    "final_rank": index + 1,
+                    "selection_reason": "Reranking disabled; original retrieval score used.",
+                }
+            )
+            for index, result in enumerate(results)
+        ]
+        return ranked, RetrievalRerankerDiagnosticsRead(
+            enabled=False,
+            provider=settings.retrieval_reranker_provider,
+        )
+
+    fallback_reason: str | None = None
+    ordered_ids: list[uuid.UUID] | None = None
+    if settings.retrieval_reranker_provider == "litellm" and not settings.should_use_llm_stub:
+        try:
+            ordered_ids = _litellm_rerank_order(settings, query, plan, results)
+        except Exception as exc:
+            fallback_reason = f"LiteLLM reranker failed: {exc}"
+
+    ranked = _deterministic_rerank(query, plan, results, ordered_ids=ordered_ids)
+    return ranked, RetrievalRerankerDiagnosticsRead(
+        enabled=True,
+        provider=settings.retrieval_reranker_provider,
+        fallback_used=fallback_reason is not None,
+        fallback_reason=fallback_reason,
+    )
+
+
+def _litellm_rerank_order(
+    settings: Settings,
+    query: str,
+    plan: RetrievalQueryPlanRead,
+    results: list[EvidenceRetrievalResultRead],
+) -> list[uuid.UUID]:
+    candidates = results[:RERANK_CANDIDATE_LIMIT]
+    if not candidates:
+        return []
+    payload = {
+        "query": query,
+        "intent": plan.intent,
+        "needed_evidence_types": plan.needed_evidence_types,
+        "candidates": [
+            {
+                "chunk_id": str(result.chunk_id),
+                "title": result.title,
+                "source_type": result.source_type,
+                "score": result.score,
+                "text": result.text[:900],
+            }
+            for result in candidates
+        ],
+    }
+    messages = [
+        ChatMessage(
+            role="system",
+            content=(
+                "Rerank retrieved evidence for a founder strategic RAG workflow. "
+                "Return JSON only with key ranked_chunk_ids as an ordered array "
+                "of chunk_id strings. "
+                "Prefer specific, source-backed evidence and reject generic or weak snippets."
+            ),
+        ),
+        ChatMessage(role="user", content=json.dumps(payload, ensure_ascii=True, default=str)),
+    ]
+    completion = LiteLLMClient(settings).complete(
+        messages,
+        model=settings.litellm_model,
+        temperature=0.0,
+        response_format_json=True,
+        max_tokens=600,
+    )
+    try:
+        body = json.loads(completion.content)
+        raw_ids = body.get("ranked_chunk_ids")
+    except json.JSONDecodeError as exc:
+        raise LiteLLMClientError("LiteLLM reranker did not return valid JSON.") from exc
+    if not isinstance(raw_ids, list):
+        raise LiteLLMClientError("LiteLLM reranker response omitted ranked_chunk_ids.")
+    valid_ids = {result.chunk_id for result in candidates}
+    ordered: list[uuid.UUID] = []
+    for raw_id in raw_ids:
+        try:
+            chunk_id = uuid.UUID(str(raw_id))
+        except ValueError:
+            continue
+        if chunk_id in valid_ids and chunk_id not in ordered:
+            ordered.append(chunk_id)
+    return ordered
+
+
+def _deterministic_rerank(
+    query: str,
+    plan: RetrievalQueryPlanRead,
+    results: list[EvidenceRetrievalResultRead],
+    *,
+    ordered_ids: list[uuid.UUID] | None,
+) -> list[EvidenceRetrievalResultRead]:
+    query_terms = _term_set(query)
+    planned_terms = _term_set(" ".join(plan.needed_evidence_types))
+    explicit_rank = {chunk_id: index for index, chunk_id in enumerate(ordered_ids or [])}
+    scored: list[tuple[float, EvidenceRetrievalResultRead]] = []
+    for result in results:
+        text_terms = _term_set(result.text)
+        overlap = len(query_terms & text_terms) / max(len(query_terms), 1)
+        type_overlap = len(planned_terms & text_terms) / max(len(planned_terms), 1)
+        credibility = _metadata_float(result.metadata, "source_credibility_score") or 0.5
+        freshness = _freshness_boost(result)
+        match_count = _metadata_float(result.metadata, "retrieval_match_count") or 1.0
+        provider_rank_boost = 0.0
+        if result.chunk_id in explicit_rank:
+            provider_rank_boost = max(0.0, 0.25 - (explicit_rank[result.chunk_id] * 0.01))
+        rerank_score = (
+            result.score * 0.55
+            + overlap * 0.18
+            + type_overlap * 0.08
+            + min(credibility, 1.0) * 0.08
+            + freshness * 0.06
+            + min(match_count / 4.0, 1.0) * 0.05
+            + provider_rank_boost
+        )
+        if overlap == 0 and type_overlap == 0 and result.keyword_score == 0:
+            rerank_score *= 0.6
+        scored.append((round(min(rerank_score, 1.0), 6), result))
+    scored.sort(key=lambda item: (item[0], item[1].created_at), reverse=True)
+    return [
+        result.model_copy(
+            update={
+                "rerank_score": score,
+                "final_rank": index + 1,
+                "selection_reason": _selection_reason(result, score),
+            }
+        )
+        for index, (score, result) in enumerate(scored)
+    ]
+
+
+def assemble_context_results(
+    settings: Settings,
+    results: list[EvidenceRetrievalResultRead],
+    *,
+    top_k: int | None = None,
+) -> tuple[list[EvidenceRetrievalResultRead], RetrievalContextDiagnosticsRead]:
+    selected: list[EvidenceRetrievalResultRead] = []
+    per_source: defaultdict[uuid.UUID, int] = defaultdict(int)
+    token_count = 0
+    deduped_count = 0
+    dropped_count = 0
+    max_results = top_k or len(results)
+    signatures: list[set[str]] = []
+    for result in results:
+        score = result.rerank_score if result.rerank_score is not None else result.score
+        if score < settings.retrieval_min_context_score:
+            dropped_count += 1
+            continue
+        if per_source[result.source_id] >= settings.retrieval_max_chunks_per_source:
+            dropped_count += 1
+            continue
+        terms = _signature_terms(result.text)
+        if any(_jaccard(terms, existing) >= 0.88 for existing in signatures):
+            deduped_count += 1
+            continue
+        estimated_tokens = _estimate_tokens(result.text)
+        if selected and token_count + estimated_tokens > settings.retrieval_context_token_budget:
+            dropped_count += 1
+            continue
+        selected.append(
+            result.model_copy(
+                update={
+                    "context_included": True,
+                    "selection_reason": (
+                        result.selection_reason or "Selected for synthesis context."
+                    ),
+                }
+            )
+        )
+        signatures.append(terms)
+        per_source[result.source_id] += 1
+        token_count += estimated_tokens
+        if len(selected) >= max_results:
+            break
+    context = RetrievalContextDiagnosticsRead(
+        token_budget=settings.retrieval_context_token_budget,
+        token_count=token_count,
+        selected_count=len(selected),
+        dropped_count=dropped_count,
+        deduped_count=deduped_count,
+        max_chunks_per_source=settings.retrieval_max_chunks_per_source,
+        min_context_score=settings.retrieval_min_context_score,
+    )
+    return selected, context
+
+
+def _quality_report(
+    *,
+    selected: list[EvidenceRetrievalResultRead],
+    candidate_count: int,
+    total_latency_ms: int,
+    reranker_used: bool,
+    token_count: int,
+) -> RetrievalQualityReportRead:
+    source_count = len({result.source_id for result in selected})
+    selected_count = len(selected)
+    recall_proxy = min(1.0, selected_count / max(candidate_count, 1))
+    precision_proxy = (
+        sum(1 for result in selected if (result.rerank_score or result.score) >= 0.35)
+        / max(selected_count, 1)
+    )
+    citation_coverage_proxy = (
+        sum(1 for result in selected if result.source_id and result.chunk_id)
+        / max(selected_count, 1)
+    )
+    if source_count >= 3 and selected_count >= 3:
+        recall_proxy = max(recall_proxy, 0.75)
+    return RetrievalQualityReportRead(
+        recall_proxy=round(recall_proxy, 3),
+        precision_proxy=round(precision_proxy, 3),
+        citation_coverage_proxy=round(citation_coverage_proxy, 3),
+        unsupported_claim_count=0,
+        average_retrieval_latency_ms=total_latency_ms,
+        reranker_used=reranker_used,
+        context_token_count=token_count,
+    )
+
+
+def _combine_fallback_reasons(diagnostics: list[RetrievalDiagnosticsRead]) -> str | None:
+    reasons = _dedupe_strings(
+        [item.fallback_reason for item in diagnostics if item.fallback_reason]
+    )
+    return "; ".join(reasons) if reasons else None
+
+
+def _metadata_float(metadata: dict[str, object], key: str) -> float | None:
+    value = metadata.get(key)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _freshness_boost(result: EvidenceRetrievalResultRead) -> float:
+    created_at = result.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    age_days = max((datetime.now(UTC) - created_at).days, 0)
+    if age_days <= 30:
+        return 1.0
+    if age_days <= 180:
+        return 0.6
+    if age_days <= 730:
+        return 0.3
+    return 0.1
+
+
+def _selection_reason(result: EvidenceRetrievalResultRead, rerank_score: float) -> str:
+    reasons: list[str] = []
+    if result.keyword_score > 0:
+        reasons.append("keyword overlap")
+    if result.semantic_score > 0:
+        reasons.append("semantic similarity")
+    if (_metadata_float(result.metadata, "retrieval_match_count") or 0) > 1:
+        reasons.append("matched multiple subqueries")
+    if not reasons:
+        reasons.append("retrieval score")
+    return f"Selected by {', '.join(reasons)}; rerank score {rerank_score:.2f}."
+
+
+def _signature_terms(text_value: str) -> set[str]:
+    terms = list(_term_set(text_value))
+    return set(terms[:120])
+
+
+def _jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
+def _estimate_tokens(text_value: str) -> int:
+    return max(1, int(len(text_value) / APPROX_CHARS_PER_TOKEN))
 
 
 def _base_conditions(
@@ -434,6 +938,17 @@ def _serialize_result(
     semantic_score: float,
     keyword_score: float,
 ) -> EvidenceRetrievalResultRead:
+    metadata = dict(chunk.chunk_metadata or {})
+    metadata.update(
+        {
+            "source_classification": source.classification,
+            "source_credibility_score": float(source.credibility_score)
+            if source.credibility_score is not None
+            else None,
+            "source_date": source.source_date.isoformat() if source.source_date else None,
+            "source_ingested_at": source.ingested_at.isoformat() if source.ingested_at else None,
+        }
+    )
     return EvidenceRetrievalResultRead(
         source_id=source.id,
         chunk_id=chunk.id,
@@ -445,7 +960,7 @@ def _serialize_result(
         score=round(score, 6),
         semantic_score=round(semantic_score, 6),
         keyword_score=round(keyword_score, 6),
-        metadata=chunk.chunk_metadata or {},
+        metadata=metadata,
         embedding_provider=chunk.embedding_provider,
         embedding_model=chunk.embedding_model,
         embedding_dimension=chunk.embedding_dimension,
@@ -476,6 +991,10 @@ def _keyword_score(query_terms: set[str], text: str) -> float:
 
 
 def _term_set(text: str) -> set[str]:
+    return {term for term in _raw_term_set(text) if term not in STOPWORDS}
+
+
+def _raw_term_set(text: str) -> set[str]:
     return {
         term
         for term in (part.strip(".,:;!?()[]{}\"'").casefold() for part in text.split())

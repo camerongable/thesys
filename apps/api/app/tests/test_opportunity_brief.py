@@ -89,6 +89,16 @@ def test_generate_opportunity_brief_retrieves_cites_and_persists(
         "citation_audit",
         "write_artifact_version",
     ]
+    retrieve_step = next(step for step in steps if step.step_name == "retrieve_existing_evidence")
+    retrieve_output = retrieve_step.output_json
+    assert retrieve_output["diagnostics"]["query_plan"]["subqueries"]
+    assert retrieve_output["diagnostics"]["reranker"]["provider"] == "deterministic"
+    assert retrieve_output["diagnostics"]["context"]["selected_count"] >= 1
+    assert retrieve_output["diagnostics"]["quality_report"]["citation_coverage_proxy"] == 1
+    assert retrieve_output["results"][0]["context_included"] is True
+    assert retrieve_output["results"][0]["chunk_id"] == (
+        supported_claim["evidence_links"][0]["evidence_chunk_id"]
+    )
 
     artifact = db_session.scalar(select(Artifact))
     assert artifact is not None

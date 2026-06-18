@@ -554,10 +554,22 @@ function RetrievalDiagnosticsLine({
     : diagnostics.fallback_path_used
       ? "fallback"
       : "keyword";
+  const subqueryCount = diagnostics.query_plan?.subqueries.length ?? 1;
+  const reranker = diagnostics.reranker
+    ? `${diagnostics.reranker.provider}${diagnostics.reranker.enabled ? "" : " off"}`
+    : "not reported";
+  const context = diagnostics.context
+    ? `${diagnostics.context.selected_count} selected · ${diagnostics.context.token_count}/${diagnostics.context.token_budget} tokens`
+    : "context not reported";
+  const quality = diagnostics.quality_report
+    ? `precision ${diagnostics.quality_report.precision_proxy.toFixed(2)} · recall ${diagnostics.quality_report.recall_proxy.toFixed(2)}`
+    : null;
   return (
     <div className="pb-3 text-xs leading-5 text-muted-foreground">
       Retrieval: {path} · {diagnostics.embedding_provider} · {diagnostics.embedding_model} ·{" "}
-      {diagnostics.candidate_count} candidates · {diagnostics.query_latency_ms}ms
+      {diagnostics.candidate_count} candidates · {diagnostics.query_latency_ms}ms ·{" "}
+      {subqueryCount} subquer{subqueryCount === 1 ? "y" : "ies"} · reranker {reranker} · {context}
+      {quality ? ` · ${quality}` : ""}
       {diagnostics.fallback_reason ? ` · ${diagnostics.fallback_reason}` : ""}
     </div>
   );

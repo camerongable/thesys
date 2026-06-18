@@ -111,6 +111,19 @@ def test_agentic_research_runs_multi_step_rag_and_writes_reviewable_memo(
     assert body["version"]["structured_content"]["memory_update_status"] == (
         "pending_human_approval"
     )
+    retrieval_diagnostics = body["version"]["structured_content"]["retrieval_diagnostics"]
+    retrieval_context = body["version"]["structured_content"]["retrieval_context"]
+    assert retrieval_diagnostics
+    assert retrieval_context["selected_count"] >= 1
+    assert retrieval_context["token_count"] <= retrieval_context["token_budget"]
+    first_retrieval = retrieval_diagnostics[0]
+    assert first_retrieval["query_plan"]["subqueries"]
+    assert first_retrieval["reranker"]["provider"] == "deterministic"
+    assert any(item["context"]["selected_count"] >= 1 for item in retrieval_diagnostics)
+    assert any(
+        item["quality_report"]["citation_coverage_proxy"] == 1
+        for item in retrieval_diagnostics
+    )
     assert body["version"]["langsmith_trace_id"]
     assert body["version"]["langsmith_trace_url"]
     assert body["version"]["structured_content"]["langsmith_trace_id"] == (

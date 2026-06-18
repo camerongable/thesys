@@ -205,7 +205,7 @@ Thesys is built to show the difference between a thin LLM wrapper and a durable 
 | Retrieval-grounded generation | Opportunity briefs, competitor analysis, research memos, assumptions, and validation plans are generated from retrieved project evidence rather than prompt-only model knowledge. | PostgreSQL, pgvector, provider-backed embeddings, retrieval service, Pydantic schemas |
 | Evidence ingestion and chunking | URLs, notes, discovered source snapshots, uploads, and PDFs are normalized into evidence sources and chunks with metadata, citation IDs, and embedding provenance. | httpx, pypdf, boto3, MinIO/S3-compatible storage, SQLAlchemy |
 | Production embeddings | Evidence chunks record provider, model, dimension, version, timestamp, and errors; deterministic local mode stays available for tests, while LiteLLM-backed embeddings can be used in live mode and re-embedded after model changes. | LiteLLM-compatible embeddings API, pgvector, PostgreSQL, Alembic |
-| Hybrid retrieval | Project-scoped retrieval combines SQL-level vector search, keyword overlap, and metadata filters for source type, freshness, competitors, assumptions, and research context, then returns diagnostics showing the path used. | pgvector HNSW/IVFFlat indexes, PostgreSQL, custom retrieval service |
+| Multi-stage retrieval | Project-scoped retrieval plans broad strategic questions, runs semantic and keyword retrieval with metadata filters, applies freshness and credibility boosts, reranks candidates, compresses context, and returns quality diagnostics for Inspect and trace surfaces. | pgvector HNSW/IVFFlat indexes, PostgreSQL, deterministic and LiteLLM rerankers, custom retrieval service |
 | Structured LLM outputs | LLM responses are requested as JSON, validated against typed schemas, repaired when possible, and persisted as structured project objects. | Pydantic v2, LiteLLM-compatible chat completions, structured output helper |
 | Model gateway and local fallback | Model and embedding calls go through configurable provider paths, while deterministic stub/embedding modes keep local demos and tests repeatable. | LiteLLM Proxy, httpx, Ollama, OpenAI-compatible APIs, Gemini |
 | Persistent AI memory | The product stores thesis versions, evidence, artifacts, claims, assumptions, validation missions, decisions, AI runs, AI steps, tool calls, and approval requests instead of relying on chat history. | PostgreSQL, SQLAlchemy, Alembic |
@@ -347,9 +347,13 @@ Core responsibilities:
 - chunk documents
 - generate embeddings
 - store source metadata
-- retrieve relevant evidence
+- plan retrieval queries and subqueries
+- retrieve relevant evidence with semantic, keyword, metadata, freshness, and credibility signals
+- rerank candidates with deterministic local behavior or optional LiteLLM mode
+- assemble bounded context with dedupe, source diversity, score thresholds, and citation IDs
 - link claims to sources
 - surface open questions when evidence is weak
+- expose retrieval quality diagnostics in Inspect and workflow trace views
 
 ---
 
@@ -495,6 +499,11 @@ EMBEDDING_DIMENSION=1536
 EMBEDDING_VERSION=v1
 RETRIEVAL_VECTOR_PATH=auto
 RETRIEVAL_PYTHON_FALLBACK_ENABLED=true
+RETRIEVAL_RERANKING_ENABLED=true
+RETRIEVAL_RERANKER_PROVIDER=deterministic
+RETRIEVAL_CONTEXT_TOKEN_BUDGET=3500
+RETRIEVAL_MAX_CHUNKS_PER_SOURCE=2
+RETRIEVAL_MIN_CONTEXT_SCORE=0.15
 
 # Optional LangSmith observability
 LANGSMITH_TRACING=false
@@ -527,6 +536,13 @@ curl -X POST http://localhost:8000/api/projects/<project_id>/evidence/reembed \
   -H "Content-Type: application/json" \
   -d '{"dry_run":false,"scope":"project"}'
 ```
+
+Retrieval diagnostics are returned by evidence search and stored in workflow
+steps or artifact structured content for brief generation and agentic research.
+They include the query plan, subquery count, reranker status, context token
+budget and selected chunk count, dedupe and drop counts, citation coverage,
+precision and recall proxies, latency, and reranker usage. These details are
+intended for Inspect and trace views so the main project UI stays compact.
 
 ### 3. Start Infrastructure
 
@@ -704,11 +720,11 @@ Implemented or demonstrated:
 - validation planning
 - decision recommendation
 - guided UI around next best action
-- provider-backed embeddings, pgvector SQL retrieval, retrieval diagnostics, and re-embedding
+- provider-backed embeddings, pgvector SQL retrieval, multi-stage retrieval,
+  reranking, context assembly, retrieval-quality diagnostics, and re-embedding
 
 Planned future work:
 
-- retrieval quality, reranking, query expansion, context compression, and retrieval-quality evals
 - LLM-grounded Ask Thesys with citations and tool-governed proposals
 - recurring market monitoring
 - team collaboration

@@ -96,6 +96,32 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="RETRIEVAL_PYTHON_FALLBACK_ENABLED",
     )
+    retrieval_reranking_enabled: bool = Field(
+        default=True,
+        validation_alias="RETRIEVAL_RERANKING_ENABLED",
+    )
+    retrieval_reranker_provider: Literal["deterministic", "litellm"] = Field(
+        default="deterministic",
+        validation_alias="RETRIEVAL_RERANKER_PROVIDER",
+    )
+    retrieval_context_token_budget: int = Field(
+        default=3500,
+        ge=500,
+        le=20000,
+        validation_alias="RETRIEVAL_CONTEXT_TOKEN_BUDGET",
+    )
+    retrieval_max_chunks_per_source: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        validation_alias="RETRIEVAL_MAX_CHUNKS_PER_SOURCE",
+    )
+    retrieval_min_context_score: float = Field(
+        default=0.15,
+        ge=0.0,
+        le=1.0,
+        validation_alias="RETRIEVAL_MIN_CONTEXT_SCORE",
+    )
     langsmith_tracing: bool = Field(default=False, validation_alias="LANGSMITH_TRACING")
     langsmith_api_key: str | None = Field(default=None, validation_alias="LANGSMITH_API_KEY")
     langsmith_endpoint: str = Field(

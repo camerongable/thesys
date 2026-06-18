@@ -2,16 +2,15 @@
 
 ## Current Phase
 
-V1 Sprint 37 implementation is complete. Thesys now supports provider-backed
-embeddings, stores embedding provenance on evidence chunks, uses the pgvector SQL
-retrieval path in Postgres with deterministic Python fallback, returns retrieval
-diagnostics through the API/UI, and exposes project/workspace re-embedding
-maintenance with dry-run support. The Sprint 33-36 simplified project experience
-is preserved: Research keeps the evidence controls behind Inspect, while chunk
-search now shows the retrieval path and embedding metadata only where a user is
-already inspecting source receipts. Watchlists, monitoring, collaboration,
-portfolio dashboards, integrations, and multi-segment workflow packs remain V2
-scope.
+V1 Sprint 38 implementation is complete. Thesys now routes evidence search,
+opportunity brief generation, agentic research, and V1 research evals through a
+multi-stage retrieval pipeline with query planning, hybrid retrieval, deterministic
+or LiteLLM-configured reranking, context assembly, citation-preserving result
+metadata, and retrieval-quality diagnostics. The Sprint 33-37 simplified project
+experience is preserved: retrieval details remain in Inspect, workflow trace,
+artifact structured content, and eval/check surfaces rather than new main
+dashboard cards. Watchlists, monitoring, collaboration, portfolio dashboards,
+integrations, and multi-segment workflow packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -1839,6 +1838,62 @@ Checks run:
 - [x] Browser console QA: no app console errors were present after the Sprint 37
   verification flow.
 
+## V1 Sprint 38 Scope
+
+- [x] Add reusable retrieval pipeline service with broad-query planning,
+  strategic intent classification, target entity/evidence-type extraction, and
+  subquery decomposition.
+- [x] Run semantic, keyword, metadata-filtered, freshness-boosted, and
+  credibility-aware retrieval through the existing pgvector SQL path with Python
+  fallback.
+- [x] Add deterministic reranking by default, disabled mode, and optional
+  LiteLLM reranker configuration with deterministic fallback on provider errors.
+- [x] Assemble bounded context with near-duplicate suppression, source diversity,
+  minimum context score, token budget enforcement, and preserved source/chunk
+  IDs.
+- [x] Extend retrieval API schemas with rerank score, final rank, context
+  inclusion, selection reason, nested query plan, reranker, context, and quality
+  diagnostics.
+- [x] Wire the pipeline into evidence retrieve, opportunity brief evidence
+  retrieval, agentic research tool execution, evidence selection, follow-up
+  retrieval, final memo structured content, and V1 research eval metrics.
+- [x] Keep retrieval-quality visibility in existing Inspect, workflow trace,
+  evidence search, memo review, and eval/check surfaces only.
+- [x] Add reranker/context configuration to `.env.example`, Docker Compose,
+  README, AI status, and frontend API types.
+- [x] Refine redaction so real secrets remain redacted while non-secret
+  retrieval token counts and token budgets remain inspectable.
+
+## V1 Sprint 38 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_opportunity_brief.py app/tests/test_agentic_research.py app/tests/test_research_history_eval.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `pnpm --filter thesys-web test`
+- [x] `docker compose config`
+- [x] Local-stack browser QA: created `Sprint 38 retrieval QA`, seeded four
+  sources, ran the broad query `Which wedge is strongest and what proof is
+  missing?`, and verified Inspect showed pgvector SQL retrieval, 3 subqueries,
+  deterministic reranker, 1 selected chunk, 47/3500 context tokens, precision
+  1.00, recall 0.25, duplicate suppression, and no noisy source selected.
+- [x] Browser brief QA: regenerated an opportunity brief in stub mode, verified
+  cited claims and appendix entries preserved source/chunk-backed quotes, and
+  opened the trace showing 5 retrieval queries, deterministic reranker, 2
+  context chunks, and 89/3500 context tokens.
+- [x] Browser agentic research QA: ran an agentic evidence review in stub mode,
+  verified the memo stored 6 retrieval diagnostics plus 4 selected context
+  chunks at 226/3500 tokens, and confirmed Evidence Checks showed multi-stage
+  retrieval strategy, reranker visibility, context assembly, and retrieval
+  quality report metrics in Inspect.
+- [x] Browser console and responsive QA: console errors/warnings were empty for
+  the app tab; at 410px width, the Inspect evidence-check content had no
+  horizontal overflow, no overflowing buttons, and retrieval-quality lines
+  remained readable and scrollable.
+
 ## Next Work
 
-V1 Sprint 38: define the next brief-backed scope.
+V1 Sprint 39: define the next brief-backed scope.

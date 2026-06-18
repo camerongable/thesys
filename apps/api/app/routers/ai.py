@@ -53,6 +53,11 @@ def get_ai_status(
         embedding_retry_attempts=settings.embedding_retry_attempts,
         retrieval_vector_path=settings.retrieval_vector_path,
         retrieval_python_fallback_enabled=settings.retrieval_python_fallback_enabled,
+        retrieval_reranking_enabled=settings.retrieval_reranking_enabled,
+        retrieval_reranker_provider=settings.retrieval_reranker_provider,
+        retrieval_context_token_budget=settings.retrieval_context_token_budget,
+        retrieval_max_chunks_per_source=settings.retrieval_max_chunks_per_source,
+        retrieval_min_context_score=settings.retrieval_min_context_score,
         structured_output_healthcheck=(
             _run_structured_output_healthcheck(settings)
             if include_structured_output_check
