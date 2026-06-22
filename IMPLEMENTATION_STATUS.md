@@ -1894,6 +1894,62 @@ Checks run:
   horizontal overflow, no overflowing buttons, and retrieval-quality lines
   remained readable and scrollable.
 
+## V1 Sprint 39 Scope
+
+- [x] Preserve the existing guide intent guardrail, bounded out-of-scope
+  refusal, deterministic fallback path, and action-card routing.
+- [x] Add traced `guide_chat` AI runs/steps for Ask Thesys with prompt version,
+  model/provider metadata, latency/cost fields, intent guardrail output,
+  retrieval context output, and answer summaries.
+- [x] Ground in-scope Ask Thesys answers through the governed
+  `search_project_evidence` read-only tool and return cited evidence IDs,
+  retrieval diagnostics, confidence level, unsupported/missing evidence, and
+  trace IDs in the guide chat response.
+- [x] Add live-mode structured LLM guide answers with citation filtering,
+  existing-action filtering, untrusted retrieved-content instructions, and
+  deterministic fallback if generation or validation fails.
+- [x] Keep chat non-mutating: proposal-style prompts route to existing
+  navigation/workflow actions, including scoped research-plan routing, without
+  executing write/proposal tools directly from chat.
+- [x] Add bounded session context by sending only the last six guide turns from
+  the panel and including the trimmed context in live LLM prompt input.
+- [x] Surface compact Ask Thesys grounding metadata in the guide panel without
+  turning the UI into a transcript-heavy chat surface.
+- [x] Extend guide tests for grounded retrieval metadata, AI run/step traces,
+  read-only tool logging, long-query truncation, non-mutating proposal prompts,
+  research-plan routing, live structured LLM output, citation filtering, action
+  filtering, and bounded recent-turn prompt context.
+
+## V1 Sprint 39 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_guide.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `pnpm --filter thesys-web test`
+- [x] `docker compose config`
+- [x] Local-stack functional QA on alternate ports with a disposable SQLite
+  model-created database: started the API on `127.0.0.1:8010` and web on
+  `127.0.0.1:3010`, seeded the guided demo project, asked `What does the
+  evidence say about weekly coach check-ins?`, and verified the guide response
+  returned cited evidence IDs, medium confidence, retrieval diagnostics,
+  related evidence entities, and an AI run trace ID.
+- [x] Local-stack non-mutation QA: asked `Create and apply a validation plan for
+  the riskiest assumption.` and verified the response returned existing guide
+  actions while the tool invocation log contained only read-only
+  `search_project_evidence` calls and no proposal/write invocation.
+
+Manual environment note:
+
+- Codex in-app browser QA was blocked in this session: the Browser plugin setup
+  succeeded but no `iab`/browser target was registered, and the local
+  app-control surface timed out while listing apps. Docker-backed localhost
+  verification was also unavailable because Docker returned internal API errors
+  and its owned `3000`/`8000` listeners did not respond.
+
 ## Next Work
 
-V1 Sprint 39: define the next brief-backed scope.
+V1 Sprint 40: External Research Connectors and Multimodal Evidence.

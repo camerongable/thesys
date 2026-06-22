@@ -1585,11 +1585,23 @@ export type GuideRelatedEntity = {
   label: string;
 };
 
+export type GuideChatTurn = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 export type GuideChatResponse = {
   answer: string;
   recommended_action: GuideAction | null;
   action_cards: GuideAction[];
   related_entities: GuideRelatedEntity[];
+  cited_evidence_ids: string[];
+  assumption_ids: string[];
+  confidence_level: GuideConfidenceLevel;
+  unsupported_or_missing_evidence: string[];
+  used_llm: boolean;
+  retrieval_diagnostics: Record<string, unknown> | null;
+  ai_run_id: string | null;
 };
 
 export type ProjectNudgeSeverity = "info" | "warning" | "action_required";
@@ -1910,10 +1922,14 @@ export function executeGuideAction(projectId: string, actionId: string) {
   });
 }
 
-export function askProjectGuide(projectId: string, message: string) {
+export function askProjectGuide(
+  projectId: string,
+  message: string,
+  recentTurns: GuideChatTurn[] = [],
+) {
   return apiFetch<GuideChatResponse>(`/api/projects/${projectId}/guide/chat`, {
     method: "POST",
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, recent_turns: recentTurns.slice(-6) }),
   });
 }
 

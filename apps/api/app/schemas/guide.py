@@ -77,8 +77,14 @@ class GuideResponseRead(BaseModel):
     suggested_questions: list[str] = Field(default_factory=list)
 
 
+class GuideChatTurnRead(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2000)
+
+
 class GuideChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
+    recent_turns: list[GuideChatTurnRead] = Field(default_factory=list, max_length=6)
 
 
 class GuideRelatedEntityRead(BaseModel):
@@ -92,3 +98,10 @@ class GuideChatResponseRead(BaseModel):
     recommended_action: GuideActionRead | None = None
     action_cards: list[GuideActionRead] = Field(default_factory=list)
     related_entities: list[GuideRelatedEntityRead] = Field(default_factory=list)
+    cited_evidence_ids: list[str] = Field(default_factory=list)
+    assumption_ids: list[str] = Field(default_factory=list)
+    confidence_level: GuideConfidenceLevel = "unknown"
+    unsupported_or_missing_evidence: list[str] = Field(default_factory=list)
+    used_llm: bool = False
+    retrieval_diagnostics: dict[str, Any] | None = None
+    ai_run_id: uuid.UUID | None = None

@@ -303,7 +303,7 @@ def chat_with_project_guide(
     db: DbDep,
     auth: AuthContextDep,
 ) -> GuideChatResponseRead:
-    return guide_service.chat(db, auth, project_id, payload.message)
+    return guide_service.chat(db, auth, project_id, payload.message, payload.recent_turns)
 
 
 @router.patch("/{project_id}", response_model=ProjectRead)
