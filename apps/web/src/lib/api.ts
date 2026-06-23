@@ -345,6 +345,7 @@ export type EvidenceSource = {
   ingested_at: string | null;
   classification: string | null;
   credibility_score: string | null;
+  metadata: Record<string, unknown>;
   ingestion_status: EvidenceIngestionStatus;
   ingestion_error: string | null;
   created_at: string;
@@ -1115,6 +1116,12 @@ export type DiscoveredSource = {
   title: string | null;
   snippet: string | null;
   source_type: DiscoveredSourceType;
+  search_provider: string | null;
+  search_query: string | null;
+  search_result_rank: number | null;
+  retrieved_at: string | null;
+  risk_level: "low" | "medium" | "high";
+  provenance_metadata: Record<string, unknown>;
   relevance_score: string;
   reason_selected: string;
   associated_research_question: string | null;
@@ -1130,6 +1137,7 @@ export type SourceDiscoveryRun = {
   ai_step_id: string;
   generated_count: number;
   candidate_count: number;
+  search_diagnostics: Record<string, unknown>;
   sources: DiscoveredSource[];
 };
 
@@ -1666,6 +1674,14 @@ export type AIStatus = {
   retrieval_context_token_budget: number;
   retrieval_max_chunks_per_source: number;
   retrieval_min_context_score: number;
+  external_search_enabled: boolean;
+  external_search_provider: "deterministic" | "tavily";
+  external_search_max_results_per_query: number;
+  external_search_max_queries_per_sprint: number;
+  multimodal_extraction_provider: "deterministic" | "litellm";
+  multimodal_extraction_model: string;
+  multimodal_pdf_fallback_enabled: boolean;
+  multimodal_pdf_min_text_chars: number;
   structured_output_healthcheck: AIStatusStructuredOutputCheck | null;
 };
 

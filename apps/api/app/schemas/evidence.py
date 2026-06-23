@@ -24,6 +24,7 @@ class EvidenceSourceRead(BaseModel):
     ingested_at: datetime | None
     classification: str | None
     credibility_score: Decimal | None
+    metadata: dict[str, object] = Field(default_factory=dict)
     ingestion_status: EvidenceIngestionStatus
     ingestion_error: str | None
     created_at: datetime

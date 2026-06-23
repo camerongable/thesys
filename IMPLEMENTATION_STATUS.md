@@ -1950,6 +1950,72 @@ Manual environment note:
   verification was also unavailable because Docker returned internal API errors
   and its owned `3000`/`8000` listeners did not respond.
 
+## V1 Sprint 40 Scope
+
+- [x] Add governed external search settings and a provider boundary with
+  deterministic and Tavily adapters.
+- [x] Keep external search disabled by default, with deterministic local mode
+  and opt-in Tavily via `EXTERNAL_SEARCH_ENABLED`, `EXTERNAL_SEARCH_PROVIDER`,
+  and `TAVILY_API_KEY`.
+- [x] Route approved research-sprint source discovery through external search
+  when enabled, dedupe by normalized URL, store provider/query/rank/retrieval
+  provenance, and preserve the existing review/approval/rejection flow.
+- [x] Carry search provenance into evidence source metadata and chunk metadata
+  after source approval, including fallback snapshot ingestion when remote fetch
+  fails.
+- [x] Add multimodal evidence extraction through a backend extractor boundary
+  with deterministic fixture extraction by default and LiteLLM multimodal
+  extraction for live image/PDF paths.
+- [x] Support PNG, JPG, JPEG, and WebP uploads; keep text-native PDFs on `pypdf`
+  and route low-text PDFs to multimodal fallback only when configured.
+- [x] Add `source_metadata` storage and expose evidence source `metadata` through
+  the existing evidence API.
+- [x] Keep search and extraction details behind Research/Evidence inspection
+  controls so Current Step stays quiet.
+- [x] Extend V1 research eval with search relevance, source diversity,
+  duplicate-rate, and provenance-coverage metrics.
+- [x] Document external search and multimodal extraction settings in
+  `.env.example`, Docker Compose, README, API status, and frontend API types.
+
+## V1 Sprint 40 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_research_discovery.py app/tests/test_evidence.py app/tests/test_research_history_eval.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `pnpm --filter thesys-web test`
+- [x] `docker compose config`
+- [x] IDE browser deterministic connector QA on alternate local ports
+  `127.0.0.1:3010`/`127.0.0.1:8010`: created disposable project
+  `Sprint 40 connector QA`, planned and approved an evidence review, ran
+  `Find sources`, confirmed deterministic candidates showed provider/query/rank
+  and retrieval time, approved one source, rejected one source, and confirmed
+  the approved source appeared as ready evidence.
+- [x] Browser evidence inspection QA: opened the approved source detail and
+  confirmed search provider, query, rank, retrieval timestamp, risk, and content
+  type appeared only behind the provenance details control.
+- [x] Browser retrieval QA: searched stored chunks for deterministic-source text
+  and confirmed the approved URL source was retrieved.
+- [x] Browser multimodal QA: uploaded the Sprint 40 fixture image through the
+  evidence file endpoint, inspected it in the browser, confirmed ready status,
+  deterministic extraction metadata, extracted text preview, and retrieval by a
+  phrase from the extracted text.
+- [x] Browser PDF QA: uploaded a normal text PDF, inspected it in the browser,
+  and confirmed `pypdf` metadata without multimodal fallback.
+- [x] Browser quality QA: browser console errors/warnings were empty, app API
+  responses during the verified flow were 2xx, and the 410px viewport had no
+  horizontal overflow with extraction details absent from Current Step.
+
+Manual environment note:
+
+- The local Docker API/web ports were already occupied, so manual browser QA used
+  isolated alternate ports plus a temporary SQLite database and local object
+  storage. The optional live Tavily path was not run because no `TAVILY_API_KEY`
+  was configured for this session.
+
 ## Next Work
 
-V1 Sprint 40: External Research Connectors and Multimodal Evidence.
+V1 Sprint 41: TBD.

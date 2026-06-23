@@ -4081,6 +4081,12 @@ function EvidenceReviewActiveItem({
               <EvidenceReviewPill>{formatLabel(source.source_type)}</EvidenceReviewPill>
               <EvidenceReviewPill>{formatLabel(source.status)}</EvidenceReviewPill>
               <EvidenceReviewPill>score {formatScore(source.relevance_score)}</EvidenceReviewPill>
+              {source.search_provider ? (
+                <EvidenceReviewPill>{source.search_provider}</EvidenceReviewPill>
+              ) : null}
+              {source.search_result_rank ? (
+                <EvidenceReviewPill>rank {source.search_result_rank}</EvidenceReviewPill>
+              ) : null}
             </div>
             <h5 className="mt-3 text-base font-semibold">
               {clarifyWorkspaceTerm(source.title ?? "Untitled source")}
@@ -4127,6 +4133,39 @@ function EvidenceReviewActiveItem({
           <p className="mt-3 max-w-[72ch] text-xs leading-5 text-muted-foreground">
             Research question: {clarifyWorkspaceTerm(source.associated_research_question)}
           </p>
+        ) : null}
+        {source.search_provider || source.search_query || source.retrieved_at ? (
+          <details className="mt-3 border-t border-border pt-3">
+            <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+              Show search provenance
+            </summary>
+            <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-[140px_minmax(0,1fr)]">
+              {source.search_provider ? (
+                <>
+                  <span className="font-medium text-foreground">Provider</span>
+                  <span>{source.search_provider}</span>
+                </>
+              ) : null}
+              {source.search_query ? (
+                <>
+                  <span className="font-medium text-foreground">Query</span>
+                  <span className="break-words">{clarifyWorkspaceTerm(source.search_query)}</span>
+                </>
+              ) : null}
+              {source.search_result_rank ? (
+                <>
+                  <span className="font-medium text-foreground">Rank</span>
+                  <span>{source.search_result_rank}</span>
+                </>
+              ) : null}
+              {source.retrieved_at ? (
+                <>
+                  <span className="font-medium text-foreground">Retrieved</span>
+                  <span>{formatDateTime(source.retrieved_at)}</span>
+                </>
+              ) : null}
+            </div>
+          </details>
         ) : null}
         {source.ingestion_error ? (
           <p className="mt-3 text-xs text-danger-foreground">{source.ingestion_error}</p>

@@ -103,3 +103,7 @@ def test_v1_research_eval_passes_for_completed_research_sprint(
     assert metrics["reranker_usage"]["passed"] is True
     assert metrics["context_assembly"]["passed"] is True
     assert metrics["retrieval_quality_report"]["passed"] is True
+    assert metrics["external_search_relevance"]["passed"] is True
+    assert metrics["source_diversity"]["passed"] is True
+    assert metrics["duplicate_detection"]["passed"] is True
+    assert metrics["provenance_coverage"]["passed"] is True

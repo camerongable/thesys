@@ -58,6 +58,14 @@ def get_ai_status(
         retrieval_context_token_budget=settings.retrieval_context_token_budget,
         retrieval_max_chunks_per_source=settings.retrieval_max_chunks_per_source,
         retrieval_min_context_score=settings.retrieval_min_context_score,
+        external_search_enabled=settings.external_search_enabled,
+        external_search_provider=settings.external_search_provider,
+        external_search_max_results_per_query=settings.external_search_max_results_per_query,
+        external_search_max_queries_per_sprint=settings.external_search_max_queries_per_sprint,
+        multimodal_extraction_provider=settings.multimodal_extraction_provider,
+        multimodal_extraction_model=settings.multimodal_extraction_model,
+        multimodal_pdf_fallback_enabled=settings.multimodal_pdf_fallback_enabled,
+        multimodal_pdf_min_text_chars=settings.multimodal_pdf_min_text_chars,
         structured_output_healthcheck=(
             _run_structured_output_healthcheck(settings)
             if include_structured_output_check

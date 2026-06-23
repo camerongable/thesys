@@ -20,7 +20,13 @@ from app.core.auth import AuthContext
 from app.core.config import Settings
 from app.db.models import EvidenceChunk, EvidenceSource
 from app.schemas.evidence import EvidenceNoteCreate, EvidenceUrlCreate
-from app.services import ai_run_service, embedding_service, object_storage_service, project_service
+from app.services import (
+    ai_run_service,
+    embedding_service,
+    multimodal_extraction_service,
+    object_storage_service,
+    project_service,
+)
 
 TOKEN_RE = re.compile(r"\S+")
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
@@ -35,6 +41,7 @@ class ParsedSource:
     title: str | None
     text: str
     content_type: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -184,6 +191,7 @@ def add_discovered_url_source(
     existing = _find_ready_url_source(db, auth, project_id, url)
     if existing is not None:
         if metadata:
+            existing.source_metadata = _merge_metadata(existing.source_metadata or {}, metadata)
             _merge_source_chunk_metadata(db, existing, metadata)
             db.commit()
         return get_source(db, auth, project_id, existing.id)
@@ -317,7 +325,12 @@ def add_file_source(
     db.refresh(source)
 
     try:
-        parsed = _parse_file(filename=filename, content_type=content_type, body=body)
+        parsed = _parse_file(
+            settings=settings,
+            filename=filename,
+            content_type=content_type,
+            body=body,
+        )
     except Exception as exc:
         _mark_source_failed(db, source, str(exc))
         raise EvidenceIngestionError("File evidence ingestion failed.") from exc
@@ -330,6 +343,7 @@ def add_file_source(
         text=parsed.text,
         title=parsed.title or filename,
         content_type=parsed.content_type or content_type,
+        metadata=parsed.metadata,
     )
 
 
@@ -451,6 +465,7 @@ def serialize_source(source: EvidenceSource) -> dict[str, Any]:
         "ingested_at": source.ingested_at,
         "classification": source.classification,
         "credibility_score": source.credibility_score,
+        "metadata": source.source_metadata or {},
         "ingestion_status": source.ingestion_status,
         "ingestion_error": source.ingestion_error,
         "created_at": source.created_at,
@@ -518,6 +533,10 @@ def _process_source_text(
         source.summary = _summarize(normalized)
         source.classification = _classify(source.source_type, source.title, normalized)
         source.credibility_score = _credibility_score(source.source_type)
+        source.source_metadata = _merge_metadata(
+            source.source_metadata or {},
+            _merge_metadata({"content_type": content_type}, metadata),
+        )
         source.ingested_at = datetime.now(UTC)
         source.ingestion_status = "ready"
         source.ingestion_error = None
@@ -531,6 +550,7 @@ def _process_source_text(
                     "source_type": source.source_type,
                     "url": source.url,
                     "content_hash": content_hash,
+                    "source_metadata": source.source_metadata or {},
                     **embedding_service.embedding_metadata(settings),
                 },
                 metadata,
@@ -694,12 +714,70 @@ def _fetch_url(settings: Settings, url: str) -> ParsedSource:
     return ParsedSource(title=None, text=text, content_type=content_type or None)
 
 
-def _parse_file(*, filename: str, content_type: str, body: bytes) -> ParsedSource:
+def _parse_file(
+    *,
+    settings: Settings,
+    filename: str,
+    content_type: str,
+    body: bytes,
+) -> ParsedSource:
     lowered = filename.casefold()
+    if multimodal_extraction_service.is_image_content(filename, content_type):
+        extraction = multimodal_extraction_service.extract_file(
+            settings,
+            filename=filename,
+            content_type=content_type,
+            body=body,
+            media_type="image",
+        )
+        return ParsedSource(
+            title=extraction.title or filename,
+            text=extraction.text,
+            content_type=content_type,
+            metadata=extraction.metadata,
+        )
+
     if content_type == "application/pdf" or lowered.endswith(".pdf"):
         reader = PdfReader(BytesIO(body))
         text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
-        return ParsedSource(title=filename, text=text, content_type="application/pdf")
+        normalized = _normalize_text(text)
+        metadata: dict[str, Any] = {
+            "media_type": "pdf",
+            "content_type": "application/pdf",
+            "pdf_text_extraction": "pypdf",
+            "extracted_text_length": len(normalized),
+        }
+        if (
+            settings.multimodal_pdf_fallback_enabled
+            and len(normalized) < settings.multimodal_pdf_min_text_chars
+        ):
+            extraction = multimodal_extraction_service.extract_file(
+                settings,
+                filename=filename,
+                content_type="application/pdf",
+                body=body,
+                media_type="pdf",
+            )
+            metadata = _merge_metadata(
+                metadata,
+                {
+                    **extraction.metadata,
+                    "pdf_text_extraction": "multimodal_fallback",
+                    "pypdf_extracted_text_length": len(normalized),
+                },
+            )
+            return ParsedSource(
+                title=extraction.title or filename,
+                text=extraction.text,
+                content_type="application/pdf",
+                metadata=metadata,
+            )
+        return ParsedSource(
+            title=filename,
+            text=text,
+            content_type="application/pdf",
+            metadata=metadata,
+        )
 
     if (
         content_type.startswith("text/")
@@ -707,9 +785,20 @@ def _parse_file(*, filename: str, content_type: str, body: bytes) -> ParsedSourc
         or lowered.endswith(".md")
         or lowered.endswith(".markdown")
     ):
-        return ParsedSource(title=filename, text=_decode_bytes(body), content_type=content_type)
+        return ParsedSource(
+            title=filename,
+            text=_decode_bytes(body),
+            content_type=content_type,
+            metadata={
+                "media_type": "text",
+                "content_type": content_type,
+                "text_extraction": "direct_decode",
+            },
+        )
 
-    raise EvidenceIngestionError("Only PDF, text, and Markdown uploads are supported in Sprint 4.")
+    raise EvidenceIngestionError(
+        "Only PDF, text, Markdown, PNG, JPG, JPEG, and WebP uploads are supported."
+    )
 
 
 def _parse_html(html: str, *, content_type: str) -> ParsedSource:

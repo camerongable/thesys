@@ -122,6 +122,57 @@ class Settings(BaseSettings):
         le=1.0,
         validation_alias="RETRIEVAL_MIN_CONTEXT_SCORE",
     )
+    external_search_enabled: bool = Field(
+        default=False,
+        validation_alias="EXTERNAL_SEARCH_ENABLED",
+    )
+    external_search_provider: Literal["deterministic", "tavily"] = Field(
+        default="deterministic",
+        validation_alias="EXTERNAL_SEARCH_PROVIDER",
+    )
+    external_search_max_results_per_query: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        validation_alias="EXTERNAL_SEARCH_MAX_RESULTS_PER_QUERY",
+    )
+    external_search_max_queries_per_sprint: int = Field(
+        default=6,
+        ge=1,
+        le=20,
+        validation_alias="EXTERNAL_SEARCH_MAX_QUERIES_PER_SPRINT",
+    )
+    external_search_timeout_seconds: float = Field(
+        default=20.0,
+        ge=1.0,
+        le=120.0,
+        validation_alias="EXTERNAL_SEARCH_TIMEOUT_SECONDS",
+    )
+    tavily_api_key: str | None = Field(default=None, validation_alias="TAVILY_API_KEY")
+    multimodal_extraction_provider: Literal["deterministic", "litellm"] = Field(
+        default="deterministic",
+        validation_alias="MULTIMODAL_EXTRACTION_PROVIDER",
+    )
+    multimodal_extraction_model: str = Field(
+        default="dev-gpt-4o-mini",
+        validation_alias="MULTIMODAL_EXTRACTION_MODEL",
+    )
+    multimodal_extraction_timeout_seconds: float = Field(
+        default=90.0,
+        ge=5.0,
+        le=300.0,
+        validation_alias="MULTIMODAL_EXTRACTION_TIMEOUT_SECONDS",
+    )
+    multimodal_pdf_fallback_enabled: bool = Field(
+        default=False,
+        validation_alias="MULTIMODAL_PDF_FALLBACK_ENABLED",
+    )
+    multimodal_pdf_min_text_chars: int = Field(
+        default=80,
+        ge=0,
+        le=5000,
+        validation_alias="MULTIMODAL_PDF_MIN_TEXT_CHARS",
+    )
     langsmith_tracing: bool = Field(default=False, validation_alias="LANGSMITH_TRACING")
     langsmith_api_key: str | None = Field(default=None, validation_alias="LANGSMITH_API_KEY")
     langsmith_endpoint: str = Field(

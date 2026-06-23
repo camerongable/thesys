@@ -28,6 +28,7 @@ from app.schemas.research import SourceDiscoveryDraft
 from app.services import (
     ai_run_service,
     evidence_service,
+    external_search_service,
     langsmith_observability_service,
     project_service,
 )
@@ -39,6 +40,7 @@ class SourceDiscoveryResult:
     step: AIStep
     generated_count: int
     candidate_count: int
+    search_diagnostics: dict[str, Any]
     sources: list[DiscoveredSource]
 
 
@@ -107,8 +109,27 @@ def discover_sources(
     )
     started = perf_counter()
     try:
-        draft, completion = _generate_source_draft(settings, sprint, messages)
-        specs = _candidate_specs_from_draft(draft)
+        if settings.external_search_enabled:
+            search_batch = external_search_service.search_many(
+                settings,
+                _search_queries_for_sprint(sprint),
+            )
+            draft = SourceDiscoveryDraft(sources=[])
+            completion = _external_search_completion(settings, messages, search_batch)
+            specs = _candidate_specs_from_search(search_batch)
+            search_diagnostics = external_search_service.diagnostics(search_batch)
+        else:
+            draft, completion = _generate_source_draft(settings, sprint, messages)
+            specs = _candidate_specs_from_draft(draft)
+            search_diagnostics = {
+                "enabled": False,
+                "provider": settings.external_search_provider,
+                "query_count": 0,
+                "result_count": 0,
+                "deduped_count": 0,
+                "fallback_used": False,
+                "fallback_reason": None,
+            }
         generated_count = len(specs)
         existing_by_url = {
             _normalize_url(source.url): source
@@ -129,6 +150,12 @@ def discover_sources(
                 relevance_score=spec["relevance_score"],
                 reason_selected=spec["reason_selected"],
                 associated_research_question=spec["associated_research_question"],
+                search_provider=spec.get("search_provider"),
+                search_query=spec.get("search_query"),
+                search_result_rank=spec.get("search_result_rank"),
+                retrieved_at=spec.get("retrieved_at"),
+                risk_level=spec.get("risk_level") or "medium",
+                provenance_metadata=spec.get("provenance_metadata") or {},
                 status="candidate",
                 created_by=auth.user_id,
             )
@@ -147,6 +174,7 @@ def discover_sources(
                 "generated_count": generated_count,
                 "candidate_count": len(sources),
                 "source_ids": [str(source.id) for source in sources],
+                "search_diagnostics": search_diagnostics,
                 "used_stub": completion.used_stub,
                 "model_provider": completion.model_provider,
                 "model_name": completion.model_name,
@@ -180,6 +208,7 @@ def discover_sources(
             step=step,
             generated_count=generated_count,
             candidate_count=len(sources),
+            search_diagnostics=search_diagnostics,
             sources=sources,
         )
     except Exception as exc:
@@ -439,6 +468,49 @@ def _candidate_specs_from_draft(draft: SourceDiscoveryDraft) -> list[dict[str, o
     return _dedupe_specs(specs)
 
 
+def _candidate_specs_from_search(
+    batch: external_search_service.ExternalSearchBatch,
+) -> list[dict[str, object]]:
+    specs: list[dict[str, object]] = []
+    for result in batch.results:
+        url = _clean_url(result.url)
+        if not url:
+            continue
+        source_type = _infer_source_type(
+            result.url,
+            result.title,
+            result.snippet,
+            result.metadata.get("source_type_hint"),
+        )
+        specs.append(
+            {
+                "url": url,
+                "title": result.title[:500] if result.title else None,
+                "snippet": result.snippet,
+                "source_type": source_type,
+                "relevance_score": _clamp_score(result.score),
+                "reason_selected": (
+                    "External search result selected for human review before ingestion."
+                ),
+                "associated_research_question": result.query,
+                "search_provider": result.provider,
+                "search_query": result.query,
+                "search_result_rank": result.rank,
+                "retrieved_at": result.retrieved_at,
+                "risk_level": _risk_level(source_type),
+                "provenance_metadata": {
+                    "search_provider": result.provider,
+                    "search_query": result.query,
+                    "search_result_rank": result.rank,
+                    "retrieved_at": result.retrieved_at.isoformat(),
+                    "search_score": str(result.score),
+                    **result.metadata,
+                },
+            }
+        )
+    return _dedupe_specs(specs)
+
+
 def _fallback_completion(
     settings: Settings,
     messages: list[ChatMessage],
@@ -466,6 +538,41 @@ def _fallback_completion(
             "error": str(error)[:500] if error is not None else None,
         },
         used_stub=True,
+    )
+
+
+def _external_search_completion(
+    settings: Settings,
+    messages: list[ChatMessage],
+    batch: external_search_service.ExternalSearchBatch,
+) -> LLMCompletion:
+    content = json.dumps(
+        {
+            "provider": batch.provider,
+            "query_count": batch.query_count,
+            "result_count": batch.result_count,
+        },
+        ensure_ascii=True,
+    )
+    prompt_tokens = sum(len(message.content.split()) for message in messages)
+    completion_tokens = len(content.split())
+    return LLMCompletion(
+        content=content,
+        model_provider=batch.provider,
+        model_name=f"{batch.provider}:external-search",
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        total_cost=Decimal("0"),
+        raw_response={
+            "external_search": True,
+            "provider": batch.provider,
+            "query_count": batch.query_count,
+            "result_count": batch.result_count,
+            "fallback_used": batch.fallback_used,
+            "fallback_reason": batch.fallback_reason,
+        },
+        used_stub=batch.provider == "deterministic",
     )
 
 
@@ -561,6 +668,19 @@ def _ordered_queries(values: list[str]) -> list[str]:
     return ordered
 
 
+def _search_queries_for_sprint(sprint: ResearchSprint) -> list[str]:
+    plan = sprint.plan
+    queries = _ordered_queries(
+        [
+            *plan.competitor_queries,
+            *plan.substitute_queries,
+            *plan.market_queries,
+            *plan.research_questions,
+        ]
+    )
+    return queries or [plan.objective]
+
+
 def _dedupe_specs(specs: list[dict[str, object]]) -> list[dict[str, object]]:
     by_url: dict[str, dict[str, object]] = {}
     for spec in specs:
@@ -585,6 +705,50 @@ def _clean_url(url: str) -> str:
 
 def _clamp_score(score: Decimal) -> Decimal:
     return max(min(score, Decimal("1.00")), Decimal("0.00"))
+
+
+def _infer_source_type(
+    url: str,
+    title: str | None,
+    snippet: str | None,
+    hint: object | None,
+) -> str:
+    allowed = {
+        "company_site",
+        "pricing_page",
+        "product_page",
+        "review",
+        "forum",
+        "blog",
+        "market_report",
+        "directory",
+        "docs",
+        "unknown",
+    }
+    if isinstance(hint, str) and hint in allowed:
+        return hint
+    combined = f"{url} {title or ''} {snippet or ''}".casefold()
+    if any(term in combined for term in ["pricing", "plans", "price"]):
+        return "pricing_page"
+    if any(term in combined for term in ["reddit", "forum", "community", "discussion"]):
+        return "forum"
+    if any(term in combined for term in ["review", "g2", "capterra", "trustpilot"]):
+        return "review"
+    if any(term in combined for term in ["market", "report", "trend", "industry"]):
+        return "market_report"
+    if any(term in combined for term in ["docs", "documentation", "changelog"]):
+        return "docs"
+    if any(term in combined for term in ["directory", "alternatives", "list"]):
+        return "directory"
+    if any(term in combined for term in ["product", "features"]):
+        return "product_page"
+    return "unknown"
+
+
+def _risk_level(source_type: str) -> str:
+    if source_type in {"forum", "review", "unknown"}:
+        return "medium"
+    return "low"
 
 
 def _snapshot_text(source: DiscoveredSource) -> str:
@@ -621,6 +785,12 @@ def _source_evidence_metadata(
         "source_relevance_score": str(source.relevance_score),
         "reason_selected": source.reason_selected,
         "associated_research_question": source.associated_research_question,
+        "search_provider": source.search_provider,
+        "search_query": source.search_query,
+        "search_result_rank": source.search_result_rank,
+        "retrieved_at": source.retrieved_at.isoformat() if source.retrieved_at else None,
+        "risk_level": source.risk_level,
+        "provenance": source.provenance_metadata or {},
         "research_questions": (
             [source.associated_research_question] if source.associated_research_question else []
         ),

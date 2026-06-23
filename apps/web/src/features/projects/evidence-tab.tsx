@@ -290,9 +290,9 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
             <h2 className="text-base font-semibold">Upload evidence file</h2>
           </div>
           <label className="mt-4 block">
-            <span className="text-sm font-medium">PDF, text, or Markdown</span>
+            <span className="text-sm font-medium">PDF, image, text, or Markdown</span>
             <input
-              accept=".pdf,.txt,.md,.markdown,text/plain,text/markdown,application/pdf"
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.md,.markdown,text/plain,text/markdown,application/pdf,image/png,image/jpeg,image/webp"
               className="mt-2 w-full rounded-md border border-border px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1 file:text-sm"
               onChange={handleFileChange}
               type="file"
@@ -806,9 +806,32 @@ function SourceDetailPanel({ source }: { source: EvidenceSource | null }) {
               {source.text_preview ?? "No preview available."}
             </p>
           </details>
+          <SourceMetadataDetails metadata={source.metadata} />
         </div>
       )}
     </DomainPanel>
+  );
+}
+
+function SourceMetadataDetails({ metadata }: { metadata: Record<string, unknown> }) {
+  const entries = metadataEntries(metadata);
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <details className="mt-3 border-t border-border pt-3">
+      <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+        Show provenance and extraction details
+      </summary>
+      <dl className="mt-3 grid gap-2 text-xs text-muted-foreground">
+        {entries.map(([label, value]) => (
+          <div key={label} className="grid gap-1 sm:grid-cols-[150px_minmax(0,1fr)]">
+            <dt className="font-medium text-foreground">{label}</dt>
+            <dd className="min-w-0 break-words">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }
 
@@ -969,6 +992,42 @@ function SourceRow({
 
 function truncate(value: string, maxLength: number) {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength)}...`;
+}
+
+function metadataEntries(metadata: Record<string, unknown>) {
+  const preferred = [
+    "search_provider",
+    "search_query",
+    "search_result_rank",
+    "retrieved_at",
+    "risk_level",
+    "media_type",
+    "content_type",
+    "extraction_provider",
+    "extraction_model",
+    "pdf_text_extraction",
+    "extracted_text_length",
+    "warnings",
+  ];
+  return preferred
+    .filter((key) => metadata[key] !== undefined && metadata[key] !== null && metadata[key] !== "")
+    .map((key) => [formatLabel(key), formatMetadataValue(metadata[key])] as const);
+}
+
+function formatMetadataValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.join(", ") : "None";
+  }
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function formatLabel(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function stringsFromUnknown(value: unknown) {

@@ -116,4 +116,12 @@ class AIStatusRead(BaseModel):
     retrieval_context_token_budget: int
     retrieval_max_chunks_per_source: int
     retrieval_min_context_score: float
+    external_search_enabled: bool
+    external_search_provider: Literal["deterministic", "tavily"]
+    external_search_max_results_per_query: int
+    external_search_max_queries_per_sprint: int
+    multimodal_extraction_provider: Literal["deterministic", "litellm"]
+    multimodal_extraction_model: str
+    multimodal_pdf_fallback_enabled: bool
+    multimodal_pdf_min_text_chars: int
     structured_output_healthcheck: AIStatusStructuredOutputCheck | None = None

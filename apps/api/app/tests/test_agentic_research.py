@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.models import (
     AIRun,
     AIStep,
@@ -23,6 +24,9 @@ def _approved_research_sprint_with_evidence(
     client: TestClient,
     monkeypatch,
 ) -> tuple[str, str]:
+    monkeypatch.setenv("EXTERNAL_SEARCH_ENABLED", "true")
+    monkeypatch.setenv("EXTERNAL_SEARCH_PROVIDER", "deterministic")
+    get_settings.cache_clear()
     project_response = client.post(
         "/api/projects",
         json={

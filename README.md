@@ -505,6 +505,14 @@ RETRIEVAL_CONTEXT_TOKEN_BUDGET=3500
 RETRIEVAL_MAX_CHUNKS_PER_SOURCE=2
 RETRIEVAL_MIN_CONTEXT_SCORE=0.15
 
+# External search and multimodal extraction
+EXTERNAL_SEARCH_ENABLED=false
+EXTERNAL_SEARCH_PROVIDER=deterministic
+TAVILY_API_KEY=
+MULTIMODAL_EXTRACTION_PROVIDER=deterministic
+MULTIMODAL_EXTRACTION_MODEL=dev-gpt-4o-mini
+MULTIMODAL_PDF_FALLBACK_ENABLED=false
+
 # Optional LangSmith observability
 LANGSMITH_TRACING=false
 LANGSMITH_API_KEY=
@@ -543,6 +551,16 @@ They include the query plan, subquery count, reranker status, context token
 budget and selected chunk count, dedupe and drop counts, citation coverage,
 precision and recall proxies, latency, and reranker usage. These details are
 intended for Inspect and trace views so the main project UI stays compact.
+
+External source discovery is also deterministic by default. To use live Tavily
+search, set `EXTERNAL_SEARCH_ENABLED=true`, `EXTERNAL_SEARCH_PROVIDER=tavily`,
+and `TAVILY_API_KEY`. Search results become review candidates with provenance;
+they are not ingested into evidence until a user approves them.
+
+Image uploads and low-text PDF fallback use the multimodal extraction provider.
+Local tests and demos use `MULTIMODAL_EXTRACTION_PROVIDER=deterministic`; live
+extraction uses LiteLLM by setting `MULTIMODAL_EXTRACTION_PROVIDER=litellm` and
+choosing a multimodal-capable `MULTIMODAL_EXTRACTION_MODEL`.
 
 ### 3. Start Infrastructure
 

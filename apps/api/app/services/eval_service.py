@@ -239,6 +239,41 @@ def run_v1_research_eval(
             "at least 3 candidates and 1 ingested source",
         ),
         _ResearchMetric(
+            "external_search_relevance",
+            "Search result relevance",
+            counts["search_provenance_sources"] >= 1,
+            counts["search_provenance_sources"],
+            "at least 1 discovered source with search provenance",
+        ),
+        _ResearchMetric(
+            "source_diversity",
+            "Source diversity",
+            counts["discovered_source_types"] >= 2,
+            counts["discovered_source_types"],
+            "at least 2 discovered source types",
+        ),
+        _ResearchMetric(
+            "duplicate_detection",
+            "Duplicate detection",
+            counts["discovered_sources"] == counts["distinct_discovered_urls"],
+            (
+                f"{counts['distinct_discovered_urls']} distinct URLs / "
+                f"{counts['discovered_sources']} candidates"
+            ),
+            "candidate URLs are deduplicated",
+        ),
+        _ResearchMetric(
+            "provenance_coverage",
+            "Provenance coverage",
+            counts["sources_with_provenance_metadata"] >= counts["search_provenance_sources"]
+            and counts["sources_with_provenance_metadata"] >= 1,
+            (
+                f"{counts['sources_with_provenance_metadata']} with provenance / "
+                f"{counts['discovered_sources']} candidates"
+            ),
+            "search candidates retain provider/query/rank provenance",
+        ),
+        _ResearchMetric(
             "competitor_discovery",
             "Competitor discovery quality",
             counts["competitor_candidates"] >= 3 and counts["merged_competitors"] >= 1,
@@ -468,6 +503,46 @@ def _v1_research_counts(db: Session, auth: AuthContext, project_id: uuid.UUID) -
                 DiscoveredSource.workspace_id == auth.workspace_id,
                 DiscoveredSource.project_id == project_id,
                 DiscoveredSource.status == "ingested",
+            ),
+        ),
+        "search_provenance_sources": _count(
+            db,
+            select(func.count())
+            .select_from(DiscoveredSource)
+            .where(
+                DiscoveredSource.workspace_id == auth.workspace_id,
+                DiscoveredSource.project_id == project_id,
+                DiscoveredSource.search_provider.is_not(None),
+            ),
+        ),
+        "sources_with_provenance_metadata": _count(
+            db,
+            select(func.count())
+            .select_from(DiscoveredSource)
+            .where(
+                DiscoveredSource.workspace_id == auth.workspace_id,
+                DiscoveredSource.project_id == project_id,
+                DiscoveredSource.search_provider.is_not(None),
+                DiscoveredSource.search_query.is_not(None),
+                DiscoveredSource.search_result_rank.is_not(None),
+            ),
+        ),
+        "discovered_source_types": _count(
+            db,
+            select(func.count(func.distinct(DiscoveredSource.source_type)))
+            .select_from(DiscoveredSource)
+            .where(
+                DiscoveredSource.workspace_id == auth.workspace_id,
+                DiscoveredSource.project_id == project_id,
+            ),
+        ),
+        "distinct_discovered_urls": _count(
+            db,
+            select(func.count(func.distinct(DiscoveredSource.url)))
+            .select_from(DiscoveredSource)
+            .where(
+                DiscoveredSource.workspace_id == auth.workspace_id,
+                DiscoveredSource.project_id == project_id,
             ),
         ),
         "competitor_candidates": _count(
