@@ -1,14 +1,24 @@
+import json
 import uuid
 from dataclasses import dataclass
+from decimal import Decimal
+from time import perf_counter
+from typing import Literal
 
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai.litellm_client import ChatMessage
+from app.ai.prompts import GUIDE_CHAT_PROMPT_VERSION, UNTRUSTED_RETRIEVED_CONTENT_RULE
+from app.ai.structured_output import generate_structured_output
 from app.core.auth import AuthContext
+from app.core.config import Settings, get_settings
 from app.db.models import Artifact, Experiment, ResearchSprint, ValidationMission
 from app.schemas.guide import (
     GuideActionRead,
     GuideChatResponseRead,
+    GuideChatTurnRead,
     GuideContextRead,
     GuideEvidenceSummaryRead,
     GuideRelatedEntityRead,
@@ -16,7 +26,14 @@ from app.schemas.guide import (
 )
 from app.schemas.overview import NextBestActionRead, ProjectOverviewRead
 from app.schemas.validation import DecisionCoachActionRead
-from app.services import project_overview_service, thesis_service, validation_service, wedge_service
+from app.services import (
+    ai_run_service,
+    project_overview_service,
+    thesis_service,
+    tool_service,
+    validation_service,
+    wedge_service,
+)
 
 
 class GuideActionNotFoundError(ValueError):
@@ -28,6 +45,22 @@ class _StageGuideCopy:
     focus: str
     why: str
     summary: str
+
+
+class _GroundedGuideAnswerDraft(BaseModel):
+    answer: str
+    cited_evidence_ids: list[str] = Field(default_factory=list)
+    assumption_ids: list[str] = Field(default_factory=list)
+    confidence_level: Literal["unknown", "low", "medium", "high"] = "unknown"
+    unsupported_or_missing_evidence: list[str] = Field(default_factory=list)
+    suggested_action_ids: list[str] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _GuideEvidenceSearch:
+    output: dict
+    cited_evidence_ids: list[str]
+    retrieval_diagnostics: dict | None
 
 
 _STAGE_GUIDE_COPY: dict[str, _StageGuideCopy] = {
@@ -169,21 +202,108 @@ def chat(
     auth: AuthContext,
     project_id: uuid.UUID,
     message: str,
+    recent_turns: list[GuideChatTurnRead] | None = None,
 ) -> GuideChatResponseRead:
+    settings = get_settings()
     context = get_guide_context(db, auth, project_id)
     normalized = message.strip().lower()
-    if not _is_in_scope(normalized):
-        return GuideChatResponseRead(
-            answer=(
-                "I can help with this idea's thesis, evidence, blockers, validation, "
-                "and decisions. Try asking what to validate next or why the current "
-                "verdict is blocked."
-            ),
-            recommended_action=_action_by_id(context, "explain_current_focus"),
-            action_cards=[_action_by_id(context, "explain_current_focus")],
-            related_entities=_related_entities(context),
+    bounded_recent_turns = _bounded_recent_turns(recent_turns or [])
+    run = ai_run_service.start_run(
+        db,
+        auth,
+        workflow_type="guide_chat",
+        prompt_version=GUIDE_CHAT_PROMPT_VERSION,
+        input_summary=message[:500],
+        project_id=project_id,
+        model_provider="stub" if settings.should_use_llm_stub else "litellm",
+        model_name=settings.litellm_model,
+    )
+    total_tokens: int | None = None
+    total_cost: Decimal | None = Decimal("0")
+    model_provider = "stub" if settings.should_use_llm_stub else "litellm"
+    model_name = settings.litellm_model
+
+    try:
+        intent_step = ai_run_service.start_step(
+            db,
+            run,
+            step_name="guide_intent_guardrail",
+            input_json={
+                "message": message[:1000],
+                "stage": context.stage,
+                "recent_turn_count": len(bounded_recent_turns),
+            },
+        )
+        in_scope = _is_in_scope(normalized)
+        ai_run_service.complete_step(
+            db,
+            intent_step,
+            output_json={
+                "in_scope": in_scope,
+                "used_llm": not settings.should_use_llm_stub and in_scope,
+            },
+            latency_ms=0,
+            tokens=None,
+            cost=Decimal("0"),
         )
 
+        if not in_scope:
+            response = _out_of_scope_chat_response(context)
+        elif settings.should_use_llm_stub:
+            response = _deterministic_chat_response(db, auth, project_id, message, context)
+            response = _attach_grounding_metadata(
+                db,
+                auth,
+                settings,
+                project_id,
+                run,
+                message,
+                response,
+                context,
+                used_llm=False,
+            )
+        else:
+            (
+                response,
+                total_tokens,
+                total_cost,
+                model_provider,
+                model_name,
+            ) = _grounded_chat_response(
+                db,
+                auth,
+                settings,
+                project_id,
+                message,
+                context,
+                run,
+                bounded_recent_turns,
+            )
+
+        response.ai_run_id = run.id
+        ai_run_service.complete_run(
+            db,
+            run,
+            output_summary=response.answer[:500],
+            total_tokens=total_tokens,
+            total_cost=total_cost,
+            model_provider=model_provider,
+            model_name=model_name,
+        )
+        return response
+    except Exception as exc:
+        ai_run_service.fail_run(db, run, error=str(exc))
+        raise
+
+
+def _deterministic_chat_response(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    message: str,
+    context: GuideContextRead,
+) -> GuideChatResponseRead:
+    normalized = message.strip().lower()
     if any(
         term in normalized
         for term in (
@@ -226,6 +346,30 @@ def chat(
             f"After that: {_after_that_for_action(context, action)}"
         )
         return _chat_response(answer, context, [action, *_support_actions(context)])
+
+    if any(
+        term in normalized
+        for term in (
+            "research sprint",
+            "research plan",
+            "plan research",
+            "evidence review",
+            "propose research",
+        )
+    ):
+        answer = (
+            "I can route you to a scoped evidence review plan, but I should not run "
+            "or apply broad research directly from chat. Use the research plan action "
+            "to define the question, evidence needed, and approval boundary first."
+        )
+        return _chat_response(
+            answer,
+            context,
+            [
+                _action_by_id(context, "plan_research_sprint"),
+                _action_by_id(context, "show_blocker_evidence"),
+            ],
+        )
 
     if any(term in normalized for term in ("blocked", "blocker", "unknown", "risk", "missing")):
         unknown = context.biggest_unknown or "the strongest untested belief"
@@ -369,6 +513,349 @@ def chat(
     return _chat_response(stage_copy.summary, context, context.available_actions[:3])
 
 
+def _out_of_scope_chat_response(context: GuideContextRead) -> GuideChatResponseRead:
+    return GuideChatResponseRead(
+        answer=(
+            "I can help with this idea's thesis, evidence, blockers, validation, "
+            "and decisions. Try asking what to validate next or why the current "
+            "verdict is blocked."
+        ),
+        recommended_action=_action_by_id(context, "explain_current_focus"),
+        action_cards=[_action_by_id(context, "explain_current_focus")],
+        related_entities=_related_entities(context),
+        confidence_level=context.confidence_level,
+        unsupported_or_missing_evidence=context.missing_context[:3],
+    )
+
+
+def _attach_grounding_metadata(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    run,
+    message: str,
+    response: GuideChatResponseRead,
+    context: GuideContextRead,
+    *,
+    used_llm: bool,
+) -> GuideChatResponseRead:
+    search = _search_guide_evidence(db, auth, settings, project_id, run, message)
+    response.used_llm = used_llm
+    response.cited_evidence_ids = search.cited_evidence_ids
+    response.retrieval_diagnostics = search.retrieval_diagnostics
+    response.confidence_level = _grounded_confidence(context, bool(search.cited_evidence_ids))
+    response.related_entities = _related_entities_with_evidence(context, search.cited_evidence_ids)
+    if not search.cited_evidence_ids and not response.unsupported_or_missing_evidence:
+        response.unsupported_or_missing_evidence = [
+            "No project evidence was retrieved for this guide answer."
+        ]
+    return response
+
+
+def _grounded_chat_response(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    message: str,
+    context: GuideContextRead,
+    run,
+    recent_turns: list[dict[str, str]],
+) -> tuple[GuideChatResponseRead, int | None, Decimal | None, str, str]:
+    search = _search_guide_evidence(db, auth, settings, project_id, run, message)
+    generation_step = ai_run_service.start_step(
+        db,
+        run,
+        step_name="guide_grounded_answer_generation",
+        input_json={
+            "message": message[:1000],
+            "stage": context.stage,
+            "retrieved_source_ids": search.cited_evidence_ids,
+            "available_action_ids": [action.id for action in context.available_actions],
+            "recent_turn_count": len(recent_turns),
+        },
+    )
+    started = perf_counter()
+    try:
+        result = generate_structured_output(
+            settings,
+            _GroundedGuideAnswerDraft,
+            _grounded_guide_messages(message, context, search, recent_turns),
+            temperature=0.1,
+            max_tokens=900,
+        )
+        draft = _GroundedGuideAnswerDraft.model_validate(result.parsed)
+        response = _response_from_grounded_draft(context, draft, search, run.id)
+        completion = result.completion
+        ai_run_service.complete_step(
+            db,
+            generation_step,
+            output_json=response.model_dump(mode="json"),
+            latency_ms=int((perf_counter() - started) * 1000),
+            tokens=completion.total_tokens,
+            cost=completion.total_cost,
+        )
+        return (
+            response,
+            completion.total_tokens,
+            completion.total_cost,
+            completion.model_provider,
+            completion.model_name,
+        )
+    except Exception as exc:
+        fallback = _deterministic_chat_response(db, auth, project_id, message, context)
+        fallback = _attach_grounding_metadata(
+            db,
+            auth,
+            settings,
+            project_id,
+            run,
+            message,
+            fallback,
+            context,
+            used_llm=False,
+        )
+        fallback.unsupported_or_missing_evidence = [
+            *fallback.unsupported_or_missing_evidence,
+            "LLM guide output could not be safely used, so the deterministic guide answered.",
+        ][:4]
+        ai_run_service.complete_step(
+            db,
+            generation_step,
+            output_json={
+                "fallback_used": True,
+                "reason": str(exc),
+                "response": fallback.model_dump(mode="json"),
+            },
+            latency_ms=int((perf_counter() - started) * 1000),
+            tokens=None,
+            cost=Decimal("0"),
+        )
+        return fallback, None, Decimal("0"), "local-fallback", settings.litellm_model
+
+
+def _search_guide_evidence(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    run,
+    message: str,
+) -> _GuideEvidenceSearch:
+    evidence_query = message[:500]
+    step = ai_run_service.start_step(
+        db,
+        run,
+        step_name="guide_retrieval_context",
+        input_json={"query": evidence_query, "mode": "hybrid", "top_k": 5},
+    )
+    started = perf_counter()
+    try:
+        result = tool_service.execute_tool(
+            db,
+            auth,
+            settings,
+            project_id,
+            "search_project_evidence",
+            {"query": evidence_query, "mode": "hybrid", "top_k": 5},
+            requested_by="agent",
+        )
+        output = result.output
+        results = output.get("results") if isinstance(output, dict) else []
+        cited_evidence_ids = _unique_strings(
+            str(item.get("source_id"))
+            for item in results
+            if isinstance(item, dict) and item.get("source_id")
+        )
+        diagnostics = output.get("diagnostics") if isinstance(output, dict) else None
+        ai_run_service.complete_step(
+            db,
+            step,
+            output_json={
+                "result_count": len(results) if isinstance(results, list) else 0,
+                "cited_evidence_ids": cited_evidence_ids,
+                "diagnostics": diagnostics,
+            },
+            latency_ms=int((perf_counter() - started) * 1000),
+            tokens=None,
+            cost=Decimal("0"),
+        )
+        return _GuideEvidenceSearch(
+            output=output if isinstance(output, dict) else {},
+            cited_evidence_ids=cited_evidence_ids,
+            retrieval_diagnostics=diagnostics if isinstance(diagnostics, dict) else None,
+        )
+    except Exception as exc:
+        ai_run_service.fail_step(
+            db,
+            step,
+            error=str(exc),
+            latency_ms=int((perf_counter() - started) * 1000),
+        )
+        raise
+
+
+def _grounded_guide_messages(
+    message: str,
+    context: GuideContextRead,
+    search: _GuideEvidenceSearch,
+    recent_turns: list[dict[str, str]],
+) -> list[ChatMessage]:
+    evidence_context = _evidence_context_for_prompt(search.output)
+    return [
+        ChatMessage(
+            role="system",
+            content=(
+                "You are Ask Thesys, a bounded strategic guide for one project. "
+                "Answer only about this project's thesis, evidence, wedges, assumptions, "
+                "validation, and decisions. "
+                f"{UNTRUSTED_RETRIEVED_CONTENT_RULE} "
+                "Do not claim to mutate project state. If a user asks for a "
+                "change, propose an existing action ID instead. Cite only source IDs from "
+                "the retrieved evidence list. Keep the answer concise and practical."
+            ),
+        ),
+        ChatMessage(
+            role="user",
+            content=(
+                "User question:\n"
+                f"{message}\n\n"
+                "Guide context JSON:\n"
+                f"{context.model_dump_json()}\n\n"
+                "Recent bounded conversation JSON:\n"
+                f"{json.dumps(recent_turns)}\n\n"
+                "Available action IDs:\n"
+                f"{json.dumps([action.id for action in context.available_actions])}\n\n"
+                "Retrieved evidence JSON:\n"
+                f"{json.dumps(evidence_context, default=str)}"
+            ),
+        ),
+    ]
+
+
+def _evidence_context_for_prompt(output: dict) -> list[dict[str, object]]:
+    results = output.get("results")
+    if not isinstance(results, list):
+        return []
+    context: list[dict[str, object]] = []
+    for item in results[:5]:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "")
+        context.append(
+            {
+                "source_id": item.get("source_id"),
+                "chunk_id": item.get("chunk_id"),
+                "title": item.get("title"),
+                "url": item.get("url"),
+                "score": item.get("score"),
+                "quote": text[:700],
+            }
+        )
+    return context
+
+
+def _response_from_grounded_draft(
+    context: GuideContextRead,
+    draft: _GroundedGuideAnswerDraft,
+    search: _GuideEvidenceSearch,
+    run_id: uuid.UUID,
+) -> GuideChatResponseRead:
+    allowed_sources = set(search.cited_evidence_ids)
+    cited_evidence_ids = [
+        source_id for source_id in draft.cited_evidence_ids if source_id in allowed_sources
+    ]
+    actions = _actions_from_ids(context, draft.suggested_action_ids)
+    if not actions:
+        actions = _support_actions(context)[:3] or context.available_actions[:3]
+    recommended_action = actions[0] if actions else context.available_actions[0]
+    unsupported = draft.unsupported_or_missing_evidence[:4]
+    if not cited_evidence_ids and not unsupported:
+        unsupported = ["No retrieved source directly supports this answer."]
+    return GuideChatResponseRead(
+        answer=draft.answer,
+        recommended_action=recommended_action,
+        action_cards=actions[:4],
+        related_entities=_related_entities_with_evidence(context, cited_evidence_ids),
+        cited_evidence_ids=cited_evidence_ids,
+        assumption_ids=draft.assumption_ids[:8],
+        confidence_level=draft.confidence_level,
+        unsupported_or_missing_evidence=unsupported,
+        used_llm=True,
+        retrieval_diagnostics=search.retrieval_diagnostics,
+        ai_run_id=run_id,
+    )
+
+
+def _actions_from_ids(context: GuideContextRead, action_ids: list[str]) -> list[GuideActionRead]:
+    actions: list[GuideActionRead] = []
+    seen: set[str] = set()
+    for action_id in action_ids:
+        action = _find_action_by_id(context, action_id)
+        if action is None:
+            continue
+        if action.id in seen:
+            continue
+        seen.add(action.id)
+        actions.append(action)
+    return actions
+
+
+def _find_action_by_id(
+    context: GuideContextRead,
+    action_id: str,
+) -> GuideActionRead | None:
+    for action in context.available_actions:
+        if action.id == action_id:
+            return action
+    canonical_action_id = _canonical_action_id(action_id)
+    for action in context.available_actions:
+        if action.id == canonical_action_id:
+            return action
+    return None
+
+
+def _related_entities_with_evidence(
+    context: GuideContextRead,
+    evidence_ids: list[str],
+) -> list[GuideRelatedEntityRead]:
+    entities = _related_entities(context)
+    for source_id in evidence_ids[:3]:
+        entities.append(
+            GuideRelatedEntityRead(
+                type="evidence",
+                id=source_id,
+                label="Retrieved evidence",
+            )
+        )
+    return entities
+
+
+def _grounded_confidence(context: GuideContextRead, has_citations: bool) -> str:
+    if not has_citations:
+        return "low" if context.confidence_level != "unknown" else "unknown"
+    return context.confidence_level if context.confidence_level != "unknown" else "medium"
+
+
+def _bounded_recent_turns(recent_turns: list[GuideChatTurnRead]) -> list[dict[str, str]]:
+    return [
+        {"role": turn.role, "content": turn.content[:500]}
+        for turn in recent_turns[-6:]
+    ]
+
+
+def _unique_strings(values) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
 def _guide_context_from_overview(
     db: Session,
     auth: AuthContext,
@@ -499,6 +986,22 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
             ),
             target_route=f"/projects/{project_id}#evidence",
             risk_level="low",
+            requires_confirmation=False,
+        ),
+        GuideActionRead(
+            id="plan_research_sprint",
+            type="run_workflow",
+            label="Plan evidence review",
+            description=(
+                "Open the research area to draft a scoped evidence review before running it."
+            ),
+            why_it_matters=(
+                "Research plans keep investigation bounded and require approval before broader "
+                "evidence work starts."
+            ),
+            target_route=f"/projects/{project_id}#research-sprint",
+            target_modal="research-sprint",
+            risk_level="medium",
             requires_confirmation=False,
         ),
         GuideActionRead(
@@ -941,6 +1444,7 @@ def _support_actions(context: GuideContextRead) -> list[GuideActionRead]:
     preferred = [
         "explain_current_focus",
         "show_blocker_evidence",
+        "plan_research_sprint",
         "rewrite_thesis_with_wedge",
         "compare_wedge_options",
         "open_validation_mission",

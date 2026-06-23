@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     Uuid,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -55,6 +56,11 @@ class EvidenceSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     ingested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     classification: Mapped[str | None] = mapped_column(String(100), index=True)
     credibility_score: Mapped[Decimal | None] = mapped_column(Numeric)
+    source_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"),
+        nullable=False,
+        default=dict,
+    )
     ingestion_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     ingestion_error: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
@@ -91,6 +97,12 @@ class EvidenceChunk(UUIDPrimaryKeyMixin, Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int | None] = mapped_column(Integer)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
+    embedding_provider: Mapped[str | None] = mapped_column(String(50), index=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(255), index=True)
+    embedding_dimension: Mapped[int | None] = mapped_column(Integer)
+    embedding_version: Mapped[str | None] = mapped_column(String(100))
+    embedded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    embedding_error: Mapped[str | None] = mapped_column(Text)
     chunk_metadata: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
         JSON,

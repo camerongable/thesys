@@ -91,6 +91,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
                 "source_types": {"type": "array", "maxItems": 5},
                 "competitor_id": {"type": ["string", "null"], "format": "uuid"},
                 "assumption_id": {"type": ["string", "null"], "format": "uuid"},
+                "research_sprint_id": {"type": ["string", "null"], "format": "uuid"},
                 "created_after": {"type": ["string", "null"]},
                 "created_before": {"type": ["string", "null"]},
                 "freshness_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 3650},
@@ -651,14 +652,17 @@ def _run_tool(
         return _get_project_summary(db, auth, project_id)
     if definition.name == "search_project_evidence":
         payload = EvidenceRetrieveCreate.model_validate(tool_input)
-        results = retrieval_service.retrieve_evidence_results(
+        search = retrieval_service.retrieve_evidence_search(
             db,
             auth,
             settings,
             project_id,
             payload,
         )
-        return {"results": [result.model_dump(mode="json") for result in results]}
+        return {
+            "results": [result.model_dump(mode="json") for result in search.results],
+            "diagnostics": search.diagnostics.model_dump(mode="json"),
+        }
     if definition.name == "list_project_sources":
         return _list_project_sources(db, auth, project_id, research_sprint_id)
     if definition.name == "list_competitors":

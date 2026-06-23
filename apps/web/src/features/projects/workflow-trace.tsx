@@ -13,7 +13,7 @@ type WorkflowTraceProps = {
 
 type TraceStep = Pick<
   WorkflowStep,
-  "step_name" | "status" | "latency_ms" | "tokens" | "cost" | "error"
+  "step_name" | "status" | "latency_ms" | "tokens" | "cost" | "error" | "output_json"
 >;
 const terminalStatuses = new Set(["succeeded", "failed", "cancelled", "waiting_for_human"]);
 
@@ -73,6 +73,7 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
       tokens: null,
       cost: null,
       error: null,
+      output_json: null,
     }));
 
   return (
@@ -168,6 +169,7 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
                 {step.error ? (
                   <p className="mt-1 text-xs text-danger-foreground">{step.error}</p>
                 ) : null}
+                <RetrievalTraceSummary output={step.output_json} />
               </div>
             </div>
           ))
@@ -188,6 +190,89 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
       </div>
     </details>
   );
+}
+
+function RetrievalTraceSummary({ output }: { output: Record<string, unknown> | null }) {
+  const summaries = retrievalSummaries(output);
+  if (summaries.length === 0) {
+    return null;
+  }
+  return (
+    <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+      {summaries.map((summary) => (
+        <span className="rounded-md bg-muted px-2 py-1" key={summary}>
+          {summary}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function retrievalSummaries(output: Record<string, unknown> | null) {
+  if (!output) {
+    return [];
+  }
+  const diagnostics = diagnosticsFromOutput(output);
+  const context = objectValue(output.retrieval_context) ?? objectValue(diagnostics?.context);
+  const queryPlan = objectValue(diagnostics?.query_plan);
+  const reranker = objectValue(diagnostics?.reranker);
+  const quality = objectValue(diagnostics?.quality_report);
+  const summaries: string[] = [];
+  if (queryPlan) {
+    const subqueries = arrayValue(queryPlan.subqueries).length || 1;
+    summaries.push(`${subqueries} retrieval quer${subqueries === 1 ? "y" : "ies"}`);
+  }
+  if (reranker) {
+    summaries.push(
+      `reranker ${stringValue(reranker.provider, "unknown")}${reranker.enabled === false ? " off" : ""}`,
+    );
+  }
+  if (context) {
+    summaries.push(
+      `context ${numberValue(context.selected_count) ?? 0} chunks · ${
+        numberValue(context.token_count) ?? 0
+      }/${numberValue(context.token_budget) ?? 0} tokens`,
+    );
+  }
+  if (quality) {
+    summaries.push(
+      `quality p${formatRatio(numberValue(quality.precision_proxy))} r${formatRatio(
+        numberValue(quality.recall_proxy),
+      )}`,
+    );
+  }
+  return summaries;
+}
+
+function diagnosticsFromOutput(output: Record<string, unknown>) {
+  const direct = objectValue(output.diagnostics);
+  if (direct) {
+    return direct;
+  }
+  const list = arrayValue(output.retrieval_diagnostics);
+  return objectValue(list[0]);
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function stringValue(value: unknown, fallback: string) {
+  return typeof value === "string" ? value : fallback;
+}
+
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function formatRatio(value: number | null) {
+  return value === null ? "?" : value.toFixed(2);
 }
 
 function StepIcon({ status }: { status: string }) {

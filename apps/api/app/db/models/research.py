@@ -191,6 +191,16 @@ class DiscoveredSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     title: Mapped[str | None] = mapped_column(String(500))
     snippet: Mapped[str | None] = mapped_column(Text)
     source_type: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
+    search_provider: Mapped[str | None] = mapped_column(String(50), index=True)
+    search_query: Mapped[str | None] = mapped_column(Text)
+    search_result_rank: Mapped[int | None] = mapped_column(index=True)
+    retrieved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    risk_level: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
+    provenance_metadata: Mapped[dict[str, object]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"),
+        nullable=False,
+        default=dict,
+    )
     relevance_score: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
     reason_selected: Mapped[str] = mapped_column(Text, nullable=False)
     associated_research_question: Mapped[str | None] = mapped_column(Text)

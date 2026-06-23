@@ -235,7 +235,7 @@ def _retrieve_evidence_step(
         input_json=payload.model_dump(mode="json"),
     )
     started = perf_counter()
-    results = retrieval_service.retrieve_evidence_results(
+    search = retrieval_service.retrieve_evidence_search(
         db,
         auth,
         settings,
@@ -247,14 +247,15 @@ def _retrieve_evidence_step(
         step,
         output_json={
             "query": query,
-            "result_count": len(results),
-            "results": [result.model_dump(mode="json") for result in results],
+            "result_count": len(search.results),
+            "diagnostics": search.diagnostics.model_dump(mode="json"),
+            "results": [result.model_dump(mode="json") for result in search.results],
         },
         latency_ms=int((perf_counter() - started) * 1000),
         tokens=None,
         cost=Decimal("0"),
     )
-    return results
+    return search.results
 
 
 def _generate_draft_step(

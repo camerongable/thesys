@@ -103,6 +103,25 @@ class AIStatusRead(BaseModel):
     litellm_base_url: str
     litellm_reachability: LiteLLMReachabilityStatus
     provider_keys: AIProviderKeyStatus
+    embedding_provider: Literal["deterministic", "litellm"]
     embedding_model: str
     embedding_dimension: int
+    embedding_version: str
+    embedding_timeout_seconds: float
+    embedding_retry_attempts: int
+    retrieval_vector_path: Literal["auto", "sql", "python"]
+    retrieval_python_fallback_enabled: bool
+    retrieval_reranking_enabled: bool
+    retrieval_reranker_provider: Literal["deterministic", "litellm"]
+    retrieval_context_token_budget: int
+    retrieval_max_chunks_per_source: int
+    retrieval_min_context_score: float
+    external_search_enabled: bool
+    external_search_provider: Literal["deterministic", "tavily"]
+    external_search_max_results_per_query: int
+    external_search_max_queries_per_sprint: int
+    multimodal_extraction_provider: Literal["deterministic", "litellm"]
+    multimodal_extraction_model: str
+    multimodal_pdf_fallback_enabled: bool
+    multimodal_pdf_min_text_chars: int
     structured_output_healthcheck: AIStatusStructuredOutputCheck | None = None

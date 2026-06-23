@@ -1,4 +1,15 @@
+import uuid
+from decimal import Decimal
+
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.ai.litellm_client import LLMCompletion
+from app.ai.structured_output import StructuredOutputResult
+from app.core.config import get_settings
+from app.db.models import AIRun, AIStep, ToolInvocation
+from app.services import guide_service
 
 
 def test_guide_context_and_recommendation_are_stage_aware(client: TestClient) -> None:
@@ -147,6 +158,8 @@ def test_guide_chat_is_project_scoped_and_rejects_generic_questions(client: Test
     off_topic_body = off_topic.json()
     assert "I can help with this idea's thesis" in off_topic_body["answer"]
     assert off_topic_body["action_cards"]
+    assert off_topic_body["ai_run_id"]
+    assert off_topic_body["used_llm"] is False
 
 
 def test_guide_explains_idea_story_wedge_and_next_proof(client: TestClient) -> None:
@@ -180,6 +193,210 @@ def test_guide_explains_idea_story_wedge_and_next_proof(client: TestClient) -> N
     assert "The next proof is" in proof_body["answer"]
     assert "current blocker" in proof_body["answer"]
     assert any(action["id"] == "show_idea_story" for action in proof_body["action_cards"])
+
+
+def test_guide_chat_attaches_grounded_retrieval_metadata_and_trace(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    create_response = client.post(
+        "/api/projects",
+        json={
+            "name": "Grounded guide idea",
+            "short_description": "AI for independent coach check-ins.",
+        },
+    )
+    assert create_response.status_code == 201
+    project_id = create_response.json()["id"]
+    source_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={
+            "title": "Coach interview evidence",
+            "text": (
+                "Independent fitness coaches spend hours reviewing weekly client "
+                "check-ins and want cited triage before deciding who needs attention."
+            ),
+        },
+    )
+    assert source_response.status_code == 201
+
+    chat_response = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={"message": "What does the evidence say about weekly coach check-ins?"},
+    )
+
+    assert chat_response.status_code == 200
+    body = chat_response.json()
+    assert body["used_llm"] is False
+    assert body["ai_run_id"]
+    assert body["cited_evidence_ids"] == [source_response.json()["id"]]
+    assert body["confidence_level"] in {"low", "medium", "high"}
+    assert body["retrieval_diagnostics"]["quality_report"]["citation_coverage_proxy"] == 1
+
+    run = db_session.scalar(select(AIRun).where(AIRun.id == uuid.UUID(body["ai_run_id"])))
+    assert run is not None
+    assert run.workflow_type == "guide_chat"
+    assert run.status == "succeeded"
+    steps = list(db_session.scalars(select(AIStep).where(AIStep.ai_run_id == run.id)))
+    assert {step.step_name for step in steps} >= {
+        "guide_intent_guardrail",
+        "guide_retrieval_context",
+    }
+    tool_invocation = db_session.scalar(
+        select(ToolInvocation).where(ToolInvocation.project_id == run.project_id)
+    )
+    assert tool_invocation is not None
+    assert tool_invocation.tool_name == "search_project_evidence"
+    assert tool_invocation.access_mode == "read"
+
+
+def test_guide_chat_truncates_long_questions_for_evidence_search(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Long guide question idea"},
+    ).json()["id"]
+    long_message = f"What evidence exists? {'x' * 1200}"
+
+    response = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={"message": long_message},
+    )
+
+    assert response.status_code == 200
+    tool_invocation = db_session.scalar(
+        select(ToolInvocation).where(ToolInvocation.project_id == uuid.UUID(project_id))
+    )
+    assert tool_invocation is not None
+    assert tool_invocation.tool_name == "search_project_evidence"
+    assert len(tool_invocation.input_json["query"]) == 500
+
+
+def test_guide_chat_proposal_prompts_do_not_mutate_project_state(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Guide proposal idea"},
+    ).json()["id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={"message": "Create a validation plan and apply it to the project."},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recommended_action"]["id"] in {
+        "structure_idea",
+        "create_validation_plan",
+        "open_validation_mission",
+        "interpret_validation_notes",
+    }
+    assert body["ai_run_id"]
+    proposals = list(
+        db_session.scalars(
+            select(ToolInvocation).where(
+                ToolInvocation.project_id == uuid.UUID(project_id),
+                ToolInvocation.access_mode == "proposal",
+            )
+        )
+    )
+    assert proposals == []
+
+
+def test_guide_chat_research_plan_prompts_route_to_existing_action(
+    client: TestClient,
+) -> None:
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Guide research plan idea"},
+    ).json()["id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={"message": "Propose a research sprint for the riskiest gap."},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recommended_action"]["id"] == "plan_research_sprint"
+    assert any(action["id"] == "plan_research_sprint" for action in body["action_cards"])
+
+
+def test_guide_chat_live_mode_uses_structured_grounded_answer(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    get_settings.cache_clear()
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Live guide idea"},
+    ).json()["id"]
+    source_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={
+            "title": "Wedge evidence",
+            "text": "Coach check-in triage is the strongest wedge because weekly reviews are slow.",
+        },
+    )
+    assert source_response.status_code == 201
+    source_id = source_response.json()["id"]
+
+    def fake_generate_structured_output(settings, output_schema, messages, **kwargs):
+        prompt_text = "\n".join(message.content for message in messages)
+        assert "Recent bounded conversation JSON" in prompt_text
+        assert "Earlier answer about coach check-ins." in prompt_text
+        parsed = output_schema(
+            answer="The strongest supported point is weekly check-in triage.",
+            cited_evidence_ids=[source_id, "not-a-real-source"],
+            assumption_ids=[],
+            confidence_level="medium",
+            unsupported_or_missing_evidence=[],
+            suggested_action_ids=["show_blocker_evidence", "not_a_real_action"],
+        )
+        completion = LLMCompletion(
+            content=parsed.model_dump_json(),
+            model_provider="litellm",
+            model_name="test-model",
+            prompt_tokens=12,
+            completion_tokens=8,
+            total_tokens=20,
+            total_cost=Decimal("0.001"),
+            raw_response={},
+            used_stub=False,
+        )
+        return StructuredOutputResult(parsed=parsed, completion=completion)
+
+    monkeypatch.setattr(
+        guide_service,
+        "generate_structured_output",
+        fake_generate_structured_output,
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={
+            "message": "Compare the wedge using evidence.",
+            "recent_turns": [
+                {"role": "user", "content": "What did the evidence say?"},
+                {"role": "assistant", "content": "Earlier answer about coach check-ins."},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["used_llm"] is True
+    assert body["cited_evidence_ids"] == [source_id]
+    assert body["confidence_level"] == "medium"
+    assert body["recommended_action"]["id"] == "show_blocker_evidence"
+    assert all(action["id"] != "not_a_real_action" for action in body["action_cards"])
+    assert body["retrieval_diagnostics"]["query_plan"]["subqueries"]
 
 
 def _guide_context(client: TestClient, project_id: str) -> dict:

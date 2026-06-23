@@ -336,6 +336,7 @@ def discover_sources(
         ai_step_id=result.step.id,
         generated_count=result.generated_count,
         candidate_count=result.candidate_count,
+        search_diagnostics=result.search_diagnostics,
         sources=[serialize_source(source) for source in result.sources],
     )
 

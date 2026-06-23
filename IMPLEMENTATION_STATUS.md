@@ -2,15 +2,15 @@
 
 ## Current Phase
 
-V1 Sprint 36 implementation is complete. Thesys keeps the Sprint 33-35 simplified
-experience, with quieter launcher/intake/current-step surfaces, standardized
-missing/why/next empty states, fewer non-primary card containers, compact Inspect
-and Explore disclosure, and verified desktop/mobile browser behavior. `/projects`
-keeps one dominant Start investigation CTA, `/projects/new` keeps a single-column
-rough-idea flow with `Continue to Current Step` as the dominant post-preview
-action, and project Current Step keeps advanced detail behind Inspect.
-Watchlists, monitoring, collaboration, portfolio dashboards, integrations, and
-multi-segment workflow packs remain V2 scope.
+V1 Sprint 38 implementation is complete. Thesys now routes evidence search,
+opportunity brief generation, agentic research, and V1 research evals through a
+multi-stage retrieval pipeline with query planning, hybrid retrieval, deterministic
+or LiteLLM-configured reranking, context assembly, citation-preserving result
+metadata, and retrieval-quality diagnostics. The Sprint 33-37 simplified project
+experience is preserved: retrieval details remain in Inspect, workflow trace,
+artifact structured content, and eval/check surfaces rather than new main
+dashboard cards. Watchlists, monitoring, collaboration, portfolio dashboards,
+integrations, and multi-segment workflow packs remain V2 scope.
 
 ## Sprint 0 Scope
 
@@ -1781,6 +1781,241 @@ Checks run:
   full-screen sheet, Explore opens as a full-screen sheet, and selected Explore
   destinations route correctly.
 
+## V1 Sprint 37 Scope
+
+- [x] Add embedding provider configuration for deterministic local embeddings
+  and LiteLLM/OpenAI-compatible production embeddings, including model,
+  provider, version, timeout, retry, and dimension validation.
+- [x] Store embedding provenance on `evidence_chunks`: provider, model,
+  dimension, version, embedded timestamp, and embedding error.
+- [x] Add a migration for embedding provenance columns plus a pgvector ANN index,
+  preferring HNSW and falling back to IVFFlat where needed.
+- [x] Preserve deterministic dev embeddings while adding provider metadata to
+  ingestion traces and retrieval results.
+- [x] Implement the Postgres pgvector SQL retrieval path for semantic and hybrid
+  evidence search, with project/source/freshness/metadata filters applied before
+  vector ranking.
+- [x] Keep deterministic Python retrieval as the non-Postgres/configured
+  fallback path and return explicit fallback diagnostics.
+- [x] Persist retrieval diagnostics in `ai_steps.output_json` and return them
+  through the evidence retrieval API.
+- [x] Add `POST /api/projects/{project_id}/evidence/reembed` with dry-run,
+  project/workspace scope, current-provider eligibility checks, and per-chunk
+  failure reporting.
+- [x] Surface retrieval path diagnostics, per-result embedding provenance, and
+  re-embedding maintenance controls in the advanced Evidence detail surface.
+- [x] Extend AI status, tool schemas, docs, Docker Compose, `.env.example`, and
+  LiteLLM config for the production embedding/retrieval path.
+
+## V1 Sprint 37 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_embedding_service.py app/tests/test_ai.py`
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_agentic_research.py app/tests/test_research_history_eval.py app/tests/test_tool_boundary.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `docker compose config`
+- [x] `docker compose restart api temporal-worker web`
+- [x] `curl -fsS http://localhost:8000/health`
+- [x] `curl -I -fsS http://localhost:3000/projects`
+- [x] Live-stack AI status smoke test: verified embedding provider/model/version,
+  dimension, retrieval vector path, and Python fallback configuration are
+  returned by `/api/ai/status`.
+- [x] Live-stack API fixture smoke test: created `Sprint 37 browser check`,
+  ingested one note source, retrieved one hybrid result through the HNSW
+  pgvector SQL path, and verified diagnostics reported `used_sql_vector_search`
+  with no fallback.
+- [x] Live-stack re-embed API smoke test: dry-run re-embed scanned one chunk,
+  skipped it as already current, and returned zero failures.
+- [x] Desktop Codex in-app browser QA: opened the fixture project, navigated
+  Research -> Inspect -> Evidence summary, ran a hybrid source-chunk search,
+  verified the rendered `Retrieval: pgvector SQL` diagnostics, opened the result
+  receipt, verified retrieved text plus embedding provenance, and confirmed
+  `Dry run` and `Re-embed project` maintenance summaries render correctly.
+- [x] Browser console QA: no app console errors were present after the Sprint 37
+  verification flow.
+
+## V1 Sprint 38 Scope
+
+- [x] Add reusable retrieval pipeline service with broad-query planning,
+  strategic intent classification, target entity/evidence-type extraction, and
+  subquery decomposition.
+- [x] Run semantic, keyword, metadata-filtered, freshness-boosted, and
+  credibility-aware retrieval through the existing pgvector SQL path with Python
+  fallback.
+- [x] Add deterministic reranking by default, disabled mode, and optional
+  LiteLLM reranker configuration with deterministic fallback on provider errors.
+- [x] Assemble bounded context with near-duplicate suppression, source diversity,
+  minimum context score, token budget enforcement, and preserved source/chunk
+  IDs.
+- [x] Extend retrieval API schemas with rerank score, final rank, context
+  inclusion, selection reason, nested query plan, reranker, context, and quality
+  diagnostics.
+- [x] Wire the pipeline into evidence retrieve, opportunity brief evidence
+  retrieval, agentic research tool execution, evidence selection, follow-up
+  retrieval, final memo structured content, and V1 research eval metrics.
+- [x] Keep retrieval-quality visibility in existing Inspect, workflow trace,
+  evidence search, memo review, and eval/check surfaces only.
+- [x] Add reranker/context configuration to `.env.example`, Docker Compose,
+  README, AI status, and frontend API types.
+- [x] Refine redaction so real secrets remain redacted while non-secret
+  retrieval token counts and token budgets remain inspectable.
+
+## V1 Sprint 38 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_opportunity_brief.py app/tests/test_agentic_research.py app/tests/test_research_history_eval.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `pnpm --filter thesys-web test`
+- [x] `docker compose config`
+- [x] Local-stack browser QA: created `Sprint 38 retrieval QA`, seeded four
+  sources, ran the broad query `Which wedge is strongest and what proof is
+  missing?`, and verified Inspect showed pgvector SQL retrieval, 3 subqueries,
+  deterministic reranker, 1 selected chunk, 47/3500 context tokens, precision
+  1.00, recall 0.25, duplicate suppression, and no noisy source selected.
+- [x] Browser brief QA: regenerated an opportunity brief in stub mode, verified
+  cited claims and appendix entries preserved source/chunk-backed quotes, and
+  opened the trace showing 5 retrieval queries, deterministic reranker, 2
+  context chunks, and 89/3500 context tokens.
+- [x] Browser agentic research QA: ran an agentic evidence review in stub mode,
+  verified the memo stored 6 retrieval diagnostics plus 4 selected context
+  chunks at 226/3500 tokens, and confirmed Evidence Checks showed multi-stage
+  retrieval strategy, reranker visibility, context assembly, and retrieval
+  quality report metrics in Inspect.
+- [x] Browser console and responsive QA: console errors/warnings were empty for
+  the app tab; at 410px width, the Inspect evidence-check content had no
+  horizontal overflow, no overflowing buttons, and retrieval-quality lines
+  remained readable and scrollable.
+
+## V1 Sprint 39 Scope
+
+- [x] Preserve the existing guide intent guardrail, bounded out-of-scope
+  refusal, deterministic fallback path, and action-card routing.
+- [x] Add traced `guide_chat` AI runs/steps for Ask Thesys with prompt version,
+  model/provider metadata, latency/cost fields, intent guardrail output,
+  retrieval context output, and answer summaries.
+- [x] Ground in-scope Ask Thesys answers through the governed
+  `search_project_evidence` read-only tool and return cited evidence IDs,
+  retrieval diagnostics, confidence level, unsupported/missing evidence, and
+  trace IDs in the guide chat response.
+- [x] Add live-mode structured LLM guide answers with citation filtering,
+  existing-action filtering, untrusted retrieved-content instructions, and
+  deterministic fallback if generation or validation fails.
+- [x] Keep chat non-mutating: proposal-style prompts route to existing
+  navigation/workflow actions, including scoped research-plan routing, without
+  executing write/proposal tools directly from chat.
+- [x] Add bounded session context by sending only the last six guide turns from
+  the panel and including the trimmed context in live LLM prompt input.
+- [x] Surface compact Ask Thesys grounding metadata in the guide panel without
+  turning the UI into a transcript-heavy chat surface.
+- [x] Extend guide tests for grounded retrieval metadata, AI run/step traces,
+  read-only tool logging, long-query truncation, non-mutating proposal prompts,
+  research-plan routing, live structured LLM output, citation filtering, action
+  filtering, and bounded recent-turn prompt context.
+
+## V1 Sprint 39 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_guide.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `pnpm --filter thesys-web test`
+- [x] `docker compose config`
+- [x] Local-stack functional QA on alternate ports with a disposable SQLite
+  model-created database: started the API on `127.0.0.1:8010` and web on
+  `127.0.0.1:3010`, seeded the guided demo project, asked `What does the
+  evidence say about weekly coach check-ins?`, and verified the guide response
+  returned cited evidence IDs, medium confidence, retrieval diagnostics,
+  related evidence entities, and an AI run trace ID.
+- [x] Local-stack non-mutation QA: asked `Create and apply a validation plan for
+  the riskiest assumption.` and verified the response returned existing guide
+  actions while the tool invocation log contained only read-only
+  `search_project_evidence` calls and no proposal/write invocation.
+
+Manual environment note:
+
+- Codex in-app browser QA was blocked in this session: the Browser plugin setup
+  succeeded but no `iab`/browser target was registered, and the local
+  app-control surface timed out while listing apps. Docker-backed localhost
+  verification was also unavailable because Docker returned internal API errors
+  and its owned `3000`/`8000` listeners did not respond.
+
+## V1 Sprint 40 Scope
+
+- [x] Add governed external search settings and a provider boundary with
+  deterministic and Tavily adapters.
+- [x] Keep external search disabled by default, with deterministic local mode
+  and opt-in Tavily via `EXTERNAL_SEARCH_ENABLED`, `EXTERNAL_SEARCH_PROVIDER`,
+  and `TAVILY_API_KEY`.
+- [x] Route approved research-sprint source discovery through external search
+  when enabled, dedupe by normalized URL, store provider/query/rank/retrieval
+  provenance, and preserve the existing review/approval/rejection flow.
+- [x] Carry search provenance into evidence source metadata and chunk metadata
+  after source approval, including fallback snapshot ingestion when remote fetch
+  fails.
+- [x] Add multimodal evidence extraction through a backend extractor boundary
+  with deterministic fixture extraction by default and LiteLLM multimodal
+  extraction for live image/PDF paths.
+- [x] Support PNG, JPG, JPEG, and WebP uploads; keep text-native PDFs on `pypdf`
+  and route low-text PDFs to multimodal fallback only when configured.
+- [x] Add `source_metadata` storage and expose evidence source `metadata` through
+  the existing evidence API.
+- [x] Keep search and extraction details behind Research/Evidence inspection
+  controls so Current Step stays quiet.
+- [x] Extend V1 research eval with search relevance, source diversity,
+  duplicate-rate, and provenance-coverage metrics.
+- [x] Document external search and multimodal extraction settings in
+  `.env.example`, Docker Compose, README, API status, and frontend API types.
+
+## V1 Sprint 40 Verification
+
+Checks run:
+
+- [x] `cd apps/api && .venv/bin/ruff check app`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_research_discovery.py app/tests/test_evidence.py app/tests/test_research_history_eval.py`
+- [x] `cd apps/api && .venv/bin/pytest`
+- [x] `cd apps/api && .venv/bin/alembic upgrade head --sql`
+- [x] `pnpm --filter thesys-web typecheck`
+- [x] `pnpm --filter thesys-web test`
+- [x] `docker compose config`
+- [x] IDE browser deterministic connector QA on alternate local ports
+  `127.0.0.1:3010`/`127.0.0.1:8010`: created disposable project
+  `Sprint 40 connector QA`, planned and approved an evidence review, ran
+  `Find sources`, confirmed deterministic candidates showed provider/query/rank
+  and retrieval time, approved one source, rejected one source, and confirmed
+  the approved source appeared as ready evidence.
+- [x] Browser evidence inspection QA: opened the approved source detail and
+  confirmed search provider, query, rank, retrieval timestamp, risk, and content
+  type appeared only behind the provenance details control.
+- [x] Browser retrieval QA: searched stored chunks for deterministic-source text
+  and confirmed the approved URL source was retrieved.
+- [x] Browser multimodal QA: uploaded the Sprint 40 fixture image through the
+  evidence file endpoint, inspected it in the browser, confirmed ready status,
+  deterministic extraction metadata, extracted text preview, and retrieval by a
+  phrase from the extracted text.
+- [x] Browser PDF QA: uploaded a normal text PDF, inspected it in the browser,
+  and confirmed `pypdf` metadata without multimodal fallback.
+- [x] Browser quality QA: browser console errors/warnings were empty, app API
+  responses during the verified flow were 2xx, and the 410px viewport had no
+  horizontal overflow with extraction details absent from Current Step.
+
+Manual environment note:
+
+- The local Docker API/web ports were already occupied, so manual browser QA used
+  isolated alternate ports plus a temporary SQLite database and local object
+  storage. The optional live Tavily path was not run because no `TAVILY_API_KEY`
+  was configured for this session.
+
 ## Next Work
 
-V1 Sprint 37: define the next brief-backed scope.
+V1 Sprint 41: TBD.

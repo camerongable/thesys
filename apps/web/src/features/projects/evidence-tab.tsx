@@ -23,6 +23,7 @@ import {
   getProjectOverview,
   listArtifacts,
   listEvidenceSources,
+  reembedEvidence,
   RetrievalMode,
   retrieveEvidence,
   reprocessEvidenceSource,
@@ -104,6 +105,20 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
       }),
   });
 
+  const reembedMutation = useMutation({
+    mutationFn: (dryRun: boolean) =>
+      reembedEvidence(projectId, {
+        dry_run: dryRun,
+        force: false,
+        scope: "project",
+      }),
+    onSuccess: async (result) => {
+      if (!result.dry_run) {
+        await invalidateSources();
+      }
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (sourceId: string) => deleteEvidenceSource(projectId, sourceId),
     onSuccess: invalidateSources,
@@ -121,6 +136,7 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
     noteMutation.error ??
     fileMutation.error ??
     retrievalMutation.error ??
+    reembedMutation.error ??
     deleteMutation.error ??
     reprocessMutation.error ??
     null;
@@ -274,9 +290,9 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
             <h2 className="text-base font-semibold">Upload evidence file</h2>
           </div>
           <label className="mt-4 block">
-            <span className="text-sm font-medium">PDF, text, or Markdown</span>
+            <span className="text-sm font-medium">PDF, image, text, or Markdown</span>
             <input
-              accept=".pdf,.txt,.md,.markdown,text/plain,text/markdown,application/pdf"
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.md,.markdown,text/plain,text/markdown,application/pdf,image/png,image/jpeg,image/webp"
               className="mt-2 w-full rounded-md border border-border px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1 file:text-sm"
               onChange={handleFileChange}
               type="file"
@@ -454,6 +470,7 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
 
             {retrievalMutation.data ? (
               <div className="mt-5 divide-y divide-border">
+                <RetrievalDiagnosticsLine diagnostics={retrievalMutation.data.diagnostics} />
                 {retrievalMutation.data.results.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No matching chunks.</p>
                 ) : (
@@ -471,15 +488,90 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
                       <p className="mt-2 border-t border-border pt-2 text-sm leading-6 text-muted-foreground">
                         {truncate(result.text, 440)}
                       </p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Embedded with {result.embedding_provider ?? "unknown"} ·{" "}
+                        {result.embedding_model ?? "unknown model"} ·{" "}
+                        {result.embedding_version ?? "unknown version"}
+                      </p>
                     </details>
                   ))
                 )}
               </div>
             ) : null}
+            <div className="mt-5 border-t border-border pt-4">
+              <p className="text-xs font-medium text-muted-foreground">
+                Embedding maintenance
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Use this after changing embedding provider or model.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  disabled={reembedMutation.isPending}
+                  onClick={() => reembedMutation.mutate(true)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                  Dry run
+                </Button>
+                <Button
+                  disabled={reembedMutation.isPending}
+                  onClick={() => reembedMutation.mutate(false)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                  Re-embed project
+                </Button>
+              </div>
+              {reembedMutation.data ? (
+                <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                  {reembedMutation.data.dry_run ? "Dry run" : "Updated"} · scanned{" "}
+                  {reembedMutation.data.scanned_count}, eligible{" "}
+                  {reembedMutation.data.eligible_count}, updated{" "}
+                  {reembedMutation.data.reembedded_count}, failed{" "}
+                  {reembedMutation.data.failed_count}
+                </p>
+              ) : null}
+            </div>
           </details>
         </aside>
       </div>
     </section>
+  );
+}
+
+function RetrievalDiagnosticsLine({
+  diagnostics,
+}: {
+  diagnostics: NonNullable<Awaited<ReturnType<typeof retrieveEvidence>>>["diagnostics"];
+}) {
+  const path = diagnostics.used_sql_vector_search
+    ? "pgvector SQL"
+    : diagnostics.fallback_path_used
+      ? "fallback"
+      : "keyword";
+  const subqueryCount = diagnostics.query_plan?.subqueries.length ?? 1;
+  const reranker = diagnostics.reranker
+    ? `${diagnostics.reranker.provider}${diagnostics.reranker.enabled ? "" : " off"}`
+    : "not reported";
+  const context = diagnostics.context
+    ? `${diagnostics.context.selected_count} selected · ${diagnostics.context.token_count}/${diagnostics.context.token_budget} tokens`
+    : "context not reported";
+  const quality = diagnostics.quality_report
+    ? `precision ${diagnostics.quality_report.precision_proxy.toFixed(2)} · recall ${diagnostics.quality_report.recall_proxy.toFixed(2)}`
+    : null;
+  return (
+    <div className="pb-3 text-xs leading-5 text-muted-foreground">
+      Retrieval: {path} · {diagnostics.embedding_provider} · {diagnostics.embedding_model} ·{" "}
+      {diagnostics.candidate_count} candidates · {diagnostics.query_latency_ms}ms ·{" "}
+      {subqueryCount} subquer{subqueryCount === 1 ? "y" : "ies"} · reranker {reranker} · {context}
+      {quality ? ` · ${quality}` : ""}
+      {diagnostics.fallback_reason ? ` · ${diagnostics.fallback_reason}` : ""}
+    </div>
   );
 }
 
@@ -714,9 +806,32 @@ function SourceDetailPanel({ source }: { source: EvidenceSource | null }) {
               {source.text_preview ?? "No preview available."}
             </p>
           </details>
+          <SourceMetadataDetails metadata={source.metadata} />
         </div>
       )}
     </DomainPanel>
+  );
+}
+
+function SourceMetadataDetails({ metadata }: { metadata: Record<string, unknown> }) {
+  const entries = metadataEntries(metadata);
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <details className="mt-3 border-t border-border pt-3">
+      <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+        Show provenance and extraction details
+      </summary>
+      <dl className="mt-3 grid gap-2 text-xs text-muted-foreground">
+        {entries.map(([label, value]) => (
+          <div key={label} className="grid gap-1 sm:grid-cols-[150px_minmax(0,1fr)]">
+            <dt className="font-medium text-foreground">{label}</dt>
+            <dd className="min-w-0 break-words">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }
 
@@ -877,6 +992,42 @@ function SourceRow({
 
 function truncate(value: string, maxLength: number) {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength)}...`;
+}
+
+function metadataEntries(metadata: Record<string, unknown>) {
+  const preferred = [
+    "search_provider",
+    "search_query",
+    "search_result_rank",
+    "retrieved_at",
+    "risk_level",
+    "media_type",
+    "content_type",
+    "extraction_provider",
+    "extraction_model",
+    "pdf_text_extraction",
+    "extracted_text_length",
+    "warnings",
+  ];
+  return preferred
+    .filter((key) => metadata[key] !== undefined && metadata[key] !== null && metadata[key] !== "")
+    .map((key) => [formatLabel(key), formatMetadataValue(metadata[key])] as const);
+}
+
+function formatMetadataValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.join(", ") : "None";
+  }
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function formatLabel(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function stringsFromUnknown(value: unknown) {

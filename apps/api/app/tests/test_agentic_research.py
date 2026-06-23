@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.models import (
     AIRun,
     AIStep,
@@ -23,6 +24,9 @@ def _approved_research_sprint_with_evidence(
     client: TestClient,
     monkeypatch,
 ) -> tuple[str, str]:
+    monkeypatch.setenv("EXTERNAL_SEARCH_ENABLED", "true")
+    monkeypatch.setenv("EXTERNAL_SEARCH_PROVIDER", "deterministic")
+    get_settings.cache_clear()
     project_response = client.post(
         "/api/projects",
         json={
@@ -110,6 +114,19 @@ def test_agentic_research_runs_multi_step_rag_and_writes_reviewable_memo(
     assert body["version"]["structured_content"]["memory_update_preview"]["assumptions"]
     assert body["version"]["structured_content"]["memory_update_status"] == (
         "pending_human_approval"
+    )
+    retrieval_diagnostics = body["version"]["structured_content"]["retrieval_diagnostics"]
+    retrieval_context = body["version"]["structured_content"]["retrieval_context"]
+    assert retrieval_diagnostics
+    assert retrieval_context["selected_count"] >= 1
+    assert retrieval_context["token_count"] <= retrieval_context["token_budget"]
+    first_retrieval = retrieval_diagnostics[0]
+    assert first_retrieval["query_plan"]["subqueries"]
+    assert first_retrieval["reranker"]["provider"] == "deterministic"
+    assert any(item["context"]["selected_count"] >= 1 for item in retrieval_diagnostics)
+    assert any(
+        item["quality_report"]["citation_coverage_proxy"] == 1
+        for item in retrieval_diagnostics
     )
     assert body["version"]["langsmith_trace_id"]
     assert body["version"]["langsmith_trace_url"]

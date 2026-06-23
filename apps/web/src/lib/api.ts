@@ -345,6 +345,7 @@ export type EvidenceSource = {
   ingested_at: string | null;
   classification: string | null;
   credibility_score: string | null;
+  metadata: Record<string, unknown>;
   ingestion_status: EvidenceIngestionStatus;
   ingestion_error: string | null;
   created_at: string;
@@ -385,7 +386,69 @@ export type EvidenceRetrievalResult = {
   semantic_score: number;
   keyword_score: number;
   metadata: Record<string, unknown>;
+  embedding_provider: string | null;
+  embedding_model: string | null;
+  embedding_dimension: number | null;
+  embedding_version: string | null;
+  embedded_at: string | null;
+  rerank_score: number | null;
+  final_rank: number | null;
+  context_included: boolean;
+  selection_reason: string | null;
   created_at: string;
+};
+
+export type RetrievalQueryPlan = {
+  intent: string;
+  target_entities: string[];
+  needed_evidence_types: string[];
+  subqueries: string[];
+  decomposed: boolean;
+};
+
+export type RetrievalRerankerDiagnostics = {
+  enabled: boolean;
+  provider: string;
+  fallback_used: boolean;
+  fallback_reason: string | null;
+};
+
+export type RetrievalContextDiagnostics = {
+  token_budget: number;
+  token_count: number;
+  selected_count: number;
+  dropped_count: number;
+  deduped_count: number;
+  max_chunks_per_source: number;
+  min_context_score: number;
+};
+
+export type RetrievalQualityReport = {
+  recall_proxy: number;
+  precision_proxy: number;
+  citation_coverage_proxy: number;
+  unsupported_claim_count: number;
+  average_retrieval_latency_ms: number;
+  reranker_used: boolean;
+  context_token_count: number;
+};
+
+export type RetrievalDiagnostics = {
+  embedding_provider: string;
+  embedding_model: string;
+  embedding_dimension: number;
+  embedding_version: string;
+  index_name: string | null;
+  index_available: boolean;
+  candidate_count: number;
+  query_latency_ms: number;
+  used_sql_vector_search: boolean;
+  fallback_path_used: boolean;
+  fallback_reason: string | null;
+  query_plan: RetrievalQueryPlan | null;
+  reranker: RetrievalRerankerDiagnostics | null;
+  context: RetrievalContextDiagnostics | null;
+  quality_report: RetrievalQualityReport | null;
 };
 
 export type EvidenceRetrieveResult = {
@@ -393,7 +456,29 @@ export type EvidenceRetrieveResult = {
   ai_step_id: string;
   mode: RetrievalMode;
   query: string;
+  diagnostics: RetrievalDiagnostics;
   results: EvidenceRetrievalResult[];
+};
+
+export type ReembedEvidenceInput = {
+  dry_run?: boolean;
+  force?: boolean;
+  scope?: "project" | "workspace";
+};
+
+export type ReembedEvidenceResult = {
+  dry_run: boolean;
+  scope: "project" | "workspace";
+  embedding_provider: string;
+  embedding_model: string;
+  embedding_dimension: number;
+  embedding_version: string;
+  scanned_count: number;
+  eligible_count: number;
+  skipped_count: number;
+  reembedded_count: number;
+  failed_count: number;
+  failures: { chunk_id: string; source_id: string; error: string }[];
 };
 
 export type ArtifactType =
@@ -1031,6 +1116,12 @@ export type DiscoveredSource = {
   title: string | null;
   snippet: string | null;
   source_type: DiscoveredSourceType;
+  search_provider: string | null;
+  search_query: string | null;
+  search_result_rank: number | null;
+  retrieved_at: string | null;
+  risk_level: "low" | "medium" | "high";
+  provenance_metadata: Record<string, unknown>;
   relevance_score: string;
   reason_selected: string;
   associated_research_question: string | null;
@@ -1046,6 +1137,7 @@ export type SourceDiscoveryRun = {
   ai_step_id: string;
   generated_count: number;
   candidate_count: number;
+  search_diagnostics: Record<string, unknown>;
   sources: DiscoveredSource[];
 };
 
@@ -1501,11 +1593,23 @@ export type GuideRelatedEntity = {
   label: string;
 };
 
+export type GuideChatTurn = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 export type GuideChatResponse = {
   answer: string;
   recommended_action: GuideAction | null;
   action_cards: GuideAction[];
   related_entities: GuideRelatedEntity[];
+  cited_evidence_ids: string[];
+  assumption_ids: string[];
+  confidence_level: GuideConfidenceLevel;
+  unsupported_or_missing_evidence: string[];
+  used_llm: boolean;
+  retrieval_diagnostics: Record<string, unknown> | null;
+  ai_run_id: string | null;
 };
 
 export type ProjectNudgeSeverity = "info" | "warning" | "action_required";
@@ -1557,8 +1661,27 @@ export type AIStatus = {
   litellm_base_url: string;
   litellm_reachability: LiteLLMReachabilityStatus;
   provider_keys: AIProviderKeyStatus;
+  embedding_provider: "deterministic" | "litellm";
   embedding_model: string;
   embedding_dimension: number;
+  embedding_version: string;
+  embedding_timeout_seconds: number;
+  embedding_retry_attempts: number;
+  retrieval_vector_path: "auto" | "sql" | "python";
+  retrieval_python_fallback_enabled: boolean;
+  retrieval_reranking_enabled: boolean;
+  retrieval_reranker_provider: "deterministic" | "litellm";
+  retrieval_context_token_budget: number;
+  retrieval_max_chunks_per_source: number;
+  retrieval_min_context_score: number;
+  external_search_enabled: boolean;
+  external_search_provider: "deterministic" | "tavily";
+  external_search_max_results_per_query: number;
+  external_search_max_queries_per_sprint: number;
+  multimodal_extraction_provider: "deterministic" | "litellm";
+  multimodal_extraction_model: string;
+  multimodal_pdf_fallback_enabled: boolean;
+  multimodal_pdf_min_text_chars: number;
   structured_output_healthcheck: AIStatusStructuredOutputCheck | null;
 };
 
@@ -1815,10 +1938,14 @@ export function executeGuideAction(projectId: string, actionId: string) {
   });
 }
 
-export function askProjectGuide(projectId: string, message: string) {
+export function askProjectGuide(
+  projectId: string,
+  message: string,
+  recentTurns: GuideChatTurn[] = [],
+) {
   return apiFetch<GuideChatResponse>(`/api/projects/${projectId}/guide/chat`, {
     method: "POST",
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, recent_turns: recentTurns.slice(-6) }),
   });
 }
 
@@ -1889,6 +2016,13 @@ export function uploadEvidenceFile(projectId: string, file: File) {
 
 export function retrieveEvidence(projectId: string, input: RetrieveEvidenceInput) {
   return apiFetch<EvidenceRetrieveResult>(`/api/projects/${projectId}/evidence/retrieve`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function reembedEvidence(projectId: string, input: ReembedEvidenceInput) {
+  return apiFetch<ReembedEvidenceResult>(`/api/projects/${projectId}/evidence/reembed`, {
     method: "POST",
     body: JSON.stringify(input),
   });

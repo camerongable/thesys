@@ -202,11 +202,12 @@ Thesys is built to show the difference between a thin LLM wrapper and a durable 
 | AI concept | How it is demonstrated in this repo | Technologies and libraries |
 |---|---|---|
 | Agentic RAG | Autonomous research sprints plan work, call bounded tools, retrieve evidence, detect gaps, synthesize a memo, critique citations, and wait for human approval before updating project memory. | LangGraph, FastAPI, SQLAlchemy, Temporal, internal tool registry |
-| Retrieval-grounded generation | Opportunity briefs, competitor analysis, research memos, assumptions, and validation plans are generated from retrieved project evidence rather than prompt-only model knowledge. | PostgreSQL, pgvector, deterministic embedding service, retrieval service, Pydantic schemas |
-| Evidence ingestion and chunking | URLs, notes, discovered source snapshots, uploads, and PDFs are normalized into evidence sources and chunks with metadata and citation IDs. | httpx, pypdf, boto3, MinIO/S3-compatible storage, SQLAlchemy |
-| Hybrid retrieval | Project-scoped retrieval combines semantic similarity, keyword overlap, and metadata filters for source type, freshness, competitors, assumptions, and research context. | pgvector, PostgreSQL, custom retrieval service |
+| Retrieval-grounded generation | Opportunity briefs, competitor analysis, research memos, assumptions, and validation plans are generated from retrieved project evidence rather than prompt-only model knowledge. | PostgreSQL, pgvector, provider-backed embeddings, retrieval service, Pydantic schemas |
+| Evidence ingestion and chunking | URLs, notes, discovered source snapshots, uploads, and PDFs are normalized into evidence sources and chunks with metadata, citation IDs, and embedding provenance. | httpx, pypdf, boto3, MinIO/S3-compatible storage, SQLAlchemy |
+| Production embeddings | Evidence chunks record provider, model, dimension, version, timestamp, and errors; deterministic local mode stays available for tests, while LiteLLM-backed embeddings can be used in live mode and re-embedded after model changes. | LiteLLM-compatible embeddings API, pgvector, PostgreSQL, Alembic |
+| Multi-stage retrieval | Project-scoped retrieval plans broad strategic questions, runs semantic and keyword retrieval with metadata filters, applies freshness and credibility boosts, reranks candidates, compresses context, and returns quality diagnostics for Inspect and trace surfaces. | pgvector HNSW/IVFFlat indexes, PostgreSQL, deterministic and LiteLLM rerankers, custom retrieval service |
 | Structured LLM outputs | LLM responses are requested as JSON, validated against typed schemas, repaired when possible, and persisted as structured project objects. | Pydantic v2, LiteLLM-compatible chat completions, structured output helper |
-| Model gateway and local fallback | Model calls go through a single gateway that can route to local Ollama, OpenAI, or Gemini models, while deterministic stub mode keeps local demos and tests repeatable. | LiteLLM Proxy, httpx, Ollama, OpenAI-compatible APIs, Gemini |
+| Model gateway and local fallback | Model and embedding calls go through configurable provider paths, while deterministic stub/embedding modes keep local demos and tests repeatable. | LiteLLM Proxy, httpx, Ollama, OpenAI-compatible APIs, Gemini |
 | Persistent AI memory | The product stores thesis versions, evidence, artifacts, claims, assumptions, validation missions, decisions, AI runs, AI steps, tool calls, and approval requests instead of relying on chat history. | PostgreSQL, SQLAlchemy, Alembic |
 | Human-in-the-loop agents | AI workflows can propose research plans, memory updates, validation plans, and decisions, but important state changes require approval. | Tool registry, approval requests, audit events, role-based project permissions |
 | Prompt-injection boundaries | Retrieved content is treated as untrusted evidence, wrapped before synthesis, and prevented from acting as model instructions. | Shared prompt rules, cited synthesis prompts, secret redaction utilities |
@@ -346,9 +347,13 @@ Core responsibilities:
 - chunk documents
 - generate embeddings
 - store source metadata
-- retrieve relevant evidence
+- plan retrieval queries and subqueries
+- retrieve relevant evidence with semantic, keyword, metadata, freshness, and credibility signals
+- rerank candidates with deterministic local behavior or optional LiteLLM mode
+- assemble bounded context with dedupe, source diversity, score thresholds, and citation IDs
 - link claims to sources
 - surface open questions when evidence is weak
+- expose retrieval quality diagnostics in Inspect and workflow trace views
 
 ---
 
@@ -429,7 +434,8 @@ Interview 5–10 independent coaches and test willingness to pay for automated c
 - LangSmith tracing
 - Temporal durable workflows
 - pgvector-backed evidence storage
-- deterministic local embeddings today, provider-backed embeddings planned
+- deterministic local embeddings for tests/offline demos
+- provider-backed embeddings and pgvector SQL retrieval for live mode
 
 ### Infrastructure
 
@@ -487,7 +493,25 @@ GEMINI_API_KEY=
 ANTHROPIC_API_KEY=
 
 # Embeddings
+EMBEDDING_PROVIDER=deterministic
 EMBEDDING_MODEL=deterministic-hash-embedding-1536
+EMBEDDING_DIMENSION=1536
+EMBEDDING_VERSION=v1
+RETRIEVAL_VECTOR_PATH=auto
+RETRIEVAL_PYTHON_FALLBACK_ENABLED=true
+RETRIEVAL_RERANKING_ENABLED=true
+RETRIEVAL_RERANKER_PROVIDER=deterministic
+RETRIEVAL_CONTEXT_TOKEN_BUDGET=3500
+RETRIEVAL_MAX_CHUNKS_PER_SOURCE=2
+RETRIEVAL_MIN_CONTEXT_SCORE=0.15
+
+# External search and multimodal extraction
+EXTERNAL_SEARCH_ENABLED=false
+EXTERNAL_SEARCH_PROVIDER=deterministic
+TAVILY_API_KEY=
+MULTIMODAL_EXTRACTION_PROVIDER=deterministic
+MULTIMODAL_EXTRACTION_MODEL=dev-gpt-4o-mini
+MULTIMODAL_PDF_FALLBACK_ENABLED=false
 
 # Optional LangSmith observability
 LANGSMITH_TRACING=false
@@ -498,6 +522,45 @@ LANGSMITH_PUBLIC_URL_BASE=https://smith.langchain.com
 ```
 
 ---
+
+For live provider-backed embeddings through LiteLLM, set:
+
+```bash
+EMBEDDING_PROVIDER=litellm
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSION=1536
+EMBEDDING_VERSION=openai-text-embedding-3-small-v1
+OPENAI_API_KEY=<real provider key>
+```
+
+After changing embedding provider, model, dimension, or version, re-embed existing project evidence:
+
+```bash
+curl -X POST http://localhost:8000/api/projects/<project_id>/evidence/reembed \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run":true,"scope":"project"}'
+
+curl -X POST http://localhost:8000/api/projects/<project_id>/evidence/reembed \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run":false,"scope":"project"}'
+```
+
+Retrieval diagnostics are returned by evidence search and stored in workflow
+steps or artifact structured content for brief generation and agentic research.
+They include the query plan, subquery count, reranker status, context token
+budget and selected chunk count, dedupe and drop counts, citation coverage,
+precision and recall proxies, latency, and reranker usage. These details are
+intended for Inspect and trace views so the main project UI stays compact.
+
+External source discovery is also deterministic by default. To use live Tavily
+search, set `EXTERNAL_SEARCH_ENABLED=true`, `EXTERNAL_SEARCH_PROVIDER=tavily`,
+and `TAVILY_API_KEY`. Search results become review candidates with provenance;
+they are not ingested into evidence until a user approves them.
+
+Image uploads and low-text PDF fallback use the multimodal extraction provider.
+Local tests and demos use `MULTIMODAL_EXTRACTION_PROVIDER=deterministic`; live
+extraction uses LiteLLM by setting `MULTIMODAL_EXTRACTION_PROVIDER=litellm` and
+choosing a multimodal-capable `MULTIMODAL_EXTRACTION_MODEL`.
 
 ### 3. Start Infrastructure
 
@@ -675,11 +738,11 @@ Implemented or demonstrated:
 - validation planning
 - decision recommendation
 - guided UI around next best action
+- provider-backed embeddings, pgvector SQL retrieval, multi-stage retrieval,
+  reranking, context assembly, retrieval-quality diagnostics, and re-embedding
 
 Planned future work:
 
-- production embedding providers and SQL-level pgvector nearest-neighbor retrieval
-- reranking, query expansion, context compression, and retrieval-quality evals
 - LLM-grounded Ask Thesys with citations and tool-governed proposals
 - recurring market monitoring
 - team collaboration

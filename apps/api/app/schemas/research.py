@@ -175,6 +175,12 @@ class DiscoveredSourceRead(BaseModel):
     title: str | None
     snippet: str | None
     source_type: DiscoveredSourceType
+    search_provider: str | None = None
+    search_query: str | None = None
+    search_result_rank: int | None = None
+    retrieved_at: datetime | None = None
+    risk_level: Literal["low", "medium", "high"] = "medium"
+    provenance_metadata: dict[str, object] = Field(default_factory=dict)
     relevance_score: Decimal
     reason_selected: str
     associated_research_question: str | None
@@ -208,6 +214,7 @@ class SourceDiscoveryRunRead(BaseModel):
     ai_step_id: uuid.UUID
     generated_count: int
     candidate_count: int
+    search_diagnostics: dict[str, object] = Field(default_factory=dict)
     sources: list[DiscoveredSourceRead]
 
 

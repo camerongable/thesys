@@ -71,14 +71,31 @@ POST   /api/projects/{project_id}/evidence/url
 POST   /api/projects/{project_id}/evidence/note
 POST   /api/projects/{project_id}/evidence/file
 POST   /api/projects/{project_id}/evidence/retrieve
+POST   /api/projects/{project_id}/evidence/reembed
 GET    /api/projects/{project_id}/evidence/{source_id}
 POST   /api/projects/{project_id}/evidence/{source_id}/reprocess
 DELETE /api/projects/{project_id}/evidence/{source_id}
 ```
 
 Retrieval supports `semantic`, `keyword`, and `hybrid` modes and returns source
-IDs, chunk IDs, scores, source metadata, and trace IDs for the `ai_runs` /
-`ai_steps` records.
+IDs, chunk IDs, scores, source metadata, embedding provider/model/version
+metadata, retrieval diagnostics, and trace IDs for the `ai_runs` / `ai_steps`
+records. In Postgres, semantic and hybrid retrieval use SQL-level pgvector
+nearest-neighbor ranking by default. Local SQLite tests and offline demos keep a
+deterministic Python fallback path.
+
+`POST /api/projects/{project_id}/evidence/reembed` supports:
+
+```json
+{
+  "dry_run": true,
+  "force": false,
+  "scope": "project"
+}
+```
+
+Use it after changing `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`,
+`EMBEDDING_DIMENSION`, or `EMBEDDING_VERSION`.
 
 Sprint 5 exposes artifact listing and opportunity brief generation:
 

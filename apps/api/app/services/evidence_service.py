@@ -20,7 +20,13 @@ from app.core.auth import AuthContext
 from app.core.config import Settings
 from app.db.models import EvidenceChunk, EvidenceSource
 from app.schemas.evidence import EvidenceNoteCreate, EvidenceUrlCreate
-from app.services import ai_run_service, embedding_service, object_storage_service, project_service
+from app.services import (
+    ai_run_service,
+    embedding_service,
+    multimodal_extraction_service,
+    object_storage_service,
+    project_service,
+)
 
 TOKEN_RE = re.compile(r"\S+")
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
@@ -35,6 +41,30 @@ class ParsedSource:
     title: str | None
     text: str
     content_type: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class ReembedFailure:
+    chunk_id: uuid.UUID
+    source_id: uuid.UUID
+    error: str
+
+
+@dataclass(frozen=True)
+class ReembedResult:
+    dry_run: bool
+    scope: str
+    embedding_provider: str
+    embedding_model: str
+    embedding_dimension: int
+    embedding_version: str
+    scanned_count: int
+    eligible_count: int
+    skipped_count: int
+    reembedded_count: int
+    failed_count: int
+    failures: list[ReembedFailure]
 
 
 def list_sources(db: Session, auth: AuthContext, project_id: uuid.UUID) -> list[EvidenceSource]:
@@ -161,6 +191,7 @@ def add_discovered_url_source(
     existing = _find_ready_url_source(db, auth, project_id, url)
     if existing is not None:
         if metadata:
+            existing.source_metadata = _merge_metadata(existing.source_metadata or {}, metadata)
             _merge_source_chunk_metadata(db, existing, metadata)
             db.commit()
         return get_source(db, auth, project_id, existing.id)
@@ -294,7 +325,12 @@ def add_file_source(
     db.refresh(source)
 
     try:
-        parsed = _parse_file(filename=filename, content_type=content_type, body=body)
+        parsed = _parse_file(
+            settings=settings,
+            filename=filename,
+            content_type=content_type,
+            body=body,
+        )
     except Exception as exc:
         _mark_source_failed(db, source, str(exc))
         raise EvidenceIngestionError("File evidence ingestion failed.") from exc
@@ -307,6 +343,7 @@ def add_file_source(
         text=parsed.text,
         title=parsed.title or filename,
         content_type=parsed.content_type or content_type,
+        metadata=parsed.metadata,
     )
 
 
@@ -349,6 +386,72 @@ def delete_source(
     db.commit()
 
 
+def reembed_evidence(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    *,
+    dry_run: bool,
+    force: bool,
+    scope: str,
+) -> ReembedResult:
+    project_service.get_project(db, auth, project_id)
+    stmt = select(EvidenceChunk).where(EvidenceChunk.workspace_id == auth.workspace_id)
+    if scope == "project":
+        stmt = stmt.where(EvidenceChunk.project_id == project_id)
+    elif scope != "workspace":
+        raise ValueError(f"Unsupported re-embedding scope: {scope}")
+
+    chunks = list(db.scalars(stmt.order_by(EvidenceChunk.created_at.asc())))
+    eligible = [chunk for chunk in chunks if force or _chunk_needs_reembedding(chunk, settings)]
+    failures: list[ReembedFailure] = []
+    reembedded_count = 0
+
+    if not dry_run:
+        for chunk in eligible:
+            try:
+                embedding = embedding_service.embed_text_with_metadata(settings, chunk.text)
+                chunk.embedding = embedding.vector
+                chunk.embedding_provider = embedding.provider
+                chunk.embedding_model = embedding.model
+                chunk.embedding_dimension = embedding.dimension
+                chunk.embedding_version = embedding.version
+                chunk.embedded_at = embedding.embedded_at
+                chunk.embedding_error = None
+                chunk.chunk_metadata = _merge_metadata(
+                    chunk.chunk_metadata or {},
+                    embedding_service.embedding_metadata(settings),
+                )
+                reembedded_count += 1
+            except Exception as exc:
+                message = str(exc)
+                chunk.embedding_error = message
+                failures.append(
+                    ReembedFailure(
+                        chunk_id=chunk.id,
+                        source_id=chunk.source_id,
+                        error=message,
+                    )
+                )
+        db.commit()
+
+    return ReembedResult(
+        dry_run=dry_run,
+        scope=scope,
+        embedding_provider=settings.embedding_provider,
+        embedding_model=settings.embedding_model,
+        embedding_dimension=settings.embedding_dimension,
+        embedding_version=settings.embedding_version,
+        scanned_count=len(chunks),
+        eligible_count=len(eligible),
+        skipped_count=len(chunks) - len(eligible),
+        reembedded_count=reembedded_count,
+        failed_count=len(failures),
+        failures=failures,
+    )
+
+
 def serialize_source(source: EvidenceSource) -> dict[str, Any]:
     return {
         "id": source.id,
@@ -362,6 +465,7 @@ def serialize_source(source: EvidenceSource) -> dict[str, Any]:
         "ingested_at": source.ingested_at,
         "classification": source.classification,
         "credibility_score": source.credibility_score,
+        "metadata": source.source_metadata or {},
         "ingestion_status": source.ingestion_status,
         "ingestion_error": source.ingestion_error,
         "created_at": source.created_at,
@@ -369,6 +473,16 @@ def serialize_source(source: EvidenceSource) -> dict[str, Any]:
         "chunk_count": len(source.chunks),
         "text_preview": _preview(source.raw_text),
     }
+
+
+def _chunk_needs_reembedding(chunk: EvidenceChunk, settings: Settings) -> bool:
+    return (
+        chunk.embedding is None
+        or chunk.embedding_provider != settings.embedding_provider
+        or chunk.embedding_model != settings.embedding_model
+        or chunk.embedding_dimension != settings.embedding_dimension
+        or chunk.embedding_version != settings.embedding_version
+    )
 
 
 def _process_source_text(
@@ -389,7 +503,7 @@ def _process_source_text(
         prompt_version=EVIDENCE_INGESTION_PROMPT_VERSION,
         input_summary=(title or source.url or str(source.id))[:500],
         project_id=source.project_id,
-        model_provider="internal",
+        model_provider=settings.embedding_provider,
         model_name=settings.embedding_model,
     )
     step = ai_run_service.start_step(
@@ -419,19 +533,25 @@ def _process_source_text(
         source.summary = _summarize(normalized)
         source.classification = _classify(source.source_type, source.title, normalized)
         source.credibility_score = _credibility_score(source.source_type)
+        source.source_metadata = _merge_metadata(
+            source.source_metadata or {},
+            _merge_metadata({"content_type": content_type}, metadata),
+        )
         source.ingested_at = datetime.now(UTC)
         source.ingestion_status = "ready"
         source.ingestion_error = None
 
         content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
         for index, chunk_text in enumerate(chunks):
+            embedding = embedding_service.embed_text_with_metadata(settings, chunk_text)
             chunk_metadata = _merge_metadata(
                 {
                     "source_title": source.title,
                     "source_type": source.source_type,
                     "url": source.url,
                     "content_hash": content_hash,
-                    "embedding_model": settings.embedding_model,
+                    "source_metadata": source.source_metadata or {},
+                    **embedding_service.embedding_metadata(settings),
                 },
                 metadata,
             )
@@ -442,7 +562,13 @@ def _process_source_text(
                 chunk_index=index,
                 text=chunk_text,
                 token_count=len(_tokens(chunk_text)),
-                embedding=embedding_service.embed_text(settings, chunk_text),
+                embedding=embedding.vector,
+                embedding_provider=embedding.provider,
+                embedding_model=embedding.model,
+                embedding_dimension=embedding.dimension,
+                embedding_version=embedding.version,
+                embedded_at=embedding.embedded_at,
+                embedding_error=None,
                 chunk_metadata=chunk_metadata,
             )
             db.add(chunk)
@@ -459,6 +585,10 @@ def _process_source_text(
                 "chunk_count": len(source.chunks),
                 "classification": source.classification,
                 "summary": source.summary,
+                "embedding_provider": settings.embedding_provider,
+                "embedding_model": settings.embedding_model,
+                "embedding_dimension": settings.embedding_dimension,
+                "embedding_version": settings.embedding_version,
             },
             latency_ms=latency_ms,
             tokens=None,
@@ -470,7 +600,7 @@ def _process_source_text(
             output_summary=source.summary or "",
             total_tokens=None,
             total_cost=Decimal("0"),
-            model_provider="internal",
+            model_provider=settings.embedding_provider,
             model_name=settings.embedding_model,
         )
         return source
@@ -584,12 +714,70 @@ def _fetch_url(settings: Settings, url: str) -> ParsedSource:
     return ParsedSource(title=None, text=text, content_type=content_type or None)
 
 
-def _parse_file(*, filename: str, content_type: str, body: bytes) -> ParsedSource:
+def _parse_file(
+    *,
+    settings: Settings,
+    filename: str,
+    content_type: str,
+    body: bytes,
+) -> ParsedSource:
     lowered = filename.casefold()
+    if multimodal_extraction_service.is_image_content(filename, content_type):
+        extraction = multimodal_extraction_service.extract_file(
+            settings,
+            filename=filename,
+            content_type=content_type,
+            body=body,
+            media_type="image",
+        )
+        return ParsedSource(
+            title=extraction.title or filename,
+            text=extraction.text,
+            content_type=content_type,
+            metadata=extraction.metadata,
+        )
+
     if content_type == "application/pdf" or lowered.endswith(".pdf"):
         reader = PdfReader(BytesIO(body))
         text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
-        return ParsedSource(title=filename, text=text, content_type="application/pdf")
+        normalized = _normalize_text(text)
+        metadata: dict[str, Any] = {
+            "media_type": "pdf",
+            "content_type": "application/pdf",
+            "pdf_text_extraction": "pypdf",
+            "extracted_text_length": len(normalized),
+        }
+        if (
+            settings.multimodal_pdf_fallback_enabled
+            and len(normalized) < settings.multimodal_pdf_min_text_chars
+        ):
+            extraction = multimodal_extraction_service.extract_file(
+                settings,
+                filename=filename,
+                content_type="application/pdf",
+                body=body,
+                media_type="pdf",
+            )
+            metadata = _merge_metadata(
+                metadata,
+                {
+                    **extraction.metadata,
+                    "pdf_text_extraction": "multimodal_fallback",
+                    "pypdf_extracted_text_length": len(normalized),
+                },
+            )
+            return ParsedSource(
+                title=extraction.title or filename,
+                text=extraction.text,
+                content_type="application/pdf",
+                metadata=metadata,
+            )
+        return ParsedSource(
+            title=filename,
+            text=text,
+            content_type="application/pdf",
+            metadata=metadata,
+        )
 
     if (
         content_type.startswith("text/")
@@ -597,9 +785,20 @@ def _parse_file(*, filename: str, content_type: str, body: bytes) -> ParsedSourc
         or lowered.endswith(".md")
         or lowered.endswith(".markdown")
     ):
-        return ParsedSource(title=filename, text=_decode_bytes(body), content_type=content_type)
+        return ParsedSource(
+            title=filename,
+            text=_decode_bytes(body),
+            content_type=content_type,
+            metadata={
+                "media_type": "text",
+                "content_type": content_type,
+                "text_extraction": "direct_decode",
+            },
+        )
 
-    raise EvidenceIngestionError("Only PDF, text, and Markdown uploads are supported in Sprint 4.")
+    raise EvidenceIngestionError(
+        "Only PDF, text, Markdown, PNG, JPG, JPEG, and WebP uploads are supported."
+    )
 
 
 def _parse_html(html: str, *, content_type: str) -> ParsedSource:

@@ -30,7 +30,8 @@ Sprint 4 adds:
 `evidence_sources` stores URL, note, transcript, manual, and file-level source
 metadata, parsed text, summary, classification, ingestion status, and object
 storage keys for uploads. `evidence_chunks` stores project-scoped parsed text
-chunks, token counts, metadata, and 1536-dimensional pgvector embeddings.
+chunks, token counts, metadata, pgvector embeddings, and embedding provenance:
+provider, model, dimension, version, `embedded_at`, and any embedding error.
 
 Every tenant-scoped table should include `workspace_id` and backend queries must
 enforce workspace membership.

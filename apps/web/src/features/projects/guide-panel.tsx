@@ -22,6 +22,7 @@ import {
   getProjectNudges,
   GuideAction,
   GuideChatResponse,
+  GuideChatTurn,
   ProjectNudge,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -37,6 +38,7 @@ export function GuidePanel({
 }) {
   const [message, setMessage] = useState("");
   const [chatResponse, setChatResponse] = useState<GuideChatResponse | null>(null);
+  const [recentTurns, setRecentTurns] = useState<GuideChatTurn[]>([]);
   const queryClient = useQueryClient();
   const guideQuery = useQuery({
     queryKey: ["projects", projectId, "guide", "recommendation"],
@@ -57,8 +59,15 @@ export function GuidePanel({
     },
   });
   const chatMutation = useMutation({
-    mutationFn: (question: string) => askProjectGuide(projectId, question),
-    onSuccess: (response) => setChatResponse(response),
+    mutationFn: (question: string) => askProjectGuide(projectId, question, recentTurns),
+    onSuccess: (response, question) => {
+      setChatResponse(response);
+      const newTurns: GuideChatTurn[] = [
+        { role: "user", content: question },
+        { role: "assistant", content: response.answer },
+      ];
+      setRecentTurns((turns) => [...turns, ...newTurns].slice(-6));
+    },
   });
 
   function submitMessage(event: FormEvent<HTMLFormElement>) {
@@ -246,6 +255,7 @@ export function GuidePanel({
                 <p className="text-xs font-medium text-muted-foreground">Guide answer</p>
               </div>
               <p className="mt-2 text-sm leading-6">{chatResponse.answer}</p>
+              <GuideAnswerMetadata response={chatResponse} />
               {chatResponse.recommended_action ? (
                 <div className="mt-3 rounded-md border border-primary/30 bg-primary/10 p-3">
                   <p className="text-xs font-medium text-primary">Recommended action</p>
@@ -288,6 +298,35 @@ export function GuidePanel({
         </div>
       ) : null}
     </aside>
+  );
+}
+
+function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
+  const hasGrounding =
+    response.used_llm ||
+    response.cited_evidence_ids.length > 0 ||
+    response.unsupported_or_missing_evidence.length > 0 ||
+    response.ai_run_id;
+  if (!hasGrounding) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 rounded-md border border-border bg-muted/40 p-2">
+      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+        <span>{response.used_llm ? "Grounded LLM" : "Deterministic guide"}</span>
+        <span>Confidence: {formatGuideLabel(response.confidence_level)}</span>
+        <span>{response.cited_evidence_ids.length} cited source(s)</span>
+        {response.ai_run_id ? <span>Trace: {response.ai_run_id.slice(0, 8)}</span> : null}
+      </div>
+      {response.unsupported_or_missing_evidence.length > 0 ? (
+        <ul className="mt-2 space-y-1 text-xs leading-5 text-muted-foreground">
+          {response.unsupported_or_missing_evidence.slice(0, 2).map((item) => (
+            <li key={item}>Missing: {item}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
@@ -375,6 +414,10 @@ function nudgeToneClass(severity: ProjectNudge["severity"]) {
     return "border-warning-border bg-background";
   }
   return "border-border bg-background";
+}
+
+function formatGuideLabel(value: string) {
+  return value.replaceAll("_", " ");
 }
 
 function GuidePanelSkeleton() {
