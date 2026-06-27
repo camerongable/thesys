@@ -53,6 +53,7 @@ from app.schemas.research import (
 )
 from app.services import (
     ai_run_service,
+    context_service,
     governance_service,
     langsmith_observability_service,
     project_service,
@@ -97,6 +98,7 @@ class AgenticResearchState(TypedDict, total=False):
     follow_up_results: list[EvidenceRetrievalResultRead]
     memo: AgenticResearchMemoDraft
     critic: dict[str, Any]
+    context_pack: dict[str, Any]
     artifact: Artifact
     version: ArtifactVersion
     claims: list[Claim]
@@ -306,10 +308,11 @@ def run_agentic_research(
         }
 
     def synthesizer(state: AgenticResearchState) -> AgenticResearchState:
-        memo, completion = _generate_memo(
+        memo, completion, memo_context_pack = _generate_memo(
             db,
             settings,
             run,
+            project_id,
             state["project_context"],
             state["subquestions"],
             state["selected_evidence"],
@@ -317,7 +320,7 @@ def run_agentic_research(
             trace,
         )
         completion_holder["completion"] = completion
-        return {"memo": memo}
+        return {"memo": memo, "context_pack": memo_context_pack}
 
     def critic(state: AgenticResearchState) -> AgenticResearchState:
         audited, critique = _step(
@@ -352,6 +355,7 @@ def run_agentic_research(
             state.get("context_diagnostics", {}),
             state["gaps"],
             state["critic"],
+            state["context_pack"],
             trace,
         )
         return write_result
@@ -1469,13 +1473,26 @@ def _generate_memo(
     db: Session,
     settings: Settings,
     run: AIRun,
+    project_id: uuid.UUID,
     project_context: dict[str, Any],
     subquestions: list[str],
     selected_evidence: list[EvidenceRetrievalResultRead],
     gaps: list[str],
     trace: langsmith_observability_service.TraceContext,
-) -> tuple[AgenticResearchMemoDraft, LLMCompletion]:
-    messages = _memo_messages(project_context, subquestions, selected_evidence, gaps)
+) -> tuple[AgenticResearchMemoDraft, LLMCompletion, dict[str, Any]]:
+    context_pack = context_service.build_research_context_pack(
+        settings,
+        project_id=project_id,
+        objective=str((project_context.get("research_plan") or {}).get("objective") or ""),
+        project_context=project_context,
+        subquestions=subquestions,
+        selected_evidence=selected_evidence,
+        gaps=gaps,
+        prompt_version=AGENTIC_RESEARCH_PROMPT_VERSION,
+        expected_schema=AgenticResearchMemoDraft.__name__,
+    )
+    context_pack_payload = context_pack.model_dump(mode="json")
+    messages = _memo_messages(context_pack)
     step = ai_run_service.start_step(
         db,
         run,
@@ -1485,6 +1502,7 @@ def _generate_memo(
             "subquestions": subquestions,
             "evidence_count": len(selected_evidence),
             "gap_count": len(gaps),
+            "context_pack": context_pack.prompt_metadata(),
             "messages": [message.model_dump() for message in messages],
         },
     )
@@ -1553,22 +1571,28 @@ def _generate_memo(
         output_json=completed_step.output_json,
         run_type="llm" if completion.model_provider != "stub" else "chain",
     )
-    return memo, completion
+    return memo, completion, context_pack_payload
 
 
 def _memo_messages(
-    project_context: dict[str, Any],
-    subquestions: list[str],
-    selected_evidence: list[EvidenceRetrievalResultRead],
-    gaps: list[str],
+    context_pack,
 ) -> list[ChatMessage]:
+    trusted_items = [
+        item.model_dump(mode="json")
+        for item in context_pack.items
+        if not item.untrusted
+    ]
+    untrusted_items = [
+        item.model_dump(mode="json")
+        for item in context_pack.items
+        if item.untrusted
+    ]
     payload = {
-        "project_context": project_context,
-        "subquestions": subquestions,
-        "detected_evidence_gaps": gaps,
+        "context_pack_metadata": context_pack.prompt_metadata(),
+        "trusted_context_items": trusted_items,
         "required_behavior": [
             "Answer using only project state and selected evidence.",
-            "Cite factual claims with source_id and chunk_id from evidence_bundles.",
+            "Cite factual claims with source_id and chunk_id from context item provenance.",
             "Mark unsupported factual claims as unsupported_claims.",
             "Be opinionated, skeptical, and specific about what to validate next.",
             "The executive verdict must be a strategic recommendation, not a workflow instruction.",
@@ -1578,12 +1602,9 @@ def _memo_messages(
             "concrete do-not-build-yet warning and next test.",
         ],
     }
-    evidence_payload = {
-        "evidence_bundles": _evidence_bundles(selected_evidence),
-    }
     payload_json = json.dumps(payload, ensure_ascii=True, default=str, separators=(",", ":"))
     evidence_json = json.dumps(
-        evidence_payload,
+        {"context_items": untrusted_items},
         ensure_ascii=True,
         default=str,
         separators=(",", ":"),
@@ -1657,6 +1678,7 @@ def _write_research_memo_step(
     context_diagnostics: dict[str, Any],
     gaps: list[str],
     critic: dict[str, Any],
+    context_pack: dict[str, Any],
     trace: langsmith_observability_service.TraceContext,
 ) -> AgenticResearchState:
     step = ai_run_service.start_step(
@@ -1689,6 +1711,7 @@ def _write_research_memo_step(
                 "tool_calls": tool_calls,
                 "retrieval_diagnostics": retrieval_diagnostics,
                 "retrieval_context": context_diagnostics,
+                "context_pack": context_pack,
                 "selected_evidence": [
                     result.model_dump(mode="json") for result in selected_evidence
                 ],

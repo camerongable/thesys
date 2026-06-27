@@ -232,6 +232,11 @@ def test_guide_chat_attaches_grounded_retrieval_metadata_and_trace(
     assert body["cited_evidence_ids"] == [source_response.json()["id"]]
     assert body["confidence_level"] in {"low", "medium", "high"}
     assert body["retrieval_diagnostics"]["quality_report"]["citation_coverage_proxy"] == 1
+    assert body["context_pack"]["workflow_type"] == "guide_chat"
+    assert body["context_pack"]["prompt"]["context_pack_version"] == "context-pack:v1"
+    assert body["context_pack"]["policy"]["token_budget"] > 0
+    assert body["context_pack"]["available_citation_ids"]
+    assert any(item["type"] == "evidence" for item in body["context_pack"]["items"])
 
     run = db_session.scalar(select(AIRun).where(AIRun.id == uuid.UUID(body["ai_run_id"])))
     assert run is not None
@@ -349,7 +354,8 @@ def test_guide_chat_live_mode_uses_structured_grounded_answer(
 
     def fake_generate_structured_output(settings, output_schema, messages, **kwargs):
         prompt_text = "\n".join(message.content for message in messages)
-        assert "Recent bounded conversation JSON" in prompt_text
+        assert "Context pack metadata JSON" in prompt_text
+        assert "<untrusted_retrieved_content>" in prompt_text
         assert "Earlier answer about coach check-ins." in prompt_text
         parsed = output_schema(
             answer="The strongest supported point is weekly check-in triage.",
@@ -397,6 +403,8 @@ def test_guide_chat_live_mode_uses_structured_grounded_answer(
     assert body["recommended_action"]["id"] == "show_blocker_evidence"
     assert all(action["id"] != "not_a_real_action" for action in body["action_cards"])
     assert body["retrieval_diagnostics"]["query_plan"]["subqueries"]
+    assert body["context_pack"]["workflow_type"] == "guide_chat"
+    assert any(item["type"] == "conversation_turn" for item in body["context_pack"]["items"])
 
 
 def _guide_context(client: TestClient, project_id: str) -> dict:

@@ -28,6 +28,7 @@ from app.schemas.overview import NextBestActionRead, ProjectOverviewRead
 from app.schemas.validation import DecisionCoachActionRead
 from app.services import (
     ai_run_service,
+    context_service,
     project_overview_service,
     thesis_service,
     tool_service,
@@ -61,6 +62,7 @@ class _GuideEvidenceSearch:
     output: dict
     cited_evidence_ids: list[str]
     retrieval_diagnostics: dict | None
+    context_pack: dict | None = None
 
 
 _STAGE_GUIDE_COPY: dict[str, _StageGuideCopy] = {
@@ -541,9 +543,20 @@ def _attach_grounding_metadata(
     used_llm: bool,
 ) -> GuideChatResponseRead:
     search = _search_guide_evidence(db, auth, settings, project_id, run, message)
+    context_pack = context_service.build_guide_context_pack(
+        settings,
+        project_id=project_id,
+        message=message,
+        guide_context=context,
+        evidence_output=search.output,
+        recent_turns=[],
+        prompt_version=GUIDE_CHAT_PROMPT_VERSION,
+        expected_schema=_GroundedGuideAnswerDraft.__name__,
+    )
     response.used_llm = used_llm
     response.cited_evidence_ids = search.cited_evidence_ids
     response.retrieval_diagnostics = search.retrieval_diagnostics
+    response.context_pack = context_pack.model_dump(mode="json")
     response.confidence_level = _grounded_confidence(context, bool(search.cited_evidence_ids))
     response.related_entities = _related_entities_with_evidence(context, search.cited_evidence_ids)
     if not search.cited_evidence_ids and not response.unsupported_or_missing_evidence:
@@ -564,6 +577,16 @@ def _grounded_chat_response(
     recent_turns: list[dict[str, str]],
 ) -> tuple[GuideChatResponseRead, int | None, Decimal | None, str, str]:
     search = _search_guide_evidence(db, auth, settings, project_id, run, message)
+    context_pack = context_service.build_guide_context_pack(
+        settings,
+        project_id=project_id,
+        message=message,
+        guide_context=context,
+        evidence_output=search.output,
+        recent_turns=recent_turns,
+        prompt_version=GUIDE_CHAT_PROMPT_VERSION,
+        expected_schema=_GroundedGuideAnswerDraft.__name__,
+    )
     generation_step = ai_run_service.start_step(
         db,
         run,
@@ -574,6 +597,7 @@ def _grounded_chat_response(
             "retrieved_source_ids": search.cited_evidence_ids,
             "available_action_ids": [action.id for action in context.available_actions],
             "recent_turn_count": len(recent_turns),
+            "context_pack": context_pack.prompt_metadata(),
         },
     )
     started = perf_counter()
@@ -581,12 +605,13 @@ def _grounded_chat_response(
         result = generate_structured_output(
             settings,
             _GroundedGuideAnswerDraft,
-            _grounded_guide_messages(message, context, search, recent_turns),
+            _grounded_guide_messages(message, context_pack),
             temperature=0.1,
             max_tokens=900,
         )
         draft = _GroundedGuideAnswerDraft.model_validate(result.parsed)
         response = _response_from_grounded_draft(context, draft, search, run.id)
+        response.context_pack = context_pack.model_dump(mode="json")
         completion = result.completion
         ai_run_service.complete_step(
             db,
@@ -620,6 +645,7 @@ def _grounded_chat_response(
             *fallback.unsupported_or_missing_evidence,
             "LLM guide output could not be safely used, so the deterministic guide answered.",
         ][:4]
+        fallback.context_pack = context_pack.model_dump(mode="json")
         ai_run_service.complete_step(
             db,
             generation_step,
@@ -698,11 +724,18 @@ def _search_guide_evidence(
 
 def _grounded_guide_messages(
     message: str,
-    context: GuideContextRead,
-    search: _GuideEvidenceSearch,
-    recent_turns: list[dict[str, str]],
+    context_pack,
 ) -> list[ChatMessage]:
-    evidence_context = _evidence_context_for_prompt(search.output)
+    trusted_items = [
+        item.model_dump(mode="json")
+        for item in context_pack.items
+        if not item.untrusted
+    ]
+    untrusted_items = [
+        item.model_dump(mode="json")
+        for item in context_pack.items
+        if item.untrusted
+    ]
     return [
         ChatMessage(
             role="system",
@@ -721,14 +754,13 @@ def _grounded_guide_messages(
             content=(
                 "User question:\n"
                 f"{message}\n\n"
-                "Guide context JSON:\n"
-                f"{context.model_dump_json()}\n\n"
-                "Recent bounded conversation JSON:\n"
-                f"{json.dumps(recent_turns)}\n\n"
-                "Available action IDs:\n"
-                f"{json.dumps([action.id for action in context.available_actions])}\n\n"
-                "Retrieved evidence JSON:\n"
-                f"{json.dumps(evidence_context, default=str)}"
+                "Context pack metadata JSON:\n"
+                f"{json.dumps(context_pack.prompt_metadata(), default=str)}\n\n"
+                "Trusted context JSON:\n"
+                f"{json.dumps(trusted_items, default=str)}\n\n"
+                "<untrusted_retrieved_content>\n"
+                f"{json.dumps(untrusted_items, default=str)}\n"
+                "</untrusted_retrieved_content>"
             ),
         ),
     ]

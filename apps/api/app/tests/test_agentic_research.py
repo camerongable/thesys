@@ -117,9 +117,16 @@ def test_agentic_research_runs_multi_step_rag_and_writes_reviewable_memo(
     )
     retrieval_diagnostics = body["version"]["structured_content"]["retrieval_diagnostics"]
     retrieval_context = body["version"]["structured_content"]["retrieval_context"]
+    context_pack = body["version"]["structured_content"]["context_pack"]
     assert retrieval_diagnostics
     assert retrieval_context["selected_count"] >= 1
     assert retrieval_context["token_count"] <= retrieval_context["token_budget"]
+    assert context_pack["workflow_type"] == "agentic_research"
+    assert context_pack["prompt"]["expected_schema"] == "AgenticResearchMemoDraft"
+    assert context_pack["policy"]["token_budget"] > 0
+    assert context_pack["available_citation_ids"]
+    assert any(item["type"] == "evidence" for item in context_pack["items"])
+    assert all("reason" in item for item in context_pack["dropped_items"])
     first_retrieval = retrieval_diagnostics[0]
     assert first_retrieval["query_plan"]["subqueries"]
     assert first_retrieval["reranker"]["provider"] == "deterministic"

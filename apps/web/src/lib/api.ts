@@ -1609,6 +1609,7 @@ export type GuideChatResponse = {
   unsupported_or_missing_evidence: string[];
   used_llm: boolean;
   retrieval_diagnostics: Record<string, unknown> | null;
+  context_pack: Record<string, unknown> | null;
   ai_run_id: string | null;
 };
 

@@ -302,10 +302,12 @@ export function GuidePanel({
 }
 
 function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
+  const contextSummary = contextPackSummary(response.context_pack);
   const hasGrounding =
     response.used_llm ||
     response.cited_evidence_ids.length > 0 ||
     response.unsupported_or_missing_evidence.length > 0 ||
+    contextSummary !== null ||
     response.ai_run_id;
   if (!hasGrounding) {
     return null;
@@ -326,8 +328,43 @@ function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
           ))}
         </ul>
       ) : null}
+      {contextSummary ? (
+        <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none">Context pack</summary>
+          <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+            <dt>Items</dt>
+            <dd className="text-right text-foreground">{contextSummary.itemCount}</dd>
+            <dt>Dropped</dt>
+            <dd className="text-right text-foreground">{contextSummary.droppedCount}</dd>
+            <dt>Tokens</dt>
+            <dd className="text-right text-foreground">
+              {contextSummary.tokenCount}/{contextSummary.tokenBudget}
+            </dd>
+          </dl>
+        </details>
+      ) : null}
     </div>
   );
+}
+
+function contextPackSummary(contextPack: Record<string, unknown> | null) {
+  if (!contextPack) {
+    return null;
+  }
+  const items = Array.isArray(contextPack.items) ? contextPack.items.length : 0;
+  const dropped = Array.isArray(contextPack.dropped_items)
+    ? contextPack.dropped_items.length
+    : 0;
+  const policy =
+    contextPack.policy && typeof contextPack.policy === "object"
+      ? (contextPack.policy as Record<string, unknown>)
+      : {};
+  return {
+    itemCount: items,
+    droppedCount: dropped,
+    tokenCount: Number(contextPack.token_count ?? 0),
+    tokenBudget: Number(policy.token_budget ?? 0),
+  };
 }
 
 function GuideNudgeCard({
