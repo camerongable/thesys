@@ -68,6 +68,24 @@ class Settings(BaseSettings):
         default=15.0,
         validation_alias="URL_FETCH_TIMEOUT_SECONDS",
     )
+    url_fetch_max_bytes: int = Field(
+        default=2_000_000,
+        ge=10_000,
+        le=20_000_000,
+        validation_alias="URL_FETCH_MAX_BYTES",
+    )
+    url_fetch_max_redirects: int = Field(
+        default=5,
+        ge=0,
+        le=10,
+        validation_alias="URL_FETCH_MAX_REDIRECTS",
+    )
+    max_extracted_text_chars: int = Field(
+        default=200_000,
+        ge=1_000,
+        le=2_000_000,
+        validation_alias="MAX_EXTRACTED_TEXT_CHARS",
+    )
     embedding_model: str = Field(
         default="deterministic-hash-embedding-1536",
         validation_alias="EMBEDDING_MODEL",

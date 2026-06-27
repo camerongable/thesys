@@ -18,11 +18,13 @@ from sqlalchemy.orm import Session, selectinload
 from app.ai.prompts import EVIDENCE_INGESTION_PROMPT_VERSION
 from app.core.auth import AuthContext
 from app.core.config import Settings
+from app.core.security import SecurityValidationError, validate_upload, validate_url_fetch_target
 from app.db.models import EvidenceChunk, EvidenceSource
 from app.schemas.evidence import EvidenceNoteCreate, EvidenceUrlCreate
 from app.services import (
     ai_run_service,
     embedding_service,
+    governance_service,
     multimodal_extraction_service,
     object_storage_service,
     project_service,
@@ -33,6 +35,10 @@ SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
 
 class EvidenceIngestionError(RuntimeError):
+    pass
+
+
+class EvidenceSecurityError(EvidenceIngestionError):
     pass
 
 
@@ -160,6 +166,19 @@ def add_url_source(
 
     try:
         parsed = _fetch_url(settings, str(payload.url))
+    except EvidenceSecurityError as exc:
+        _mark_source_failed(db, source, str(exc))
+        _record_ingestion_security_event(
+            db,
+            auth,
+            project_id=project_id,
+            source_id=source.id,
+            event_type="evidence_url_fetch_blocked",
+            summary="Blocked unsafe URL evidence ingestion.",
+            reason=str(exc),
+            metadata={"url": str(payload.url)},
+        )
+        raise EvidenceIngestionError("URL evidence ingestion failed.") from exc
     except Exception as exc:
         _mark_source_failed(db, source, str(exc))
         raise EvidenceIngestionError("URL evidence ingestion failed.") from exc
@@ -212,6 +231,19 @@ def add_discovered_url_source(
 
     try:
         parsed = _fetch_url(settings, url)
+    except EvidenceSecurityError as exc:
+        _mark_source_failed(db, source, str(exc))
+        _record_ingestion_security_event(
+            db,
+            auth,
+            project_id=project_id,
+            source_id=source.id,
+            event_type="discovered_source_fetch_blocked",
+            summary="Blocked unsafe discovered-source ingestion.",
+            reason=str(exc),
+            metadata={"url": url, **(metadata or {})},
+        )
+        raise EvidenceIngestionError("URL evidence ingestion failed.") from exc
     except Exception as exc:
         if fallback_text and _normalize_text(fallback_text):
             fallback_metadata = _merge_metadata(
@@ -291,15 +323,37 @@ def add_file_source(
 ) -> EvidenceSource:
     project_service.get_project(db, auth, project_id)
     body = upload.file.read()
-    max_bytes = settings.max_upload_mb * 1024 * 1024
-    if len(body) > max_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File exceeds {settings.max_upload_mb} MB upload limit.",
+    try:
+        upload_validation = validate_upload(
+            filename=upload.filename,
+            content_type=upload.content_type,
+            body=body,
+            settings=settings,
         )
+    except SecurityValidationError as exc:
+        _record_ingestion_security_event(
+            db,
+            auth,
+            project_id=project_id,
+            source_id=None,
+            event_type="evidence_upload_rejected",
+            summary="Rejected unsafe evidence upload.",
+            reason=exc.reason,
+            metadata={
+                "filename": upload.filename,
+                "content_type": upload.content_type,
+                "size_bytes": len(body),
+            },
+        )
+        if "upload limit" in exc.reason:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=exc.reason,
+            ) from exc
+        raise EvidenceIngestionError("File evidence ingestion failed.") from exc
 
-    filename = upload.filename or "uploaded-evidence"
-    content_type = upload.content_type or "application/octet-stream"
+    filename = upload_validation.filename
+    content_type = upload_validation.content_type
     storage_key = (
         f"workspaces/{auth.workspace_id}/projects/{project_id}/evidence/"
         f"{uuid.uuid4()}-{filename}"
@@ -522,6 +576,10 @@ def _process_source_text(
         normalized = _normalize_text(text)
         if not normalized:
             raise EvidenceIngestionError("Evidence source did not contain extractable text.")
+        if len(normalized) > settings.max_extracted_text_chars:
+            raise EvidenceIngestionError(
+                f"Extracted text exceeds {settings.max_extracted_text_chars} character limit."
+            )
 
         chunks = _chunk_text(normalized)
         if not chunks:
@@ -691,14 +749,30 @@ def _merge_metadata(
 
 
 def _fetch_url(settings: Settings, url: str) -> ParsedSource:
+    _validate_fetch_target(url)
+
     try:
         with httpx.Client(
             timeout=settings.url_fetch_timeout_seconds,
-            follow_redirects=True,
             headers={"User-Agent": "ThesysBot/0.1 (+local-dev)"},
         ) as client:
-            response = client.get(url)
-            response.raise_for_status()
+            current_url = url
+            response: httpx.Response | None = None
+            for redirect_count in range(settings.url_fetch_max_redirects + 1):
+                _validate_fetch_target(current_url)
+                response = client.get(current_url, follow_redirects=False)
+                if response.is_redirect:
+                    if redirect_count >= settings.url_fetch_max_redirects:
+                        raise EvidenceSecurityError("URL exceeded redirect limit.")
+                    redirect_url = response.headers.get("location")
+                    if not redirect_url:
+                        raise EvidenceSecurityError("URL redirect did not include a location.")
+                    current_url = str(response.url.join(redirect_url))
+                    continue
+                response.raise_for_status()
+                break
+            if response is None:
+                raise EvidenceIngestionError("URL did not return a response.")
     except httpx.HTTPStatusError as exc:
         raise EvidenceIngestionError(
             f"URL returned HTTP {exc.response.status_code}."
@@ -707,6 +781,16 @@ def _fetch_url(settings: Settings, url: str) -> ParsedSource:
         raise EvidenceIngestionError(f"Could not fetch URL: {exc}") from exc
 
     content_type = response.headers.get("content-type", "").split(";")[0].strip().casefold()
+    content_length = response.headers.get("content-length")
+    if content_length:
+        try:
+            declared_length = int(content_length)
+        except ValueError:
+            declared_length = 0
+        if declared_length > settings.url_fetch_max_bytes:
+            raise EvidenceSecurityError("URL response exceeded maximum allowed size.")
+    if len(response.content) > settings.url_fetch_max_bytes:
+        raise EvidenceSecurityError("URL response exceeded maximum allowed size.")
     if "html" in content_type:
         return _parse_html(response.text, content_type=content_type)
 
@@ -738,7 +822,10 @@ def _parse_file(
         )
 
     if content_type == "application/pdf" or lowered.endswith(".pdf"):
-        reader = PdfReader(BytesIO(body))
+        try:
+            reader = PdfReader(BytesIO(body))
+        except Exception as exc:
+            raise EvidenceIngestionError("PDF could not be parsed safely.") from exc
         text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
         normalized = _normalize_text(text)
         metadata: dict[str, Any] = {
@@ -880,6 +967,39 @@ def _preview(text: str | None) -> str | None:
 
 def _truncate(value: str, max_length: int) -> str:
     return value[:max_length]
+
+
+def _validate_fetch_target(url: str) -> None:
+    try:
+        validate_url_fetch_target(url)
+    except SecurityValidationError as exc:
+        raise EvidenceSecurityError(exc.reason) from exc
+
+
+def _record_ingestion_security_event(
+    db: Session,
+    auth: AuthContext,
+    *,
+    project_id: uuid.UUID,
+    source_id: uuid.UUID | None,
+    event_type: str,
+    summary: str,
+    reason: str,
+    metadata: dict[str, Any],
+) -> None:
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type=event_type,
+        actor_type="user",
+        project_id=project_id,
+        entity_type="evidence_source",
+        entity_id=source_id,
+        risk_level="medium",
+        summary=summary,
+        metadata={"reason": reason, **metadata},
+    )
+    db.commit()
 
 
 class _ReadableHtmlParser(HTMLParser):
