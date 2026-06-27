@@ -651,6 +651,11 @@ def _process_source_text(
                 exclude_source_id=source.id,
             )
             if duplicate is not None:
+                duplicate.source_metadata = _merge_metadata(
+                    duplicate.source_metadata or {},
+                    processed_metadata,
+                )
+                _merge_source_chunk_metadata(db, duplicate, processed_metadata)
                 db.delete(source)
                 db.commit()
                 existing = get_source(db, auth, source.project_id, duplicate.id)
