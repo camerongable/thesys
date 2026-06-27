@@ -26,10 +26,13 @@ from app.db.models import (
     ExperimentResult,
     ResearchSprint,
     Risk,
+    ToolInvocation,
 )
 from app.schemas.evals import (
     MvpEvalCheckRead,
     MvpEvalRead,
+    GuideEvalMetricRead,
+    GuideEvalRead,
     ResearchEvalCaseRead,
     V1ResearchEvalMetricRead,
     V1ResearchEvalRead,
@@ -191,6 +194,95 @@ def run_v1_research_eval(
     unsupported = memo.get("unsupported_claims") if isinstance(memo, dict) else []
     validation_actions = (
         memo.get("recommended_validation_actions") if isinstance(memo, dict) else []
+    )
+
+
+def run_guide_eval(db: Session, auth: AuthContext, project_id: uuid.UUID) -> GuideEvalRead:
+    project_service.get_project(db, auth, project_id)
+    guide_runs = int(
+        db.scalar(
+            select(func.count(AIRun.id)).where(
+                AIRun.workspace_id == auth.workspace_id,
+                AIRun.project_id == project_id,
+                AIRun.workflow_type == "guide_chat",
+            )
+        )
+        or 0
+    )
+    retrieval_steps = int(
+        db.scalar(
+            select(func.count(AIStep.id))
+            .join(AIRun, AIRun.id == AIStep.ai_run_id)
+            .where(
+                AIRun.workspace_id == auth.workspace_id,
+                AIRun.project_id == project_id,
+                AIRun.workflow_type == "guide_chat",
+                AIStep.step_name == "guide_retrieval_context",
+            )
+        )
+        or 0
+    )
+    proposal_invocations = int(
+        db.scalar(
+            select(func.count(ToolInvocation.id)).where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.access_mode == "proposal",
+                ToolInvocation.requested_by == "agent",
+            )
+        )
+        or 0
+    )
+    write_invocations = int(
+        db.scalar(
+            select(func.count(ToolInvocation.id)).where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.access_mode == "write",
+                ToolInvocation.requested_by == "agent",
+            )
+        )
+        or 0
+    )
+    metrics = [
+        _ResearchMetric(
+            "guide_runs",
+            "Guide runs exist",
+            guide_runs >= 1,
+            guide_runs,
+            "at least one guide_chat run",
+        ),
+        _ResearchMetric(
+            "guide_retrieval",
+            "Guide retrieval grounding",
+            retrieval_steps >= 1,
+            retrieval_steps,
+            "at least one guide retrieval context step",
+        ),
+        _ResearchMetric(
+            "proposal_governance",
+            "Proposal governance",
+            proposal_invocations >= 0 and write_invocations == 0,
+            f"{proposal_invocations} proposals, {write_invocations} direct writes",
+            "chat creates proposals only, no direct write tools",
+        ),
+    ]
+    score = sum(1 for metric in metrics if metric.passed)
+    return GuideEvalRead(
+        project_id=project_id,
+        passed=score == len(metrics),
+        score=score,
+        total=len(metrics),
+        metrics=[
+            GuideEvalMetricRead(
+                key=metric.key,
+                label=metric.label,
+                passed=metric.passed,
+                observed=metric.observed,
+                expected=metric.expected,
+            )
+            for metric in metrics
+        ],
     )
     tool_calls = structured.get("tool_calls") if isinstance(structured, dict) else []
     retrieval_diagnostics = (

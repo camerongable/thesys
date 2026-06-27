@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.ai.litellm_client import LLMCompletion
 from app.ai.structured_output import StructuredOutputResult
 from app.core.config import get_settings
-from app.db.models import AIRun, AIStep, ToolInvocation
+from app.db.models import AIRun, AIStep, ApprovalRequest, ToolInvocation
 from app.services import guide_service
 
 
@@ -295,12 +295,9 @@ def test_guide_chat_proposal_prompts_do_not_mutate_project_state(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["recommended_action"]["id"] in {
-        "structure_idea",
-        "create_validation_plan",
-        "open_validation_mission",
-        "interpret_validation_notes",
-    }
+    assert body["recommended_action"]["id"] in {"structure_idea", "create_validation_plan"}
+    assert body["proposal_invocation_id"]
+    assert body["approval_request_id"]
     assert body["ai_run_id"]
     proposals = list(
         db_session.scalars(
@@ -310,7 +307,16 @@ def test_guide_chat_proposal_prompts_do_not_mutate_project_state(
             )
         )
     )
-    assert proposals == []
+    assert len(proposals) == 1
+    assert proposals[0].tool_name == "propose_validation_plan"
+    assert proposals[0].status == "requested"
+    approval = db_session.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.id == uuid.UUID(body["approval_request_id"])
+        )
+    )
+    assert approval is not None
+    assert approval.status == "pending"
 
 
 def test_guide_chat_research_plan_prompts_route_to_existing_action(
@@ -330,6 +336,56 @@ def test_guide_chat_research_plan_prompts_route_to_existing_action(
     body = response.json()
     assert body["recommended_action"]["id"] == "plan_research_sprint"
     assert any(action["id"] == "plan_research_sprint" for action in body["action_cards"])
+    assert body["proposal_invocation_id"]
+    assert body["approval_request_id"]
+
+
+def test_guide_chat_stream_emits_delta_and_final_metadata(client: TestClient) -> None:
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Guide stream idea"},
+    ).json()["id"]
+
+    with client.stream(
+        "POST",
+        f"/api/projects/{project_id}/guide/chat/stream",
+        json={"message": "What should I do next?"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: delta" in body
+    assert "event: final" in body
+    assert "recommended_action" in body
+
+
+def test_guide_eval_reports_grounding_and_proposal_governance(
+    client: TestClient,
+) -> None:
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Guide eval idea"},
+    ).json()["id"]
+    client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={
+            "title": "Guide eval evidence",
+            "text": "Coaches need evidence-grounded weekly check-in triage.",
+        },
+    )
+    chat = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={"message": "What evidence supports weekly check-in triage?"},
+    )
+    assert chat.status_code == 200
+
+    eval_response = client.get(f"/api/projects/{project_id}/evals/guide")
+
+    assert eval_response.status_code == 200
+    body = eval_response.json()
+    metric_keys = {metric["key"] for metric in body["metrics"]}
+    assert {"guide_runs", "guide_retrieval", "proposal_governance"} <= metric_keys
+    assert body["score"] >= 2
 
 
 def test_guide_chat_live_mode_uses_structured_grounded_answer(

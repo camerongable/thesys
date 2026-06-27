@@ -14,7 +14,7 @@ from app.ai.prompts import GUIDE_CHAT_PROMPT_VERSION, UNTRUSTED_RETRIEVED_CONTEN
 from app.ai.structured_output import generate_structured_output
 from app.core.auth import AuthContext
 from app.core.config import Settings, get_settings
-from app.db.models import Artifact, Experiment, ResearchSprint, ValidationMission
+from app.db.models import ApprovalRequest, Artifact, Experiment, ResearchSprint, ValidationMission
 from app.schemas.guide import (
     GuideActionRead,
     GuideChatResponseRead,
@@ -249,8 +249,18 @@ def chat(
             cost=Decimal("0"),
         )
 
+        proposal_tool = _proposal_tool_for_message(normalized)
         if not in_scope:
             response = _out_of_scope_chat_response(context)
+        elif proposal_tool is not None:
+            response = _proposal_chat_response(
+                db,
+                auth,
+                project_id,
+                message,
+                context,
+                proposal_tool,
+            )
         elif settings.should_use_llm_stub:
             response = _deterministic_chat_response(db, auth, project_id, message, context)
             response = _attach_grounding_metadata(
@@ -528,6 +538,106 @@ def _out_of_scope_chat_response(context: GuideContextRead) -> GuideChatResponseR
         confidence_level=context.confidence_level,
         unsupported_or_missing_evidence=context.missing_context[:3],
     )
+
+
+def _proposal_chat_response(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    message: str,
+    context: GuideContextRead,
+    tool_name: str,
+) -> GuideChatResponseRead:
+    invocation = tool_service.create_proposal(
+        db,
+        auth,
+        project_id,
+        tool_name,
+        _proposal_payload(tool_name, message, context),
+        requested_by="agent",
+        input_json={"source": "ask_thesys", "message": message[:1000]},
+    )
+    approval = db.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.entity_type == "tool_invocation",
+            ApprovalRequest.entity_id == invocation.id,
+            ApprovalRequest.status == "pending",
+        )
+    )
+    action = _proposal_action(context, tool_name)
+    return GuideChatResponseRead(
+        answer=(
+            "I created an approval-gated proposal. It will not change project state "
+            "unless you approve it in the governance queue."
+        ),
+        recommended_action=action,
+        action_cards=[action, *_support_actions(context)[:2]],
+        related_entities=_related_entities(context),
+        confidence_level=context.confidence_level,
+        proposal_invocation_id=invocation.id,
+        approval_request_id=approval.id if approval else None,
+    )
+
+
+def _proposal_tool_for_message(normalized: str) -> str | None:
+    if not any(term in normalized for term in ("create", "propose", "draft", "record")):
+        return None
+    if "research" in normalized and ("plan" in normalized or "sprint" in normalized):
+        return "propose_research_plan"
+    if "validation" in normalized and ("plan" in normalized or "test" in normalized):
+        return "propose_validation_plan"
+    if "memory" in normalized or "remember" in normalized:
+        return "propose_memory_update"
+    if "decision" in normalized or any(
+        term in normalized for term in ("proceed", "pivot", "pause", "kill")
+    ):
+        return "propose_decision"
+    return None
+
+
+def _proposal_payload(
+    tool_name: str,
+    message: str,
+    context: GuideContextRead,
+) -> dict[str, object]:
+    summary = message[:1000]
+    if tool_name == "propose_research_plan":
+        return {
+            "summary": summary,
+            "objective": message[:2000],
+            "project_stage": context.stage,
+        }
+    if tool_name == "propose_validation_plan":
+        return {
+            "summary": summary,
+            "actions": [
+                {
+                    "type": "validation_plan",
+                    "target_assumption": context.biggest_unknown,
+                    "suggested_test": context.next_action,
+                }
+            ],
+        }
+    if tool_name == "propose_decision":
+        return {
+            "summary": summary,
+            "decision": {
+                "requested_from_chat": True,
+                "stage": context.stage,
+                "verdict": context.verdict,
+            },
+        }
+    return {"summary": summary}
+
+
+def _proposal_action(context: GuideContextRead, tool_name: str) -> GuideActionRead:
+    preferred = {
+        "propose_research_plan": "plan_research_sprint",
+        "propose_validation_plan": "create_validation_plan",
+        "propose_memory_update": "show_project_history",
+        "propose_decision": "use_suggested_decision",
+    }
+    return _action_by_id(context, preferred.get(tool_name, "explain_current_focus"))
 
 
 def _attach_grounding_metadata(

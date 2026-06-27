@@ -1610,6 +1610,8 @@ export type GuideChatResponse = {
   used_llm: boolean;
   retrieval_diagnostics: Record<string, unknown> | null;
   context_pack: Record<string, unknown> | null;
+  proposal_invocation_id: string | null;
+  approval_request_id: string | null;
   ai_run_id: string | null;
 };
 

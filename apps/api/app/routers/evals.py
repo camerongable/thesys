@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContextDep
 from app.db.session import get_db
-from app.schemas.evals import MvpEvalRead, V1ResearchEvalRead
+from app.schemas.evals import GuideEvalRead, MvpEvalRead, V1ResearchEvalRead
 from app.services import eval_service
 
 router = APIRouter(prefix="/api/projects/{project_id}/evals", tags=["evals"])
@@ -25,3 +25,8 @@ def run_v1_research_eval(
     auth: AuthContextDep,
 ) -> V1ResearchEvalRead:
     return eval_service.run_v1_research_eval(db, auth, project_id)
+
+
+@router.get("/guide", response_model=GuideEvalRead)
+def run_guide_eval(project_id: uuid.UUID, db: DbDep, auth: AuthContextDep) -> GuideEvalRead:
+    return eval_service.run_guide_eval(db, auth, project_id)

@@ -308,6 +308,7 @@ function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
     response.cited_evidence_ids.length > 0 ||
     response.unsupported_or_missing_evidence.length > 0 ||
     contextSummary !== null ||
+    response.approval_request_id !== null ||
     response.ai_run_id;
   if (!hasGrounding) {
     return null;
@@ -320,6 +321,9 @@ function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
         <span>Confidence: {formatGuideLabel(response.confidence_level)}</span>
         <span>{response.cited_evidence_ids.length} cited source(s)</span>
         {response.ai_run_id ? <span>Trace: {response.ai_run_id.slice(0, 8)}</span> : null}
+        {response.approval_request_id ? (
+          <span>Approval: {response.approval_request_id.slice(0, 8)}</span>
+        ) : null}
       </div>
       {response.unsupported_or_missing_evidence.length > 0 ? (
         <ul className="mt-2 space-y-1 text-xs leading-5 text-muted-foreground">

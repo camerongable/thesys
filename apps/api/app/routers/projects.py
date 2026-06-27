@@ -1,7 +1,9 @@
+import json
 import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContextDep
@@ -304,6 +306,26 @@ def chat_with_project_guide(
     auth: AuthContextDep,
 ) -> GuideChatResponseRead:
     return guide_service.chat(db, auth, project_id, payload.message, payload.recent_turns)
+
+
+@router.post("/{project_id}/guide/chat/stream")
+def stream_project_guide_chat(
+    project_id: uuid.UUID,
+    payload: GuideChatRequest,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> StreamingResponse:
+    response = guide_service.chat(db, auth, project_id, payload.message, payload.recent_turns)
+
+    def events():
+        yield _sse("delta", {"text": response.answer})
+        yield _sse("final", response.model_dump(mode="json"))
+
+    return StreamingResponse(events(), media_type="text/event-stream")
+
+
+def _sse(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, default=str)}\n\n"
 
 
 @router.patch("/{project_id}", response_model=ProjectRead)
