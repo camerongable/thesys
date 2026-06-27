@@ -29,6 +29,7 @@ def build_guide_context_pack(
     prompt_version: str,
     expected_schema: str,
 ) -> ContextPack:
+    """Assemble bounded Ask Thesys prompt context from project state, tools, and evidence."""
     items: list[ContextItem] = [
         _item(
             "guide-project-state",
@@ -106,6 +107,7 @@ def build_research_context_pack(
     prompt_version: str,
     expected_schema: str,
 ) -> ContextPack:
+    """Assemble bounded agentic-research context with explicit citation provenance."""
     items: list[ContextItem] = [
         _item(
             "research-project-context",

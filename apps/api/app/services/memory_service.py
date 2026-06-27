@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext, require_permission
 from app.db.models import Assumption, ProjectMemoryItem, Risk
-from app.schemas.memory import MemoryType, ProjectMemoryItemRead, MemoryWritePolicy
+from app.schemas.memory import MemoryType, MemoryWritePolicy, ProjectMemoryItemRead
 from app.services import project_service
 
 ACTIVE_MEMORY_STATUSES = {"active", "proposed"}
@@ -30,6 +30,7 @@ def list_memory(
     include_stale: bool = False,
     limit: int = 50,
 ) -> list[ProjectMemoryItem]:
+    """List typed project memory with stale/expired records hidden by default."""
     project_service.get_project(db, auth, project_id)
     stmt = select(ProjectMemoryItem).where(
         ProjectMemoryItem.workspace_id == auth.workspace_id,
@@ -60,6 +61,7 @@ def select_memory_for_workflow(
     workflow_type: str,
     limit: int = 20,
 ) -> list[ProjectMemoryItem]:
+    """Select memory types that are relevant for a specific AI workflow."""
     allowed_types = WORKFLOW_MEMORY_TYPES.get(
         workflow_type,
         {"semantic", "project", "episodic", "preference"},
@@ -90,6 +92,7 @@ def explain_memory(
     project_id: uuid.UUID,
     memory_id: uuid.UUID,
 ) -> dict[str, Any]:
+    """Return an inspectable explanation of why a memory item exists."""
     item = get_memory_item(db, auth, project_id, memory_id)
     provenance = item.provenance_metadata or {}
     source = provenance.get("source") or item.source_entity_type or item.entity_type or "unknown"
@@ -141,6 +144,7 @@ def upsert_memory_item(
     status_value: str = "active",
     expires_at: datetime | None = None,
 ) -> ProjectMemoryItem:
+    """Create or update a typed memory item under the project's governance model."""
     project_service.get_project(db, auth, project_id)
     existing = None
     if entity_type and entity_id:

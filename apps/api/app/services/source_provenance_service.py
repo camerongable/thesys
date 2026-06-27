@@ -1,3 +1,5 @@
+"""Source provenance, dedupe, and quality-signal helpers for evidence ingestion."""
+
 import hashlib
 import re
 from dataclasses import dataclass
@@ -46,6 +48,7 @@ class FetchFailureClassification:
 
 
 def canonicalize_url(url: str) -> str:
+    """Normalize a URL for project-scoped dedupe without changing fetch safety checks."""
     parsed = urlparse(url.strip())
     scheme = parsed.scheme.lower()
     hostname = (parsed.hostname or "").lower()
@@ -69,6 +72,7 @@ def canonicalize_url(url: str) -> str:
 
 
 def content_hash(text: str) -> str:
+    """Return a stable hash of normalized extracted text for duplicate detection."""
     normalized = re.sub(r"\s+", " ", text).strip()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
@@ -90,6 +94,7 @@ def html_snapshot_metadata(
     final_url: str,
     fetched_at: datetime,
 ) -> dict[str, Any]:
+    """Record inspectable snapshot metadata without storing full fetched HTML in JSON."""
     return {
         "raw_html_snapshot": {
             "captured_at": fetched_at.isoformat(),
@@ -105,6 +110,7 @@ def html_snapshot_metadata(
 
 
 def detect_prompt_injection_markers(text: str) -> list[str]:
+    """Detect fetched-page strings that should be treated as evidence-risk signals."""
     return [
         marker
         for marker, pattern in PROMPT_INJECTION_PATTERNS.items()
@@ -130,6 +136,7 @@ def classify_fetch_failure(message: str) -> FetchFailureClassification:
 
 
 def fetch_failure_metadata(message: str) -> dict[str, Any]:
+    """Convert fetch errors into metadata users and evals can inspect later."""
     classification = classify_fetch_failure(message)
     return {
         "fetch_failure": {
@@ -141,6 +148,7 @@ def fetch_failure_metadata(message: str) -> dict[str, Any]:
 
 
 def pdf_page_lineage(page_texts: list[str]) -> list[dict[str, Any]]:
+    """Map extracted PDF text back to page-level offsets and hashes."""
     lineage: list[dict[str, Any]] = []
     cursor = 0
     for index, text in enumerate(page_texts, start=1):
@@ -170,6 +178,7 @@ def quality_metadata(
     credibility_score: Decimal | None,
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
+    """Build source quality signals used by retrieval diagnostics and inspect panels."""
     reference_date = source_date or ingested_at
     recency_score = _recency_score(reference_date)
     markers = metadata.get("prompt_injection_markers")
@@ -186,7 +195,9 @@ def quality_metadata(
             "source_type": source_type,
             "domain": domain,
             "classification": classification,
-            "credibility_score": float(credibility_score) if credibility_score is not None else None,
+            "credibility_score": (
+                float(credibility_score) if credibility_score is not None else None
+            ),
             "recency_score": recency_score,
             "risk_level": risk_level,
             "prompt_injection_marker_count": marker_count,
@@ -205,6 +216,7 @@ def adjusted_credibility_score(
     url: str | None,
     metadata: dict[str, Any],
 ) -> Decimal:
+    """Apply deterministic source-quality heuristics to the base credibility score."""
     base = {
         "url": Decimal("0.70"),
         "file": Decimal("0.65"),

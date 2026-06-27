@@ -2,8 +2,9 @@
 
 ## Current Phase
 
-V1 Sprint 40 implementation is complete. Thesys now demonstrates a stronger
-production-style AI architecture for a portfolio project:
+V1 Sprint 50 implementation is complete on the AI upgrade branch. Thesys now
+demonstrates a stronger production-style AI architecture for a portfolio
+project:
 
 - provider-backed embeddings with deterministic local fallback and re-embedding
   support
@@ -15,10 +16,20 @@ production-style AI architecture for a portfolio project:
   retrieval diagnostics, action-card routing, and deterministic fallback
 - governed external source discovery with deterministic and Tavily providers
 - multimodal evidence extraction for image uploads and low-text PDF fallback
+- URL/upload security guards, source provenance metadata, canonical
+  URL/content-hash dedupe, fetched-page prompt-injection markers, source quality
+  signals, and PDF page lineage
+- typed context packs, workflow-aware memory selection, and multiple memory
+  types
+- MCP-shaped adapter over the governed internal tool registry
+- AI cost accounting, budget/circuit checks, guide evals, and local AI quality
+  gates
 - Temporal-backed durable research sprint orchestration
 - LangGraph-backed agentic research synthesis
 - LangSmith-compatible trace metadata, local AI run/step records, and custom eval
   checks
+- shared service utilities for metadata merging and workflow finalization
+- developer docs and README navigation for AI architecture review
 
 The simplified project experience is preserved: retrieval, search, extraction,
 cost, trace, and quality details stay in Inspect, Evidence, workflow trace,
@@ -26,10 +37,8 @@ artifact structured content, and eval/check surfaces rather than new main
 dashboard cards. The homepage and main project workflow should remain focused on
 current verdict, next action, evidence health, validation, and decision state.
 
-Next work is ordered in `IMPLEMENTATION_BRIEF.md` as V1 Sprint 41 and later:
-security hardening first, then context engineering, memory management, MCP,
-retrieval/guide/eval upgrades, external/multimodal hardening, codebase cleanup,
-and developer documentation.
+The completed Sprint 41-50 upgrade track is summarized in the "Recently
+Completed V1 AI Engineering Upgrade Track" section near the end of this file.
 
 ## Sprint 0 Scope
 
@@ -2035,22 +2044,44 @@ Manual environment note:
   storage. The optional live Tavily path was not run because no `TAVILY_API_KEY`
   was configured for this session.
 
-## Next Work
+## Recently Completed V1 AI Engineering Upgrade Track
 
-Planned V1 work is now ordered by risk and portfolio value:
+Sprints 41-50 are implemented on the AI upgrade branch:
 
 1. V1 Sprint 41: Security, AI Safety, and Abuse Hardening
+   - Added SSRF-resistant URL validation, redirect re-checks, response-size
+     limits, upload validation, file-name sanitization, and audit events for
+     rejected ingestion.
 2. V1 Sprint 42: Context Engineering and Prompt Context Architecture
+   - Added typed context packs with token budgets, provenance, dropped-item
+     diagnostics, and untrusted-content rules for Ask Thesys and research.
 3. V1 Sprint 43: Multiple Memory Types and Memory Management
+   - Added typed project memory records, workflow-aware memory selection,
+     memory explanation APIs, and governed memory indexing.
 4. V1 Sprint 44: MCP Adapter and External Tool Integration Boundary
+   - Added MCP-shaped HTTP endpoints over the existing governed tool registry,
+     preserving approvals, permissions, and audit logs.
 5. V1 Sprint 45: Advanced Retrieval Quality and Citation Verification
+   - Added shared citation verification and stronger source-diverse context
+     selection.
 6. V1 Sprint 46: Ask Thesys Streaming, Tool Proposals, and Guide Evals
+   - Added guide SSE streaming, proposal-only guide actions for state changes,
+     and guide grounding/governance evals.
 7. V1 Sprint 47: Observability, Cost Controls, and CI Eval Gates
+   - Added AI accounting, budget/circuit checks, `/evals/ai`, and
+     `scripts/eval_ai_quality.py`.
 8. V1 Sprint 48: External Research and Multimodal Intelligence Hardening
+   - Added source provenance helpers, canonical URL/content-hash dedupe, fetch
+     failure classification, prompt-injection markers, source quality signals,
+     and PDF page lineage.
 9. V1 Sprint 49: Codebase Architecture Cleanup
+   - Added shared service utilities for metadata merging and workflow run
+     finalization, with characterization tests covering evidence and retrieval.
 10. V1 Sprint 50: Developer Documentation and Code Navigation
+    - Added README updates, developer docs under `docs/`, and concise docstrings
+      for context, memory, MCP, provenance, and shared service utilities.
 
-UI-related work in these sprints must keep the homepage and primary project
-workflow straightforward. Advanced diagnostics, trace details, memory internals,
-security findings, and retrieval explanations should be hidden by default and
-available through inspect drawers, details panels, or developer-oriented routes.
+The main homepage and primary project workflow remain straightforward. Advanced
+diagnostics, trace details, memory internals, security findings, and retrieval
+explanations stay hidden by default and are available through metadata,
+inspection surfaces, eval output, or developer docs.

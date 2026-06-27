@@ -24,6 +24,7 @@ class MCPCallContext:
 
 
 def list_tools(*, include_proposals: bool = True) -> list[MCPToolRead]:
+    """Expose governed app tools in an MCP-shaped schema without bypassing policy."""
     definitions = tool_service.list_tool_definitions()
     if not include_proposals:
         definitions = [definition for definition in definitions if definition.access_mode == "read"]
@@ -52,6 +53,7 @@ def call_tool(
     arguments: dict[str, Any],
     client_id: str,
 ) -> MCPToolCallRead:
+    """Invoke a governed tool for an MCP client, preserving approvals and audit logs."""
     project_service.get_project(db, auth, project_id)
     definition = _definition(tool_name)
     started = perf_counter()
@@ -170,6 +172,4 @@ def _definition(tool_name: str):
     for definition in tool_service.list_tool_definitions():
         if definition.name == tool_name:
             return definition
-    # Reuse the existing service's 404 behavior for unknown tools.
-    tool_service.execute_tool  # keep module import visibly tied to the boundary
     raise ValueError(f"Unsupported MCP tool: {tool_name}")
