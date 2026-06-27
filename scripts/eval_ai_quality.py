@@ -92,6 +92,30 @@ def _static_metrics() -> list[dict[str, Any]]:
             "present",
             "cost and latency accounting exists",
         ),
+        _metric(
+            "source_provenance",
+            "Source provenance service",
+            (REPO_ROOT / "apps/api/app/services/source_provenance_service.py").exists()
+            and _contains("apps/api/app/services/evidence_service.py", "content_hash"),
+            "present",
+            "canonical URL, hash, and provenance helpers exist",
+        ),
+        _metric(
+            "prompt_injection_markers",
+            "Fetched-page prompt injection markers",
+            _contains("apps/api/app/services/source_provenance_service.py", "PROMPT_INJECTION_PATTERNS")
+            and _contains("apps/api/app/tests/test_evidence.py", "prompt_injection_markers"),
+            "present",
+            "fetched-page prompt-injection detection is tested",
+        ),
+        _metric(
+            "multimodal_lineage",
+            "Multimodal extraction lineage",
+            _contains("apps/api/app/services/evidence_service.py", "pdf_page_lineage")
+            and _contains("apps/api/app/tests/test_evidence.py", "pdf_page_lineage"),
+            "present",
+            "PDF page lineage is recorded and tested",
+        ),
     ]
 
 
