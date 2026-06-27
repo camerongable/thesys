@@ -11512,3 +11512,642 @@ observable cost, quality, and safety behavior
 The desired reviewer reaction:
 
 > This is not just an AI app demo. This shows the engineering patterns behind production RAG, agent workflows, evaluation, governance, and AI product UX.
+
+---
+
+# Post-Sprint 40 Ordered Upgrade Plan
+
+These sprints are ordered by importance. Security and correctness come first,
+then AI quality, then integration surface area, then maintainability and
+documentation.
+
+UI principle for every sprint:
+
+```text
+The homepage and main project workflow stay straightforward.
+Advanced diagnostics, memory internals, security findings, retrieval details,
+MCP traces, and eval artifacts are hidden by default but available from Inspect,
+details panels, workflow traces, or developer-oriented settings.
+```
+
+---
+
+# V1 Sprint 41: Security, AI Safety, and Abuse Hardening
+
+## Goal
+
+Close the highest-risk security holes before adding more autonomy or external
+connectors.
+
+This sprint should make Thesys safer as an AI application that ingests URLs,
+files, retrieved web content, model outputs, and tool calls.
+
+## Scope
+
+- Run a threat-model pass across:
+  - URL ingestion and discovered-source ingestion
+  - file upload and multimodal extraction
+  - prompt construction and retrieved content handling
+  - tool invocation and approval flows
+  - Temporal activities
+  - local-dev auth assumptions
+  - multi-tenant workspace/project boundaries
+  - LiteLLM/model-provider data egress
+- Harden URL fetching against SSRF:
+  - block localhost, private IP ranges, metadata-service IPs, and unsupported schemes
+  - resolve DNS before fetch and re-check redirects
+  - enforce max response size, timeout, redirect, and content-type limits
+  - preserve blocked-fetch reasons in audit metadata
+- Harden file uploads:
+  - validate MIME type and extension
+  - enforce size limits per type
+  - reject archive/binary types outside the supported evidence set
+  - scan PDF/image parser errors into safe public errors
+- Add AI-specific prompt-injection tests:
+  - retrieved content that asks the model to ignore instructions
+  - source text containing fake tool instructions
+  - source text containing fake citations or fake approval statements
+  - source text containing secrets or credential-looking strings
+- Strengthen tool governance:
+  - add regression tests for every role and every tool access mode
+  - ensure proposal tools cannot be executed as write tools
+  - ensure chat cannot bypass approval gates
+  - add denial audit events for malformed or oversized tool payloads
+- Add provider egress controls:
+  - document what data leaves the app in live LLM/embedding/multimodal modes
+  - add config flags to disable external model calls per environment
+  - redact secrets before trace, prompt, tool, and error logging
+- Add dependency and static checks:
+  - backend dependency audit command
+  - frontend dependency audit command
+  - secret scanning recommendation
+  - CI-friendly security checklist script
+- Add abuse controls:
+  - per-workspace rate limits for expensive AI workflows
+  - max concurrent research sprint runs
+  - max external search queries per sprint
+  - max upload size and max extracted text length
+
+## Acceptance Criteria
+
+- SSRF attempts against URL ingestion and discovered-source ingestion are
+  blocked and tested.
+- File upload size/type limits are enforced and tested.
+- Prompt-injection fixtures cannot mutate state, bypass approvals, fabricate
+  valid citations, or suppress unsupported-claim reporting.
+- Tool governance tests cover owner/admin/editor/viewer behavior for read,
+  proposal, write, and high-risk tools.
+- Sensitive values are redacted in AI runs, tool invocations, audit logs,
+  LangSmith metadata, and UI-facing errors.
+- Live model/data egress behavior is documented in README and `.env.example`.
+- Security details stay out of the main project workflow and appear only in
+  governance, audit, or developer inspect surfaces.
+
+---
+
+# V1 Sprint 42: Context Engineering and Prompt Context Architecture
+
+## Goal
+
+Make context assembly a first-class subsystem instead of ad hoc prompt payload
+construction spread across services.
+
+This sprint should demonstrate modern context engineering: selecting the right
+information, preserving provenance, fitting budget, and making context behavior
+inspectable without cluttering the core UI.
+
+## Scope
+
+- Add a shared `ContextPack` abstraction for LLM workflows:
+  - project summary
+  - current thesis/canvas
+  - retrieved evidence snippets
+  - assumptions and risks
+  - validation state
+  - decision history
+  - recent guide turns
+  - tool outputs
+  - provenance/citation metadata
+- Add context builders for:
+  - opportunity brief
+  - competitor analysis
+  - agentic research memo
+  - Ask Thesys
+  - validation planning
+  - validation-result interpretation
+  - decision recommendation
+- Add context policies:
+  - max token budget per workflow
+  - source diversity rules
+  - recency/freshness weighting
+  - evidence support thresholds
+  - required fields per workflow
+  - dropped-context reason tracking
+- Add prompt-template metadata:
+  - prompt version
+  - context pack version
+  - model target
+  - expected schema
+  - token budget
+  - safety rules included
+- Add a context inspector:
+  - show selected sources, assumptions, risks, and token counts
+  - show dropped or compressed items
+  - show citation IDs available to the model
+  - hide by default behind workflow trace/details panels
+- Refactor existing prompt constructors to use the context builders.
+- Add context regression tests:
+  - budget overflow
+  - duplicate evidence
+  - missing citations
+  - prompt-injection content
+  - broad strategic question decomposition
+
+## Acceptance Criteria
+
+- Major LLM workflows build prompts from a shared context system.
+- Context packs are persisted or traceable from AI run/step metadata.
+- Every generated answer/artifact can explain which context was supplied and
+  which eligible context was omitted.
+- Context assembly remains deterministic in stub/test mode.
+- The main UI remains verdict-first; context details are available only through
+  Inspect, workflow traces, or artifact debug details.
+
+---
+
+# V1 Sprint 43: Multiple Memory Types and Memory Management
+
+## Goal
+
+Upgrade "persistent project memory" into an explicit memory architecture with
+different memory types, lifecycle rules, and review workflows.
+
+This sprint should demonstrate that the app understands memory as a product and
+agent-system problem, not just a database table.
+
+## Memory Types
+
+- Working memory:
+  - short-lived context for the current workflow run
+  - latest guide turns
+  - active research objective
+  - current validation mission
+- Episodic memory:
+  - research sprint events
+  - source discovery events
+  - validation result interpretations
+  - decision history
+  - thesis evolution events
+- Semantic/project memory:
+  - current thesis
+  - target user/problem
+  - evidence-backed facts
+  - assumptions
+  - risks
+  - competitors and substitutes
+- Procedural memory:
+  - approved validation playbooks
+  - preferred research plan patterns
+  - workflow policies
+  - tool usage rules
+- Preference memory:
+  - user/team preferences for validation style, audience, and decision criteria
+  - initially project-scoped and explicit only
+
+## Scope
+
+- Add memory classification to relevant persisted records or a dedicated memory
+  view/table.
+- Add memory write policies:
+  - direct write
+  - proposal requiring approval
+  - derived read-only memory
+  - expiring/transient memory
+- Add memory manager service:
+  - list memory by type
+  - explain memory provenance
+  - mark stale/superseded
+  - merge duplicates
+  - archive memory
+  - propose memory updates from AI workflows
+- Add memory retrieval policy:
+  - select memory by workflow type
+  - prefer current thesis and approved decisions
+  - include stale memory only when useful as history
+  - avoid unbounded transcript stuffing
+- Add memory compaction:
+  - summarize old guide turns into approved project notes only when useful
+  - preserve source links and decision provenance
+  - never silently convert unapproved AI output into durable memory
+- Add memory UI:
+  - high-level memory health summary in Inspect
+  - detailed memory browser behind a secondary panel
+  - approve/reject controls for AI-proposed memory changes
+- Add tests:
+  - memory update approval gates
+  - stale memory exclusion
+  - conflicting memory handling
+  - memory provenance display
+
+## Acceptance Criteria
+
+- Project memory is explicitly typed and explainable.
+- AI workflows can request memory by type instead of loading arbitrary project
+  state.
+- Memory writes that affect strategy remain approval-gated.
+- Users can inspect why a recommendation used a specific memory item.
+- The primary workflow UI stays simple; memory management lives in secondary
+  inspect/governance surfaces.
+
+---
+
+# V1 Sprint 44: MCP Adapter and External Tool Integration Boundary
+
+## Goal
+
+Add a realistic MCP integration without weakening the existing tool governance
+model.
+
+The best fit is to expose Thesys project tools through an MCP server adapter for
+developer agents, IDE assistants, and evaluation harnesses. The web app should
+continue using the normal API; MCP is an integration surface, not a replacement
+for product routes.
+
+## Scope
+
+- Add an MCP server package or API mode that wraps the existing internal tool
+  registry.
+- Expose read-only MCP tools first:
+  - get project summary
+  - search project evidence
+  - list sources
+  - list competitors
+  - list assumptions/risks
+  - list validation plans
+  - list decisions
+  - get research memo
+- Expose proposal MCP tools only after read-only tools are stable:
+  - propose research plan
+  - propose memory update
+  - propose validation plan
+  - propose decision
+- Preserve existing governance:
+  - project/workspace auth
+  - role checks
+  - risk levels
+  - approval requests
+  - audit events
+  - redaction
+  - no direct high-risk writes
+- Add MCP-specific observability:
+  - MCP client identifier
+  - tool call duration
+  - denied call reason
+  - approval request IDs
+  - trace links
+- Add an MCP integration guide:
+  - local server startup
+  - example client config
+  - example read-only query
+  - example proposal requiring approval
+- Add tests:
+  - MCP schema generation from internal tool definitions
+  - read tool execution
+  - proposal tool approval path
+  - denied write/high-risk calls
+  - redaction of MCP payloads
+
+## Acceptance Criteria
+
+- A local MCP client can query project memory and evidence through governed
+  tools.
+- MCP proposal tools create approval requests instead of mutating strategic
+  state directly.
+- MCP activity appears in the same tool invocation and audit surfaces as normal
+  agent activity.
+- The main web UI does not become more complex; MCP configuration is documented
+  and surfaced only in developer/integration settings.
+
+---
+
+# V1 Sprint 45: Advanced Retrieval Quality and Citation Verification
+
+## Goal
+
+Push retrieval from a credible RAG implementation into a stronger production
+retrieval system with better keyword search, diversity, reranking, and citation
+verification.
+
+## Scope
+
+- Add Postgres full-text search:
+  - `tsvector` columns or generated search vectors
+  - BM25-like ranking where practical
+  - phrase and entity matching
+  - fallback to current keyword scorer in deterministic/local mode
+- Add retrieval diversity:
+  - MMR or similar source-diversity selection
+  - per-source and per-domain caps
+  - competitor/source-type balance rules
+- Add reranker adapters:
+  - LiteLLM prompt reranker remains available
+  - cross-encoder-compatible provider boundary
+  - deterministic fallback remains the default test path
+- Add citation verifier:
+  - each generated citation must map to retrieved source/chunk IDs
+  - quoted or summarized claims should overlap with cited source text
+  - unsupported claims are added when citation support is weak
+- Add retrieval eval dataset:
+  - labeled expected sources
+  - expected competitor coverage
+  - expected assumptions
+  - negative examples
+  - prompt-injection examples
+- Add retrieval-quality CI command:
+  - recall@k proxy
+  - precision proxy
+  - citation support
+  - latency
+  - reranker usage
+  - fallback path usage
+
+## Acceptance Criteria
+
+- Hybrid retrieval uses real Postgres text search when available.
+- Reranking can be swapped without changing calling workflows.
+- Citation verification can downgrade unsupported claims before persistence.
+- Retrieval evals can run locally without provider credentials.
+- Retrieval explanations stay hidden by default and appear in Evidence search,
+  Inspect, workflow traces, and eval output.
+
+---
+
+# V1 Sprint 46: Ask Thesys Streaming, Tool Proposals, and Guide Evals
+
+## Goal
+
+Make Ask Thesys feel more useful while preserving the product discipline that
+chat cannot directly mutate project state.
+
+## Scope
+
+- Add streaming guide responses:
+  - server-sent events or fetch streaming
+  - progressive answer text
+  - final structured metadata after completion
+  - deterministic non-streaming fallback
+- Add proposal routing from chat:
+  - user asks to create research plan, validation plan, memory update, or decision
+  - guide creates a proposal through governed proposal tools
+  - user approves in the existing approval flow
+  - no direct state mutation from chat
+- Add richer guide citations:
+  - cited source labels
+  - short evidence snippets
+  - link to Evidence details
+  - trace ID link
+  - hidden by default under answer metadata
+- Add guide-specific evals:
+  - groundedness
+  - citation validity
+  - refusal behavior
+  - action-card relevance
+  - no unauthorized mutation
+  - concise answer style
+- Add guardrails for conversational memory:
+  - bounded recent turns
+  - summarized session state only when approved or explicitly saved
+  - no unlimited transcript context
+
+## Acceptance Criteria
+
+- Ask Thesys streams answers in live mode without breaking deterministic local mode.
+- Chat can create approval-gated proposals but cannot apply them directly.
+- Guide evals run locally and fail when answers cite unavailable evidence or
+  suggest unauthorized state mutation.
+- The guide panel remains compact; citations, traces, and proposal details are
+  collapsed by default.
+
+---
+
+# V1 Sprint 47: Observability, Cost Controls, and CI Eval Gates
+
+## Goal
+
+Turn observability and evals into a repeatable engineering workflow, not only a
+runtime debug feature.
+
+## Scope
+
+- Add cost controls:
+  - per-workflow estimated cost
+  - per-workspace budget thresholds
+  - max token/config limits by workflow
+  - circuit breaker for repeated provider failures
+- Add OpenTelemetry-compatible metrics:
+  - workflow latency
+  - model latency
+  - retrieval latency
+  - token usage
+  - cost
+  - tool denial count
+  - approval wait time
+- Add eval CI commands:
+  - structured output smoke tests
+  - retrieval golden-set eval
+  - guide groundedness eval
+  - security prompt-injection eval
+  - redaction eval
+  - deterministic fixture evals
+- Add regression dashboards or local reports:
+  - pass/fail summary
+  - trend over recent runs when stored locally
+  - links to failing cases
+  - optional LangSmith upload
+- Add prompt/version tracking improvements:
+  - prompt version changelog
+  - schema version mapping
+  - context pack version mapping
+
+## Acceptance Criteria
+
+- A reviewer can run one command to see AI quality, safety, retrieval, and cost
+  checks.
+- Provider failures degrade safely and are visible in traces.
+- Cost and latency are tracked consistently across LLM, embedding, reranking,
+  multimodal, and external search paths.
+- Main product screens stay focused; reports live in eval output, workflow
+  traces, and developer diagnostics.
+
+---
+
+# V1 Sprint 48: External Research and Multimodal Intelligence Hardening
+
+## Goal
+
+Make the external research and document-intelligence paths more reliable and
+portfolio-worthy without turning the main workflow into a crawler dashboard.
+
+## Scope
+
+- Improve fetched-source extraction:
+  - readability extraction
+  - canonical URL normalization
+  - duplicate detection by canonical URL and content hash
+  - source freshness and retrieval timestamp handling
+  - fetch failure classification
+- Add page snapshots:
+  - raw HTML snapshot metadata
+  - optional screenshot capture
+  - source text lineage back to page/title/section
+- Improve multimodal extraction:
+  - page-level PDF extraction
+  - OCR fallback for scanned PDFs
+  - table extraction extension point
+  - image metadata extraction
+  - extracted quote/snippet provenance
+- Add source quality signals:
+  - source type
+  - credibility heuristic
+  - recency
+  - domain/source diversity
+  - risk level
+- Add evals:
+  - source relevance
+  - duplicate rate
+  - extraction coverage
+  - provenance preservation
+  - prompt-injection from fetched pages
+
+## Acceptance Criteria
+
+- External sources are easier to inspect, dedupe, and cite.
+- Multimodal extraction records enough provenance to explain where extracted
+  text came from.
+- Source quality signals can influence retrieval and context assembly.
+- Main workflow still shows only source status and evidence health; extraction
+  details remain in Evidence provenance panels.
+
+---
+
+# V1 Sprint 49: Codebase Architecture Cleanup
+
+## Goal
+
+Clean up the codebase so it is easier to understand, extend, and defend in an
+engineering interview.
+
+The target is reasonably DRY, idiomatic Python, understandable module
+boundaries, and SOLID-style service responsibilities without a risky rewrite.
+
+## Scope
+
+- Audit current services for:
+  - duplicated prompt construction
+  - duplicated citation audit logic
+  - duplicated fallback completion logic
+  - oversized service modules
+  - mixed persistence/domain/LLM responsibilities
+  - hard-to-test helper functions
+- Move toward a clearer feature-oriented layout:
+  - `features/evidence`
+  - `features/research`
+  - `features/guide`
+  - `features/validation`
+  - `features/governance`
+  - shared `common/ai`, `common/retrieval`, `common/security`, and `common/db`
+  - exact package names can follow the repo's conventions, but the ownership
+    boundaries should be explicit
+- Extract shared abstractions:
+  - citation audit service
+  - context pack builder
+  - fallback completion helper
+  - workflow run recorder
+  - tool execution result serializer
+  - source provenance utilities
+- Improve Python idioms:
+  - small cohesive functions
+  - typed dataclasses or Pydantic models for internal transfer objects
+  - fewer giant dict payloads where typed models are practical
+  - consistent exception types
+  - consistent transaction boundaries
+  - no broad except blocks without deliberate fallback behavior
+- Add characterization tests before moving behavior.
+- Keep API contracts and UI behavior unchanged unless explicitly documented.
+- Avoid large unrelated visual redesigns during cleanup.
+
+## Acceptance Criteria
+
+- Service modules have clearer ownership and fewer mixed responsibilities.
+- Shared AI/retrieval/citation/fallback logic is reused instead of copied.
+- Existing tests pass before and after the cleanup.
+- New characterization tests cover the highest-risk refactors.
+- Public API behavior and primary UI workflow remain unchanged.
+- The repository structure is documented after the cleanup in Sprint 50.
+
+---
+
+# V1 Sprint 50: Developer Documentation and Code Navigation
+
+## Goal
+
+Make the codebase easier for future developers and interview reviewers to
+follow after the architecture cleanup.
+
+This sprint should add documentation where it reduces cognitive load without
+filling obvious code with noise.
+
+## Scope
+
+- Add code docstrings for:
+  - public service entrypoints
+  - context builders
+  - retrieval pipeline stages
+  - tool governance functions
+  - Temporal activities/workflows
+  - structured-output helper behavior
+  - memory manager APIs after Sprint 43
+  - MCP adapter APIs after Sprint 44
+- Add line comments only where they explain non-obvious reasoning:
+  - prompt-injection boundary decisions
+  - approval-gate invariants
+  - SSRF protections
+  - retrieval scoring tradeoffs
+  - context budget behavior
+  - Temporal determinism constraints
+- Add developer docs:
+  - repository navigation guide
+  - AI architecture guide
+  - retrieval pipeline guide
+  - agent/tool governance guide
+  - memory model guide
+  - security model guide
+  - evals and observability guide
+- Expand README portfolio sections:
+  - AI concepts demonstrated
+  - feature-by-feature AI engineering map
+  - technologies used by each feature
+  - current limitations and planned upgrades
+- Add diagrams where useful:
+  - agentic research workflow
+  - retrieval pipeline
+  - memory types
+  - tool approval lifecycle
+  - Temporal vs LangGraph responsibilities
+- Add onboarding checklist:
+  - run local stack
+  - seed demo
+  - run tests
+  - run evals
+  - inspect traces
+  - switch to live model mode
+
+## Acceptance Criteria
+
+- A new developer can identify the main AI codepaths in under 10 minutes using
+  README and developer docs.
+- Important public service functions have concise docstrings.
+- Comments explain reasoning and invariants, not obvious assignments.
+- README clearly frames the repo as a portfolio project demonstrating AI
+  engineering patterns and technologies.
+- Documentation does not claim planned features are implemented.

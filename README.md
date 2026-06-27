@@ -195,26 +195,67 @@ Decisions can include:
 
 ---
 
-## AI Concepts Demonstrated
+## AI Engineering Portfolio Showcase
 
 Thesys is built to show the difference between a thin LLM wrapper and a durable AI application. The AI layer is visible in the architecture, data model, workflow records, governance model, and UX.
 
 | AI concept | How it is demonstrated in this repo | Technologies and libraries |
 |---|---|---|
-| Agentic RAG | Autonomous research sprints plan work, call bounded tools, retrieve evidence, detect gaps, synthesize a memo, critique citations, and wait for human approval before updating project memory. | LangGraph, FastAPI, SQLAlchemy, Temporal, internal tool registry |
-| Retrieval-grounded generation | Opportunity briefs, competitor analysis, research memos, assumptions, and validation plans are generated from retrieved project evidence rather than prompt-only model knowledge. | PostgreSQL, pgvector, provider-backed embeddings, retrieval service, Pydantic schemas |
-| Evidence ingestion and chunking | URLs, notes, discovered source snapshots, uploads, and PDFs are normalized into evidence sources and chunks with metadata, citation IDs, and embedding provenance. | httpx, pypdf, boto3, MinIO/S3-compatible storage, SQLAlchemy |
-| Production embeddings | Evidence chunks record provider, model, dimension, version, timestamp, and errors; deterministic local mode stays available for tests, while LiteLLM-backed embeddings can be used in live mode and re-embedded after model changes. | LiteLLM-compatible embeddings API, pgvector, PostgreSQL, Alembic |
-| Multi-stage retrieval | Project-scoped retrieval plans broad strategic questions, runs semantic and keyword retrieval with metadata filters, applies freshness and credibility boosts, reranks candidates, compresses context, and returns quality diagnostics for Inspect and trace surfaces. | pgvector HNSW/IVFFlat indexes, PostgreSQL, deterministic and LiteLLM rerankers, custom retrieval service |
+| Agentic RAG | Autonomous research sprints plan work, call bounded tools, retrieve evidence, detect gaps, run follow-up retrieval, synthesize a memo, critique citations, and wait for human approval before updating project memory. | LangGraph, FastAPI, SQLAlchemy, Temporal, internal tool registry |
+| Multi-stage retrieval | Project-scoped retrieval plans broad strategic questions, decomposes subqueries, fuses results, reranks candidates, assembles a bounded context pack, and returns quality diagnostics. | PostgreSQL, pgvector, deterministic and LiteLLM rerankers, custom retrieval service |
+| Production embeddings | Evidence chunks record provider, model, dimension, version, timestamp, and errors. Local deterministic embeddings stay available for tests, while LiteLLM-backed embeddings support live mode and re-embedding after model changes. | LiteLLM-compatible embeddings API, pgvector, PostgreSQL, Alembic |
+| Retrieval-grounded generation | Opportunity briefs, competitor analysis, research memos, Ask Thesys answers, assumptions, and validation plans are generated from project state and retrieved evidence rather than model memory alone. | Retrieval service, Pydantic schemas, LiteLLM, SQLAlchemy |
 | Structured LLM outputs | LLM responses are requested as JSON, validated against typed schemas, repaired when possible, and persisted as structured project objects. | Pydantic v2, LiteLLM-compatible chat completions, structured output helper |
-| Model gateway and local fallback | Model and embedding calls go through configurable provider paths, while deterministic stub/embedding modes keep local demos and tests repeatable. | LiteLLM Proxy, httpx, Ollama, OpenAI-compatible APIs, Gemini |
-| Persistent AI memory | The product stores thesis versions, evidence, artifacts, claims, assumptions, validation missions, decisions, AI runs, AI steps, tool calls, and approval requests instead of relying on chat history. | PostgreSQL, SQLAlchemy, Alembic |
-| Human-in-the-loop agents | AI workflows can propose research plans, memory updates, validation plans, and decisions, but important state changes require approval. | Tool registry, approval requests, audit events, role-based project permissions |
+| Model gateway and deterministic fallback | Chat, embedding, reranking, and multimodal extraction paths are configurable. Local demos and tests can run without provider credentials. | LiteLLM Proxy, httpx, Ollama, OpenAI-compatible APIs, Gemini, deterministic stubs |
+| Persistent project memory | The product stores thesis versions, evidence, artifacts, claims, assumptions, validation missions, decisions, AI runs, AI steps, tool calls, approvals, and audit events instead of relying on chat history. | PostgreSQL, SQLAlchemy, Alembic |
+| Bounded conversational context | Ask Thesys uses recent-turn context and project memory while keeping chat non-mutating and scoped to one project. | Guide service, Pydantic response schemas, retrieval tool calls, React Query |
+| Tool governance and MCP-ready boundary | Project capabilities are exposed through explicit tool contracts with schemas, risk levels, access modes, approval policy, and audit logging. This is not a full MCP server yet, but the boundary is shaped so an MCP adapter can be added. | Internal tool registry, approval requests, RBAC, audit events |
+| Human-in-the-loop agents | AI workflows can propose research plans, memory updates, validation plans, and decisions, but important strategic state changes require user approval. | Tool registry, approval requests, Temporal signals, role-based project permissions |
 | Prompt-injection boundaries | Retrieved content is treated as untrusted evidence, wrapped before synthesis, and prevented from acting as model instructions. | Shared prompt rules, cited synthesis prompts, secret redaction utilities |
-| AI observability | AI runs and steps track model, prompt version, latency, token usage, cost, trace IDs, failures, and generated artifact provenance. | LangSmith, AI run/step tables, LiteLLM cost headers, eval service |
-| Evaluation | Research sprint evals check citation coverage, unsupported claims, agentic traceability, gap detection, cost visibility, and secret redaction. | Custom eval scripts, JSON eval cases, pytest-compatible service checks |
+| External research connectors | Source discovery can use deterministic local results or live Tavily search, preserving provider/query/rank provenance before user-approved ingestion. | Tavily API, httpx, source discovery service, provenance metadata |
+| Multimodal evidence extraction | Image uploads and low-text PDF fallback can be extracted through a multimodal model boundary, while local deterministic fixture extraction keeps tests stable. | LiteLLM multimodal chat, pypdf, file upload pipeline, source metadata |
 | Durable orchestration | Long-running research sprints can survive retries, approval waits, and worker restarts through a durable workflow layer. | Temporal, Temporal Python SDK, FastAPI service layer |
-| AI product UX | The UI exposes AI reasoning as current verdicts, next actions, evidence, assumptions, validation missions, decisions, traces, and Ask Thesys guidance. | Next.js, React, TanStack Query, project guide service |
+| AI observability | AI runs and steps track model, prompt version, latency, token usage, cost, trace IDs, failures, retrieval diagnostics, and generated artifact provenance. | LangSmith, AI run/step tables, LiteLLM cost headers, workflow trace UI |
+| Evaluation | Research sprint evals check citation coverage, unsupported claims, agentic traceability, gap detection, retrieval quality, search provenance, cost visibility, and secret redaction. | Custom eval scripts, JSON eval cases, pytest-compatible service checks |
+| AI product UX | The UI exposes verdicts, next actions, evidence, unsupported gaps, assumptions, validation missions, decisions, citations, and traces while keeping implementation details hidden by default. | Next.js, React, TanStack Query, project guide service |
+
+### Feature-by-Feature AI Engineering Map
+
+**Research Sprint**
+
+- Uses LangGraph for the agent reasoning graph and Temporal for durable business workflow execution.
+- Calls governed read/proposal tools instead of letting the model mutate project state directly.
+- Produces cited research memos with selected evidence, retrieval diagnostics, unsupported claims, memory-update proposals, and approval gates.
+
+**Evidence and Retrieval**
+
+- Ingests URLs, source-discovery snapshots, notes, PDFs, text files, Markdown, and images.
+- Embeds chunks with deterministic or provider-backed embeddings and stores provenance on each chunk.
+- Runs SQL-level pgvector retrieval when available, with Python fallback for local/dev resilience.
+- Assembles context with token budgets, source diversity, dedupe, rerank scores, and citation IDs.
+
+**Ask Thesys**
+
+- Acts as a bounded project guide, not a general chatbot.
+- Retrieves project evidence through the governed `search_project_evidence` tool, generates structured answers in live mode, filters citations to retrieved source IDs, and falls back to deterministic guidance if generation fails.
+- Keeps action cards and UI routing separate from state mutation.
+
+**Source and Competitor Discovery**
+
+- Turns research plans into source and competitor candidates.
+- Uses deterministic discovery by default, optional Tavily search for live source discovery, candidate review before ingestion, and competitor merge workflows.
+- Stores search provider, query, rank, retrieval time, source type, and risk metadata for inspection.
+
+**Validation and Decision Support**
+
+- Extracts assumptions and risks, creates validation assets, interprets validation results, and suggests proceed / pivot / pause / kill / continue-research decisions.
+- Uses structured outputs where judgment is needed and deterministic decision rules where reproducible product behavior is more important than open-ended generation.
+
+**Observability, Safety, and UX**
+
+- Stores local AI runs and steps even when LangSmith is disabled.
+- Exposes cost, tokens, model provider, trace IDs, retrieval context summaries, and quality proxies in workflow details and inspect surfaces.
+- Keeps the homepage and main project workflow focused on "what should I do next?" while allowing deeper traces and diagnostics through details panels.
 
 ---
 
@@ -379,6 +420,38 @@ StrategicUpdate
 ResearchSprint
 ResearchMemo
 ```
+
+---
+
+## How to Navigate the Project
+
+The repository is a monorepo. The fastest way to understand it is to start with
+the domain workflow, then follow the AI services behind each step.
+
+| Area | Path | What to look for |
+|---|---|---|
+| API entrypoints | `apps/api/app/routers/` | FastAPI routes for projects, evidence, research sprints, guide chat, tools, workflows, evals, and governance. |
+| AI service layer | `apps/api/app/services/` | The main AI/product behavior: retrieval, embeddings, source discovery, agentic research, guide chat, validation, governance, and observability. |
+| LLM helpers | `apps/api/app/ai/` | LiteLLM client, structured-output validation/repair, prompt versions, fallback policy, and shared prompt-safety rules. |
+| Domain models | `apps/api/app/db/models/` | SQLAlchemy models for project memory, evidence, artifacts, claims, tools, approvals, AI runs, and research workflow state. |
+| Schemas | `apps/api/app/schemas/` | Pydantic request/response contracts and structured AI output shapes. |
+| Durable workflows | `apps/api/app/temporal/` | Temporal workflow and activities for long-running research sprints. |
+| Web app | `apps/web/src/` | Next.js app shell, project workspace screens, guide panel, evidence UI, workflow traces, and typed API client. |
+| Implementation docs | `IMPLEMENTATION_BRIEF.md` | Product/engineering sprint plan, including future AI engineering upgrades. |
+| Status docs | `IMPLEMENTATION_STATUS.md` | What has been implemented and verified so far. |
+
+Useful codepaths for AI reviewers:
+
+- Agentic research graph: `apps/api/app/services/agentic_research_service.py`
+- Retrieval pipeline: `apps/api/app/services/retrieval_service.py`
+- Embedding provider boundary: `apps/api/app/services/embedding_service.py`
+- Ask Thesys grounded guide: `apps/api/app/services/guide_service.py`
+- Tool governance boundary: `apps/api/app/services/tool_service.py`
+- Source discovery and external search: `apps/api/app/services/source_discovery_service.py`
+  and `apps/api/app/services/external_search_service.py`
+- Multimodal extraction: `apps/api/app/services/multimodal_extraction_service.py`
+- Observability/evals: `apps/api/app/services/langsmith_observability_service.py`
+  and `apps/api/app/services/eval_service.py`
 
 ---
 
@@ -724,7 +797,8 @@ The core workflow is designed to prevent premature building by identifying the m
 
 ## Current Status
 
-This is a V1 proof-of-concept.
+This is a V1 proof-of-concept with the Sprint 40 AI engineering upgrade track
+implemented.
 
 Implemented or demonstrated:
 
@@ -740,15 +814,28 @@ Implemented or demonstrated:
 - guided UI around next best action
 - provider-backed embeddings, pgvector SQL retrieval, multi-stage retrieval,
   reranking, context assembly, retrieval-quality diagnostics, and re-embedding
+- LLM-grounded Ask Thesys with citations, retrieval diagnostics, bounded recent
+  turns, action-card routing, and deterministic fallback
+- optional Tavily-backed source discovery with provenance
+- multimodal image extraction and low-text PDF fallback through a LiteLLM
+  multimodal provider boundary
 
 Planned future work:
 
-- LLM-grounded Ask Thesys with citations and tool-governed proposals
+- security hardening for AI/tool/web ingestion boundaries
+- context engineering and reusable prompt-context packs
+- multiple memory types and explicit memory-management workflows
+- MCP adapter around the existing governed tool registry
+- stronger retrieval quality with BM25, MMR/diversity, cross-encoder reranking,
+  and labeled retrieval evals
+- streaming guide responses and richer trace/citation drilldowns that remain
+  hidden by default
 - recurring market monitoring
+- advanced evaluation dashboard and CI eval gates
+- codebase architecture cleanup and developer documentation pass
 - team collaboration
 - multi-project portfolio dashboard
 - integrations
-- advanced evaluation dashboard
 - consultant / product discovery / investor workflow packs
 
 ---
@@ -792,7 +879,9 @@ Potential capabilities:
 - advanced evals
 - workflow packs for consultants, PMs, investors, and innovation teams
 
-## MCP / Tool Boundary
+---
+
+## Tool Boundary and Future MCP
 
 Thesys exposes project capabilities through explicit tool contracts. Tools define
 input/output schemas, access modes, risk levels, and approval policies.
@@ -800,6 +889,11 @@ input/output schemas, access modes, risk levels, and approval policies.
 Read tools allow agents to inspect project context. Proposal tools allow agents
 to suggest changes, but final state mutation requires human approval. This
 creates a safer boundary between model reasoning and application state.
+
+Today this is an internal MCP-style tool boundary, not a standalone MCP server.
+The planned MCP sprint should wrap the same governed tools with a real MCP
+adapter so external developer agents can inspect project state and propose
+changes without bypassing project permissions or approval gates.
 
 The local API exposes:
 

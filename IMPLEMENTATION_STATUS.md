@@ -2,15 +2,34 @@
 
 ## Current Phase
 
-V1 Sprint 38 implementation is complete. Thesys now routes evidence search,
-opportunity brief generation, agentic research, and V1 research evals through a
-multi-stage retrieval pipeline with query planning, hybrid retrieval, deterministic
-or LiteLLM-configured reranking, context assembly, citation-preserving result
-metadata, and retrieval-quality diagnostics. The Sprint 33-37 simplified project
-experience is preserved: retrieval details remain in Inspect, workflow trace,
+V1 Sprint 40 implementation is complete. Thesys now demonstrates a stronger
+production-style AI architecture for a portfolio project:
+
+- provider-backed embeddings with deterministic local fallback and re-embedding
+  support
+- SQL-level pgvector retrieval with Python fallback
+- multi-stage retrieval with query planning, subquery decomposition, reranking,
+  context assembly, citation-preserving result metadata, and retrieval-quality
+  diagnostics
+- LLM-grounded Ask Thesys answers with citations, bounded recent-turn context,
+  retrieval diagnostics, action-card routing, and deterministic fallback
+- governed external source discovery with deterministic and Tavily providers
+- multimodal evidence extraction for image uploads and low-text PDF fallback
+- Temporal-backed durable research sprint orchestration
+- LangGraph-backed agentic research synthesis
+- LangSmith-compatible trace metadata, local AI run/step records, and custom eval
+  checks
+
+The simplified project experience is preserved: retrieval, search, extraction,
+cost, trace, and quality details stay in Inspect, Evidence, workflow trace,
 artifact structured content, and eval/check surfaces rather than new main
-dashboard cards. Watchlists, monitoring, collaboration, portfolio dashboards,
-integrations, and multi-segment workflow packs remain V2 scope.
+dashboard cards. The homepage and main project workflow should remain focused on
+current verdict, next action, evidence health, validation, and decision state.
+
+Next work is ordered in `IMPLEMENTATION_BRIEF.md` as V1 Sprint 41 and later:
+security hardening first, then context engineering, memory management, MCP,
+retrieval/guide/eval upgrades, external/multimodal hardening, codebase cleanup,
+and developer documentation.
 
 ## Sprint 0 Scope
 
@@ -870,7 +889,7 @@ Checks run:
 - [x] Gate research-plan and research-memo proposal approvals before final
   project state mutation.
 - [x] Add a secondary Tool Activity panel to the project evidence review UI.
-- [x] Document the MCP / Tool Boundary in README.
+- [x] Document the internal MCP-style tool boundary in README.
 
 ## V1 Sprint 15 Verification
 
@@ -2018,4 +2037,20 @@ Manual environment note:
 
 ## Next Work
 
-V1 Sprint 41: TBD.
+Planned V1 work is now ordered by risk and portfolio value:
+
+1. V1 Sprint 41: Security, AI Safety, and Abuse Hardening
+2. V1 Sprint 42: Context Engineering and Prompt Context Architecture
+3. V1 Sprint 43: Multiple Memory Types and Memory Management
+4. V1 Sprint 44: MCP Adapter and External Tool Integration Boundary
+5. V1 Sprint 45: Advanced Retrieval Quality and Citation Verification
+6. V1 Sprint 46: Ask Thesys Streaming, Tool Proposals, and Guide Evals
+7. V1 Sprint 47: Observability, Cost Controls, and CI Eval Gates
+8. V1 Sprint 48: External Research and Multimodal Intelligence Hardening
+9. V1 Sprint 49: Codebase Architecture Cleanup
+10. V1 Sprint 50: Developer Documentation and Code Navigation
+
+UI-related work in these sprints must keep the homepage and primary project
+workflow straightforward. Advanced diagnostics, trace details, memory internals,
+security findings, and retrieval explanations should be hidden by default and
+available through inspect drawers, details panels, or developer-oriented routes.
