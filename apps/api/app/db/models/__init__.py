@@ -13,6 +13,7 @@ from app.db.models.competitor import Competitor, CompetitorEvidenceLink
 from app.db.models.evidence import EvidenceChunk, EvidenceSource
 from app.db.models.governance import ApprovalRequest, AuditEvent
 from app.db.models.identity import User, Workspace, WorkspaceMember
+from app.db.models.memory import ProjectMemoryItem
 from app.db.models.nudge import ProjectNudge
 from app.db.models.project import (
     CustomerSegment,
@@ -66,6 +67,7 @@ __all__ = [
     "Problem",
     "Project",
     "ProjectIntake",
+    "ProjectMemoryItem",
     "ProjectNudge",
     "ProjectThesis",
     "ResearchPlan",

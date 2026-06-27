@@ -14,6 +14,7 @@ from app.db.models import (
     AssumptionEvidenceLink,
     Claim,
     ClaimEvidenceLink,
+    ProjectMemoryItem,
     ResearchSprint,
     Risk,
 )
@@ -225,8 +226,10 @@ def test_agentic_research_memo_can_be_approved_after_review(
     assert body["version"]["structured_content"]["memory_update_approved_by"] is not None
     assert body["version"]["structured_content"]["memory_update_summary"]["assumption_ids"]
     assert body["version"]["structured_content"]["memory_update_summary"]["risk_ids"]
+    assert body["version"]["structured_content"]["memory_update_summary"]["memory_item_ids"]
     assert db_session.scalar(select(Assumption)) is not None
     assert db_session.scalar(select(Risk)) is not None
+    assert db_session.scalar(select(ProjectMemoryItem)) is not None
     assert db_session.scalar(select(AssumptionEvidenceLink)) is not None
 
     run = db_session.scalar(select(AIRun).where(AIRun.id == uuid.UUID(body["ai_run_id"])))

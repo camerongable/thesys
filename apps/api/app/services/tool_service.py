@@ -25,7 +25,7 @@ from app.db.models import (
     ToolInvocation,
 )
 from app.schemas.evidence import EvidenceRetrieveCreate
-from app.services import governance_service, project_service, retrieval_service
+from app.services import governance_service, memory_service, project_service, retrieval_service
 
 ToolAccessMode = Literal["read", "write", "proposal"]
 ToolRiskLevel = Literal["low", "medium", "high"]
@@ -176,6 +176,37 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             "additionalProperties": False,
         },
         output_schema={"type": "object", "properties": {"memo": {"type": ["object", "null"]}}},
+        access_mode="read",
+        risk_level="low",
+        approval_policy="never_required",
+        allowed_project_roles=PROJECT_READ_ROLES,
+    ),
+    "list_project_memory": ToolDefinition(
+        name="list_project_memory",
+        title="List project memory",
+        description="List typed project memory items selected for a workflow or memory type.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "memory_type": {
+                    "type": ["string", "null"],
+                    "enum": [
+                        "working",
+                        "episodic",
+                        "semantic",
+                        "project",
+                        "procedural",
+                        "preference",
+                        None,
+                    ],
+                },
+                "workflow_type": {"type": ["string", "null"], "maxLength": 120},
+                "include_stale": {"type": "boolean"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+            },
+            "additionalProperties": False,
+        },
+        output_schema={"type": "object", "properties": {"memory_items": {"type": "array"}}},
         access_mode="read",
         risk_level="low",
         approval_policy="never_required",
@@ -675,6 +706,8 @@ def _run_tool(
         return _list_decisions(db, auth, project_id)
     if definition.name == "get_research_memo":
         return _get_research_memo(db, auth, project_id, tool_input, research_sprint_id)
+    if definition.name == "list_project_memory":
+        return _list_project_memory(db, auth, project_id, tool_input)
     if definition.access_mode == "proposal":
         return {"proposal": tool_input, "requires_human_approval": True}
     raise ValueError(f"Unsupported tool: {definition.name}")
@@ -968,6 +1001,34 @@ def _get_research_memo(
             }
         }
     return {"memo": None}
+
+
+def _list_project_memory(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    tool_input: dict[str, Any],
+) -> dict[str, Any]:
+    workflow_type = tool_input.get("workflow_type")
+    limit = int(tool_input.get("limit") or 50)
+    if workflow_type:
+        items = memory_service.select_memory_for_workflow(
+            db,
+            auth,
+            project_id,
+            workflow_type=str(workflow_type),
+            limit=limit,
+        )
+    else:
+        items = memory_service.list_memory(
+            db,
+            auth,
+            project_id,
+            memory_type=tool_input.get("memory_type"),
+            include_stale=bool(tool_input.get("include_stale")),
+            limit=limit,
+        )
+    return {"memory_items": [memory_service.serialize_memory_item(item) for item in items]}
 
 
 def _guard_tool_input(

@@ -56,6 +56,7 @@ from app.services import (
     context_service,
     governance_service,
     langsmith_observability_service,
+    memory_service,
     project_service,
     retrieval_service,
     tool_service,
@@ -752,11 +753,34 @@ def _write_approved_memory_updates(
     risks = _upsert_research_risks(db, auth, project, memo)
     _link_assumptions_to_research_evidence(db, assumptions, memo)
     _refresh_project_confidence_from_research(project, assumptions)
+    memory_items = [
+        memory_service.upsert_from_assumption(
+            db,
+            auth,
+            project.id,
+            assumption,
+            source_entity_type="artifact_version",
+            source_entity_id=version.id,
+        )
+        for assumption in assumptions
+    ]
+    memory_items.extend(
+        memory_service.upsert_from_risk(
+            db,
+            auth,
+            project.id,
+            risk,
+            source_entity_type="artifact_version",
+            source_entity_id=version.id,
+        )
+        for risk in risks
+    )
     db.flush()
     return {
         "research_sprint_id": str(sprint.id),
         "assumption_ids": [str(assumption.id) for assumption in assumptions],
         "risk_ids": [str(risk.id) for risk in risks],
+        "memory_item_ids": [str(item.id) for item in memory_items],
         "recommended_validation_actions": memo.recommended_validation_actions,
         "first_validation_target_assumption_id": str(assumptions[0].id)
         if assumptions
@@ -1152,6 +1176,16 @@ def _research_context(
         research_sprint_id=sprint.id,
         requested_by="agent",
     ).output
+    memory_summary = tool_service.execute_tool(
+        db,
+        auth,
+        settings,
+        project.id,
+        "list_project_memory",
+        {"workflow_type": "agentic_research", "limit": 20},
+        research_sprint_id=sprint.id,
+        requested_by="agent",
+    ).output
     project_payload = project_summary.get("project") or {}
     return {
         "project": project_payload,
@@ -1175,6 +1209,7 @@ def _research_context(
         "risks": assumption_summary.get("risks", []),
         "validation_plans": validation_summary,
         "decisions": decision_summary.get("decisions", []),
+        "project_memory": memory_summary.get("memory_items", []),
         "latest_research_memo": memo_summary.get("memo"),
     }
 
@@ -1328,7 +1363,7 @@ def _lookup_tool_name(tool: ResearchTool) -> str | None:
     if tool == "assumption_lookup":
         return "list_assumptions"
     if tool == "project_memory_lookup":
-        return "get_project_summary"
+        return "list_project_memory"
     return None
 
 
@@ -1345,8 +1380,7 @@ def _lookup_tool_payload(
     if tool == "assumption_lookup":
         return list(project_context.get("assumptions", []))
     if tool == "project_memory_lookup":
-        project = project_context.get("project")
-        return [project] if isinstance(project, dict) else []
+        return list(project_context.get("project_memory", []))
     return []
 
 
