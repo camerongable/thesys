@@ -4,7 +4,6 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from time import perf_counter
 
 from sqlalchemy import Select, cast, func, or_, select, text
@@ -27,6 +26,7 @@ from app.schemas.evidence import (
     RetrievalRerankerDiagnosticsRead,
 )
 from app.services import ai_run_service, embedding_service, project_service
+from app.services.common import workflow as workflow_utils
 
 SQL_VECTOR_CANDIDATE_MULTIPLIER = 4
 PIPELINE_SUBQUERY_LIMIT = 5
@@ -112,38 +112,30 @@ def retrieve_evidence(
 
     try:
         search = retrieve_evidence_search(db, auth, settings, project_id, payload)
-        step = ai_run_service.complete_step(
+        completed = workflow_utils.complete_zero_cost_step_and_run(
             db,
-            step,
+            run=run,
+            step=step,
             output_json={
                 "result_count": len(search.results),
                 "diagnostics": search.diagnostics.model_dump(mode="json"),
                 "results": [result.model_dump(mode="json") for result in search.results],
             },
             latency_ms=search.diagnostics.query_latency_ms,
-            tokens=None,
-            cost=Decimal("0"),
-        )
-        run = ai_run_service.complete_run(
-            db,
-            run,
             output_summary=f"Retrieved {len(search.results)} chunks for query.",
-            total_tokens=None,
-            total_cost=Decimal("0"),
             model_provider=settings.embedding_provider,
             model_name=settings.embedding_model,
         )
         return RetrievalRunResult(
-            run=run,
-            step=step,
+            run=completed.run,
+            step=completed.step,
             mode=payload.mode,
             query=payload.query,
             diagnostics=search.diagnostics,
             results=search.results,
         )
     except Exception as exc:
-        ai_run_service.fail_step(db, step, error=str(exc))
-        ai_run_service.fail_run(db, run, error=str(exc))
+        workflow_utils.fail_step_and_run(db, run=run, step=step, error=str(exc))
         raise
 
 

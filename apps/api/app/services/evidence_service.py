@@ -2,7 +2,6 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
 from html.parser import HTMLParser
 from io import BytesIO
 from time import perf_counter
@@ -29,6 +28,8 @@ from app.services import (
     project_service,
     source_provenance_service,
 )
+from app.services.common import metadata as metadata_utils
+from app.services.common import workflow as workflow_utils
 
 TOKEN_RE = re.compile(r"\S+")
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
@@ -653,24 +654,17 @@ def _process_source_text(
                 db.delete(source)
                 db.commit()
                 existing = get_source(db, auth, source.project_id, duplicate.id)
-                ai_run_service.complete_step(
+                workflow_utils.complete_zero_cost_step_and_run(
                     db,
-                    step,
+                    run=run,
+                    step=step,
                     output_json={
                         "source_id": str(existing.id),
                         "duplicate_of_source_id": str(existing.id),
                         "content_hash": content_hash,
                     },
                     latency_ms=int((perf_counter() - started) * 1000),
-                    tokens=None,
-                    cost=Decimal("0"),
-                )
-                ai_run_service.complete_run(
-                    db,
-                    run,
                     output_summary="Skipped duplicate external source.",
-                    total_tokens=None,
-                    total_cost=Decimal("0"),
                     model_provider=settings.embedding_provider,
                     model_name=settings.embedding_model,
                 )
@@ -737,9 +731,10 @@ def _process_source_text(
         db.refresh(source)
         source = get_source(db, auth, source.project_id, source.id)
         latency_ms = int((perf_counter() - started) * 1000)
-        ai_run_service.complete_step(
+        workflow_utils.complete_zero_cost_step_and_run(
             db,
-            step,
+            run=run,
+            step=step,
             output_json={
                 "source_id": str(source.id),
                 "chunk_count": len(source.chunks),
@@ -751,15 +746,7 @@ def _process_source_text(
                 "embedding_version": settings.embedding_version,
             },
             latency_ms=latency_ms,
-            tokens=None,
-            cost=Decimal("0"),
-        )
-        ai_run_service.complete_run(
-            db,
-            run,
             output_summary=source.summary or "",
-            total_tokens=None,
-            total_cost=Decimal("0"),
             model_provider=settings.embedding_provider,
             model_name=settings.embedding_model,
         )
@@ -767,13 +754,13 @@ def _process_source_text(
     except Exception as exc:
         db.rollback()
         _mark_source_failed(db, source, str(exc))
-        ai_run_service.fail_step(
+        workflow_utils.fail_step_and_run(
             db,
-            step,
+            run=run,
+            step=step,
             error=str(exc),
             latency_ms=int((perf_counter() - started) * 1000),
         )
-        ai_run_service.fail_run(db, run, error=str(exc))
         if isinstance(exc, EvidenceIngestionError):
             raise
         raise EvidenceIngestionError("Evidence source processing failed.") from exc
@@ -851,38 +838,7 @@ def _merge_metadata(
     base: dict[str, Any],
     extra: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    if not extra:
-        return base
-
-    merged = dict(base)
-    for key, value in extra.items():
-        if value is None:
-            continue
-        if key.endswith("_ids") or key in {
-            "research_questions",
-            "assumptions_to_test",
-            "source_candidate_types",
-            "discovered_source_ids",
-            "competitor_candidate_ids",
-            "competitor_ids",
-        }:
-            existing_values = merged.get(key, [])
-            if not isinstance(existing_values, list):
-                existing_values = [existing_values]
-            new_values = value if isinstance(value, list) else [value]
-            ordered: list[Any] = []
-            seen: set[str] = set()
-            for item in [*existing_values, *new_values]:
-                if item is None:
-                    continue
-                marker = str(item)
-                if marker not in seen:
-                    ordered.append(item)
-                    seen.add(marker)
-            merged[key] = ordered
-        else:
-            merged[key] = value
-    return merged
+    return metadata_utils.merge_metadata(base, extra)
 
 
 def _fetch_url(settings: Settings, url: str) -> ParsedSource:
