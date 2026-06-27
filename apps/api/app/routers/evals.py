@@ -4,9 +4,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.core.auth import AuthContextDep
+from app.core.auth import AuthContextDep, SettingsDep
 from app.db.session import get_db
-from app.schemas.evals import GuideEvalRead, MvpEvalRead, V1ResearchEvalRead
+from app.schemas.evals import AIEvalRead, GuideEvalRead, MvpEvalRead, V1ResearchEvalRead
 from app.services import eval_service
 
 router = APIRouter(prefix="/api/projects/{project_id}/evals", tags=["evals"])
@@ -30,3 +30,13 @@ def run_v1_research_eval(
 @router.get("/guide", response_model=GuideEvalRead)
 def run_guide_eval(project_id: uuid.UUID, db: DbDep, auth: AuthContextDep) -> GuideEvalRead:
     return eval_service.run_guide_eval(db, auth, project_id)
+
+
+@router.get("/ai", response_model=AIEvalRead)
+def run_ai_eval(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> AIEvalRead:
+    return eval_service.run_ai_eval(db, auth, settings, project_id)

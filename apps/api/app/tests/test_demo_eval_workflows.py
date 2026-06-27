@@ -1,5 +1,9 @@
+import json
+import subprocess
+import sys
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -54,6 +58,38 @@ def test_seed_demo_project_runs_mvp_eval_and_exposes_workflow_events(
         body = "".join(event_response.iter_text())
     assert "demo_seed" in body
     assert "write_demo_workspace" in body
+
+
+def test_ai_eval_reports_cost_and_budget_status(client: TestClient) -> None:
+    seed_body = client.post("/api/demo/seed").json()
+    project_id = seed_body["project"]["id"]
+
+    response = client.get(f"/api/projects/{project_id}/evals/ai")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["report"]["run_count"] >= 1
+    assert body["report"]["budget_status"] == "within_budget"
+    assert body["report"]["circuit_breaker_status"] == "closed"
+    metric_keys = {metric["key"] for metric in body["metrics"]}
+    assert {"ai_runs_recorded", "budget_status", "provider_circuit"} <= metric_keys
+
+
+def test_static_ai_eval_gate_script_passes() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+
+    result = subprocess.run(
+        [sys.executable, str(repo_root / "scripts/eval_ai_quality.py"), "--json"],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    body = json.loads(result.stdout)
+    assert body["passed"] is True
+    assert body["score"] == body["total"]
 
 
 def test_seed_demo_project_contains_guided_sprint_28_journey(
