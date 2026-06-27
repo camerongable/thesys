@@ -640,7 +640,7 @@ def assemble_context_results(
     dropped_count = 0
     max_results = top_k or len(results)
     signatures: list[set[str]] = []
-    for result in results:
+    for result in _diversify_context_candidates(results):
         score = result.rerank_score if result.rerank_score is not None else result.score
         if score < settings.retrieval_min_context_score:
             dropped_count += 1
@@ -661,7 +661,7 @@ def assemble_context_results(
                 update={
                     "context_included": True,
                     "selection_reason": (
-                        result.selection_reason or "Selected for synthesis context."
+                        _context_selection_reason(result, per_source[result.source_id])
                     ),
                 }
             )
@@ -681,6 +681,30 @@ def assemble_context_results(
         min_context_score=settings.retrieval_min_context_score,
     )
     return selected, context
+
+
+def _diversify_context_candidates(
+    results: list[EvidenceRetrievalResultRead],
+) -> list[EvidenceRetrievalResultRead]:
+    by_source: dict[uuid.UUID, list[EvidenceRetrievalResultRead]] = defaultdict(list)
+    for result in results:
+        by_source[result.source_id].append(result)
+    diversified: list[EvidenceRetrievalResultRead] = []
+    while by_source:
+        for source_id in list(by_source):
+            candidates = by_source[source_id]
+            if candidates:
+                diversified.append(candidates.pop(0))
+            if not candidates:
+                del by_source[source_id]
+    return diversified
+
+
+def _context_selection_reason(result: EvidenceRetrievalResultRead, prior_source_count: int) -> str:
+    base = result.selection_reason or "Selected for synthesis context."
+    if prior_source_count == 0:
+        return f"{base} Prioritized for source diversity."
+    return base
 
 
 def _quality_report(

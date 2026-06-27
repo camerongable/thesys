@@ -53,6 +53,7 @@ from app.schemas.research import (
 )
 from app.services import (
     ai_run_service,
+    citation_verifier_service,
     context_service,
     governance_service,
     langsmith_observability_service,
@@ -2336,38 +2337,50 @@ def _audit_citations(
     memo: AgenticResearchMemoDraft,
     selected_evidence: list[EvidenceRetrievalResultRead],
 ) -> AgenticResearchMemoDraft:
-    valid_by_chunk = {result.chunk_id: result for result in selected_evidence}
-    valid_by_source = {result.source_id: result for result in selected_evidence}
     unsupported = list(memo.unsupported_claims)
     claims: list[ClaimDraft] = []
     citations: list[Citation] = []
-    for claim in memo.claims:
-        valid_citations = [
-            citation
-            for citation in claim.citations
-            if _citation_is_valid(citation, valid_by_chunk, valid_by_source)
-        ]
-        if claim.support_level == "supported" and not valid_citations:
-            unsupported.append(claim.text)
+    for verification in citation_verifier_service.verify_claims(memo.claims, selected_evidence):
+        claim = verification.claim
+        if verification.unsupported_reason:
+            unsupported.append(f"{claim.text} ({verification.unsupported_reason})")
             claims.append(
                 claim.model_copy(update={"support_level": "unsupported", "citations": []})
             )
             continue
-        claims.append(claim.model_copy(update={"citations": valid_citations}))
-        citations.extend(valid_citations)
+        support_level = "partial" if verification.weak_citations else claim.support_level
+        claims.append(
+            claim.model_copy(
+                update={
+                    "support_level": support_level,
+                    "citations": verification.verified_citations,
+                }
+            )
+        )
+        if verification.weak_citations and claim.support_level == "supported":
+            unsupported.append(f"{claim.text} (weak_text_overlap)")
+        citations.extend(verification.verified_citations)
 
     audited_findings: list[ResearchFindingDraft] = []
     for finding in memo.findings:
         valid_citations = [
             citation
             for citation in finding.citations
-            if _citation_is_valid(citation, valid_by_chunk, valid_by_source)
+            if citation_verifier_service.citation_is_supported(
+                citation,
+                finding.finding,
+                selected_evidence,
+            ).supported
         ]
         audited_findings.append(finding.model_copy(update={"citations": valid_citations}))
         citations.extend(valid_citations)
 
     for citation in memo.citations:
-        if _citation_is_valid(citation, valid_by_chunk, valid_by_source):
+        if citation_verifier_service.citation_is_supported(
+            citation,
+            citation.quote or citation.title or "",
+            selected_evidence,
+        ).supported:
             citations.append(citation)
 
     return memo.model_copy(

@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -7,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import AIRun, AIStep, EvidenceChunk, EvidenceSource
-from app.services import evidence_service, multimodal_extraction_service
+from app.schemas.evidence import EvidenceRetrievalResultRead
+from app.services import evidence_service, multimodal_extraction_service, retrieval_service
 
 
 def test_note_ingestion_chunks_embeds_and_retrieves(
@@ -197,6 +199,27 @@ def test_retrieval_reranking_can_be_disabled_by_config(
     result = body["results"][0]
     assert result["rerank_score"] == result["score"]
     assert result["final_rank"] == 1
+
+
+def test_context_assembly_prioritizes_source_diversity() -> None:
+    settings = get_settings()
+    source_a = uuid.uuid4()
+    source_b = uuid.uuid4()
+    results = [
+        _retrieval_result(source_a, "First source best score", score=0.95),
+        _retrieval_result(source_a, "First source second chunk", score=0.94),
+        _retrieval_result(source_b, "Second source diverse chunk", score=0.80),
+    ]
+
+    selected, diagnostics = retrieval_service.assemble_context_results(
+        settings,
+        results,
+        top_k=2,
+    )
+
+    assert [result.source_id for result in selected] == [source_a, source_b]
+    assert "source diversity" in selected[0].selection_reason.lower()
+    assert diagnostics.selected_count == 2
 
 
 def test_url_ingestion_uses_fetcher_and_source_type_filter(
@@ -513,6 +536,29 @@ def _minimal_text_pdf(text: str) -> bytes:
         ).encode("ascii")
     )
     return bytes(pdf)
+
+
+def _retrieval_result(
+    source_id: uuid.UUID,
+    text: str,
+    *,
+    score: float,
+) -> EvidenceRetrievalResultRead:
+    return EvidenceRetrievalResultRead(
+        source_id=source_id,
+        chunk_id=uuid.uuid4(),
+        title="Source",
+        url=None,
+        source_type="note",
+        chunk_index=0,
+        text=text,
+        score=score,
+        semantic_score=score,
+        keyword_score=score,
+        metadata={},
+        rerank_score=score,
+        created_at=datetime.now(UTC),
+    )
 
 
 def test_evidence_endpoints_are_workspace_scoped(client: TestClient) -> None:
