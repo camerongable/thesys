@@ -15,6 +15,10 @@ ContextItemType = Literal[
     "conversation_turn",
     "action",
     "gap",
+    "memory",
+    "context_summary",
+    "safety_instruction",
+    "conflict",
     "tool_output",
 ]
 

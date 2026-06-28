@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +15,7 @@ from app.schemas.artifacts import (
     RiskDraft,
     RiskRead,
 )
+from app.schemas.context import ContextPack
 
 ExperimentStatus = Literal["planned", "running", "completed", "cancelled"]
 ExperimentOutcome = Literal["positive", "negative", "mixed", "inconclusive"]
@@ -343,6 +344,7 @@ class DecisionRecommendationRead(BaseModel):
     risks: list[str] = Field(default_factory=list)
     suggested_decision_record: SuggestedDecisionRecordRead
     action_cards: list[DecisionCoachActionRead] = Field(default_factory=list)
+    context_pack: ContextPack | dict[str, Any] | None = None
 
 
 class DecisionCoachChatCreate(BaseModel):

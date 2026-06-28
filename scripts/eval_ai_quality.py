@@ -29,6 +29,7 @@ def main() -> int:
     if args.project_id:
         metrics.extend(_fetch_project_eval(args.api_base, args.project_id, "ai"))
         metrics.extend(_fetch_project_eval(args.api_base, args.project_id, "guide"))
+        metrics.extend(_fetch_project_eval(args.api_base, args.project_id, "context"))
 
     passed = sum(1 for metric in metrics if metric["passed"])
     total = len(metrics)
@@ -84,6 +85,14 @@ def _static_metrics() -> list[dict[str, Any]]:
             _contains("apps/api/app/routers/evals.py", "/guide"),
             "present",
             "guide eval route exists",
+        ),
+        _metric(
+            "context_eval_endpoint",
+            "Context eval endpoint",
+            _contains("apps/api/app/routers/evals.py", "/context")
+            and _contains("apps/api/app/services/eval_service.py", "run_context_eval"),
+            "present",
+            "context eval route exists",
         ),
         _metric(
             "ai_accounting",

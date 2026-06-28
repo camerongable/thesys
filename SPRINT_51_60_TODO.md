@@ -32,27 +32,30 @@ sprint must end with a focused commit before the next sprint begins.
 
 ## Sprint 51: Unified Context Compiler, Memory V2, and Context Evals
 
-- [ ] Build `ContextCompiler` service for domain state, retrieved evidence,
+- [x] Build `ContextCompiler` service for domain state, retrieved evidence,
   typed memory, tool outputs, recent turns, validation state, decisions, and
   safety instructions.
-- [ ] Add explicit context profiles for Ask Thesys, agentic research memos,
-  opportunity briefs, competitor analysis, validation planning, validation
-  result interpretation, and decision recommendations.
-- [ ] Route all major LLM workflows through the shared compiler.
-- [ ] Add `MemoryManager` policy layer for selection, compaction, conflict
+- [x] Add explicit context profiles for assumption extraction, Ask Thesys,
+  agentic research memos, opportunity briefs, competitor analysis, validation
+  planning, validation result interpretation, and decision recommendations.
+- [x] Route all major LLM workflows through the shared compiler.
+- [x] Add `MemoryManager` policy layer for selection, compaction, conflict
   resolution, preference capture, and memory write-review routing.
-- [ ] Add approval-gated durable memory compaction with provenance preservation.
-- [ ] Add explicit preference-memory capture and management.
-- [ ] Add memory conflict detection and approval-gated keep/supersede/archive/
+- [x] Add approval-gated durable memory compaction with provenance preservation.
+- [x] Add explicit preference-memory capture and management.
+- [x] Add memory conflict detection and approval-gated keep/supersede/archive/
   merge resolution.
-- [ ] Add hidden-by-default memory browser/inspector under Inspect.
-- [ ] Add recommendation-to-memory trace links.
-- [ ] Add context diff/inspector and context evals for relevant inclusion,
+- [x] Add hidden-by-default memory browser/inspector under Inspect.
+- [x] Add recommendation-to-memory trace links.
+- [x] Add context diff/inspector and context evals for relevant inclusion,
   poisoned-instruction isolation, stale exclusion, citation scoping, and
   dropped-context explanations.
-- [ ] Run backend context/memory tests and evals.
-- [ ] Run IDE browser QA for the memory inspector if UI changes are included.
-- [ ] Commit Sprint 51.
+- [x] Run backend context/memory tests and evals.
+- [ ] Run IDE browser QA for the memory/context inspector if UI changes are
+  included. Blocked so far because `pnpm --filter thesys-web typecheck` fails
+  before TypeScript while fetching registry tarballs/supply-chain metadata
+  (`ECONNRESET` / `fetch failed`); retry when npm registry access is stable.
+- [x] Commit Sprint 51.
 
 ## Sprint 52: Real MCP Server and External Agent Harness
 

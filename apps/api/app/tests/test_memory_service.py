@@ -180,6 +180,147 @@ def test_memory_api_can_mark_items_stale(
     assert active_response.json()["memory_items"] == []
 
 
+def test_memory_context_selection_explains_exclusions_and_conflicts(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    active = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="semantic",
+        write_policy="approval_required",
+        title="Target pain",
+        summary="Coaches need triage before weekly check-ins.",
+        content={"text": "Coaches need triage before weekly check-ins."},
+    )
+    memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="preference",
+        write_policy="approval_required",
+        title="Validation preference",
+        summary="Prefer concierge tests.",
+        content={"preference": "concierge"},
+        status_value="proposed",
+    )
+    first_conflict = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="project",
+        write_policy="direct",
+        title="Current wedge",
+        summary="Weekly check-in triage for independent coaches.",
+        content={"wedge": "coaches"},
+    )
+    second_conflict = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="project",
+        write_policy="direct",
+        title="Current wedge",
+        summary="Weekly scheduling automation for agencies.",
+        content={"wedge": "agencies"},
+    )
+    db_session.commit()
+
+    selection = memory_service.select_memory_for_context(
+        db_session,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+    )
+
+    assert active.id in {item.id for item in selection.selected}
+    assert any(item["reason"] == "pending_human_review" for item in selection.excluded)
+    assert selection.conflicts
+    conflict = selection.conflicts[0]
+    assert {first_conflict.id, second_conflict.id}.issubset(set(conflict["memory_item_ids"]))
+
+    keeper = memory_service.resolve_memory_conflict(
+        db_session,
+        auth,
+        project_id,
+        conflict_group_id=conflict["conflict_group_id"],
+        keeper_id=first_conflict.id,
+        supersede_ids=[second_conflict.id],
+        archive_ids=[],
+        reason="Coach wedge is the approved current thesis.",
+    )
+    db_session.refresh(second_conflict)
+    assert keeper.status == "active"
+    assert second_conflict.status == "superseded"
+    assert second_conflict.superseded_by_id == keeper.id
+
+
+def test_memory_proposals_and_inspect_endpoint(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    source = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="semantic",
+        write_policy="direct",
+        title="Research finding",
+        summary="Two coaches asked for triage before calls.",
+        content={"finding": "triage before calls"},
+        source_entity_type="artifact_version",
+        source_entity_id=uuid.uuid4(),
+    )
+    db_session.commit()
+
+    preference_response = client.post(
+        f"/api/projects/{project_id}/memory/preferences",
+        json={
+            "title": "Validation style",
+            "summary": "Prefer concierge tests before surveys.",
+            "content": {"preference": "concierge first"},
+        },
+    )
+    assert preference_response.status_code == 200
+    preference = preference_response.json()
+    assert preference["memory_type"] == "preference"
+    assert preference["status"] == "proposed"
+
+    inspect_response = client.get(f"/api/projects/{project_id}/memory/inspect?workflow_type=guide_chat")
+    assert inspect_response.status_code == 200
+    inspect = inspect_response.json()
+    assert inspect["policy"]["workflow_type"] == "guide_chat"
+    assert any(item["id"] == str(source.id) for item in inspect["selected_memory"])
+    assert any(item["id"] == preference["id"] for item in inspect["proposed_memory"])
+    assert any(item["reason"] == "pending_human_review" for item in inspect["excluded_memory"])
+
+    approve_response = client.post(f"/api/projects/{project_id}/memory/{preference['id']}/approve")
+    assert approve_response.status_code == 200
+    assert approve_response.json()["status"] == "active"
+
+    compact_response = client.post(
+        f"/api/projects/{project_id}/memory/compact",
+        json={
+            "workflow_type": "guide_chat",
+            "memory_type": "semantic",
+            "source_memory_ids": [str(source.id)],
+        },
+    )
+    assert compact_response.status_code == 200
+    compacted = compact_response.json()
+    assert compacted["status"] == "proposed"
+    assert compacted["provenance_metadata"]["source_memory_ids"] == [str(source.id)]
+
+    reject_response = client.post(f"/api/projects/{project_id}/memory/{compacted['id']}/reject")
+    assert reject_response.status_code == 200
+    assert reject_response.json()["status"] == "archived"
+
+
 def _create_project(client: TestClient) -> str:
     response = client.post(
         "/api/projects",

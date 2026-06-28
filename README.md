@@ -208,7 +208,7 @@ Thesys is built to show the difference between a thin LLM wrapper and a durable 
 | Structured LLM outputs | LLM responses are requested as JSON, validated against typed schemas, repaired when possible, and persisted as structured project objects. | Pydantic v2, LiteLLM-compatible chat completions, structured output helper |
 | Model gateway and deterministic fallback | Chat, embedding, reranking, and multimodal extraction paths are configurable. Local demos and tests can run without provider credentials. | LiteLLM Proxy, httpx, Ollama, OpenAI-compatible APIs, Gemini, deterministic stubs |
 | Persistent project memory | The product stores thesis versions, evidence, artifacts, claims, assumptions, validation missions, decisions, AI runs, AI steps, tool calls, approvals, and audit events instead of relying on chat history. | PostgreSQL, SQLAlchemy, Alembic |
-| Bounded conversational context | Ask Thesys uses recent-turn context and project memory while keeping chat non-mutating and scoped to one project. | Guide service, Pydantic response schemas, retrieval tool calls, React Query |
+| Unified context engineering | Major AI workflows compile typed context packs with domain state, retrieval results, selected memory, untrusted inputs, tool output metadata, token budgets, dropped-item reasons, and workflow-specific context profiles. | ContextCompiler, Pydantic context schemas, FastAPI services, SQLAlchemy-backed memory |
 | Tool governance and MCP adapter | Project capabilities are exposed through explicit tool contracts with schemas, risk levels, access modes, approval policy, audit logging, and an MCP-shaped HTTP adapter. | Internal tool registry, MCP adapter, approval requests, RBAC, audit events |
 | Human-in-the-loop agents | AI workflows can propose research plans, memory updates, validation plans, and decisions, but important strategic state changes require user approval. | Tool registry, approval requests, Temporal signals, role-based project permissions |
 | Prompt-injection and ingestion safety | Retrieved content is treated as untrusted evidence, URL fetches are SSRF-guarded, uploads are validated, fetched-page injection markers are recorded, and secrets are redacted from traces. | Shared prompt rules, SSRF guards, upload validation, cited synthesis prompts, secret redaction utilities |
@@ -216,7 +216,7 @@ Thesys is built to show the difference between a thin LLM wrapper and a durable 
 | Multimodal evidence extraction | Image uploads and low-text PDF fallback can be extracted through a multimodal model boundary. PDFs record page lineage and table-extraction extension metadata, while local deterministic fixture extraction keeps tests stable. | LiteLLM multimodal chat, pypdf, file upload pipeline, source provenance metadata |
 | Durable orchestration | Long-running research sprints can survive retries, approval waits, and worker restarts through a durable workflow layer. | Temporal, Temporal Python SDK, FastAPI service layer |
 | AI observability | AI runs and steps track model, prompt version, latency, token usage, cost, trace IDs, failures, retrieval diagnostics, and generated artifact provenance. | LangSmith, AI run/step tables, LiteLLM cost headers, workflow trace UI |
-| Evaluation | Research and AI evals check citation coverage, unsupported claims, agentic traceability, gap detection, retrieval quality, search provenance, cost visibility, source provenance, prompt-injection markers, and secret redaction. | Custom eval scripts, JSON eval cases, pytest-compatible service checks |
+| Evaluation | Research, guide, AI, and context evals check citation coverage, unsupported claims, agentic traceability, gap detection, retrieval quality, search provenance, cost visibility, context inclusion, stale-memory exclusion, poisoned-instruction isolation, dropped-context explanations, prompt-injection markers, and secret redaction. | Custom eval scripts, JSON eval cases, pytest-compatible service checks |
 | AI product UX | The UI exposes verdicts, next actions, evidence, unsupported gaps, assumptions, validation missions, decisions, citations, and traces while keeping implementation details hidden by default. | Next.js, React, TanStack Query, project guide service |
 
 ### Feature-by-Feature AI Engineering Map
@@ -244,9 +244,12 @@ Thesys is built to show the difference between a thin LLM wrapper and a durable 
 
 **Context and Memory**
 
-- Builds typed context packs for Ask Thesys and agentic research with token budgets, provenance, dropped-item diagnostics, and untrusted-content rules.
+- Builds typed context packs for assumption extraction, Ask Thesys, agentic research, opportunity briefs, competitor analysis, validation planning, validation-result interpretation, and decision recommendation.
+- Uses explicit workflow profiles so each path has an inspectable token budget, expected context item types, selected memory, dropped-context explanations, citation IDs, and untrusted-content rules.
 - Stores typed memory items for semantic, episodic, procedural, preference, working, and project memory.
 - Selects memory by workflow so each AI path receives relevant context without turning the whole database into a prompt.
+- Supports approval-gated preference memory, compacted memory proposals, stale/archive behavior, conflict detection/resolution, and recommendation-to-memory provenance links.
+- Exposes hidden-by-default memory and context diagnostics in Inspect, plus `/evals/context` and `scripts/eval_ai_quality.py --json` checks.
 
 **Tool Governance and MCP**
 
@@ -857,7 +860,9 @@ Implemented or demonstrated:
   multimodal provider boundary
 - URL/upload security guards, fetched-page prompt-injection markers, source
   quality signals, canonical URL/content-hash dedupe, and PDF page lineage
-- typed context packs and multiple memory types with workflow-aware selection
+- unified context compiler, workflow context profiles, typed context packs,
+  multiple memory types, memory proposal review, context diagnostics, and
+  workflow-aware memory selection
 - MCP-shaped adapter over the governed tool registry
 - AI cost accounting, provider-failure circuit checks, and local AI eval gates
 - shared service utilities, source provenance utilities, developer docs, and
@@ -865,8 +870,8 @@ Implemented or demonstrated:
 
 Planned future work:
 
-- unified context compiler with workflow profiles, memory integration, context
-  compression, conflict detection, context diffs, and context-quality evals
+- deeper context compression and visual diffing for older guide turns, long
+  evidence sets, and historical research traces
 - real MCP server transport for external agent clients, beyond the current
   MCP-shaped HTTP adapter
 - true token/step streaming in Ask Thesys with cancellation and live tool events

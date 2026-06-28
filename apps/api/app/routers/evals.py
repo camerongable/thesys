@@ -6,7 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContextDep, SettingsDep
 from app.db.session import get_db
-from app.schemas.evals import AIEvalRead, GuideEvalRead, MvpEvalRead, V1ResearchEvalRead
+from app.schemas.evals import (
+    AIEvalRead,
+    ContextEvalRead,
+    GuideEvalRead,
+    MvpEvalRead,
+    V1ResearchEvalRead,
+)
 from app.services import eval_service
 
 router = APIRouter(prefix="/api/projects/{project_id}/evals", tags=["evals"])
@@ -30,6 +36,16 @@ def run_v1_research_eval(
 @router.get("/guide", response_model=GuideEvalRead)
 def run_guide_eval(project_id: uuid.UUID, db: DbDep, auth: AuthContextDep) -> GuideEvalRead:
     return eval_service.run_guide_eval(db, auth, project_id)
+
+
+@router.get("/context", response_model=ContextEvalRead)
+def run_context_eval(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> ContextEvalRead:
+    return eval_service.run_context_eval(db, auth, settings, project_id)
 
 
 @router.get("/ai", response_model=AIEvalRead)

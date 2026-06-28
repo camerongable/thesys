@@ -2088,3 +2088,37 @@ The main homepage and primary project workflow remain straightforward. Advanced
 diagnostics, trace details, memory internals, security findings, and retrieval
 explanations stay hidden by default and are available through metadata,
 inspection surfaces, eval output, or developer docs.
+
+## V1 Sprint 51 Branch Progress
+
+Sprint 51 is implemented on `codex/v1-sprints-51-60`:
+
+- Added a shared `ContextCompiler` with explicit workflow profiles for
+  assumption extraction, Ask Thesys, agentic research, opportunity briefs,
+  competitor analysis, validation planning, validation-result interpretation,
+  and decision recommendation.
+- Routed the major AI workflows through compiled context packs with workflow
+  metadata, token budgets, selected memory, dropped-item explanations,
+  citation IDs, and untrusted-content safety metadata.
+- Added Memory V2 policy behavior for workflow-aware selection, excluded-memory
+  reasons, proposed preference memory, approval-gated compaction candidates,
+  conflict detection/resolution, proposal approval/rejection, and
+  recommendation-to-memory provenance links.
+- Added hidden-by-default Inspect surfaces for project memory and context
+  diagnostics so the homepage and primary workflow stay focused.
+- Added `/api/projects/{project_id}/evals/context` and wired the static AI eval
+  gate to check context profiles, relevant inclusion, poisoned-instruction
+  isolation, stale exclusion, citation scoping, dropped-context explanations,
+  and memory-policy visibility.
+
+Sprint 51 verification run:
+
+- [x] `python3 -m compileall -q` on the touched API modules
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py app/tests/test_memory_service.py app/tests/test_validation.py app/tests/test_agentic_research.py app/tests/test_demo_eval_workflows.py -q --maxfail=1`
+- [x] `cd apps/api && .venv/bin/pytest -q`
+- [x] `python3 scripts/eval_ai_quality.py --json`
+- [x] `git diff --check`
+- [x] `rg -n "<{7}|={7}|>{7}" .`
+- [ ] `pnpm --filter thesys-web typecheck` could not complete in this
+  environment because pnpm failed before TypeScript while fetching registry
+  tarballs and supply-chain metadata (`ECONNRESET` / `fetch failed`).

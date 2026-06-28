@@ -322,6 +322,7 @@ def run_agentic_research(
     def synthesizer(state: AgenticResearchState) -> AgenticResearchState:
         memo, completion, memo_context_pack = _generate_memo(
             db,
+            auth,
             settings,
             run,
             project_id,
@@ -775,6 +776,11 @@ def _write_approved_memory_updates(
             assumption,
             source_entity_type="artifact_version",
             source_entity_id=version.id,
+            source_metadata={
+                "research_sprint_id": str(sprint.id),
+                "decision_recommendation": memo.decision_recommendation,
+                "recommendation_source": "agentic_research_memo",
+            },
         )
         for assumption in assumptions
     ]
@@ -786,6 +792,11 @@ def _write_approved_memory_updates(
             risk,
             source_entity_type="artifact_version",
             source_entity_id=version.id,
+            source_metadata={
+                "research_sprint_id": str(sprint.id),
+                "decision_recommendation": memo.decision_recommendation,
+                "recommendation_source": "agentic_research_memo",
+            },
         )
         for risk in risks
     )
@@ -1515,6 +1526,7 @@ def _follow_up_retrieval(
 
 def _generate_memo(
     db: Session,
+    auth: AuthContext,
     settings: Settings,
     run: AIRun,
     project_id: uuid.UUID,
@@ -1524,6 +1536,13 @@ def _generate_memo(
     gaps: list[str],
     trace: langsmith_observability_service.TraceContext,
 ) -> tuple[AgenticResearchMemoDraft, LLMCompletion, dict[str, Any]]:
+    memory_selection = memory_service.select_memory_for_context(
+        db,
+        auth,
+        project_id,
+        workflow_type="agentic_research",
+        limit=20,
+    )
     context_pack = context_service.build_research_context_pack(
         settings,
         project_id=project_id,
@@ -1534,6 +1553,7 @@ def _generate_memo(
         gaps=gaps,
         prompt_version=AGENTIC_RESEARCH_PROMPT_VERSION,
         expected_schema=AgenticResearchMemoDraft.__name__,
+        memory_selection=memory_selection,
     )
     context_pack_payload = context_pack.model_dump(mode="json")
     messages = _memo_messages(context_pack)

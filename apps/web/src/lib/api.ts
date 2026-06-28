@@ -827,6 +827,7 @@ export type DecisionCoachRecommendation = {
   risks: string[];
   suggested_decision_record: SuggestedDecisionRecord;
   action_cards: DecisionCoachAction[];
+  context_pack: Record<string, unknown> | null;
 };
 
 export type DecisionCoachChatResponse = {
@@ -1334,6 +1335,65 @@ export type ApprovalRequest = {
   resolved_at: string | null;
 };
 
+export type MemoryType =
+  | "working"
+  | "episodic"
+  | "semantic"
+  | "project"
+  | "procedural"
+  | "preference";
+export type MemoryStatus = "active" | "stale" | "archived" | "superseded" | "proposed";
+export type MemoryWritePolicy =
+  | "direct"
+  | "approval_required"
+  | "derived_read_only"
+  | "transient";
+
+export type ProjectMemoryItem = {
+  id: string;
+  project_id: string;
+  memory_type: MemoryType;
+  status: MemoryStatus;
+  write_policy: MemoryWritePolicy;
+  entity_type: string | null;
+  entity_id: string | null;
+  source_entity_type: string | null;
+  source_entity_id: string | null;
+  title: string;
+  summary: string;
+  content: Record<string, unknown>;
+  provenance_metadata: Record<string, unknown>;
+  confidence_score: string | null;
+  expires_at: string | null;
+  superseded_by_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectMemoryExcluded = {
+  id: string;
+  memory_type: MemoryType;
+  status: MemoryStatus;
+  title: string;
+  reason: string;
+};
+
+export type ProjectMemoryConflict = {
+  conflict_group_id: string;
+  reason: string;
+  memory_item_ids: string[];
+  titles: string[];
+};
+
+export type ProjectMemoryInspect = {
+  workflow_type: string;
+  selected_memory: ProjectMemoryItem[];
+  excluded_memory: ProjectMemoryExcluded[];
+  proposed_memory: ProjectMemoryItem[];
+  conflicts: ProjectMemoryConflict[];
+  policy: Record<string, unknown>;
+};
+
 export type AuditActorType = "user" | "agent" | "system";
 
 export type AuditEvent = {
@@ -1418,6 +1478,36 @@ export type V1ResearchEval = {
   dataset_cases: ResearchEvalCase[];
   dataset_case_count: number;
   demo_ready_case_count: number;
+};
+
+export type ContextEvalMetric = {
+  key: string;
+  label: string;
+  passed: boolean;
+  observed: number | boolean | string | null;
+  expected: string;
+};
+
+export type ContextEval = {
+  project_id: string;
+  passed: boolean;
+  score: number;
+  total: number;
+  metrics: ContextEvalMetric[];
+  report: {
+    context_pack_id?: string;
+    workflow_type?: string;
+    token_count?: number;
+    token_budget?: number;
+    item_count?: number;
+    dropped_count?: number;
+    available_citation_ids?: string[];
+    included_items?: Array<Record<string, unknown>>;
+    dropped_items?: Array<Record<string, unknown>>;
+    excluded_memory?: Array<Record<string, unknown>>;
+    metadata?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
 };
 
 export type StrategicRecommendation = {
@@ -2503,6 +2593,26 @@ export async function rejectApprovalRequest(projectId: string, approvalId: strin
   return response.approval;
 }
 
+export function inspectProjectMemory(projectId: string, workflowType = "guide_chat") {
+  return apiFetch<ProjectMemoryInspect>(
+    `/api/projects/${projectId}/memory/inspect?workflow_type=${encodeURIComponent(workflowType)}`,
+  );
+}
+
+export async function approveProjectMemory(projectId: string, memoryId: string) {
+  return apiFetch<ProjectMemoryItem>(
+    `/api/projects/${projectId}/memory/${memoryId}/approve`,
+    { method: "POST" },
+  );
+}
+
+export async function rejectProjectMemory(projectId: string, memoryId: string) {
+  return apiFetch<ProjectMemoryItem>(
+    `/api/projects/${projectId}/memory/${memoryId}/reject`,
+    { method: "POST" },
+  );
+}
+
 export async function listAuditEvents(projectId: string) {
   const response = await apiFetch<{ events: AuditEvent[] }>(
     `/api/projects/${projectId}/audit-events`,
@@ -2520,6 +2630,10 @@ export function getMvpEval(projectId: string) {
 
 export function getV1ResearchEval(projectId: string) {
   return apiFetch<V1ResearchEval>(`/api/projects/${projectId}/evals/v1-research`);
+}
+
+export function getContextEval(projectId: string) {
+  return apiFetch<ContextEval>(`/api/projects/${projectId}/evals/context`);
 }
 
 export function getAIStatus() {

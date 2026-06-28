@@ -16,6 +16,7 @@ from app.db.models import (
     DecisionLink,
     Experiment,
     ExperimentResult,
+    ProjectMemoryItem,
     ThesisEvolutionEvent,
     ValidationMission,
     ValidationResultInterpretation,
@@ -55,6 +56,8 @@ def test_extract_assumptions_and_risks(client: TestClient, db_session: Session) 
     assert step.langsmith_trace_id == run.langsmith_trace_id
     assert step.langsmith_run_id
     assert step.langsmith_trace_url == run.langsmith_trace_url
+    assert step.input_json["context_pack"]["workflow_type"] == "assumption_extraction"
+    assert step.input_json["context_pack"]["item_count"] >= 1
 
     assumption_id = body["assumptions"][0]["id"]
     update_response = client.patch(
@@ -317,6 +320,21 @@ def test_interpret_validation_notes_creates_pending_memory_update(
     ][0]
     assert float(updated_assumption["confidence_score"]) > old_confidence
     assert updated_assumption["status"] == "validated"
+    memory_item = db_session.scalar(
+        select(ProjectMemoryItem).where(
+            ProjectMemoryItem.source_entity_type == "validation_interpretation"
+        )
+    )
+    assert memory_item is not None
+    assert (
+        memory_item.provenance_metadata["recommendation_source"]
+        == "validation_result_interpretation"
+    )
+    assert memory_item.provenance_metadata["decision_recommendation"] in {
+        "proceed",
+        "continue_research",
+    }
+    assert memory_item.provenance_metadata["approval_request_id"] == body["approval_request_id"]
 
 
 def test_validation_plan_can_force_local_fallback_with_always_policy(

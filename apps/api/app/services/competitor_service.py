@@ -52,7 +52,14 @@ from app.schemas.competitors import (
     CompetitorUpdate,
 )
 from app.schemas.evidence import EvidenceRetrieveCreate, EvidenceUrlCreate
-from app.services import ai_run_service, evidence_service, project_service, retrieval_service
+from app.services import (
+    ai_run_service,
+    context_service,
+    evidence_service,
+    memory_service,
+    project_service,
+    retrieval_service,
+)
 
 
 class CompetitorAnalysisError(RuntimeError):
@@ -243,8 +250,10 @@ def analyze_competitors(
         )
         draft, completion, _generate_step = _generate_analysis_step(
             db,
+            auth,
             settings,
             run,
+            project.id,
             project_state,
             competitors,
             retrieval_results,
@@ -441,14 +450,36 @@ def _retrieve_competitor_evidence_step(
 
 def _generate_analysis_step(
     db: Session,
+    auth: AuthContext,
     settings: Settings,
     run: AIRun,
+    project_id: uuid.UUID,
     project_state: dict[str, Any],
     competitors: list[Competitor],
     retrieval_results,
 ):
     """Produce typed competitor profiles and market clusters from evidence bundles."""
 
+    memory_selection = memory_service.select_memory_for_context(
+        db,
+        auth,
+        project_id,
+        workflow_type="competitor_analysis",
+        limit=12,
+    )
+    context_pack = context_service.ContextCompiler(settings).compile_workflow_context(
+        workflow_type="competitor_analysis",
+        project_id=project_id,
+        query=_competitor_retrieval_query(project_state, competitors),
+        domain_context={
+            "project_state": project_state,
+            "seeded_competitors": [_competitor_bundle(competitor) for competitor in competitors],
+        },
+        prompt_version=COMPETITOR_ANALYSIS_PROMPT_VERSION,
+        expected_schema=CompetitorAnalysisDraft.__name__,
+        memory_selection=memory_selection,
+        evidence_results=list(retrieval_results),
+    )
     messages = _competitor_messages(
         project_state,
         [_competitor_bundle(competitor) for competitor in competitors],
@@ -460,6 +491,7 @@ def _generate_analysis_step(
         step_name="extract_competitor_profiles",
         input_json={
             "schema": CompetitorAnalysisDraft.__name__,
+            "context_pack": context_pack.prompt_metadata(),
             "messages": [message.model_dump() for message in messages],
         },
     )

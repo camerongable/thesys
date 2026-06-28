@@ -66,6 +66,23 @@ class GuideEvalRead(BaseModel):
     metrics: list[GuideEvalMetricRead]
 
 
+class ContextEvalMetricRead(BaseModel):
+    key: str
+    label: str
+    passed: bool
+    observed: int | bool | str | None = None
+    expected: str
+
+
+class ContextEvalRead(BaseModel):
+    project_id: uuid.UUID
+    passed: bool
+    score: int
+    total: int
+    metrics: list[ContextEvalMetricRead]
+    report: dict[str, object]
+
+
 class AIEvalMetricRead(BaseModel):
     key: str
     label: str

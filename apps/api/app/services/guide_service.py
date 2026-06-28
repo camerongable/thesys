@@ -36,6 +36,7 @@ from app.schemas.validation import DecisionCoachActionRead
 from app.services import (
     ai_run_service,
     context_service,
+    memory_service,
     project_overview_service,
     thesis_service,
     tool_service,
@@ -660,6 +661,13 @@ def _attach_grounding_metadata(
     used_llm: bool,
 ) -> GuideChatResponseRead:
     search = _search_guide_evidence(db, auth, settings, project_id, run, message)
+    memory_selection = memory_service.select_memory_for_context(
+        db,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+        limit=12,
+    )
     context_pack = context_service.build_guide_context_pack(
         settings,
         project_id=project_id,
@@ -669,6 +677,7 @@ def _attach_grounding_metadata(
         recent_turns=[],
         prompt_version=GUIDE_CHAT_PROMPT_VERSION,
         expected_schema=_GroundedGuideAnswerDraft.__name__,
+        memory_selection=memory_selection,
     )
     response.used_llm = used_llm
     response.cited_evidence_ids = search.cited_evidence_ids
@@ -694,6 +703,13 @@ def _grounded_chat_response(
     recent_turns: list[dict[str, str]],
 ) -> tuple[GuideChatResponseRead, int | None, Decimal | None, str, str]:
     search = _search_guide_evidence(db, auth, settings, project_id, run, message)
+    memory_selection = memory_service.select_memory_for_context(
+        db,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+        limit=12,
+    )
     context_pack = context_service.build_guide_context_pack(
         settings,
         project_id=project_id,
@@ -703,6 +719,7 @@ def _grounded_chat_response(
         recent_turns=recent_turns,
         prompt_version=GUIDE_CHAT_PROMPT_VERSION,
         expected_schema=_GroundedGuideAnswerDraft.__name__,
+        memory_selection=memory_selection,
     )
     generation_step = ai_run_service.start_step(
         db,

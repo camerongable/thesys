@@ -52,12 +52,14 @@ import {
   dismissProjectNudge,
   executeNextAction,
   GuideAction,
+  getContextEval,
   getIdeaStory,
   getDurableResearchStatus,
   getProjectResearchHistory,
   getProjectOverview,
   getProjectNudges,
   getV1ResearchEval,
+  inspectProjectMemory,
   listApprovalRequests,
   listArtifacts,
   listAuditEvents,
@@ -68,9 +70,11 @@ import {
   NextBestAction,
   ProjectStage,
   ProjectNudge,
+  ProjectMemoryItem,
   rejectApprovalRequest,
   rejectCompetitorCandidate,
   rejectDiscoveredSource,
+  rejectProjectMemory,
   rejectAgenticResearchMemo,
   rejectResearchSprint,
   RecommendationConfidence,
@@ -83,6 +87,7 @@ import {
   startDurableResearchWorkflow,
   startResearchSprintPlan,
   ToolInvocation,
+  approveProjectMemory,
   updateCompetitorCandidate,
   updateResearchPlan,
 } from "@/lib/api";
@@ -1363,6 +1368,10 @@ function ProjectInspectDrawer({
               </div>
             </DrawerSection>
 
+            <ProjectMemoryInspectSection projectId={overview.project.id} />
+
+            <ProjectContextDiagnosticsSection projectId={overview.project.id} />
+
             <DrawerSection
               icon={<ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />}
               title="Assumptions behind the decision"
@@ -1476,6 +1485,352 @@ function ProjectInspectDrawer({
           </div>
         </div>
       </aside>
+    </div>
+  );
+}
+
+function ProjectMemoryInspectSection({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient();
+  const [workflowType, setWorkflowType] = useState("guide_chat");
+  const memoryQuery = useQuery({
+    queryKey: ["projects", projectId, "memory", "inspect", workflowType],
+    queryFn: () => inspectProjectMemory(projectId, workflowType),
+  });
+  const approveMutation = useMutation({
+    mutationFn: (memoryId: string) => approveProjectMemory(projectId, memoryId),
+    onSuccess: () => refreshAfterMemoryAction(queryClient, projectId),
+  });
+  const rejectMutation = useMutation({
+    mutationFn: (memoryId: string) => rejectProjectMemory(projectId, memoryId),
+    onSuccess: () => refreshAfterMemoryAction(queryClient, projectId),
+  });
+  const data = memoryQuery.data;
+  const selected = data?.selected_memory ?? [];
+  const proposed = data?.proposed_memory ?? [];
+  const excluded = data?.excluded_memory ?? [];
+  const conflicts = data?.conflicts ?? [];
+  const busy = approveMutation.isPending || rejectMutation.isPending;
+  const error =
+    (memoryQuery.error as Error | null) ??
+    approveMutation.error ??
+    rejectMutation.error;
+
+  return (
+    <DrawerSection
+      icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
+      title="Project memory"
+    >
+      <div className="flex flex-col gap-3">
+        <div className="grid gap-2 sm:grid-cols-4">
+          <DecisionMetric label="Selected" value={selected.length} />
+          <DecisionMetric label="Proposed" value={proposed.length} />
+          <DecisionMetric label="Excluded" value={excluded.length} />
+          <DecisionMetric label="Conflicts" value={conflicts.length} />
+        </div>
+        <details className="rounded-md border border-border px-3 py-3">
+          <summary className="cursor-pointer list-none">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-sm font-medium">Browse memory</span>
+              <select
+                className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground sm:w-56"
+                onChange={(event) => setWorkflowType(event.target.value)}
+                onClick={(event) => event.stopPropagation()}
+                value={workflowType}
+              >
+                <option value="assumption_extraction">Assumption extraction</option>
+                <option value="guide_chat">Ask Thesys</option>
+                <option value="agentic_research">Research sprint</option>
+                <option value="opportunity_brief">Opportunity brief</option>
+                <option value="competitor_analysis">Competitor analysis</option>
+                <option value="validation_plan">Validation plan</option>
+                <option value="validation_result_interpretation">Validation results</option>
+                <option value="decision_recommendation">Decision recommendation</option>
+              </select>
+            </div>
+          </summary>
+
+          {error ? (
+            <p className="mt-3 text-sm text-danger-foreground">{error.message}</p>
+          ) : memoryQuery.isLoading ? (
+            <p className="mt-3 text-sm text-muted-foreground">Loading memory...</p>
+          ) : (
+            <div className="mt-4 space-y-4">
+              <MemoryItemList items={selected} title="Selected for this workflow" />
+              <MemoryProposalList
+                busy={busy}
+                items={proposed}
+                onApprove={(memoryId) => approveMutation.mutate(memoryId)}
+                onReject={(memoryId) => rejectMutation.mutate(memoryId)}
+              />
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Excluded
+                </h4>
+                {excluded.length === 0 ? (
+                  <p className="mt-2 text-sm text-muted-foreground">No excluded memory.</p>
+                ) : (
+                  <ol className="mt-2 space-y-2">
+                    {excluded.slice(0, 8).map((item) => (
+                      <li className="rounded-md bg-muted px-3 py-2 text-sm" key={item.id}>
+                        <div className="font-medium">{truncate(item.title, 90)}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {formatLabel(item.memory_type)} · {formatLabel(item.status)} ·{" "}
+                          {formatLabel(item.reason)}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Conflicts
+                </h4>
+                {conflicts.length === 0 ? (
+                  <p className="mt-2 text-sm text-muted-foreground">No active conflicts.</p>
+                ) : (
+                  <ol className="mt-2 space-y-2">
+                    {conflicts.map((conflict) => (
+                      <li className="rounded-md bg-warning-muted px-3 py-2 text-sm" key={conflict.conflict_group_id}>
+                        <div className="font-medium text-warning-foreground">
+                          {truncate(conflict.reason, 120)}
+                        </div>
+                        <div className="mt-1 text-xs text-warning-foreground">
+                          {conflict.titles.map((title) => truncate(title, 50)).join(", ")}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            </div>
+          )}
+        </details>
+      </div>
+    </DrawerSection>
+  );
+}
+
+function ProjectContextDiagnosticsSection({ projectId }: { projectId: string }) {
+  const [enabled, setEnabled] = useState(false);
+  const contextEvalQuery = useQuery({
+    enabled,
+    queryKey: ["projects", projectId, "evals", "context"],
+    queryFn: () => getContextEval(projectId),
+  });
+  const data = contextEvalQuery.data;
+  const report = data?.report;
+  const metrics = data?.metrics ?? [];
+  const includedItems = Array.isArray(report?.included_items)
+    ? (report.included_items as Array<Record<string, unknown>>)
+    : [];
+  const droppedItems = Array.isArray(report?.dropped_items)
+    ? (report.dropped_items as Array<Record<string, unknown>>)
+    : [];
+
+  return (
+    <DrawerSection
+      icon={<FileText className="h-4 w-4 text-primary" aria-hidden="true" />}
+      title="Context diagnostics"
+    >
+      <details
+        className="rounded-md border border-border px-3 py-3"
+        onToggle={(event) => {
+          if (event.currentTarget.open) {
+            setEnabled(true);
+          }
+        }}
+      >
+        <summary className="cursor-pointer list-none">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-sm font-medium">Context quality gate</span>
+            {data ? (
+              <span className={data.passed ? tonePillClass("good") : tonePillClass("danger")}>
+                {data.score}/{data.total}
+              </span>
+            ) : null}
+          </div>
+        </summary>
+        {contextEvalQuery.isLoading ? (
+          <p className="mt-3 text-sm text-muted-foreground">Loading diagnostics...</p>
+        ) : contextEvalQuery.error ? (
+          <p className="mt-3 text-sm text-danger-foreground">
+            {(contextEvalQuery.error as Error).message}
+          </p>
+        ) : data ? (
+          <div className="mt-4 space-y-4">
+            <div className="grid gap-2 sm:grid-cols-4">
+              <DecisionMetric label="Items" value={report?.item_count ?? 0} />
+              <DecisionMetric label="Dropped" value={report?.dropped_count ?? 0} />
+              <DecisionMetric label="Tokens" value={report?.token_count ?? 0} />
+              <DecisionMetric
+                label="Citations"
+                value={report?.available_citation_ids?.length ?? 0}
+              />
+            </div>
+            <ol className="space-y-2">
+              {metrics.map((metric) => (
+                <li className="rounded-md bg-muted px-3 py-2 text-sm" key={metric.key}>
+                  <div className="flex items-start gap-2">
+                    {metric.passed ? (
+                      <CheckCircle2
+                        className="mt-0.5 h-4 w-4 shrink-0 text-success-foreground"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <AlertTriangle
+                        className="mt-0.5 h-4 w-4 shrink-0 text-danger-foreground"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <div className="min-w-0">
+                      <div className="font-medium">{metric.label}</div>
+                      <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                        {String(metric.observed)} · expected {metric.expected}
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <details className="rounded-md border border-border px-3 py-3">
+              <summary className="cursor-pointer list-none text-sm font-medium">
+                Included and dropped context
+              </summary>
+              <div className="mt-3 grid gap-4">
+                <ContextReportList items={includedItems} title="Included" />
+                <ContextReportList items={droppedItems} title="Dropped" />
+              </div>
+            </details>
+            <div className="rounded-md bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">
+              {report?.workflow_type ?? "context"} · {report?.context_pack_id ?? "no context pack"}
+            </div>
+          </div>
+        ) : null}
+      </details>
+    </DrawerSection>
+  );
+}
+
+function ContextReportList({
+  items,
+  title,
+}: {
+  items: Array<Record<string, unknown>>;
+  title: string;
+}) {
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h4>
+      {items.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No records.</p>
+      ) : (
+        <ol className="mt-2 space-y-2">
+          {items.slice(0, 8).map((item, index) => (
+            <li className="rounded-md bg-muted px-3 py-2 text-xs" key={`${title}-${index}`}>
+              <div className="font-medium">{truncate(String(item.title ?? item.id), 90)}</div>
+              <div className="mt-1 text-muted-foreground">
+                {formatLabel(String(item.type ?? "context"))}
+                {item.reason ? ` · ${formatLabel(String(item.reason))}` : ""}
+                {item.untrusted ? " · untrusted" : ""}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function MemoryItemList({ items, title }: { items: ProjectMemoryItem[]; title: string }) {
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h4>
+      {items.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No memory records.</p>
+      ) : (
+        <ol className="mt-2 space-y-2">
+          {items.slice(0, 8).map((item) => (
+            <li key={item.id}>
+              <MemoryItemRow item={item} />
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function MemoryProposalList({
+  busy,
+  items,
+  onApprove,
+  onReject,
+}: {
+  busy: boolean;
+  items: ProjectMemoryItem[];
+  onApprove: (memoryId: string) => void;
+  onReject: (memoryId: string) => void;
+}) {
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Proposed memory
+      </h4>
+      {items.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No proposed memory.</p>
+      ) : (
+        <ol className="mt-2 space-y-2">
+          {items.slice(0, 8).map((item) => (
+            <li className="rounded-md bg-card px-3 py-3" key={item.id}>
+              <MemoryItemRow item={item} />
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  disabled={busy}
+                  onClick={() => onApprove(item.id)}
+                  size="sm"
+                  type="button"
+                >
+                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                  Approve
+                </Button>
+                <Button
+                  disabled={busy}
+                  onClick={() => onReject(item.id)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Reject
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function MemoryItemRow({ item }: { item: ProjectMemoryItem }) {
+  const source = item.provenance_metadata.source ?? item.source_entity_type ?? "memory";
+  return (
+    <div className="rounded-md bg-muted px-3 py-2 text-sm">
+      <div className="font-medium">{truncate(item.title, 100)}</div>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        {truncate(item.summary, 180)}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+        <span>{formatLabel(item.memory_type)}</span>
+        <span>{formatLabel(item.status)}</span>
+        <span>{formatLabel(item.write_policy)}</span>
+        <span>{String(source)}</span>
+        <span>{formatDateTime(item.updated_at)}</span>
+      </div>
     </div>
   );
 }
@@ -1706,7 +2061,7 @@ function DecisionSignal({
   );
 }
 
-function DecisionMetric({ label, value }: { label: string; value: number }) {
+function DecisionMetric({ label, value }: { label: string; value: number | string }) {
   return (
     <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
       {label}: {value}
@@ -2570,6 +2925,17 @@ async function refreshAfterGovernanceAction(
     queryClient.invalidateQueries({ queryKey: ["projects", projectId, "research-sprints"] }),
     queryClient.invalidateQueries({ queryKey: ["projects", projectId, "research-history"] }),
     queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] }),
+  ]);
+}
+
+async function refreshAfterMemoryAction(
+  queryClient: ReturnType<typeof useQueryClient>,
+  projectId: string,
+) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["projects", projectId, "memory"] }),
+    queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] }),
+    invalidateGovernanceQueries(queryClient, projectId),
   ]);
 }
 

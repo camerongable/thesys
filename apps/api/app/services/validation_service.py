@@ -29,7 +29,7 @@ from app.ai.prompts import (
 )
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
 from app.core.auth import AuthContext, require_permission
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.db.models import (
     AIRun,
     AIStep,
@@ -69,8 +69,10 @@ from app.schemas.validation import (
 )
 from app.services import (
     ai_run_service,
+    context_service,
     governance_service,
     langsmith_observability_service,
+    memory_service,
     project_service,
 )
 
@@ -236,14 +238,34 @@ def extract_assumptions_and_risks(
     )
     step: AIStep | None = None
     try:
+        project_state = _project_state(project)
+        memory_selection = memory_service.select_memory_for_context(
+            db,
+            auth,
+            project_id,
+            workflow_type="assumption_extraction",
+            limit=8,
+        )
+        context_pack = context_service.ContextCompiler(settings).compile_workflow_context(
+            workflow_type="assumption_extraction",
+            project_id=project_id,
+            query="Extract risky assumptions and strategic risks.",
+            domain_context={"project": project_state},
+            prompt_version=ASSUMPTION_EXTRACTION_PROMPT_VERSION,
+            expected_schema=AssumptionExtractionDraft.__name__,
+            memory_selection=memory_selection,
+        )
         step = ai_run_service.start_step(
             db,
             run,
             step_name="extract_assumptions_risks",
-            input_json={"project_id": str(project.id)},
+            input_json={
+                "project_id": str(project.id),
+                "context_pack": context_pack.prompt_metadata(),
+            },
         )
         started = perf_counter()
-        messages = _assumption_messages(project, _project_state(project))
+        messages = _assumption_messages(project, project_state)
         if should_use_fallback_without_model(settings):
             draft = _fallback_assumption_extraction(project)
             completion = _fallback_completion(
@@ -546,6 +568,33 @@ def interpret_validation_results(
     )
     step: AIStep | None = None
     try:
+        memory_selection = memory_service.select_memory_for_context(
+            db,
+            auth,
+            project_id,
+            workflow_type="validation_result_interpretation",
+            limit=12,
+        )
+        context_pack = context_service.ContextCompiler(settings).compile_workflow_context(
+            workflow_type="validation_result_interpretation",
+            project_id=project_id,
+            query=mission.mission_title,
+            domain_context={
+                "project": _project_state(project),
+                "mission": _decision_mission_context(mission),
+            },
+            prompt_version=VALIDATION_RESULT_INTERPRETATION_PROMPT_VERSION,
+            expected_schema=ValidationResultInterpretationDraft.__name__,
+            memory_selection=memory_selection,
+            untrusted_inputs=[
+                {
+                    "type": "validation",
+                    "title": "Validation notes",
+                    "content": raw_notes,
+                    "source": "validation_result_notes",
+                }
+            ],
+        )
         step = ai_run_service.start_step(
             db,
             run,
@@ -555,6 +604,7 @@ def interpret_validation_results(
                 "validation_mission_id": str(mission.id),
                 "experiment_id": str(mission.experiment_id) if mission.experiment_id else None,
                 "assumption_id": str(mission.assumption_id),
+                "context_pack": context_pack.prompt_metadata(),
             },
         )
         started = perf_counter()
@@ -759,6 +809,34 @@ def generate_validation_plan(
     )
     step: AIStep | None = None
     try:
+        memory_selection = memory_service.select_memory_for_context(
+            db,
+            auth,
+            project_id,
+            workflow_type="validation_plan",
+            limit=12,
+        )
+        context_pack = context_service.ContextCompiler(settings).compile_workflow_context(
+            workflow_type="validation_plan",
+            project_id=project_id,
+            query="validation plan",
+            domain_context={
+                "project": _project_state(project),
+                "assumptions": [
+                    {
+                        "id": str(assumption.id),
+                        "text": assumption.text,
+                        "category": assumption.category,
+                        "importance": assumption.importance,
+                        "uncertainty": assumption.uncertainty,
+                    }
+                    for assumption in assumptions
+                ],
+            },
+            prompt_version=VALIDATION_PLAN_PROMPT_VERSION,
+            expected_schema=ValidationPlanSetDraft.__name__,
+            memory_selection=memory_selection,
+        )
         step = ai_run_service.start_step(
             db,
             run,
@@ -766,6 +844,7 @@ def generate_validation_plan(
             input_json={
                 "project_id": str(project.id),
                 "assumption_ids": [str(item.id) for item in assumptions],
+                "context_pack": context_pack.prompt_metadata(),
             },
         )
         started = perf_counter()
@@ -1110,6 +1189,37 @@ def get_decision_recommendation(
         interpretation=interpretation,
         mission=mission,
     )
+    memory_selection = memory_service.select_memory_for_context(
+        db,
+        auth,
+        project_id,
+        workflow_type="decision_recommendation",
+    )
+    context_pack = context_service.ContextCompiler(get_settings()).compile_workflow_context(
+        workflow_type="decision_recommendation",
+        project_id=project_id,
+        query="Recommend whether to proceed, pivot, pause, kill, or continue research.",
+        domain_context=_decision_context_domain(
+            assumptions=assumptions,
+            risks=risks,
+            evidence_sources=evidence_sources,
+            experiments=experiments,
+            interpretation=interpretation,
+            mission=mission,
+            recommendation=recommendation,
+            supporting_evidence=supporting_evidence,
+            missing_evidence=missing_evidence,
+            risk_texts=risk_texts,
+        ),
+        prompt_version="decision-recommendation:deterministic:v1",
+        expected_schema="DecisionRecommendationRead",
+        memory_selection=memory_selection,
+        untrusted_inputs=_decision_context_untrusted_inputs(
+            evidence_sources=evidence_sources,
+            interpretation=interpretation,
+            experiments=experiments,
+        ),
+    )
     return DecisionRecommendationRead(
         recommendation=recommendation,
         rationale=rationale,
@@ -1118,6 +1228,7 @@ def get_decision_recommendation(
         risks=risk_texts,
         suggested_decision_record=suggested_record,
         action_cards=_decision_action_cards(project_id, recommendation, bool(mission)),
+        context_pack=context_pack,
     )
 
 
@@ -1261,6 +1372,157 @@ def _decision_validation_mission(
         .order_by(ValidationMission.updated_at.desc())
         .limit(1)
     )
+
+
+def _decision_context_domain(
+    *,
+    assumptions: list[Assumption],
+    risks: list[Risk],
+    evidence_sources: list[EvidenceSource],
+    experiments: list[Experiment],
+    interpretation: ValidationResultInterpretation | None,
+    mission: ValidationMission | None,
+    recommendation: str,
+    supporting_evidence: list[str],
+    missing_evidence: list[str],
+    risk_texts: list[str],
+) -> dict[str, Any]:
+    return {
+        "recommendation": recommendation,
+        "supporting_evidence": supporting_evidence,
+        "missing_evidence": missing_evidence,
+        "risks": risk_texts,
+        "inputs": {
+            "assumption_count": len(assumptions),
+            "risk_count": len(risks),
+            "evidence_source_count": len(evidence_sources),
+            "experiment_count": len(experiments),
+            "logged_result_count": sum(len(experiment.results) for experiment in experiments),
+            "has_latest_interpretation": interpretation is not None,
+            "has_validation_mission": mission is not None,
+        },
+        "top_assumptions": [
+            {
+                "id": str(assumption.id),
+                "text": _shorten(assumption.text, 300),
+                "status": assumption.status,
+                "importance": assumption.importance,
+                "uncertainty": assumption.uncertainty,
+                "kill_risk": assumption.kill_risk,
+                "confidence_score": str(assumption.confidence_score)
+                if assumption.confidence_score is not None
+                else None,
+            }
+            for assumption in assumptions[:6]
+        ],
+        "open_risks": [
+            {
+                "id": str(risk.id),
+                "text": _shorten(risk.text, 260),
+                "severity": risk.severity,
+                "likelihood": risk.likelihood,
+                "status": risk.status,
+            }
+            for risk in risks[:5]
+        ],
+        "latest_interpretation": _decision_interpretation_context(interpretation),
+        "active_validation_mission": _decision_mission_context(mission),
+    }
+
+
+def _decision_interpretation_context(
+    interpretation: ValidationResultInterpretation | None,
+) -> dict[str, Any] | None:
+    if interpretation is None:
+        return None
+    return {
+        "id": str(interpretation.id),
+        "signal_summary": _shorten(interpretation.signal_summary, 400),
+        "pain_severity": interpretation.pain_severity,
+        "urgency": interpretation.urgency,
+        "willingness_to_pay": interpretation.willingness_to_pay,
+        "switching_signal": interpretation.switching_signal,
+        "confidence_change": interpretation.confidence_change,
+        "decision_recommendation": interpretation.decision_recommendation,
+        "recommended_next_action": _shorten(interpretation.recommended_next_action, 320),
+        "what_strengthened": [_shorten(item, 220) for item in interpretation.what_strengthened[:4]],
+        "what_weakened": [_shorten(item, 220) for item in interpretation.what_weakened[:4]],
+    }
+
+
+def _decision_mission_context(mission: ValidationMission | None) -> dict[str, Any] | None:
+    if mission is None:
+        return None
+    return {
+        "id": str(mission.id),
+        "assumption_id": str(mission.assumption_id),
+        "experiment_id": str(mission.experiment_id) if mission.experiment_id is not None else None,
+        "mission_title": mission.mission_title,
+        "target_user": _shorten(mission.target_user, 240),
+        "test_type": mission.test_type,
+        "success_criteria": _shorten(mission.success_criteria, 260),
+        "failure_criteria": _shorten(mission.failure_criteria, 260),
+        "status": mission.status,
+    }
+
+
+def _decision_context_untrusted_inputs(
+    *,
+    evidence_sources: list[EvidenceSource],
+    interpretation: ValidationResultInterpretation | None,
+    experiments: list[Experiment],
+) -> list[dict[str, Any]]:
+    inputs: list[dict[str, Any]] = []
+    for source in evidence_sources[:6]:
+        content = source.summary or source.raw_text or source.title or ""
+        inputs.append(
+            {
+                "type": "evidence",
+                "title": source.title or f"Evidence source {source.id}",
+                "content": _shorten(content, 700),
+                "source": "decision_evidence_source",
+                "metadata": {
+                    "source_id": str(source.id),
+                    "source_type": source.source_type,
+                    "url": source.url,
+                    "classification": source.classification,
+                    "credibility_score": str(source.credibility_score)
+                    if source.credibility_score is not None
+                    else None,
+                },
+            }
+        )
+    if interpretation is not None:
+        inputs.append(
+            {
+                "type": "validation",
+                "title": "Latest validation interpretation",
+                "content": _shorten(interpretation.raw_notes, 900),
+                "source": "validation_result_interpretation",
+                "metadata": {"interpretation_id": str(interpretation.id)},
+            }
+        )
+    for experiment in experiments[:4]:
+        if not experiment.results:
+            continue
+        latest_result = experiment.results[0]
+        inputs.append(
+            {
+                "type": "validation",
+                "title": f"Experiment result: {experiment.name}",
+                "content": _shorten(
+                    latest_result.raw_notes or latest_result.result_summary,
+                    700,
+                ),
+                "source": "experiment_result",
+                "metadata": {
+                    "experiment_id": str(experiment.id),
+                    "result_id": str(latest_result.id),
+                    "outcome": latest_result.outcome,
+                },
+            }
+        )
+    return inputs
 
 
 def _decision_recommendation_value(
@@ -2448,6 +2710,7 @@ def apply_validation_interpretation_approval(
     interpretation = _get_validation_interpretation(db, auth, project_id, approval.entity_id)
     approval = governance_service.approve_approval_request(db, auth, project_id, approval_id)
     project = project_service.get_project(db, auth, project_id)
+    memory_item_id: uuid.UUID | None = None
     if interpretation.assumption_id is not None:
         assumption = get_assumption(db, auth, project_id, interpretation.assumption_id)
         current_score = assumption.confidence_score or Decimal("0.5")
@@ -2456,6 +2719,24 @@ def apply_validation_interpretation_approval(
         )
         if interpretation.proposed_assumption_status:
             assumption.status = interpretation.proposed_assumption_status
+        memory_item = memory_service.upsert_from_assumption(
+            db,
+            auth,
+            project_id,
+            assumption,
+            source_entity_type="validation_interpretation",
+            source_entity_id=interpretation.id,
+            source_metadata={
+                "approval_request_id": str(approval.id),
+                "validation_mission_id": str(interpretation.mission_id),
+                "decision_recommendation": interpretation.decision_recommendation,
+                "recommendation_source": "validation_result_interpretation",
+                "ai_run_id": str(interpretation.ai_run_id)
+                if interpretation.ai_run_id is not None
+                else None,
+            },
+        )
+        memory_item_id = memory_item.id
     mission = _get_validation_mission(db, auth, project_id, interpretation.mission_id)
     mission.status = "interpreted"
     _recalculate_project_confidence(db, auth, project_id)
@@ -2490,6 +2771,7 @@ def apply_validation_interpretation_approval(
             else None,
             "confidence_delta": str(interpretation.proposed_confidence_delta),
             "decision_recommendation": interpretation.decision_recommendation,
+            "memory_item_id": str(memory_item_id) if memory_item_id is not None else None,
         },
     )
     db.commit()

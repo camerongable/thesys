@@ -46,7 +46,7 @@ from app.schemas.artifacts import (
     RiskDraft,
 )
 from app.schemas.evidence import EvidenceRetrieveCreate
-from app.services import ai_run_service, project_service, retrieval_service
+from app.services import ai_run_service, context_service, memory_service, project_service, retrieval_service
 
 
 class OpportunityBriefWorkflowError(RuntimeError):
@@ -155,8 +155,10 @@ def generate_opportunity_brief(
         retrieval_results = _retrieve_evidence_step(db, auth, settings, run, project, project_state)
         draft, completion, generate_step = _generate_draft_step(
             db,
+            auth,
             settings,
             run,
+            project.id,
             project_state,
             retrieval_results,
         )
@@ -283,13 +285,32 @@ def _retrieve_evidence_step(
 
 def _generate_draft_step(
     db: Session,
+    auth: AuthContext,
     settings: Settings,
     run: AIRun,
+    project_id: uuid.UUID,
     project_state: dict[str, Any],
     retrieval_results,
 ):
     """Ask the configured model for a Pydantic-validated opportunity brief."""
 
+    memory_selection = memory_service.select_memory_for_context(
+        db,
+        auth,
+        project_id,
+        workflow_type="opportunity_brief",
+        limit=12,
+    )
+    context_pack = context_service.ContextCompiler(settings).compile_workflow_context(
+        workflow_type="opportunity_brief",
+        project_id=project_id,
+        query=_brief_retrieval_query(project_state),
+        domain_context=project_state,
+        prompt_version=OPPORTUNITY_BRIEF_PROMPT_VERSION,
+        expected_schema=OpportunityBriefDraft.__name__,
+        memory_selection=memory_selection,
+        evidence_results=list(retrieval_results),
+    )
     messages = _brief_messages(project_state, _evidence_bundles(retrieval_results))
     step = ai_run_service.start_step(
         db,
@@ -297,6 +318,7 @@ def _generate_draft_step(
         step_name="generate_structured_brief",
         input_json={
             "schema": OpportunityBriefDraft.__name__,
+            "context_pack": context_pack.prompt_metadata(),
             "messages": [message.model_dump() for message in messages],
         },
     )

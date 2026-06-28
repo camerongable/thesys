@@ -229,7 +229,13 @@ def test_agentic_research_memo_can_be_approved_after_review(
     assert body["version"]["structured_content"]["memory_update_summary"]["memory_item_ids"]
     assert db_session.scalar(select(Assumption)) is not None
     assert db_session.scalar(select(Risk)) is not None
-    assert db_session.scalar(select(ProjectMemoryItem)) is not None
+    memory_item = db_session.scalar(
+        select(ProjectMemoryItem).where(ProjectMemoryItem.source_entity_type == "artifact_version")
+    )
+    assert memory_item is not None
+    assert memory_item.provenance_metadata["recommendation_source"] == "agentic_research_memo"
+    assert memory_item.provenance_metadata["decision_recommendation"]
+    assert memory_item.provenance_metadata["research_sprint_id"] == sprint_id
     assert db_session.scalar(select(AssumptionEvidenceLink)) is not None
 
     run = db_session.scalar(select(AIRun).where(AIRun.id == uuid.UUID(body["ai_run_id"])))
