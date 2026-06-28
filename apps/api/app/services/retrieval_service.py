@@ -34,6 +34,7 @@ from app.schemas.evidence import (
     RetrievalRerankerDiagnosticsRead,
 )
 from app.services import (
+    ai_cache_service,
     ai_run_service,
     embedding_service,
     project_service,
@@ -185,6 +186,42 @@ def retrieve_evidence_pipeline(
     """Plan, retrieve, fuse, rerank, and assemble context for one user query."""
     project_service.get_project(db, auth, project_id)
     started = perf_counter()
+    key_payload, family_payload, version_payload = ai_cache_service.retrieval_cache_payloads(
+        db,
+        auth,
+        settings,
+        project_id,
+        payload,
+        context_profile="evidence_retrieval",
+    )
+    cache_lookup = ai_cache_service.lookup(
+        db,
+        auth,
+        settings,
+        cache_type="retrieval_plan",
+        key_payload=key_payload,
+        family_payload=family_payload,
+        version_payload=version_payload,
+        project_id=project_id,
+        saved_tokens=settings.retrieval_context_token_budget,
+        latency_saved_ms=80,
+    )
+    if cache_lookup.value is not None:
+        diagnostics = RetrievalDiagnosticsRead.model_validate(
+            cache_lookup.value["diagnostics"]
+        )
+        diagnostics = diagnostics.model_copy(
+            update={
+                "query_latency_ms": int((perf_counter() - started) * 1000),
+                "cache": ai_cache_service.cache_event_diagnostics(cache_lookup.event),
+            }
+        )
+        results = [
+            EvidenceRetrievalResultRead.model_validate(result)
+            for result in cache_lookup.value.get("results", [])
+        ]
+        return RetrievalSearchResult(diagnostics=diagnostics, results=results)
+
     plan = _plan_query(payload.query)
     subqueries = plan.subqueries or [payload.query]
     all_results: list[EvidenceRetrievalResultRead] = []
@@ -199,7 +236,16 @@ def retrieve_evidence_pipeline(
         all_results.extend(search.results)
 
     fused_results = _fuse_results(all_results)
-    reranked, reranker = _rerank_results(settings, payload.query, plan, fused_results)
+    reranked, reranker = _rerank_results(
+        db,
+        auth,
+        settings,
+        project_id,
+        payload.query,
+        plan,
+        fused_results,
+        version_payload,
+    )
     assembled, context = assemble_context_results(settings, reranked, top_k=payload.top_k)
     total_latency = int((perf_counter() - started) * 1000)
     quality = _quality_report(
@@ -235,9 +281,23 @@ def retrieve_evidence_pipeline(
             "reranker": reranker,
             "context": context,
             "quality_report": quality,
+            "cache": ai_cache_service.cache_event_diagnostics(cache_lookup.event),
         }
     )
     pipeline_diagnostics = RetrievalDiagnosticsRead.model_validate(diagnostic_payload)
+    ai_cache_service.store(
+        db,
+        auth,
+        cache_type="retrieval_plan",
+        key_payload=key_payload,
+        family_payload=family_payload,
+        version_payload=version_payload,
+        value_payload={
+            "diagnostics": pipeline_diagnostics.model_dump(mode="json"),
+            "results": [result.model_dump(mode="json") for result in assembled],
+        },
+        project_id=project_id,
+    )
     return RetrievalSearchResult(diagnostics=pipeline_diagnostics, results=assembled)
 
 
@@ -276,7 +336,13 @@ def _retrieve_single_query_search(
             results=results,
         )
 
-    query_embedding = embedding_service.embed_text(settings, payload.query)
+    query_embedding = embedding_service.embed_text_with_metadata_cached(
+        db,
+        auth,
+        settings,
+        payload.query,
+        project_id=project_id,
+    ).vector
     should_use_sql = _should_use_sql_vector_search(db, settings)
     if should_use_sql:
         try:
@@ -413,7 +479,13 @@ def _retrieve_with_python_scoring(
     query_embedding: list[float] | None,
 ) -> tuple[list[EvidenceRetrievalResultRead], int]:
     if query_embedding is None and payload.mode != "keyword":
-        query_embedding = embedding_service.embed_text(settings, payload.query)
+        query_embedding = embedding_service.embed_text_with_metadata_cached(
+            db,
+            auth,
+            settings,
+            payload.query,
+            project_id=project_id,
+        ).vector
     candidates = _load_candidates(db, auth, project_id, payload)
     return (
         _score_candidates(
@@ -528,21 +600,75 @@ def _fuse_results(
 
 
 def _rerank_results(
+    db: Session,
+    auth: AuthContext,
     settings: Settings,
+    project_id: uuid.UUID,
     query: str,
     plan: RetrievalQueryPlanRead,
     results: list[EvidenceRetrievalResultRead],
+    retrieval_versions: dict[str, object],
 ) -> tuple[list[EvidenceRetrievalResultRead], RetrievalRerankerDiagnosticsRead]:
     """Apply optional provider reranking with deterministic fallback visibility."""
+    key_payload, family_payload, version_payload = ai_cache_service.rerank_cache_payloads(
+        auth,
+        settings,
+        project_id,
+        query=query,
+        candidate_chunk_ids=[result.chunk_id for result in results[:RERANK_CANDIDATE_LIMIT]],
+        retrieval_policy_version=str(retrieval_versions.get("retrieval_policy_version")),
+    )
+    cache_lookup = ai_cache_service.lookup(
+        db,
+        auth,
+        settings,
+        cache_type="rerank_result",
+        key_payload=key_payload,
+        family_payload=family_payload,
+        version_payload=version_payload,
+        project_id=project_id,
+        saved_tokens=400 if settings.retrieval_reranker_provider == "litellm" else 0,
+        latency_saved_ms=40,
+    )
+    if cache_lookup.value is not None:
+        cached_results = [
+            EvidenceRetrievalResultRead.model_validate(result)
+            for result in cache_lookup.value.get("results", [])
+        ]
+        cached = cache_lookup.value.get("reranker", {})
+        return cached_results, RetrievalRerankerDiagnosticsRead(
+            enabled=bool(cached.get("enabled")),
+            provider=str(cached.get("provider") or settings.retrieval_reranker_provider),
+            adapter=str(cached.get("adapter") or "cache"),
+            fallback_used=bool(cached.get("fallback_used", False)),
+            fallback_reason=cached.get("fallback_reason"),
+            cache=ai_cache_service.cache_event_diagnostics(cache_lookup.event),
+        )
+
     reranked = retrieval_reranker_service.rerank_results(settings, query, plan, results)
-    return reranked.results, RetrievalRerankerDiagnosticsRead(
+    diagnostics = RetrievalRerankerDiagnosticsRead(
         enabled=settings.retrieval_reranking_enabled
         and settings.retrieval_reranker_provider != "none",
         provider=settings.retrieval_reranker_provider,
         adapter=reranked.adapter,
         fallback_used=reranked.fallback_used,
         fallback_reason=reranked.fallback_reason,
+        cache=ai_cache_service.cache_event_diagnostics(cache_lookup.event),
     )
+    ai_cache_service.store(
+        db,
+        auth,
+        cache_type="rerank_result",
+        key_payload=key_payload,
+        family_payload=family_payload,
+        version_payload=version_payload,
+        value_payload={
+            "results": [result.model_dump(mode="json") for result in reranked.results],
+            "reranker": diagnostics.model_dump(mode="json"),
+        },
+        project_id=project_id,
+    )
+    return reranked.results, diagnostics
 
 
 def _litellm_rerank_order(

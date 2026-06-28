@@ -196,6 +196,26 @@ class Settings(BaseSettings):
         le=5,
         validation_alias="EMBEDDING_RETRY_ATTEMPTS",
     )
+    ai_embedding_cache_enabled: bool = Field(
+        default=True,
+        validation_alias="AI_EMBEDDING_CACHE_ENABLED",
+    )
+    ai_retrieval_cache_enabled: bool = Field(
+        default=True,
+        validation_alias="AI_RETRIEVAL_CACHE_ENABLED",
+    )
+    ai_rerank_cache_enabled: bool = Field(
+        default=True,
+        validation_alias="AI_RERANK_CACHE_ENABLED",
+    )
+    ai_semantic_answer_cache_enabled: bool = Field(
+        default=False,
+        validation_alias="AI_SEMANTIC_ANSWER_CACHE_ENABLED",
+    )
+    ai_semantic_answer_cache_live_enabled: bool = Field(
+        default=False,
+        validation_alias="AI_SEMANTIC_ANSWER_CACHE_LIVE_ENABLED",
+    )
     retrieval_vector_path: Literal["auto", "sql", "python"] = Field(
         default="auto",
         validation_alias="RETRIEVAL_VECTOR_PATH",

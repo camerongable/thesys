@@ -4,6 +4,36 @@ This changelog tracks AI-facing behavior changes that can affect prompts,
 schemas, context, memory, retrieval, tools, providers, evals, or governance.
 Each entry names the evals that should catch regressions.
 
+## Sprint 57: Semantic Caching and Cost Optimization
+
+- Added DB-backed `ai_cache_entries` and `ai_cache_events` records with
+  workspace/project scope, hashed keys, version payloads, hit/miss/stale-denial
+  events, and saved token/cost/latency estimates.
+  - Expected impact: repeated AI-adjacent work can be reused without relying on
+    process-local state or crossing project boundaries.
+  - Regression coverage: `app/tests/test_ai_cache_service.py`,
+    `python3 scripts/eval_quality_gate.py --json`.
+- Added cache-aware embedding, retrieval-plan, and rerank paths. Cache keys use
+  provider/model/version, normalized text or query hashes, retrieval settings,
+  corpus/memory/thesis/assumption/decision versions, reranker provider/model,
+  and score-normalization versions.
+  - Expected impact: repeated retrieval work avoids unnecessary embedding and
+    reranking while stale evidence, memory, thesis, prompt, schema, or retrieval
+    policy changes force recomputation.
+  - Regression coverage: `app/tests/test_ai_cache_service.py`,
+    `app/tests/test_evidence.py`, `app/tests/test_guide.py`.
+- Added optional non-streaming Ask Thesys answer caching behind
+  `AI_SEMANTIC_ANSWER_CACHE_ENABLED`; live-provider answer caching remains
+  disabled unless `AI_SEMANTIC_ANSWER_CACHE_LIVE_ENABLED` is explicitly set.
+  - Expected impact: answer reuse is available for controlled/demo modes without
+    making live provider behavior opaque by default.
+  - Regression coverage: `app/tests/test_ai_cache_service.py`.
+- Added cache metrics to observability reports and the aggregate quality gate.
+  - Expected impact: hidden Inspect/report surfaces can show cache hit/miss,
+    stale-denial, saved-token, saved-cost, and saved-latency behavior.
+  - Regression coverage: `app/tests/test_eval_reports.py`,
+    `python3 scripts/eval_quality_gate.py --json`.
+
 ## Sprint 56: Observability V2 and Eval Gates
 
 - Added `scripts/eval_quality_gate.py` as the aggregate local quality gate.

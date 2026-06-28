@@ -564,15 +564,25 @@ function RetrievalDiagnosticsLine({
   const quality = diagnostics.quality_report
     ? `precision ${diagnostics.quality_report.precision_proxy.toFixed(2)} · recall ${diagnostics.quality_report.recall_proxy.toFixed(2)}`
     : null;
+  const cache = cacheStatusText(diagnostics.cache);
   return (
     <div className="pb-3 text-xs leading-5 text-muted-foreground">
       Retrieval: {path} · {diagnostics.embedding_provider} · {diagnostics.embedding_model} ·{" "}
       {diagnostics.candidate_count} candidates · {diagnostics.query_latency_ms}ms ·{" "}
       {subqueryCount} subquer{subqueryCount === 1 ? "y" : "ies"} · reranker {reranker} · {context}
       {quality ? ` · ${quality}` : ""}
+      {cache ? ` · cache ${cache}` : ""}
       {diagnostics.fallback_reason ? ` · ${diagnostics.fallback_reason}` : ""}
     </div>
   );
+}
+
+function cacheStatusText(cache: Record<string, unknown> | null | undefined) {
+  if (!cache || typeof cache.status !== "string") {
+    return null;
+  }
+  const reason = typeof cache.reason === "string" && cache.reason ? ` (${cache.reason})` : "";
+  return `${cache.status.replace("_", " ")}${reason}`;
 }
 
 function EvidenceFindingsPanel({

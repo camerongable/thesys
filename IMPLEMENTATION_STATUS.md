@@ -2340,3 +2340,45 @@ Sprint 56 verification run:
   could not complete because pnpm repeatedly failed while fetching npm registry
   packages (`ECONNRESET` / `fetch failed`). Sprint 60 owns the retry plus IDE
   browser QA for the hidden eval-report Inspect surface.
+
+## V1 Sprint 57 Branch Progress
+
+Sprint 57 is implemented on `codex/v1-sprints-51-60`:
+
+- Added DB-backed `AICacheEntry` and `AICacheEvent` records plus migration
+  `0027_ai_cache_entries.py` for workspace/project-scoped cache entries, hashed
+  keys, version payloads, access events, stale-denial reasons, and saved
+  token/cost/latency estimates.
+- Added `ai_cache_service` with key builders for embeddings, retrieval plans,
+  rerank results, and optional guide answers. Cache versions include evidence
+  corpus, memory, thesis, assumption, decision, retrieval policy, prompt/schema,
+  provider/model, and source-quality policy metadata.
+- Routed evidence chunk embedding, re-embedding, retrieval query embedding,
+  retrieval-plan execution, and rerank results through cache-aware paths.
+- Added optional non-streaming Ask Thesys answer caching. Semantic answer caching
+  is disabled by default; live-provider answer caching requires explicit
+  opt-in.
+- Added cache flags to settings, `.env.example`, Docker Compose, `/api/ai/status`,
+  and the existing AI status tooltip.
+- Added cache status to retrieval diagnostics and the Evidence search detail
+  line.
+- Added cache metrics to eval observability: hits, misses, stale denials, saved
+  tokens, saved cost, and saved latency.
+- Extended `scripts/eval_quality_gate.py` with a `cache_quality` gate and added
+  the cache tests to the default pytest quality slice.
+- Added `app/tests/test_ai_cache_service.py` for project isolation, no raw-text
+  cache keys, exact hits, stale denials after evidence/memory/thesis changes,
+  prompt/schema version invalidation, and observability cache metrics.
+
+Sprint 57 verification run:
+
+- [x] `cd apps/api && .venv/bin/ruff check ...` on touched cache/config/schema/router/service/test/script files
+- [x] `cd apps/api && .venv/bin/python -m compileall ...` on touched cache/config/schema/router/service/test/script files
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_ai_cache_service.py app/tests/test_eval_reports.py -q` (`9 passed`)
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_guide.py app/tests/test_retrieval_quality_eval.py -q --maxfail=1` (`31 passed`)
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s57 LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-security` (`warn`, `39/39`; cache quality `8/8`, skipped/unavailable gates warned)
+- [x] `cd apps/api && .venv/bin/pytest -q` (`173 passed`)
+- [x] `python3 scripts/security_check.py` exited `0` after focused security tests and AI quality passed; strict dependency auditing remained environment-limited because `pip-audit` was unavailable in the API venv and `pnpm audit --prod` hit npm registry `ECONNRESET` / `fetch failed`.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s57-default LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json` (`warn`; AI quality, retrieval quality, research-sprint dataset, extraction quality, cache quality, pytest quality slice, and security check passed; MCP contract warned because no live API/project endpoint was supplied).
+- [ ] `pnpm --filter thesys-web typecheck` and `pnpm --filter thesys-web test` did not reach TypeScript/tests. Both commands repeatedly hit npm registry package and attestation fetch failures (`ECONNRESET`, with one `ENOTFOUND`) during pnpm dependency-status/install work and were stopped after several minutes. Sprint 60 owns the retry plus browser QA for Sprint 57 cache diagnostics.
+- [x] Sprint 57 commit recorded in branch history.

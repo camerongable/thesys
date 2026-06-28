@@ -12261,15 +12261,15 @@ Sprint 41-50 audit:
 | Gap source | Remaining work | Owner |
 |---|---|---|
 | Sprint 41 | Strict dependency auditing needs `pip-audit` plus stable npm registry access; hosted-production posture still needs OIDC/JWKS docs, rotation/revocation runbooks, backup/restore guidance, and hosted-demo smoke verification. | Sprint 56 gates audit availability; Sprint 60 documents/verifies hosted posture. |
-| Sprint 42 | Context/compiler code exists, but memory/context Inspect browser QA was blocked by registry failures and post-refactor context-profile developer docs remain. | Sprint 60 |
-| Sprint 43 | Memory compaction/preferences/conflicts exist, but memory lifecycle diagrams, extension docs, post-refactor docstrings/comments, and browser QA for Inspect surfaces remain. | Sprint 60 |
-| Sprint 44 | MCP JSON-RPC/stdio behavior exists, but lifecycle diagrams, client docs after the refactor, advanced integration settings, and hosted-demo read-tool smoke coverage remain. | Sprint 60 |
-| Sprint 45 | Retrieval/citation quality exists, but cache-aware retrieval/rerank metrics, stale-cache denial coverage, and post-refactor provider/reranker extension docs remain. | Sprint 57 and Sprint 60 |
-| Sprint 46 | Ask Thesys streaming/citations exist, but web typecheck/tests and browser QA for streaming, cancellation, timeout, and citation drilldowns remain blocked until npm registry access is stable. | Sprint 60 |
-| Sprint 47 | Observability gates/reports exist after Sprint 56, but browser QA for the hidden report surface, real cache metrics from Sprint 57, and hosted/CI documentation remain. | Sprint 57 and Sprint 60 |
-| Sprint 48 | Current extraction work covers guards, low-text PDF fallback, multimodal boundaries, provenance, and eval gates, but maintained readability extraction, snapshots, OCR, table extraction, richer source-quality scoring, and extraction-provenance citation UI remain. | Sprint 58 |
-| Sprint 49 | Shared utilities were added, but validation, research, guide, evidence/retrieval, tool/MCP, and eval/reporting code still need a real feature-package refactor. | Sprint 59 |
-| Sprint 50 | README/docs improved, but final diagrams, code navigation, docstrings/comments, deployment docs, and honest limits must be regenerated after Sprints 57-59 land. | Sprint 60 |
+| Sprint 42 | Context/compiler code exists, but memory/context Inspect browser QA was blocked by registry failures; docs still need a post-refactor map of context profiles, token budgets, compression, stale/conflict policy, dropped-context explanations, and eval entrypoints. | Sprint 60 |
+| Sprint 43 | Memory compaction/preferences/conflicts exist, but memory lifecycle diagrams, extension docs for adding memory types, post-refactor docstrings/comments, and browser QA for Inspect filters/proposals/conflict resolution remain. | Sprint 60 |
+| Sprint 44 | MCP JSON-RPC/stdio behavior exists, but lifecycle diagrams, client docs after the refactor, advanced integration settings, stdio/API smoke commands, and hosted-demo read-tool coverage remain. | Sprint 60 |
+| Sprint 45 | Retrieval/citation quality, cache-aware retrieval/rerank metrics, and stale-cache denial coverage exist; post-refactor docs still need exact provider/reranker extension points, hybrid ranking limits, cache invalidation notes, and citation-verifier ownership. | Sprint 60 |
+| Sprint 46 | Ask Thesys streaming/citations exist, but web typecheck/tests and browser QA for streaming, cancellation, timeout, event ordering, proposal cards, and citation drilldowns remain blocked until npm registry access is stable. | Sprint 60 |
+| Sprint 47 | Observability gates/reports and real cache metrics exist; browser QA for the hidden report surface and hosted/CI docs still need concrete commands, artifact paths, warn/fail policy, and environment prerequisites. | Sprint 60 |
+| Sprint 48 | Current extraction work covers guards, low-text PDF fallback, multimodal boundaries, provenance, and eval gates, but maintained readability extraction, snapshots, OCR, table extraction, richer source-quality scoring, extraction-provenance citation UI, and live Tavily/multimodal QA fixtures remain. | Sprint 58 |
+| Sprint 49 | Shared utilities were added, but validation, research, guide, evidence/retrieval, tool/MCP, eval/reporting, prompt assembly, structured-output repair, proposal creation, and audit metadata paths still need a real feature-package refactor with typed DTO boundaries. | Sprint 59 |
+| Sprint 50 | README/docs improved, but final diagrams, code navigation, docstrings/comments, deployment docs, hosted-demo runbooks, and honest limits must be regenerated after Sprints 57-59 land and deferred browser checks are retried. | Sprint 60 |
 
 ---
 
@@ -12651,6 +12651,17 @@ opaque.
 - Tests prove invalidation for evidence, memory, thesis, prompt, schema,
   retrieval, provider, and source-quality changes.
 
+## Branch Implementation Note
+
+The `codex/v1-sprints-51-60` branch implements this sprint with DB-backed
+`AICacheEntry` and `AICacheEvent` records, an `ai_cache_service` for hashed
+workspace/project-scoped keys, cache-aware embedding/retrieval/rerank paths,
+optional non-streaming Ask Thesys answer caching, cache flags in API status and
+environment config, cache hit/miss/stale/savings metrics in eval observability,
+and a `cache_quality` gate in `scripts/eval_quality_gate.py`. Semantic answer
+caching remains disabled by default and live-provider answer caching requires an
+explicit opt-in flag.
+
 ---
 
 # V1 Sprint 58: Source Intelligence and Document AI V2
@@ -12665,18 +12676,27 @@ provenance.
 - Add readability extraction for fetched HTML pages using an explicit maintained
   parser such as `trafilatura`, `readability-lxml`, or an equivalent dependency.
   Preserve canonical URL, title, author/date when available, warnings, and
-  fallback-to-raw-text reason.
+  fallback-to-raw-text reason. Route it through source ingestion so evidence
+  records identify raw fetch metadata, normalized readability text,
+  parser/version, and fallback path.
 - Add optional page screenshot/snapshot capture for inspected sources with
   storage limits, redaction/egress policy, source metadata, and Inspect-only UI
-  exposure.
+  exposure. Persist snapshot metadata separately from normalized text:
+  canonical URL, fetched timestamp, content hash, storage key/path, byte size,
+  screenshot availability, redaction status, and retention policy.
 - Add OCR fallback for scanned PDFs with confidence, page numbers, extraction
-  method metadata, and deterministic fallback behavior for tests.
+  method metadata, and deterministic fallback behavior for tests. Include a test
+  double so scanned-PDF behavior can be verified without OCR binaries or live
+  multimodal credentials.
 - Add table extraction extension for PDFs and screenshots, including table text,
   row/column structure when available, page/region provenance, and extraction
-  confidence.
+  confidence. Store table rows/cells plus text summaries so retrieval can search
+  them and citation drilldowns can show row/column provenance.
 - Add section/page/region-level quote provenance for extracted snippets so
   citations can point to exact document pages, sections, table regions,
-  screenshots, or OCR spans.
+  screenshots, or OCR spans. Extend chunk metadata with extraction method,
+  source snapshot ID, page number, section heading, table ID, region, confidence,
+  and quote offsets where available.
 - Add richer source quality scoring and source-type/domain diversity controls:
   authority, freshness, canonical/deduped status, extraction confidence,
   prompt-injection markers, source type, domain/source diversity, and whether
@@ -12688,7 +12708,8 @@ provenance.
   availability, and source-quality explanation.
 - Add live Tavily and live multimodal QA paths when credentials are configured,
   guarded by egress policy, rate limits, and deterministic no-credential eval
-  fixtures.
+  fixtures. Missing credentials or egress allowlists should produce explicit
+  eval warnings rather than silent passes.
 - Add fixtures for messy HTML, prompt-injected HTML, scanned PDFs, low-text
   PDFs, table-heavy PDFs, duplicate canonical URLs, stale sources, and
   live-provider-unavailable fallback.
@@ -12699,6 +12720,9 @@ provenance.
 - Store raw snapshot metadata and normalized extraction artifacts separately
   enough that citations can explain whether a quote came from raw HTML,
   readability text, OCR, a table, a PDF page, or a screenshot region.
+- Update README/docs portfolio language with the implemented document-AI stack:
+  extraction methods, provenance model, source-quality scoring, deterministic
+  fallbacks, and live-provider limits.
 
 ## Acceptance Criteria
 
@@ -12729,7 +12753,9 @@ and extend.
   feature packages for `evidence`, `retrieval`, `research`, `guide`,
   `validation`, `decisions`, `memory`, `governance/tools`, `mcp`, and `evals`,
   plus shared packages only for `common/ai`, `common/db`, `common/security`,
-  `common/observability`, and `common/types`.
+  `common/observability`, and `common/types`. Record package ownership before
+  code movement, including owned routers, service entrypoints, DTOs, DB models
+  touched, tests, and allowed dependencies.
 - Start with the largest mixed-responsibility modules and their routers:
   `validation_service.py`, `agentic_research_service.py`, `guide_service.py`,
   `tool_service.py`, `retrieval_service.py`, `evidence_service.py`,
@@ -12738,7 +12764,8 @@ and extend.
 - Define dependency rules: routers call feature service entrypoints; feature
   packages depend on common packages; cross-feature behavior uses explicit DTOs
   or orchestration services; feature packages should not import each other
-  through module-level side effects.
+  through module-level side effects. Add or document an import-boundary check
+  that catches circular imports and private sibling-feature imports.
 - Split oversized services into cohesive modules: validation planning/result
   interpretation/decisions, agentic research graph/synthesis/citation
   audit/memory proposals, guide routing/grounded generation/proposal routing,
@@ -12749,6 +12776,9 @@ and extend.
   used by API routes or tests, especially eval gate/report/trend/LangSmith export
   behavior.
 - Add typed internal transfer objects to replace large ad hoc dict payloads.
+  Prioritize DTOs for context packs, retrieval requests/results, citation
+  verification outcomes, guide events, tool execution/proposal outcomes, eval
+  gate results, cache diagnostics, and extraction artifacts.
 - Establish explicit module ownership boundaries and dependency rules so feature
   packages do not import across each other through hidden side effects.
 - Apply the refactor incrementally:
@@ -12759,6 +12789,9 @@ and extend.
   - rerun targeted tests before moving the next group
 - Remove meaningful duplication in prompt assembly, structured-output repair,
   retrieval result shaping, audit metadata merging, and proposal creation.
+  Centralize shared prompt/schema repair behavior in common AI code, keep
+  feature prompts in feature-owned modules, and centralize audit metadata
+  merging/redaction in governance/common code.
 - Keep Python idiomatic and SOLID: small cohesive services, typed DTOs for
   cross-module boundaries, dependency injection at service edges, and shared
   utilities only for genuinely shared behavior.
@@ -12767,6 +12800,9 @@ and extend.
   avoid circular model imports.
 - Run import-cycle checks or an equivalent static inspection after package
   movement.
+- Update `SPRINT_51_60_TODO.md`, `IMPLEMENTATION_STATUS.md`, README project
+  navigation, and code-owner docs with the final package layout before the
+  Sprint 59 commit.
 
 ## Acceptance Criteria
 
@@ -12799,6 +12835,18 @@ interviewers to understand without overwhelming the core workflow.
   - eval gates from local run through CI, trend report, and dashboard/report
   - production deployment and security posture, including auth, provider egress,
     object storage, Temporal, database, and frontend/API boundaries
+  Each diagram must identify the source files/services that own the depicted
+  steps. The context diagram must show profile selection, item sources, memory,
+  retrieval, compression, dropped/stale/conflict diagnostics, and
+  prompt-injection boundaries. The memory diagram must show proposal, approval,
+  active, compacted, conflicted, superseded, archived, audited, and
+  context-linked states. The MCP diagram must show initialize, capabilities,
+  tool list/call, RBAC/risk guard, approval, denial/error, audit, redaction, and
+  stdio versus HTTP/SSE entrypoints. The eval diagram must show local command,
+  gates, unavailable warnings, artifacts, trends, optional LangSmith export,
+  Inspect UI, and CI usage. The deployment diagram must show frontend, FastAPI,
+  Temporal, Postgres/pgvector, object storage, provider egress, auth, audit
+  logs, eval artifacts, backup boundaries, and secret redaction.
 - Update developer navigation docs after the feature-package refactor lands:
   - where to add a new AI workflow
   - where to add a new memory type or context profile
@@ -12824,7 +12872,17 @@ interviewers to understand without overwhelming the core workflow.
     Temporal determinism constraints, and prompt-injection boundaries
   - no comments that merely restate obvious assignments
 - Add deployment documentation and environment profiles.
+- For local, deterministic demo, provider-backed demo, staging-like, and
+  production-like profiles, document required env vars, disabled provider paths,
+  auth mode, egress posture, cache posture, eval/report behavior,
+  object-storage expectation, and verification commands.
+- Add production-auth notes for JWT/OIDC/JWKS expectations, API-key service
+  accounts, token/key rotation, token revocation, dev-auth isolation, and known
+  remaining auth limitations.
 - Add production object-storage guidance and backup/restore notes.
+- Add a dependency-audit runbook covering `pip-audit`, `pnpm audit --prod`,
+  non-strict local behavior, strict CI behavior, expected failure modes, and how
+  warnings appear in `scripts/security_check.py` and the quality gate.
 - Retry deferred web/browser checks from Sprints 51 and 53: memory/context
   Inspect, Ask Thesys streaming, cancellation/timeout UI, citation drilldowns,
   and advanced report/settings surfaces.
@@ -12835,12 +12893,19 @@ interviewers to understand without overwhelming the core workflow.
 - Add multi-project portfolio views only after single-project workflow remains
   simple.
 - Add integration settings for MCP/API clients, search providers, and model
-  providers behind developer/advanced settings.
+  providers behind developer/advanced settings. Keep MCP, provider, cache, eval,
+  and extraction internals out of the homepage and primary workflow.
 - Add smoke tests for seeded hosted demo data.
 - Document remaining honest limits after Sprints 51-60, including any
   provider-only features not exercised in deterministic local mode, OIDC/JWKS
   auth gaps, live Tavily/multimodal credential requirements, and deployment
   assumptions.
+- Retry and record deferred browser checks for Sprint 51 memory/context Inspect,
+  Sprint 53 streaming/cancellation/timeout/citation drilldowns, Sprint 56 hidden
+  eval reports, and Sprint 57 cache diagnostics if those web checks are still
+  pending when Sprint 57 lands. Also rerun web typecheck/tests and strict or
+  non-strict dependency checks; if registry access blocks them, record the exact
+  error and next owner.
 
 ## Acceptance Criteria
 

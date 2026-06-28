@@ -517,7 +517,13 @@ def reembed_evidence(
     if not dry_run:
         for chunk in eligible:
             try:
-                embedding = embedding_service.embed_text_with_metadata(settings, chunk.text)
+                embedding = embedding_service.embed_text_with_metadata_cached(
+                    db,
+                    auth,
+                    settings,
+                    chunk.text,
+                    project_id=chunk.project_id,
+                )
                 chunk.embedding = embedding.vector
                 chunk.embedding_provider = embedding.provider
                 chunk.embedding_model = embedding.model
@@ -719,7 +725,13 @@ def _process_source_text(
         source.ingestion_error = None
 
         for index, chunk_text in enumerate(chunks):
-            embedding = embedding_service.embed_text_with_metadata(settings, chunk_text)
+            embedding = embedding_service.embed_text_with_metadata_cached(
+                db,
+                auth,
+                settings,
+                chunk_text,
+                project_id=source.project_id,
+            )
             chunk_metadata = _merge_metadata(
                 {
                     "source_title": source.title,

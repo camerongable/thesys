@@ -109,6 +109,7 @@ class RetrievalRerankerDiagnosticsRead(BaseModel):
     adapter: str | None = None
     fallback_used: bool = False
     fallback_reason: str | None = None
+    cache: dict[str, object] | None = None
 
 
 class RetrievalContextDiagnosticsRead(BaseModel):
@@ -158,6 +159,7 @@ class RetrievalDiagnosticsRead(BaseModel):
     reranker: RetrievalRerankerDiagnosticsRead | None = None
     context: RetrievalContextDiagnosticsRead | None = None
     quality_report: RetrievalQualityReportRead | None = None
+    cache: dict[str, object] | None = None
 
 
 class EvidenceRetrieveRead(BaseModel):

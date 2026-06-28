@@ -36,6 +36,7 @@ from app.schemas.guide import (
 from app.schemas.overview import NextBestActionRead, ProjectOverviewRead
 from app.schemas.validation import DecisionCoachActionRead
 from app.services import (
+    ai_cache_service,
     ai_run_service,
     context_service,
     memory_service,
@@ -1285,6 +1286,18 @@ def _grounded_chat_response(
         expected_schema=_GroundedGuideAnswerDraft.__name__,
         memory_selection=memory_selection,
     )
+    context_pack_payload = context_pack.model_dump(mode="json")
+    key_payload, family_payload, version_payload = ai_cache_service.guide_answer_cache_payloads(
+        db,
+        auth,
+        settings,
+        project_id,
+        message=message,
+        recent_turns=recent_turns,
+        prompt_version=GUIDE_CHAT_PROMPT_VERSION,
+        expected_schema=_GroundedGuideAnswerDraft.__name__,
+        context_pack=context_pack_payload,
+    )
     generation_step = ai_run_service.start_step(
         db,
         run,
@@ -1300,6 +1313,39 @@ def _grounded_chat_response(
     )
     started = perf_counter()
     try:
+        cache_lookup = ai_cache_service.lookup(
+            db,
+            auth,
+            settings,
+            cache_type="guide_answer",
+            key_payload=key_payload,
+            family_payload=family_payload,
+            version_payload=version_payload,
+            project_id=project_id,
+            saved_tokens=1200,
+            latency_saved_ms=250,
+        )
+        if cache_lookup.value is not None:
+            response = GuideChatResponseRead.model_validate(cache_lookup.value["response"])
+            response.ai_run_id = run.id
+            cache_metadata = ai_cache_service.cache_event_diagnostics(cache_lookup.event)
+            response.context_pack = {
+                **(response.context_pack or {}),
+                "cache": cache_metadata,
+            }
+            ai_run_service.complete_step(
+                db,
+                generation_step,
+                output_json={
+                    "cache": cache_metadata,
+                    "response": response.model_dump(mode="json"),
+                },
+                latency_ms=int((perf_counter() - started) * 1000),
+                tokens=0,
+                cost=Decimal("0"),
+            )
+            return response, 0, Decimal("0"), "cache", settings.litellm_model
+
         result = generate_structured_output(
             settings,
             _GroundedGuideAnswerDraft,
@@ -1309,7 +1355,7 @@ def _grounded_chat_response(
         )
         draft = _GroundedGuideAnswerDraft.model_validate(result.parsed)
         response = _response_from_grounded_draft(context, draft, search, run.id)
-        response.context_pack = context_pack.model_dump(mode="json")
+        response.context_pack = context_pack_payload
         response.citation_details = _citation_details_from_search(
             search.output,
             response.context_pack,
@@ -1324,6 +1370,17 @@ def _grounded_chat_response(
             tokens=completion.total_tokens,
             cost=completion.total_cost,
         )
+        if cache_lookup.event is None or cache_lookup.event.event_type != "disabled":
+            ai_cache_service.store(
+                db,
+                auth,
+                cache_type="guide_answer",
+                key_payload=key_payload,
+                family_payload=family_payload,
+                version_payload=version_payload,
+                value_payload={"response": response.model_dump(mode="json")},
+                project_id=project_id,
+            )
         return (
             response,
             completion.total_tokens,

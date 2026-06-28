@@ -54,8 +54,7 @@ def test_eval_observability_metrics_endpoint_reports_project_metrics(
         json.dumps({"available": True, "cache": {"hits": 2, "misses": 1, "stale_denials": 0}}),
         encoding="utf-8",
     )
-    seed_body = client.post("/api/demo/seed").json()
-    project_id = seed_body["project"]["id"]
+    project_id = client.post("/api/projects", json={"name": "Eval metrics project"}).json()["id"]
 
     response = client.get(f"/api/projects/{project_id}/evals/observability-metrics")
 

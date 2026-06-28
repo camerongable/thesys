@@ -9,7 +9,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+from sqlalchemy.orm import Session
 
+from app.core.auth import AuthContext
 from app.core.config import Settings
 from app.services.security_policy_service import (
     ProviderEgressDeniedError,
@@ -37,6 +39,68 @@ class EmbeddingResult:
 
 def embed_text(settings: Settings, text: str) -> list[float]:
     return embed_text_with_metadata(settings, text).vector
+
+
+def embed_text_with_metadata_cached(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    text: str,
+    *,
+    project_id: Any | None = None,
+) -> EmbeddingResult:
+    """Embed text with a workspace-scoped cache keyed by text hash and provider version."""
+
+    from app.services import ai_cache_service
+
+    key, family, versions = ai_cache_service.embedding_cache_payloads(auth, settings, text)
+    lookup = ai_cache_service.lookup(
+        db,
+        auth,
+        settings,
+        cache_type="embedding",
+        key_payload=key,
+        family_payload=family,
+        version_payload=versions,
+        project_id=project_id,
+        latency_saved_ms=50,
+    )
+    if lookup.value is not None:
+        value = lookup.value
+        embedded_at_raw = value.get("embedded_at")
+        embedded_at = (
+            datetime.fromisoformat(str(embedded_at_raw))
+            if embedded_at_raw
+            else datetime.now(UTC)
+        )
+        return EmbeddingResult(
+            vector=[float(item) for item in value.get("vector", [])],
+            provider=str(value.get("provider") or settings.embedding_provider),
+            model=str(value.get("model") or settings.embedding_model),
+            dimension=int(value.get("dimension") or settings.embedding_dimension),
+            version=str(value.get("version") or settings.embedding_version),
+            embedded_at=embedded_at,
+        )
+
+    result = embed_text_with_metadata(settings, text)
+    ai_cache_service.store(
+        db,
+        auth,
+        cache_type="embedding",
+        key_payload=key,
+        family_payload=family,
+        version_payload=versions,
+        value_payload={
+            "vector": result.vector,
+            "provider": result.provider,
+            "model": result.model,
+            "dimension": result.dimension,
+            "version": result.version,
+            "embedded_at": result.embedded_at.isoformat(),
+        },
+        project_id=project_id,
+    )
+    return result
 
 
 def embed_text_with_metadata(settings: Settings, text: str) -> EmbeddingResult:

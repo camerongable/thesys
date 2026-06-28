@@ -68,6 +68,7 @@ def main() -> int:
             [sys.executable, "scripts/eval_extraction_quality.py", "--json"],
             purpose="source ingestion, document extraction, provenance, and injection markers",
         ),
+        _cache_quality_gate(),
     ]
     gates.append(_mcp_contract_gate(args))
     gates.append(_pytest_gate(args.skip_pytest))
@@ -98,7 +99,7 @@ def _report_dir() -> Path:
 def _metadata(args: argparse.Namespace, generated_at: str) -> dict[str, Any]:
     return {
         "generated_at": generated_at,
-        "sprint": "56",
+        "sprint": "57",
         "git_commit": _git(["rev-parse", "--short", "HEAD"]),
         "git_branch": _git(["rev-parse", "--abbrev-ref", "HEAD"]),
         "provider_mode": "deterministic_or_configured",
@@ -106,7 +107,7 @@ def _metadata(args: argparse.Namespace, generated_at: str) -> dict[str, Any]:
         "prompt_version": "mixed; see persisted AI runs",
         "schema_version": "eval-quality-gate:v1",
         "context_profile_version": "context-pack:v1",
-        "retrieval_policy_version": "retrieval-quality:v2",
+        "retrieval_policy_version": "retrieval-quality:v3",
         "memory_policy_version": "memory-manager:v2",
         "tool_schema_version": "thesys-mcp-adapter:v1",
         "api_base": args.api_base,
@@ -135,6 +136,90 @@ def _run_json_gate(name: str, command: list[str], *, purpose: str) -> dict[str, 
         "stdout_tail": result.stdout[-2500:],
         "stderr_tail": result.stderr[-2500:],
         "rerun": " ".join(command),
+    }
+
+
+def _cache_quality_gate() -> dict[str, Any]:
+    cache_model_source = _read("apps/api/app/db/models/cache.py")
+    cache_service_source = _read("apps/api/app/services/ai_cache_service.py")
+    config_source = _read("apps/api/app/core/config.py")
+    evidence_service_source = _read("apps/api/app/services/evidence_service.py")
+    retrieval_service_source = _read("apps/api/app/services/retrieval_service.py")
+    guide_service_source = _read("apps/api/app/services/guide_service.py")
+    report_service_source = _read("apps/api/app/services/eval_report_service.py")
+    gate_source = _read("scripts/eval_quality_gate.py")
+    checks = [
+        (
+            "cache_models_exist",
+            "AICacheEntry" in cache_model_source and "AICacheEvent" in cache_model_source,
+            "DB-backed cache entries and per-access events exist",
+        ),
+        (
+            "cache_scoped_to_workspace_project",
+            "workspace_id" in cache_service_source and "project_id" in cache_service_source,
+            "cache keys/events are scoped by workspace and project",
+        ),
+        (
+            "versioned_cache_keys",
+            "project_state_versions" in cache_service_source
+            and "version changed" in cache_service_source,
+            "cache keys include project state versions and stale-denial reasons",
+        ),
+        (
+            "embedding_cache_integration",
+            "embed_text_with_metadata_cached" in evidence_service_source
+            and "embed_text_with_metadata_cached" in retrieval_service_source,
+            "chunk and query embeddings use the cache-aware embedding wrapper",
+        ),
+        (
+            "retrieval_rerank_cache_integration",
+            "cache_type=\"retrieval_plan\"" in retrieval_service_source
+            and "cache_type=\"rerank_result\"" in retrieval_service_source,
+            "retrieval plans and rerank results use cache entries",
+        ),
+        (
+            "semantic_answer_cache_guarded",
+            "ai_semantic_answer_cache_live_enabled" in config_source
+            and "cache_type=\"guide_answer\"" in guide_service_source,
+            "guide answer cache is optional and live-provider gated",
+        ),
+        (
+            "cache_report_metrics",
+            "thesys.ai.cache.saved_tokens" in report_service_source
+            and "cache_quality" in gate_source,
+            "cache hit/miss/stale/savings metrics reach reports and quality gates",
+        ),
+        (
+            "cache_tests_exist",
+            "test_ai_cache_service.py" in "\n".join(_repo_files("apps/api/app/tests")),
+            "cache isolation and stale-denial tests exist",
+        ),
+    ]
+    metrics = [
+        {
+            "key": key,
+            "label": key.replace("_", " ").title(),
+            "passed": passed,
+            "observed": "present" if passed else "missing",
+            "expected": expected,
+        }
+        for key, passed, expected in checks
+    ]
+    score = sum(1 for metric in metrics if metric["passed"])
+    total = len(metrics)
+    return {
+        "name": "cache_quality",
+        "purpose": "semantic caching, stale denial, isolation, and saved cost/latency reporting",
+        "status": "pass" if score == total else "fail",
+        "passed": score == total,
+        "score": score,
+        "total": total,
+        "metrics": metrics,
+        "command": [],
+        "returncode": None,
+        "stdout_tail": "",
+        "stderr_tail": "",
+        "rerun": "python3 scripts/eval_quality_gate.py --json",
     }
 
 
@@ -177,6 +262,7 @@ def _pytest_gate(skip: bool) -> dict[str, Any]:
         "app/tests/test_context_compiler.py",
         "app/tests/test_citation_verifier.py",
         "app/tests/test_retrieval_quality_eval.py",
+        "app/tests/test_ai_cache_service.py",
         "app/tests/test_guide.py",
         "app/tests/test_evidence.py",
         "app/tests/test_langsmith_observability.py",
@@ -189,8 +275,8 @@ def _pytest_gate(skip: bool) -> dict[str, Any]:
         command,
         cwd=API_DIR,
         purpose=(
-            "structured output, context, retrieval, guide, extraction, redaction, MCP, "
-            "security, and citation tests"
+            "structured output, context, retrieval, cache, guide, extraction, redaction, "
+            "MCP, security, and citation tests"
         ),
     )
 
@@ -289,6 +375,7 @@ def _summary(
         if not metric.get("passed", False)
     ]
     live_ai_report = as_dict(live_snapshot.get("ai_report")) if live_snapshot else {}
+    cache_snapshot = _cache_from_live_snapshot(live_snapshot)
     return {
         **metadata,
         "available": True,
@@ -300,7 +387,7 @@ def _summary(
         "warning_gate_ids": [gate["name"] for gate in warnings],
         "gates": gates,
         "reports": gates,
-        "cache": {"hits": 0, "misses": 0, "stale_denials": 0},
+        "cache": cache_snapshot,
         "latency_ms": live_ai_report.get("average_step_latency_ms"),
         "token_cost": {
             "total_tokens": live_ai_report.get("total_tokens"),
@@ -318,6 +405,9 @@ def _live_project_snapshot(args: argparse.Namespace) -> dict[str, Any] | None:
     workflow_body = _fetch_json(
         f"{args.api_base.rstrip('/')}/api/projects/{args.project_id}/workflows"
     )
+    observability_body = _fetch_json(
+        f"{args.api_base.rstrip('/')}/api/projects/{args.project_id}/evals/observability-metrics"
+    )
     runs = workflow_body.get("runs", []) if isinstance(workflow_body, dict) else []
     trace_ids = [
         str(run["langsmith_trace_id"])
@@ -326,8 +416,43 @@ def _live_project_snapshot(args: argparse.Namespace) -> dict[str, Any] | None:
     ]
     return {
         "ai_report": ai_body.get("report", {}) if isinstance(ai_body, dict) else {},
+        "observability": observability_body if isinstance(observability_body, dict) else {},
         "trace_ids": trace_ids[:20],
     }
+
+
+def _cache_from_live_snapshot(live_snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    cache = {
+        "hits": 0,
+        "misses": 0,
+        "stale_denials": 0,
+        "saved_tokens": 0,
+        "saved_cost": "0",
+        "latency_saved_ms": 0,
+    }
+    if not live_snapshot:
+        return cache
+    observability = as_dict(live_snapshot.get("observability"))
+    metrics = observability.get("metrics", [])
+    if not isinstance(metrics, list):
+        return cache
+    name_map = {
+        "thesys.ai.cache.hits": "hits",
+        "thesys.ai.cache.misses": "misses",
+        "thesys.ai.cache.stale_denials": "stale_denials",
+        "thesys.ai.cache.saved_tokens": "saved_tokens",
+        "thesys.ai.cache.saved_cost": "saved_cost",
+        "thesys.ai.cache.latency_saved": "latency_saved_ms",
+    }
+    for metric in metrics:
+        if not isinstance(metric, dict):
+            continue
+        target = name_map.get(str(metric.get("name")))
+        if not target:
+            continue
+        value = metric.get("value", 0)
+        cache[target] = str(value) if target == "saved_cost" else int(float(value or 0))
+    return cache
 
 
 def _fetch_json(url: str) -> dict[str, Any]:
@@ -553,6 +678,20 @@ def _parse_json_output(stdout: str) -> dict[str, Any]:
 
 def as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _read(relative_path: str) -> str:
+    path = ROOT / relative_path
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+def _repo_files(relative_path: str) -> list[str]:
+    path = ROOT / relative_path
+    if not path.exists():
+        return []
+    return [str(item.relative_to(ROOT)) for item in path.rglob("*") if item.is_file()]
 
 
 def _git(args: list[str]) -> str:

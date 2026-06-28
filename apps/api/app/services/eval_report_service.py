@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import AuthContext
 from app.core.config import Settings
 from app.db.models import AIRun, AIStep, ApprovalRequest, AuditEvent
-from app.services import project_service
+from app.services import ai_cache_service, project_service
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 REPORT_DIR_ENV = "THESYS_EVAL_REPORT_DIR"
@@ -82,7 +82,15 @@ def project_observability_metrics(
     )
     audit_counts = _audit_event_counts(db, auth, project_id)
     latest_report = read_latest_report()
-    cache_summary = latest_report.get("cache", {}) if isinstance(latest_report, dict) else {}
+    persisted_cache_summary = ai_cache_service.cache_summary(db, auth, project_id=project_id)
+    report_cache_summary = latest_report.get("cache", {}) if isinstance(latest_report, dict) else {}
+    cache_summary = (
+        persisted_cache_summary
+        if _cache_value(persisted_cache_summary, "hits")
+        or _cache_value(persisted_cache_summary, "misses")
+        or _cache_value(persisted_cache_summary, "stale_denials")
+        else report_cache_summary
+    )
     workflow_counts: dict[str, int] = {}
     for run in runs:
         workflow_counts[run.workflow_type] = workflow_counts.get(run.workflow_type, 0) + 1
@@ -158,6 +166,24 @@ def project_observability_metrics(
             "thesys.ai.cache.stale_denials",
             _cache_value(cache_summary, "stale_denials"),
             "1",
+            base_attributes,
+        ),
+        _metric(
+            "thesys.ai.cache.saved_tokens",
+            _cache_value(cache_summary, "saved_tokens"),
+            "tokens",
+            base_attributes,
+        ),
+        _metric(
+            "thesys.ai.cache.saved_cost",
+            _cache_float(cache_summary, "saved_cost"),
+            "USD",
+            base_attributes,
+        ),
+        _metric(
+            "thesys.ai.cache.latency_saved",
+            _cache_value(cache_summary, "latency_saved_ms"),
+            "ms",
             base_attributes,
         ),
         _metric(
@@ -336,6 +362,20 @@ def _cache_value(cache_summary: Any, key: str) -> int:
     if isinstance(value, str) and value.strip().isdigit():
         return int(value)
     return 0
+
+
+def _cache_float(cache_summary: Any, key: str) -> float:
+    if not isinstance(cache_summary, dict):
+        return 0.0
+    value = cache_summary.get(key, 0)
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    return 0.0
 
 
 def _utc(value: datetime) -> datetime:

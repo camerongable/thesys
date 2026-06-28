@@ -411,6 +411,7 @@ export type RetrievalRerankerDiagnostics = {
   provider: string;
   fallback_used: boolean;
   fallback_reason: string | null;
+  cache: Record<string, unknown> | null;
 };
 
 export type RetrievalContextDiagnostics = {
@@ -449,6 +450,7 @@ export type RetrievalDiagnostics = {
   reranker: RetrievalRerankerDiagnostics | null;
   context: RetrievalContextDiagnostics | null;
   quality_report: RetrievalQualityReport | null;
+  cache: Record<string, unknown> | null;
 };
 
 export type EvidenceRetrieveResult = {
@@ -1818,6 +1820,11 @@ export type AIStatus = {
   embedding_version: string;
   embedding_timeout_seconds: number;
   embedding_retry_attempts: number;
+  ai_embedding_cache_enabled: boolean;
+  ai_retrieval_cache_enabled: boolean;
+  ai_rerank_cache_enabled: boolean;
+  ai_semantic_answer_cache_enabled: boolean;
+  ai_semantic_answer_cache_live_enabled: boolean;
   retrieval_vector_path: "auto" | "sql" | "python";
   retrieval_python_fallback_enabled: boolean;
   retrieval_reranking_enabled: boolean;

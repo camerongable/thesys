@@ -612,6 +612,11 @@ EMBEDDING_PROVIDER=deterministic
 EMBEDDING_MODEL=deterministic-hash-embedding-1536
 EMBEDDING_DIMENSION=1536
 EMBEDDING_VERSION=v1
+AI_EMBEDDING_CACHE_ENABLED=true
+AI_RETRIEVAL_CACHE_ENABLED=true
+AI_RERANK_CACHE_ENABLED=true
+AI_SEMANTIC_ANSWER_CACHE_ENABLED=false
+AI_SEMANTIC_ANSWER_CACHE_LIVE_ENABLED=false
 RETRIEVAL_VECTOR_PATH=auto
 RETRIEVAL_PYTHON_FALLBACK_ENABLED=true
 RETRIEVAL_RERANKING_ENABLED=true
@@ -858,7 +863,7 @@ The core workflow is designed to prevent premature building by identifying the m
 This is a V1 portfolio proof-of-concept. Sprint 41-50 established the first AI
 engineering upgrade baseline; they are not treated as fully complete
 production-grade work. Sprints 51-60 are the explicit gap-closure track, and the
-current branch has implemented Sprints 51-56.
+current branch has implemented Sprints 51-57.
 
 Implemented or demonstrated:
 
@@ -892,10 +897,13 @@ Implemented or demonstrated:
   multiple memory types, memory proposal review, context diagnostics, and
   workflow-aware memory selection
 - MCP JSON-RPC adapter and stdio bridge over the governed tool registry
+- DB-backed semantic caching for embeddings, retrieval plans, rerank results, and
+  optional non-streaming Ask Thesys answers with hashed keys, versioned
+  invalidation, stale-cache denials, and saved token/cost/latency metrics
 - AI cost accounting, provider-failure circuit checks, OpenTelemetry-compatible
   local metrics, aggregate quality gates, file-backed eval reports/trends,
-  extraction readiness checks, redacted optional LangSmith eval export, and
-  hidden Inspect quality reporting
+  cache-quality gates, extraction readiness checks, redacted optional LangSmith
+  eval export, and hidden Inspect quality reporting
 - shared service utilities, source provenance utilities, developer docs, and
   code navigation guides
 
@@ -921,10 +929,10 @@ unfinished Sprint 41-50 item. The list below is the reader-friendly summary.
   one CI-ready quality-gate command; Markdown/HTML eval reports; local trend
   persistence; prompt/schema/context/retrieval/memory/tool changelogs; optional
   redacted LangSmith export; and a hidden-by-default quality report surface.
-- Sprint 57 adds semantic caching and cost optimization for embeddings,
-  retrieval plans, reranking, and optional guide answers with strict
-  project/workspace isolation, versioned invalidation, stale-cache denial
-  records, and saved-token/cost/latency metrics.
+- Sprint 57 is implemented on this branch: it adds semantic caching and cost
+  optimization for embeddings, retrieval plans, reranking, and optional
+  non-streaming guide answers with strict project/workspace isolation, versioned
+  invalidation, stale-cache denial records, and saved-token/cost/latency metrics.
 - Sprint 58 closes the document intelligence gap with readability extraction,
   snapshots, OCR, table extraction, page/section/table/region quote provenance,
   richer source quality, citation drilldown metadata, retrieval/context quality

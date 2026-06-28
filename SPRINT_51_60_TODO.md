@@ -62,15 +62,15 @@ with the sprint checklists below.
 | Gap source | Remaining work | Owning sprint |
 |---|---|---|
 | Sprint 41 | Strict dependency audits still depend on `pip-audit` being installed and stable npm registry access; hosted-production auth still needs OIDC/JWKS operational docs, token/key rotation runbooks, backup/restore guidance, and hosted-demo smoke verification. | Sprint 56 exposes audit availability as warn/fail gates; Sprint 60 documents and verifies hosted posture. |
-| Sprint 42 | Context/compiler behavior is implemented, but web/browser QA for memory/context Inspect was blocked by npm registry errors; developer docs still need post-refactor context-profile navigation and extension guidance. | Sprint 60 |
-| Sprint 43 | Memory compaction/preferences/conflicts are implemented, but the memory lifecycle needs diagrams, developer navigation, post-refactor docstrings/comments, and browser QA for Inspect review surfaces. | Sprint 60 |
-| Sprint 44 | MCP JSON-RPC/stdio behavior is implemented, but lifecycle diagrams, client setup docs after the refactor, advanced integration settings, and hosted-demo read-tool smoke coverage remain. | Sprint 60 |
-| Sprint 45 | Retrieval quality and citation verification are implemented, but cache-aware retrieval/rerank metrics, stale-cache denial coverage, and post-refactor provider/reranker extension docs remain. | Sprint 57 and Sprint 60 |
-| Sprint 46 | Ask Thesys streaming/citations are implemented, but web typecheck/tests and IDE browser QA for streaming, cancellation, timeout, and citation drilldowns were blocked by npm registry errors. | Sprint 60 |
-| Sprint 47 | Observability gates/reports are implemented in Sprint 56, but browser QA for the hidden eval report is blocked by npm registry errors; real cache metrics require Sprint 57 caches; hosted/CI wiring remains documentation/readiness work. | Sprint 57 and Sprint 60 |
-| Sprint 48 | Current code has security guards, low-text PDF fallback, multimodal boundaries, provenance, and extraction eval gates, but still lacks maintained readability extraction, persisted page snapshots, OCR, table extraction, richer source-quality scoring, and citation drilldown UI for extraction provenance. | Sprint 58 |
-| Sprint 49 | Earlier cleanup added shared utilities, but the codebase still has oversized service modules and mixed responsibilities in validation, research, guide, evidence/retrieval, tools/MCP, and eval/reporting paths. | Sprint 59 |
-| Sprint 50 | README/docs were improved, but final diagrams, code navigation, docstrings/comments, deployment docs, and honest limit notes must be regenerated after Sprints 57-59 land. | Sprint 60 |
+| Sprint 42 | Context/compiler behavior is implemented, but memory/context Inspect browser QA was blocked by npm registry errors; docs still need a post-refactor map of context profiles, token budgets, compression, stale/conflict policy, dropped-context explanations, and eval entrypoints. | Sprint 60 |
+| Sprint 43 | Memory compaction/preferences/conflicts are implemented, but the memory lifecycle still needs diagrams, developer navigation for adding memory types, docstrings/comments for manager/review APIs, and browser QA for Inspect filters, proposals, selection reasons, and conflict resolution. | Sprint 60 |
+| Sprint 44 | MCP JSON-RPC/stdio behavior is implemented, but lifecycle diagrams, client setup docs after the refactor, advanced integration settings, stdio/API smoke commands, and hosted-demo read-tool coverage remain. | Sprint 60 |
+| Sprint 45 | Retrieval quality, citation verification, cache-aware retrieval/rerank metrics, and stale-cache denial coverage are implemented; post-refactor docs still need exact provider/reranker extension points, hybrid ranking limits, cache invalidation notes, and citation-verifier ownership. | Sprint 60 |
+| Sprint 46 | Ask Thesys streaming/citations are implemented, but web typecheck/tests and IDE browser QA for streaming, cancellation, timeout, event ordering, proposal cards, and citation drilldowns were blocked by npm registry errors. | Sprint 60 |
+| Sprint 47 | Observability gates/reports and real cache metrics are implemented; browser QA for the hidden eval report is blocked by npm registry errors, and hosted/CI wiring still needs concrete commands, artifact paths, warn/fail policy, and environment prerequisites. | Sprint 60 |
+| Sprint 48 | Current code has security guards, low-text PDF fallback, multimodal boundaries, provenance, and extraction eval gates, but still lacks maintained readability extraction, persisted page/screenshot snapshots, OCR, table extraction, richer source-quality scoring, extraction-provenance citation UI, and live Tavily/multimodal QA fixtures. | Sprint 58 |
+| Sprint 49 | Earlier cleanup added shared utilities, but validation, research, guide, evidence/retrieval, tools/MCP, eval/reporting, prompt assembly, structured-output repair, proposal creation, and audit metadata paths still need a feature-package refactor with typed DTO boundaries. | Sprint 59 |
+| Sprint 50 | README/docs were improved, but final diagrams, code navigation, docstrings/comments, deployment docs, hosted-demo runbooks, and honest limit notes must be regenerated after Sprints 57-59 land and after deferred browser checks are retried. | Sprint 60 |
 
 ## Deferred Verification Items
 
@@ -87,6 +87,10 @@ with the sprint checklists below.
 - Any future sprint that changes UI must keep advanced AI internals collapsed or
   behind Inspect/developer settings; the homepage and main validation workflow
   should stay focused on founder decisions, not implementation diagnostics.
+- Sprint 57 web verification must also be retried if it remains blocked when
+  the cache implementation is committed: AI status tooltip cache posture,
+  Evidence retrieval diagnostic cache line, and hidden eval cache metrics should
+  be checked with the Sprint 56 report UI.
 
 ## Sprint 51: Unified Context Compiler, Memory V2, and Context Evals
 
@@ -318,50 +322,51 @@ with the sprint checklists below.
 
 ## Sprint 57: Semantic Caching and Cost Optimization
 
-- [ ] Add the cost/latency upgrade not covered by Sprint 41-50: cache repeated
+- [x] Add the cost/latency upgrade not covered by Sprint 41-50: cache repeated
   AI work while proving cache keys cannot leak data across projects or stale
   contexts.
-- [ ] Design cache storage and invalidation before writing implementation code.
+- [x] Design cache storage and invalidation before writing implementation code.
   Document whether each cache is DB-backed, file-backed, or in-memory, and why
   that choice is acceptable for local demo versus production-like mode.
-- [ ] Add embedding cache keyed by workspace, provider, model, embedding
+- [x] Add embedding cache keyed by workspace, provider, model, embedding
   dimension, embedding version, normalization/chunking version, and text hash.
   Cache entries must not store raw secrets or cross workspace/project
   boundaries.
-- [ ] Add retrieval-plan cache keyed by workspace, project, query text/hash,
+- [x] Add retrieval-plan cache keyed by workspace, project, query text/hash,
   context profile, retrieval settings, evidence corpus version, memory version,
   thesis version, assumption/decision versions, and source-quality policy
   version.
-- [ ] Add rerank-result cache keyed by candidate chunk IDs plus reranker
+- [x] Add rerank-result cache keyed by candidate chunk IDs plus reranker
   provider/model/version, query hash, retrieval policy version, and score
   normalization version.
-- [ ] Add optional semantic cache for Ask Thesys answers keyed by project,
+- [x] Add optional semantic cache for Ask Thesys answers keyed by project,
   workspace, evidence, memory, thesis, prompt, schema, retrieval, and
-  context-pack versions.
-- [ ] Invalidate caches when evidence, memory, thesis, assumptions, decisions,
+  context-pack versions. The V1 implementation covers validated non-streaming
+  answers; streaming replay remains intentionally uncached.
+- [x] Invalidate caches when evidence, memory, thesis, assumptions, decisions,
   source quality, retrieval settings, tool outputs, provider settings, or
   prompt/context versions change.
-- [ ] Add explicit stale-cache denial behavior. When a cache key is close but
+- [x] Add explicit stale-cache denial behavior. When a cache key is close but
   invalid because context changed, record the reason and recompute instead of
   silently serving stale results.
-- [ ] Add configuration to disable semantic answer caching by default in live
+- [x] Add configuration to disable semantic answer caching by default in live
   provider mode until correctness evals pass; embedding/retrieval/rerank caches
   may be enabled independently.
-- [ ] Add cache-hit, cache-miss, stale-cache-denial, saved-token, saved-cost,
+- [x] Add cache-hit, cache-miss, stale-cache-denial, saved-token, saved-cost,
   and latency metrics to AI runs and eval reports.
-- [ ] Wire the new cache metrics into the Sprint 56 eval report service and
+- [x] Wire the new cache metrics into the Sprint 56 eval report service and
   hidden Inspect quality surface so cache regressions are visible without adding
   homepage/dashboard noise.
-- [ ] Add cache-aware quality-gate checks to `scripts/eval_quality_gate.py`:
+- [x] Add cache-aware quality-gate checks to `scripts/eval_quality_gate.py`:
   report cache hit/miss/stale-denial counts, saved token/cost estimates,
   isolation failures, and stale-context recomputation cases.
-- [ ] Add tests that prove cache isolation across projects/workspaces, stale
+- [x] Add tests that prove cache isolation across projects/workspaces, stale
   context invalidation, prompt/schema version invalidation, and no reuse after
   memory or evidence changes.
-- [ ] Add eval cases showing equivalent answers with and without safe caches,
+- [x] Add eval cases showing equivalent answers with and without safe caches,
   and divergent answers after evidence/memory/thesis changes.
-- [ ] Run cost/accounting, retrieval, guide, context, and eval tests.
-- [ ] Commit Sprint 57.
+- [x] Run cost/accounting, retrieval, guide, context, and eval tests.
+- [x] Commit Sprint 57 after final verification is recorded.
 
 ## Sprint 58: Source Intelligence and Document AI V2
 
@@ -372,15 +377,29 @@ with the sprint checklists below.
   such as `trafilatura`, `readability-lxml`, or another explicit dependency.
   Preserve original URL, canonical URL, title, author/date when available,
   extracted text, extraction warnings, and fallback-to-raw-text reason.
+- [ ] Route readability extraction through the existing source-ingestion path,
+  not a one-off helper. The stored evidence record must identify the raw fetch,
+  normalized readability text, parser/version, and fallback path used.
 - [ ] Add optional page screenshot/snapshot capture with storage limits,
   redaction/egress policy, source metadata, and Inspect-only UI exposure.
+- [ ] Persist snapshot metadata separately from normalized text: capture URL,
+  canonical URL, fetched timestamp, content hash, storage key/path, byte size,
+  screenshot availability, redaction status, and retention policy.
 - [ ] Add OCR fallback for scanned PDFs with confidence, page numbers,
   extraction method metadata, and graceful deterministic fallback.
+- [ ] Add a deterministic OCR test double so scanned-PDF behavior can be tested
+  without local OCR binaries or live multimodal credentials.
 - [ ] Add table extraction for PDFs and screenshots, including table text,
   row/column structure where available, page/region provenance, and extraction
   confidence.
+- [ ] Store table artifacts as structured rows/cells plus plain-text summaries
+  so retrieval can search them and citation drilldowns can show row/column
+  provenance.
 - [ ] Add section/page-level quote provenance so generated citations can point
   to exact document pages, sections, table regions, screenshots, or OCR spans.
+- [ ] Extend chunk metadata with `extraction_method`, `source_snapshot_id`,
+  `page_number`, `section_heading`, `table_id`, `region`, confidence, and quote
+  offsets where available.
 - [ ] Add richer source quality scoring for authority, freshness,
   canonical/deduped status, extraction confidence, injection markers, source
   type, domain diversity, OCR confidence, table extraction confidence,
@@ -393,6 +412,9 @@ with the sprint checklists below.
 - [ ] Add live Tavily and live multimodal QA paths when credentials are
   configured, with deterministic fallback, egress policy checks, rate limits,
   and eval fixtures that do not require credentials.
+- [ ] Make live-provider QA opt-in and visibly skipped when credentials or
+  egress allowlists are missing. The skip must appear in eval output as a
+  warning, not as a silent pass.
 - [ ] Add eval fixtures for messy HTML, prompt-injected HTML, scanned PDFs,
   low-text PDFs, table-heavy PDFs, duplicate canonical URLs, stale sources, and
   live-provider-unavailable fallback.
@@ -403,6 +425,9 @@ with the sprint checklists below.
 - [ ] Store raw snapshot metadata and normalized extraction artifacts separately
   enough that citations can explain whether a quote came from raw HTML,
   readability text, OCR, a table, a PDF page, or a screenshot region.
+- [ ] Update docs/README portfolio language for the implemented document-AI
+  stack: extraction methods, provenance model, source-quality scoring,
+  deterministic fallbacks, and live-provider limits.
 - [ ] Run evidence, extraction, provenance, retrieval, citation, source-quality,
   security-egress, and browser document QA.
 - [ ] Commit Sprint 58.
@@ -421,6 +446,9 @@ with the sprint checklists below.
   `validation`, `decisions`, `memory`, `governance/tools`, `mcp`, and `evals`;
   shared packages only for `common/ai`, `common/db`, `common/security`,
   `common/observability`, and `common/types`.
+- [ ] Record the package map in a temporary migration note or architecture doc
+  before code movement. For each package, list owned routers, service
+  entrypoints, DTOs, models touched, tests, and allowed dependencies.
 - [ ] Start with the largest mixed-responsibility modules: split
   `validation_service.py`, `agentic_research_service.py`, `guide_service.py`,
   `tool_service.py`, `retrieval_service.py`, `evidence_service.py`,
@@ -430,6 +458,9 @@ with the sprint checklists below.
   routers call feature service entrypoints; feature packages must not import
   each other through hidden module-level side effects; cross-feature behavior
   uses explicit DTOs or orchestration services.
+- [ ] Add or document an import-boundary check for the new package layout. At a
+  minimum, run a static import scan that proves feature packages do not create
+  circular imports or depend on private modules from sibling features.
 - [ ] Split validation planning, validation result interpretation, decision
   recommendations, experiment result parsing, and shared validation DTOs into
   cohesive modules.
@@ -453,8 +484,16 @@ with the sprint checklists below.
   and DB code.
 - [ ] Add typed internal DTOs for cross-module boundaries and remove large
   untyped dict payloads where they cross service/package boundaries.
+- [ ] Define DTOs for context packs, retrieval requests/results, citation
+  verification outcomes, guide events, tool execution/proposal outcomes, eval
+  gate results, cache diagnostics, and extraction artifacts before replacing the
+  existing dict payloads.
 - [ ] Remove meaningful duplication in prompts, structured-output repair,
   retrieval shaping, audit metadata merging, and proposal creation.
+- [ ] Centralize shared prompt/schema repair behavior in one AI common module
+  and keep feature prompts in feature-owned prompt modules.
+- [ ] Centralize audit metadata merging and redaction in governance/common code
+  so tool, MCP, workflow, eval, and cache paths do not each hand-roll it.
 - [ ] Keep migration/model ownership clear. If DB models remain centralized,
   document that choice; if model modules move, preserve Alembic imports and
   avoid circular model imports.
@@ -463,6 +502,9 @@ with the sprint checklists below.
   package move.
 - [ ] Run full backend tests, web checks, evals, and targeted browser smoke if
   imports affect UI behavior.
+- [ ] Update `SPRINT_51_60_TODO.md`, `IMPLEMENTATION_STATUS.md`, README project
+  navigation, and code-owner docs with the final package layout before the
+  Sprint 59 commit.
 - [ ] Commit Sprint 59.
 
 ## Sprint 60: Architecture Docs, Deployment, and Production Readiness
@@ -472,6 +514,22 @@ with the sprint checklists below.
   architecture.
 - [ ] Add architecture diagrams for context compilation, memory lifecycle, real
   MCP lifecycle, eval gates, and deployment/security posture.
+- [ ] Context diagram must show workflow profile selection, context item
+  sources, memory selection, retrieval results, compression, dropped/stale/
+  conflict diagnostics, prompt-injection boundaries, and which service files own
+  those steps.
+- [ ] Memory diagram must show capture, proposed memory, approval/rejection,
+  active memory, compaction, preference updates, conflict groups, supersession,
+  archive, audit records, and context-pack links.
+- [ ] MCP diagram must show client initialize, capabilities, tool list, tool
+  call, RBAC/risk guard, approval-request path, denial/error path, audit event,
+  redaction, and stdio versus HTTP/SSE entrypoints.
+- [ ] Eval diagram must show local command, individual gates, unavailable-gate
+  warnings, JSON/Markdown/HTML artifacts, trend persistence, optional LangSmith
+  export, hidden Inspect UI, and CI usage.
+- [ ] Deployment/security diagram must show frontend, FastAPI API, Temporal,
+  Postgres/pgvector, object storage, provider egress, auth modes, audit logs,
+  eval artifacts, backup boundaries, and secret-redaction boundaries.
 - [ ] Update developer navigation after Sprint 59 refactor.
 - [ ] Add targeted docstrings and comments for public service entrypoints,
   DTOs, invariants, security boundaries, approval gates, Temporal determinism,
@@ -493,8 +551,17 @@ with the sprint checklists below.
 - [ ] Add deployment documentation and environment profiles for local,
   deterministic demo, provider-backed demo, staging-like, and production-like
   modes.
+- [ ] For each environment profile, document required env vars, disabled
+  provider paths, auth mode, egress posture, cache posture, eval/report
+  behavior, object-storage expectation, and commands to verify the profile.
+- [ ] Add production-auth notes for JWT/OIDC/JWKS expectations, API-key service
+  accounts, token/key rotation, token revocation, dev-auth isolation, and known
+  remaining auth limitations.
 - [ ] Add production object-storage and backup/restore guidance for Postgres,
   pgvector embeddings, object storage, eval reports, AI traces, and audit logs.
+- [ ] Add a dependency-audit runbook covering `pip-audit`, `pnpm audit --prod`,
+  non-strict local behavior, strict CI behavior, expected failure modes, and how
+  warnings appear in `scripts/security_check.py` and the quality gate.
 - [ ] Add workspace/team collaboration flows if still aligned with product
   direction.
 - [ ] Add multi-project portfolio views only if the single-project workflow
@@ -502,6 +569,9 @@ with the sprint checklists below.
 - [ ] Add advanced integration settings for MCP/API clients, search providers,
   model providers, OCR/multimodal providers, and egress policy behind
   developer/advanced settings.
+- [ ] Keep all advanced settings behind Inspect/developer navigation. Do not add
+  new homepage cards, hero sections, or primary-workflow panels for MCP,
+  provider, cache, eval, or extraction internals.
 - [ ] Add seeded hosted-demo smoke tests for the critical path: project load,
   Ask Thesys, evidence inspection, validation mission, decision recommendation,
   memory/context Inspect, MCP read tool, and eval report.
@@ -509,10 +579,25 @@ with the sprint checklists below.
   tests, IDE browser QA for memory/context Inspect, Ask Thesys streaming,
   cancellation/timeout UI, citation drilldowns, and advanced report/settings
   surfaces.
+- [ ] For Sprint 51 browser QA, explicitly exercise memory filters, proposal
+  review, conflict resolution, context-pack included/dropped/compressed/stale
+  rows, and no clutter in the primary project workflow.
+- [ ] For Sprint 53 browser QA, explicitly exercise streamed answer deltas,
+  retrieval/tool/proposal events, cancellation, timeout fallback, final metadata
+  parity with non-streaming response, action cards, and collapsed citation
+  drilldowns.
 - [ ] Retry the deferred Sprint 56 web checks: web typecheck, web tests, and IDE
   browser QA for the hidden eval-report Inspect panel, including collapsed gate
   status, trend rows, cache/cost metrics, failing-case links, and no homepage
   clutter.
+- [ ] Retry Sprint 57 cache-related web checks if they were not completed at the
+  Sprint 57 commit: AI status tooltip cache posture, Evidence retrieval cache
+  diagnostic line, hidden eval cache metrics, stale-denial reporting, and no
+  new homepage/dashboard clutter.
+- [ ] Run and record strict or non-strict security/dependency checks:
+  `python3 scripts/security_check.py`, `python3 scripts/audit_dependencies.py`
+  where available, `pip-audit` availability, and `pnpm audit --prod` result.
+  If registry access blocks a check, record the exact error and next owner.
 - [ ] Document remaining honest limits after Sprints 51-60, including any
   provider-only features not exercised in deterministic local mode, OIDC/JWKS
   production-auth gaps, live Tavily/multimodal credential requirements, and
