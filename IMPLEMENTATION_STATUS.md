@@ -51,6 +51,17 @@ contains a gap coverage ledger, deferred verification list, and specific
 acceptance work for each remaining sprint. The audit keeps the completed
 portfolio work visible while assigning each unfinished gap to Sprints 51-60.
 
+Current branch status: Sprints 51-57 are implemented; Sprints 58-60 remain
+pending. Sprint 58 must not be treated as complete until the document-AI gaps
+are closed with implementation and fixture-backed verification: maintained HTML
+readability extraction, raw/page/screenshot snapshot metadata, OCR
+confidence/page metadata, real table extraction, exact quote provenance, richer
+source-quality scoring, retrieval/context use of source quality,
+extraction-provenance citation/Evidence Inspect surfaces, and explicit
+live-provider-unavailable warnings. Sprint 60 must finish with a carried-gap
+audit that records implemented, intentionally out-of-scope, or still-open status
+for every Sprint 41-50 gap.
+
 ## Sprint 0 Scope
 
 - [x] Create monorepo structure.
@@ -2112,7 +2123,7 @@ verification items live in the `SPRINT_51_60_TODO.md` gap coverage ledger.
 | Sprint 45 Postgres text search/BM25 semantics, MMR/diversity, cross-encoder-compatible reranking, golden retrieval evals, and artifact-wide citation verification | Sprint 55 |
 | Sprint 46 true Ask Thesys streaming, cancellation, live retrieval/tool events, citation drilldowns, and stronger guide evals | Sprint 53 |
 | Sprint 47 OpenTelemetry, CI gates, eval trend reports, prompt/schema changelog, and pre-call budget enforcement | Sprint 54 and Sprint 56 |
-| Sprint 48 readability extraction, screenshots, OCR, table extraction, richer source quality, and live provider QA | Sprint 58 |
+| Sprint 48 readability extraction, screenshots, OCR, table extraction, richer source quality, and live provider QA | Sprint 58, with required fixture-backed proof for maintained readability extraction, raw/page/screenshot snapshot metadata, OCR confidence/page metadata, positive table extraction, exact quote provenance, retrieval use of source quality, collapsed citation/Evidence Inspect metadata, and explicit live-provider-unavailable warnings |
 | Sprint 49 feature-package refactor, service splits, typed DTOs, characterization coverage, and layout docs | Sprint 59 |
 | Sprint 50 architecture diagrams, post-refactor developer navigation, targeted code docs, and production/deployment posture | Sprint 60 |
 

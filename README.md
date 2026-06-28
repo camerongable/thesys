@@ -933,18 +933,22 @@ unfinished Sprint 41-50 item. The list below is the reader-friendly summary.
   optimization for embeddings, retrieval plans, reranking, and optional
   non-streaming guide answers with strict project/workspace isolation, versioned
   invalidation, stale-cache denial records, and saved-token/cost/latency metrics.
-- Sprint 58 closes the document intelligence gap with readability extraction,
-  snapshots, OCR, table extraction, page/section/table/region quote provenance,
-  richer source quality, citation drilldown metadata, retrieval/context quality
-  signals, and credential-gated live provider QA.
-- Sprint 59 closes the architecture cleanup gap by splitting oversized services
-  into feature packages, adding characterization tests, enforcing dependency
-  rules, adding typed DTO boundaries, removing duplication, checking import
-  cycles, and preserving public API behavior.
-- Sprint 60 closes the documentation/readiness gap with architecture diagrams,
-  post-refactor navigation, targeted docstrings/comments, deployment docs,
-  object-storage backup guidance, advanced integration settings, deferred
-  browser QA retry, hosted-demo smoke tests, and honest remaining-limit notes.
+- Sprint 58 is still pending and must close the document-intelligence gap with
+  maintained readability extraction, raw/page/screenshot snapshot metadata, OCR
+  confidence/page metadata, table extraction, exact quote provenance, richer
+  source quality, citation drilldown metadata, retrieval/context quality
+  signals, fixture-backed extraction evals, and credential-gated live-provider
+  QA warnings.
+- Sprint 59 is still pending and must close the architecture cleanup gap by
+  splitting oversized services into feature packages, adding characterization
+  tests, enforcing dependency rules, adding typed DTO boundaries, removing
+  duplication, checking import cycles, and preserving public API behavior.
+- Sprint 60 is still pending and must close the documentation/readiness gap with
+  architecture diagrams, post-refactor navigation, targeted
+  docstrings/comments, deployment docs, object-storage backup guidance, advanced
+  integration settings, deferred browser QA retry, Sprint 58 extraction UI QA,
+  hosted-demo smoke tests, a final carried-gap audit, and honest
+  remaining-limit notes.
 
 ---
 

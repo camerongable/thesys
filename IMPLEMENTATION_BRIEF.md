@@ -12231,7 +12231,7 @@ Every incomplete Sprint 41-50 gap should be owned by one of the future sprints:
 | Sprint 45 Postgres full-text search, BM25-like ranking, MMR/domain caps, cross-encoder reranking, golden retrieval evals, and cross-artifact citation verification | Sprint 55 |
 | Sprint 46 true Ask Thesys provider streaming, cancellation, live retrieval/tool events, citation drilldowns, and stronger guide evals | Sprint 53, with eval gates in Sprint 56 |
 | Sprint 47 OpenTelemetry, CI gates, eval trends, prompt/schema changelog, pre-call budget enforcement, and dashboard/report output | Sprint 54 and Sprint 56 |
-| Sprint 48 readability extraction, screenshots/snapshots, OCR, tables, source-quality scoring, and live-provider QA | Sprint 58 |
+| Sprint 48 readability extraction, screenshots/snapshots, OCR, tables, source-quality scoring, and live-provider QA | Sprint 58, with Sprint 56 consuming the new evals and Sprint 60 documenting/QAing provider and UI surfaces |
 | Sprint 49 feature-package refactor, oversized-service splits, typed DTOs, characterization coverage, and layout docs | Sprint 59 |
 | Sprint 50 architecture diagrams, expanded developer navigation, code docs after refactors, and production/security posture docs | Sprint 60 |
 
@@ -12249,7 +12249,7 @@ gaps are explicitly implemented, tested, and documented:
 | Sprint 55 | Sprint 45 retrieval quality and citation verification | Postgres full-text search participates in hybrid retrieval; BM25-like limitations are documented if exact BM25 is not implemented; MMR or equivalent source/domain diversity is applied; reranking is behind a swappable adapter; labeled golden retrieval evals exist; every generated artifact path runs citation verification; unsupported or weak claims are blocked, downgraded, or visibly labeled before persistence. |
 | Sprint 56 | Sprint 47 observability and CI gates | OpenTelemetry-compatible metrics/traces cover workflow/model/retrieval/tool/approval/token/cost/cache/timeout behavior; one local command runs structured output, context, retrieval, guide, redaction, security, cost, citation, MCP, and extraction evals; reports include failing-case links and version metadata; eval summaries are persisted for trend comparison; prompt/schema/context/retrieval/memory/tool changes have a changelog; any UI is hidden behind Inspect/developer surfaces. |
 | Sprint 57 | Cost/latency upgrade not covered by Sprint 41-50 | Embedding, retrieval-plan, rerank-result, and optional guide-answer caches are keyed by project/workspace plus evidence, memory, thesis, prompt, schema, retrieval, and context-pack versions; invalidation is tested for stale evidence/memory/decision/provider changes; cache metrics report saved token/cost/latency; tests prove cache data never crosses project or workspace boundaries. |
-| Sprint 58 | Sprint 48 source/document intelligence | HTML readability extraction, optional page snapshots, OCR fallback, table extraction, section/page/region quote provenance, and richer source-quality scoring exist with deterministic fallbacks; live Tavily and multimodal QA paths are guarded by credentials, egress policy, rate limits, and eval fixtures. |
+| Sprint 58 | Sprint 48 source/document intelligence | HTML readability extraction uses a maintained parser or clearly documented fallback; raw/page/screenshot snapshot metadata is separated from normalized text; OCR fallback records confidence/page/method metadata; table extraction stores rows/cells and summaries; quote provenance maps citations to page/section/table/OCR/screenshot spans with offsets; source-quality scoring covers authority, freshness, canonical/dedupe, prompt injection, OCR/table confidence, screenshot availability, and retrieval weight; live Tavily/multimodal QA paths are credential/egress/rate-limit guarded and produce explicit warnings when unavailable; fixture-backed evals prove behavior rather than only scanning for implementation substrings. |
 | Sprint 59 | Sprint 49 code cleanup | Characterization tests are added before code movement; oversized validation, research, guide, evidence, retrieval, tool, MCP, and eval services are split into cohesive feature packages; typed DTOs replace large untyped cross-service dicts; duplication in prompt assembly, structured-output repair, retrieval shaping, audit metadata, and proposal creation is removed; public API behavior and persisted schemas remain unchanged. |
 | Sprint 60 | Sprint 50 developer docs and production readiness | Diagrams reflect the implemented post-refactor system; README/developer docs explain where to add workflows, memory types, context profiles, MCP tools, retrieval providers, rerankers, and eval cases; public service entrypoints and DTOs have useful docstrings; comments document security, approval, Temporal, and prompt-injection invariants; deployment, object-storage, backup/restore, hosted-demo smoke, and advanced integration settings are documented without cluttering the primary workflow. |
 
@@ -12267,7 +12267,7 @@ Sprint 41-50 audit:
 | Sprint 45 | Retrieval/citation quality, cache-aware retrieval/rerank metrics, and stale-cache denial coverage exist; post-refactor docs still need exact provider/reranker extension points, hybrid ranking limits, cache invalidation notes, and citation-verifier ownership. | Sprint 60 |
 | Sprint 46 | Ask Thesys streaming/citations exist, but web typecheck/tests and browser QA for streaming, cancellation, timeout, event ordering, proposal cards, and citation drilldowns remain blocked until npm registry access is stable. | Sprint 60 |
 | Sprint 47 | Observability gates/reports and real cache metrics exist; browser QA for the hidden report surface and hosted/CI docs still need concrete commands, artifact paths, warn/fail policy, and environment prerequisites. | Sprint 60 |
-| Sprint 48 | Current extraction work covers guards, low-text PDF fallback, multimodal boundaries, provenance, and eval gates, but maintained readability extraction, snapshots, OCR, table extraction, richer source-quality scoring, extraction-provenance citation UI, and live Tavily/multimodal QA fixtures remain. | Sprint 58 |
+| Sprint 48 | Current extraction work covers guards, low-text PDF fallback, multimodal boundaries, provenance, and eval gates, but maintained readability extraction, raw/page/screenshot snapshot persistence, OCR confidence/page metadata, positive table extraction, exact quote offsets, richer source-quality scoring, retrieval use of source quality, extraction-provenance citation UI, and live Tavily/multimodal QA fixtures remain. The current extraction eval is mostly structural and must become fixture-backed behavior coverage. | Sprint 58 |
 | Sprint 49 | Shared utilities were added, but validation, research, guide, evidence/retrieval, tool/MCP, eval/reporting, prompt assembly, structured-output repair, proposal creation, and audit metadata paths still need a real feature-package refactor with typed DTO boundaries. | Sprint 59 |
 | Sprint 50 | README/docs improved, but final diagrams, code navigation, docstrings/comments, deployment docs, hosted-demo runbooks, and honest limits must be regenerated after Sprints 57-59 land and deferred browser checks are retried. | Sprint 60 |
 
@@ -12673,56 +12673,109 @@ provenance.
 
 ## Scope
 
+- Treat the following as required gap closure, not stretch work: maintained
+  readability extraction; raw/page/screenshot snapshot metadata; OCR fallback
+  with confidence, page, provider, method, and warning metadata; deterministic
+  OCR test doubles; positive table extraction with rows/cells; exact quote
+  provenance with offsets; source-quality scoring beyond basic credibility;
+  retrieval/context use of source quality; extraction-provenance citation and
+  Evidence Inspect surfaces; and explicit live-provider-unavailable warnings.
 - Add readability extraction for fetched HTML pages using an explicit maintained
   parser such as `trafilatura`, `readability-lxml`, or an equivalent dependency.
   Preserve canonical URL, title, author/date when available, warnings, and
   fallback-to-raw-text reason. Route it through source ingestion so evidence
   records identify raw fetch metadata, normalized readability text,
-  parser/version, and fallback path.
+  parser/version, section headings, section offsets, and fallback path. The
+  current minimal HTML parser is not sufficient as the only implementation if
+  title/nav/footer boilerplate can be treated as evidence without explicit
+  confidence and fallback metadata.
+- Add messy HTML and prompt-injected HTML fixtures that assert boilerplate
+  removal, script/style stripping, title handling, section names, section
+  offsets, prompt-injection marker propagation, and fallback behavior when
+  readability confidence is low.
 - Add optional page screenshot/snapshot capture for inspected sources with
   storage limits, redaction/egress policy, source metadata, and Inspect-only UI
   exposure. Persist snapshot metadata separately from normalized text:
-  canonical URL, fetched timestamp, content hash, storage key/path, byte size,
-  screenshot availability, redaction status, and retention policy.
+  capture URL, final URL, canonical URL, fetched timestamp, content hash, byte
+  hash, storage key/path or explicit local-mode absence reason, byte size,
+  screenshot availability, redaction status, retention policy, and source
+  snapshot ID. If screenshot capture is still not available locally, the stored
+  metadata must say so explicitly and the residual gap must stay visible.
 - Add OCR fallback for scanned PDFs with confidence, page numbers, extraction
   method metadata, and deterministic fallback behavior for tests. Include a test
   double so scanned-PDF behavior can be verified without OCR binaries or live
-  multimodal credentials.
+  multimodal credentials. Cover marker present, marker missing, low-confidence
+  warnings, provider errors, missing credentials, and egress denial.
 - Add table extraction extension for PDFs and screenshots, including table text,
   row/column structure when available, page/region provenance, and extraction
   confidence. Store table rows/cells plus text summaries so retrieval can search
-  them and citation drilldowns can show row/column provenance.
+  them and citation drilldowns can show row/column provenance. Add positive
+  table-heavy PDF/HTML fixtures; do not accept an eval that only verifies the
+  current disabled-table fallback.
 - Add section/page/region-level quote provenance for extracted snippets so
   citations can point to exact document pages, sections, table regions,
   screenshots, or OCR spans. Extend chunk metadata with extraction method,
   source snapshot ID, page number, section heading, table ID, region, confidence,
-  and quote offsets where available.
+  and quote offsets where available. Tests must catch offset drift introduced by
+  whitespace normalization or chunking.
 - Add richer source quality scoring and source-type/domain diversity controls:
   authority, freshness, canonical/deduped status, extraction confidence,
-  prompt-injection markers, source type, domain/source diversity, and whether
+  prompt-injection markers, source type, domain/source diversity, OCR
+  confidence, table extraction confidence, screenshot availability, and whether
   the content came from OCR, table extraction, or standard text extraction.
 - Feed source quality into retrieval/context policy as a boost, cap, or warning
   while still allowing relevant low-quality evidence to remain inspectable.
+- Add tests proving source quality affects ranking/context selection without
+  hiding relevant lower-quality evidence and without promoting prompt-injected
+  evidence by semantic relevance alone.
 - Extend citation drilldowns and Evidence/Inspect metadata with extraction
   method, confidence, page/section/table/region provenance, screenshot
   availability, and source-quality explanation.
+- Normalize provenance fields before UI work:
+  `extraction_method`, `extraction_provider`, `extraction_confidence`,
+  `page_number`, `section_heading`, `table_id`, `region`, `quote_offsets`,
+  `source_snapshot_id`, `screenshot.captured`, `snapshot.storage_key`, and
+  `source_quality.explanation`.
+- Update the concrete metadata surfaces:
+  `evidence_service.serialize_source`, `EvidenceSourceRead`,
+  `EvidenceSource`, `SourceMetadataDetails`, retrieval-result rendering in
+  `EvidenceTab`, `Citation`, `GuideCitationDetailRead`, guide citation detail
+  creation, guide citation renderers, research memo citation renderers,
+  discovery-source provenance review, and Project Inspect trust summaries.
+  These details should remain collapsed behind Evidence, citation, provenance,
+  or Inspect controls.
+- Preserve rich provenance across artifact paths. Agentic research can
+  cross-reference compact citations against `selected_evidence`; opportunity
+  brief and competitor artifacts need selected-evidence/provenance snapshots or
+  enriched audited citations so source quality and extraction metadata are not
+  dropped during persistence.
+- Add `source_quality.explanation`, `source_quality.factors`, and
+  `source_quality.policy_version`, then carry them through retrieval metadata,
+  citation drilldowns, Evidence source details, context diagnostics, and eval
+  output.
 - Add live Tavily and live multimodal QA paths when credentials are configured,
   guarded by egress policy, rate limits, and deterministic no-credential eval
-  fixtures. Missing credentials or egress allowlists should produce explicit
-  eval warnings rather than silent passes.
+  fixtures. Missing credentials, unreachable providers, and egress deny policies
+  should produce explicit eval warnings with provider, feature, reason, and
+  rerun instructions rather than silent passes or generic ingestion failures.
 - Add fixtures for messy HTML, prompt-injected HTML, scanned PDFs, low-text
   PDFs, table-heavy PDFs, duplicate canonical URLs, stale sources, and
   live-provider-unavailable fallback.
 - Extend `scripts/eval_extraction_quality.py` from readiness checks into
   fixture-backed extraction regression cases with expected extracted text,
   provenance spans, source-quality outcomes, and provider-unavailable fallback
-  results.
+  results. The eval must execute code paths or focused service tests; substring
+  detection in repository files is not sufficient completion evidence.
 - Store raw snapshot metadata and normalized extraction artifacts separately
   enough that citations can explain whether a quote came from raw HTML,
   readability text, OCR, a table, a PDF page, or a screenshot region.
 - Update README/docs portfolio language with the implemented document-AI stack:
   extraction methods, provenance model, source-quality scoring, deterministic
   fallbacks, and live-provider limits.
+- Update `SPRINT_51_60_TODO.md` and `IMPLEMENTATION_STATUS.md` with exact
+  verification results. If screenshot capture, live Tavily QA, live multimodal
+  QA, OCR binaries, or browser checks are environment-blocked, leave the gap
+  visible with the exact blocker and next owner.
 
 ## Acceptance Criteria
 
@@ -12889,6 +12942,11 @@ interviewers to understand without overwhelming the core workflow.
 - Retry deferred web/browser checks from Sprint 56: hidden eval-report Inspect
   panel, collapsed gate status, trend rows, cache/cost metrics, failing-case
   links, and confirmation that no new homepage/dashboard clutter was added.
+- Retry or complete Sprint 58 document-intelligence UI checks: Evidence Inspect
+  and citation drilldowns must show extraction method, parser/provider,
+  confidence, source snapshot ID, page, section heading, table/cell region, OCR
+  status, screenshot availability, source-quality explanation,
+  provider-unavailable warnings, and no new homepage/dashboard clutter.
 - Add workspace/team collaboration flows if product direction requires it.
 - Add multi-project portfolio views only after single-project workflow remains
   simple.
@@ -12906,6 +12964,11 @@ interviewers to understand without overwhelming the core workflow.
   pending when Sprint 57 lands. Also rerun web typecheck/tests and strict or
   non-strict dependency checks; if registry access blocks them, record the exact
   error and next owner.
+- Run a final carried-gap audit before the Sprint 60 commit. For each Sprint
+  41-50 gap in the ledger, record one of: implemented with verification link,
+  intentionally out of V1 scope with reason, or still open with a new backlog
+  owner. Do not let a broad sprint title stand in for a concrete completion
+  record.
 
 ## Acceptance Criteria
 
@@ -12921,3 +12984,6 @@ interviewers to understand without overwhelming the core workflow.
 - Advanced integration settings do not clutter the homepage or main workflow.
 - Deferred web/browser and strict-audit verification items are either completed
   or explicitly recorded with reason and next owner.
+- No README, status file, or portfolio summary claims a Sprint 51-60 capability
+  is implemented unless the implementation, tests/evals, docs, and verification
+  entry are present.
