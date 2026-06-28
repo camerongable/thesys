@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -98,3 +99,25 @@ class AIEvalRead(BaseModel):
     total: int
     metrics: list[AIEvalMetricRead]
     report: dict[str, object]
+
+
+class EvalReportRead(BaseModel):
+    report: dict[str, Any]
+
+
+class EvalTrendListRead(BaseModel):
+    trends: list[dict[str, Any]]
+
+
+class EvalMetricPointRead(BaseModel):
+    name: str
+    value: int | float
+    unit: str
+    attributes: dict[str, str]
+    temporality: str
+
+
+class EvalObservabilityMetricsRead(BaseModel):
+    generated_at: str
+    project_id: uuid.UUID
+    metrics: list[EvalMetricPointRead]

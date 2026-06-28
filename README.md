@@ -764,6 +764,15 @@ Run the broader AI quality, safety, provenance, and cost gate:
 pnpm eval:ai
 ```
 
+Run the aggregate quality gate and local eval report generator:
+
+```bash
+pnpm eval:quality
+```
+
+This writes local JSON, Markdown, HTML, and JSONL trend artifacts under
+`reports/evals/` and powers the hidden Inspect quality report surface.
+
 To include live project metrics from a running API:
 
 ```bash
@@ -849,8 +858,7 @@ The core workflow is designed to prevent premature building by identifying the m
 This is a V1 portfolio proof-of-concept. Sprint 41-50 established the first AI
 engineering upgrade baseline; they are not treated as fully complete
 production-grade work. Sprints 51-60 are the explicit gap-closure track, and the
-current branch has implemented Sprint 51, Sprint 52, Sprint 53, Sprint 54, and
-Sprint 55.
+current branch has implemented Sprints 51-56.
 
 Implemented or demonstrated:
 
@@ -884,7 +892,10 @@ Implemented or demonstrated:
   multiple memory types, memory proposal review, context diagnostics, and
   workflow-aware memory selection
 - MCP JSON-RPC adapter and stdio bridge over the governed tool registry
-- AI cost accounting, provider-failure circuit checks, and local AI eval gates
+- AI cost accounting, provider-failure circuit checks, OpenTelemetry-compatible
+  local metrics, aggregate quality gates, file-backed eval reports/trends,
+  extraction readiness checks, redacted optional LangSmith eval export, and
+  hidden Inspect quality reporting
 - shared service utilities, source provenance utilities, developer docs, and
   code navigation guides
 
@@ -904,7 +915,8 @@ unfinished Sprint 41-50 item. The list below is the reader-friendly summary.
   rank signals, BM25-like local scoring, MMR/source-domain-type-competitor caps,
   a no-op/deterministic/LiteLLM reranker adapter, claim-level citation outcomes,
   and a credential-free golden retrieval eval command.
-- Sprint 56 closes the observability gap with OpenTelemetry-compatible workflow,
+- Sprint 56 is implemented on this branch: it closes the observability gap with
+  OpenTelemetry-compatible workflow,
   model, retrieval, tool, approval, cost, cache, timeout, and egress metrics;
   one CI-ready quality-gate command; Markdown/HTML eval reports; local trend
   persistence; prompt/schema/context/retrieval/memory/tool changelogs; optional

@@ -200,6 +200,7 @@ pnpm-debug.log*
 *.tsbuildinfo
 dist/
 tmp/
+reports/evals/
 
 # PyCharm
 #   JetBrains specific template is maintained in a separate JetBrains.gitignore that can

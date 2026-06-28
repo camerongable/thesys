@@ -30,6 +30,7 @@ sprint must end with a focused commit before the next sprint begins.
 - Web typecheck: `pnpm --filter thesys-web typecheck`
 - AI quality eval: `python3 scripts/eval_ai_quality.py --json`
 - Research sprint eval: `python3 scripts/eval_research_sprints.py`
+- Full AI quality gate: `python3 scripts/eval_quality_gate.py --json`
 - Whitespace/conflict check: `git diff --check` and
   `rg -n "<{7}|={7}|>{7}" .`
 
@@ -52,6 +53,25 @@ and verification entry in `IMPLEMENTATION_STATUS.md`.
 | Sprint 49: feature-package refactor, oversized service splits, typed DTOs, characterization tests, layout docs | Sprint 59, Sprint 60 | Sprint 59 refactors behind characterization tests; Sprint 60 updates README navigation, diagrams, docstrings, and developer docs after the code has moved. |
 | Sprint 50: diagrams, post-refactor navigation, targeted code docs, deployment/security posture | Sprint 60 | Sprint 60 is not complete until docs match the post-Sprint-59 architecture and explain the portfolio-grade AI engineering story plus practical deployment constraints. |
 
+## Residual Gap Register
+
+These are the remaining pieces called out by the Sprint 41-50 audit that must
+still be closed before the branch is considered complete. Keep this list in sync
+with the sprint checklists below.
+
+| Gap source | Remaining work | Owning sprint |
+|---|---|---|
+| Sprint 41 | Strict dependency audits still depend on `pip-audit` being installed and stable npm registry access; hosted-production auth still needs OIDC/JWKS operational docs, token/key rotation runbooks, backup/restore guidance, and hosted-demo smoke verification. | Sprint 56 exposes audit availability as warn/fail gates; Sprint 60 documents and verifies hosted posture. |
+| Sprint 42 | Context/compiler behavior is implemented, but web/browser QA for memory/context Inspect was blocked by npm registry errors; developer docs still need post-refactor context-profile navigation and extension guidance. | Sprint 60 |
+| Sprint 43 | Memory compaction/preferences/conflicts are implemented, but the memory lifecycle needs diagrams, developer navigation, post-refactor docstrings/comments, and browser QA for Inspect review surfaces. | Sprint 60 |
+| Sprint 44 | MCP JSON-RPC/stdio behavior is implemented, but lifecycle diagrams, client setup docs after the refactor, advanced integration settings, and hosted-demo read-tool smoke coverage remain. | Sprint 60 |
+| Sprint 45 | Retrieval quality and citation verification are implemented, but cache-aware retrieval/rerank metrics, stale-cache denial coverage, and post-refactor provider/reranker extension docs remain. | Sprint 57 and Sprint 60 |
+| Sprint 46 | Ask Thesys streaming/citations are implemented, but web typecheck/tests and IDE browser QA for streaming, cancellation, timeout, and citation drilldowns were blocked by npm registry errors. | Sprint 60 |
+| Sprint 47 | Observability gates/reports are implemented in Sprint 56, but browser QA for the hidden eval report is blocked by npm registry errors; real cache metrics require Sprint 57 caches; hosted/CI wiring remains documentation/readiness work. | Sprint 57 and Sprint 60 |
+| Sprint 48 | Current code has security guards, low-text PDF fallback, multimodal boundaries, provenance, and extraction eval gates, but still lacks maintained readability extraction, persisted page snapshots, OCR, table extraction, richer source-quality scoring, and citation drilldown UI for extraction provenance. | Sprint 58 |
+| Sprint 49 | Earlier cleanup added shared utilities, but the codebase still has oversized service modules and mixed responsibilities in validation, research, guide, evidence/retrieval, tools/MCP, and eval/reporting paths. | Sprint 59 |
+| Sprint 50 | README/docs were improved, but final diagrams, code navigation, docstrings/comments, deployment docs, and honest limit notes must be regenerated after Sprints 57-59 land. | Sprint 60 |
+
 ## Deferred Verification Items
 
 - Sprint 51 and Sprint 53 web/browser QA was blocked by transient npm registry
@@ -59,8 +79,11 @@ and verification entry in `IMPLEMENTATION_STATUS.md`.
   web tests, and IDE browser QA for memory/context Inspect, Ask Thesys
   streaming, and citation drilldowns.
 - Sprint 54 strict dependency auditing depends on `pip-audit` availability and
-  stable npm registry access. Sprint 56 must expose this as an explicit
+  stable npm registry access. Sprint 56 exposes this as an explicit
   pass/warn/fail gate so it cannot disappear in local-only verification.
+- Sprint 56 web/browser QA was also blocked by npm registry failures while
+  trying to run the web typecheck/test commands. Sprint 60 must retry the hidden
+  eval-report Inspect surface along with the earlier deferred UI checks.
 - Any future sprint that changes UI must keep advanced AI internals collapsed or
   behind Inspect/developer settings; the homepage and main validation workflow
   should stay focused on founder decisions, not implementation diagnostics.
@@ -240,54 +263,58 @@ and verification entry in `IMPLEMENTATION_STATUS.md`.
 
 ## Sprint 56: Observability V2, CI Gates, and Eval Reports
 
-- [ ] Close Sprint 47 gaps: turn local accounting/eval checks into repeatable
+- [x] Close Sprint 47 gaps: turn local accounting/eval checks into repeatable
   gates with traces, metrics, reports, trends, changelogs, and hidden developer
   surfaces.
-- [ ] Inventory every existing gate/eval command and wire them into one
+- [x] Inventory every existing gate/eval command and wire them into one
   CI-ready entrypoint, for example `scripts/eval_quality_gate.py`. The command
   must run or explicitly mark unavailable: structured-output smoke,
   context-quality evals, retrieval golden evals, guide behavior evals,
   citation verification evals, redaction/secret checks, security checks,
   budget/cost checks, MCP contract evals, and source/document extraction evals.
-- [ ] Add OpenTelemetry-compatible metric names and trace metadata for:
+- [x] Add OpenTelemetry-compatible metric names and trace metadata for:
   workflow run count/failure/cancellation, workflow latency, model latency,
   provider name/model/prompt version, retrieval latency/mode/reranker,
   tool denial count and reason, approval wait time, token input/output/total,
   cost estimate, budget denial, cache hit/miss/stale denial, timeout,
   cancellation, and provider-egress allow/deny decisions.
-- [ ] Persist local eval run summaries under a stable location such as
+- [x] Persist local eval run summaries under a stable location such as
   `reports/evals/` with JSONL trend data. Each run summary must include sprint,
   git commit when available, timestamp, provider mode, model mode, prompt
   version, schema version, context profile/version, retrieval policy/version,
   memory policy/version, gate status, failed check IDs, latency, token/cost,
   and trace IDs.
-- [ ] Add local Markdown and HTML reports generated from the same JSON source.
+- [x] Add local Markdown and HTML reports generated from the same JSON source.
   Reports must include pass/fail/warn status, failing-case links or fixture IDs,
   expected versus actual summaries, prompt/schema/context/retrieval metadata,
   budget/cost values, latency, and instructions for rerunning only the failed
   slice.
-- [ ] Add trend reports by sprint, prompt version, schema version, context
+- [x] Add trend reports by sprint, prompt version, schema version, context
   profile/version, retrieval version, memory policy version, model/provider
   mode, and git commit. Trends must make regressions obvious, not just append
   raw logs.
-- [ ] Add hidden-by-default dashboard/report surface for AI quality gates that
+- [x] Add hidden-by-default dashboard/report surface for AI quality gates that
   shows pass/fail state, recent regressions, budget status, failing-case links,
   and last-run metadata without cluttering the homepage. Acceptable surfaces:
   Inspect tab, developer-only route, or generated static report linked from
   docs; do not add a new homepage card.
-- [ ] Add `docs/AI_CHANGELOG.md` or equivalent with versioned entries for
+- [x] Add `docs/AI_CHANGELOG.md` or equivalent with versioned entries for
   prompt, schema, context-pack, retrieval-policy, memory-policy, reranker,
   provider, and tool-schema changes. Every entry should explain what changed,
   expected behavior impact, and which evals should catch regressions.
-- [ ] Add optional LangSmith export/upload for eval runs with secret redaction
+- [x] Add optional LangSmith export/upload for eval runs with secret redaction
   before egress. It must be disabled by default, controlled by configuration,
   and safe in deterministic local mode.
-- [ ] Add tests for report generation, trend persistence, redaction before
+- [x] Add tests for report generation, trend persistence, redaction before
   external export, metric payload shape, unavailable-gate warnings, and API/UI
   access controls for any developer report surface.
-- [ ] Run the all-gates command, backend eval/report tests, MCP contract tests,
-  security checks, and web/browser QA if a report/dashboard UI is added.
-- [ ] Commit Sprint 56.
+- [x] Run the all-gates command, backend eval/report tests, MCP contract tests,
+  and security checks.
+- [ ] Run web typecheck, web tests, and IDE browser QA for the hidden eval-report
+  Inspect UI. Blocked so far because pnpm repeatedly failed before TypeScript
+  while fetching registry packages (`ECONNRESET` / `fetch failed`); Sprint 60
+  owns the retry with the other deferred UI checks.
+- [x] Commit Sprint 56.
 
 ## Sprint 57: Semantic Caching and Cost Optimization
 
@@ -322,6 +349,12 @@ and verification entry in `IMPLEMENTATION_STATUS.md`.
   may be enabled independently.
 - [ ] Add cache-hit, cache-miss, stale-cache-denial, saved-token, saved-cost,
   and latency metrics to AI runs and eval reports.
+- [ ] Wire the new cache metrics into the Sprint 56 eval report service and
+  hidden Inspect quality surface so cache regressions are visible without adding
+  homepage/dashboard noise.
+- [ ] Add cache-aware quality-gate checks to `scripts/eval_quality_gate.py`:
+  report cache hit/miss/stale-denial counts, saved token/cost estimates,
+  isolation failures, and stale-context recomputation cases.
 - [ ] Add tests that prove cache isolation across projects/workspaces, stale
   context invalidation, prompt/schema version invalidation, and no reuse after
   memory or evidence changes.
@@ -363,6 +396,13 @@ and verification entry in `IMPLEMENTATION_STATUS.md`.
 - [ ] Add eval fixtures for messy HTML, prompt-injected HTML, scanned PDFs,
   low-text PDFs, table-heavy PDFs, duplicate canonical URLs, stale sources, and
   live-provider-unavailable fallback.
+- [ ] Extend `scripts/eval_extraction_quality.py` from structural readiness
+  checks into fixture-backed extraction regression cases with expected extracted
+  text, provenance spans, source-quality outcomes, and provider-unavailable
+  fallback results.
+- [ ] Store raw snapshot metadata and normalized extraction artifacts separately
+  enough that citations can explain whether a quote came from raw HTML,
+  readability text, OCR, a table, a PDF page, or a screenshot region.
 - [ ] Run evidence, extraction, provenance, retrieval, citation, source-quality,
   security-egress, and browser document QA.
 - [ ] Commit Sprint 58.
@@ -381,6 +421,11 @@ and verification entry in `IMPLEMENTATION_STATUS.md`.
   `validation`, `decisions`, `memory`, `governance/tools`, `mcp`, and `evals`;
   shared packages only for `common/ai`, `common/db`, `common/security`,
   `common/observability`, and `common/types`.
+- [ ] Start with the largest mixed-responsibility modules: split
+  `validation_service.py`, `agentic_research_service.py`, `guide_service.py`,
+  `tool_service.py`, `retrieval_service.py`, `evidence_service.py`,
+  `eval_service.py`, `eval_report_service.py`, and related routers only after
+  characterization tests protect their current behavior.
 - [ ] Define dependency rules: feature packages may depend on common packages;
   routers call feature service entrypoints; feature packages must not import
   each other through hidden module-level side effects; cross-feature behavior
@@ -401,6 +446,9 @@ and verification entry in `IMPLEMENTATION_STATUS.md`.
   application, MCP schema generation, audit events, and redaction helpers.
 - [ ] Split eval case loading, gate execution, report generation, trend
   persistence, metric export, and optional LangSmith export.
+- [ ] Move script-adjacent eval logic out of ad hoc script helpers where it is
+  shared by API routes, local reports, or tests. Keep scripts as thin CLIs over
+  package-owned services.
 - [ ] Move toward feature packages with shared common AI, retrieval, security,
   and DB code.
 - [ ] Add typed internal DTOs for cross-module boundaries and remove large
@@ -432,6 +480,11 @@ and verification entry in `IMPLEMENTATION_STATUS.md`.
   find: AI workflow entrypoints, context profiles, memory manager, retrieval
   pipeline, source ingestion/extraction, MCP tools, eval gates/reports,
   security/auth policy, observability, and frontend Inspect surfaces.
+- [ ] Add a short "AI engineering tour" for interview prep that maps features to
+  patterns and technologies: LangGraph agentic research, LiteLLM gateway,
+  Pydantic structured outputs, pgvector/Postgres retrieval, MCP JSON-RPC,
+  ContextCompiler/MemoryManager, eval gates/reports, LangSmith/OpenTelemetry
+  observability, and governed tool approvals.
 - [ ] Build diagrams from implemented code paths, not roadmap intent. Include
   source file references near diagrams so future maintainers can verify them.
 - [ ] Add "how to add" docs for a new AI workflow, context profile, memory type,
@@ -456,6 +509,10 @@ and verification entry in `IMPLEMENTATION_STATUS.md`.
   tests, IDE browser QA for memory/context Inspect, Ask Thesys streaming,
   cancellation/timeout UI, citation drilldowns, and advanced report/settings
   surfaces.
+- [ ] Retry the deferred Sprint 56 web checks: web typecheck, web tests, and IDE
+  browser QA for the hidden eval-report Inspect panel, including collapsed gate
+  status, trend rows, cache/cost metrics, failing-case links, and no homepage
+  clutter.
 - [ ] Document remaining honest limits after Sprints 51-60, including any
   provider-only features not exercised in deterministic local mode, OIDC/JWKS
   production-auth gaps, live Tavily/multimodal credential requirements, and

@@ -9,11 +9,14 @@ from app.db.session import get_db
 from app.schemas.evals import (
     AIEvalRead,
     ContextEvalRead,
+    EvalObservabilityMetricsRead,
+    EvalReportRead,
+    EvalTrendListRead,
     GuideEvalRead,
     MvpEvalRead,
     V1ResearchEvalRead,
 )
-from app.services import eval_service, security_policy_service
+from app.services import eval_report_service, eval_service, security_policy_service
 
 router = APIRouter(prefix="/api/projects/{project_id}/evals", tags=["evals"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -72,6 +75,42 @@ def run_ai_eval(
 ) -> AIEvalRead:
     with _guard_eval(db, auth, settings, project_id, "ai_eval"):
         return eval_service.run_ai_eval(db, auth, settings, project_id)
+
+
+@router.get("/reports/latest", response_model=EvalReportRead)
+def get_latest_eval_report(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> EvalReportRead:
+    with _guard_eval(db, auth, settings, project_id, "eval_report_read"):
+        return EvalReportRead(report=eval_report_service.read_latest_report())
+
+
+@router.get("/reports/trends", response_model=EvalTrendListRead)
+def get_eval_trends(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+    limit: int = 20,
+) -> EvalTrendListRead:
+    with _guard_eval(db, auth, settings, project_id, "eval_trend_read"):
+        return EvalTrendListRead(trends=eval_report_service.read_eval_trends(limit=limit))
+
+
+@router.get("/observability-metrics", response_model=EvalObservabilityMetricsRead)
+def get_eval_observability_metrics(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> EvalObservabilityMetricsRead:
+    with _guard_eval(db, auth, settings, project_id, "eval_observability_metrics"):
+        return EvalObservabilityMetricsRead.model_validate(
+            eval_report_service.project_observability_metrics(db, auth, settings, project_id)
+        )
 
 
 def _guard_eval(

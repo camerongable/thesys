@@ -53,8 +53,11 @@ import {
   executeNextAction,
   GuideAction,
   getContextEval,
+  getEvalObservabilityMetrics,
+  getEvalTrends,
   getIdeaStory,
   getDurableResearchStatus,
+  getLatestEvalReport,
   getProjectResearchHistory,
   getProjectOverview,
   getProjectNudges,
@@ -1372,6 +1375,8 @@ function ProjectInspectDrawer({
 
             <ProjectContextDiagnosticsSection projectId={overview.project.id} />
 
+            <ProjectEvalReportSection projectId={overview.project.id} />
+
             <DrawerSection
               icon={<ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />}
               title="Assumptions behind the decision"
@@ -1709,6 +1714,196 @@ function ProjectContextDiagnosticsSection({ projectId }: { projectId: string }) 
         ) : null}
       </details>
     </DrawerSection>
+  );
+}
+
+function ProjectEvalReportSection({ projectId }: { projectId: string }) {
+  const [enabled, setEnabled] = useState(false);
+  const reportQuery = useQuery({
+    enabled,
+    queryKey: ["projects", projectId, "evals", "reports", "latest"],
+    queryFn: () => getLatestEvalReport(projectId),
+  });
+  const trendsQuery = useQuery({
+    enabled,
+    queryKey: ["projects", projectId, "evals", "reports", "trends"],
+    queryFn: () => getEvalTrends(projectId),
+  });
+  const metricsQuery = useQuery({
+    enabled,
+    queryKey: ["projects", projectId, "evals", "observability-metrics"],
+    queryFn: () => getEvalObservabilityMetrics(projectId),
+  });
+  const report = reportQuery.data?.report ?? null;
+  const status = evalReportStatus(report);
+  const tone = evalReportTone(status);
+  const gates = evalGateRecords(report);
+  const failedGates = gates.filter((gate) => String(gate.status ?? "").toLowerCase() === "fail");
+  const trends = trendsQuery.data?.trends ?? [];
+  const metrics = metricsQuery.data?.metrics ?? [];
+  const tokenMetric = metrics.find((metric) => metric.name === "thesys.ai.tokens.total");
+  const costMetric = metrics.find((metric) => metric.name === "thesys.ai.cost.total");
+  const egressMetric = metrics.find((metric) => metric.name === "thesys.provider_egress.denials");
+  const cacheHitMetric = metrics.find((metric) => metric.name === "thesys.ai.cache.hits");
+  const score = evalScore(report);
+  const paths = asRecord(report?.paths);
+  const generatedAt = nullableString(report?.generated_at);
+  const unavailable = report?.available === false;
+  const error =
+    (reportQuery.error as Error | null) ??
+    (trendsQuery.error as Error | null) ??
+    (metricsQuery.error as Error | null);
+
+  return (
+    <DrawerSection
+      icon={<ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />}
+      title="AI quality gates"
+    >
+      <details
+        className="rounded-md border border-border px-3 py-3"
+        onToggle={(event) => {
+          if (event.currentTarget.open) {
+            setEnabled(true);
+          }
+        }}
+      >
+        <summary className="cursor-pointer list-none">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-sm font-medium">Latest eval report</span>
+            <span className={tonePillClass(tone)}>
+              {unavailable ? "unavailable" : `${status}${score ? ` · ${score}` : ""}`}
+            </span>
+          </div>
+        </summary>
+        {reportQuery.isLoading || trendsQuery.isLoading || metricsQuery.isLoading ? (
+          <p className="mt-3 text-sm text-muted-foreground">Loading eval report...</p>
+        ) : error ? (
+          <p className="mt-3 text-sm text-danger-foreground">{error.message}</p>
+        ) : unavailable ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            {String(report?.message ?? "Run python3 scripts/eval_quality_gate.py.")}
+          </p>
+        ) : (
+          <div className="mt-4 space-y-4">
+            <div className="grid gap-2 sm:grid-cols-4">
+              <DecisionMetric label="Gates" value={gates.length} />
+              <DecisionMetric label="Failures" value={failedGates.length} />
+              <DecisionMetric label="Trends" value={trends.length} />
+              <DecisionMetric label="Cache hits" value={metricValue(cacheHitMetric)} />
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <DecisionMetric label="Tokens" value={metricValue(tokenMetric)} />
+              <DecisionMetric label="Cost" value={metricValue(costMetric)} />
+              <DecisionMetric label="Egress denies" value={metricValue(egressMetric)} />
+            </div>
+            {generatedAt ? (
+              <p className="text-xs text-muted-foreground">Last run {formatDateTime(generatedAt)}</p>
+            ) : null}
+            <EvalGateList gates={gates} />
+            {failedGates.length > 0 ? (
+              <EvalGateList gates={failedGates} title="Failing gates" />
+            ) : null}
+            <EvalTrendSummary trends={trends} />
+            <details className="rounded-md border border-border px-3 py-3">
+              <summary className="cursor-pointer list-none text-sm font-medium">
+                Report files
+              </summary>
+              <div className="mt-3 grid gap-2 text-xs leading-5 text-muted-foreground">
+                {paths ? (
+                  Object.entries(paths).map(([key, value]) => (
+                    <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)]" key={key}>
+                      <span>{formatLabel(key)}</span>
+                      <code className="break-all rounded bg-muted px-2 py-1">{String(value)}</code>
+                    </div>
+                  ))
+                ) : (
+                  <p>No report paths recorded.</p>
+                )}
+              </div>
+            </details>
+          </div>
+        )}
+      </details>
+    </DrawerSection>
+  );
+}
+
+function EvalGateList({
+  gates,
+  title = "Gates",
+}: {
+  gates: Array<Record<string, unknown>>;
+  title?: string;
+}) {
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h4>
+      {gates.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No gate records.</p>
+      ) : (
+        <ol className="mt-2 space-y-2">
+          {gates.slice(0, 8).map((gate, index) => {
+            const status = String(gate.status ?? (gate.passed ? "pass" : "fail"));
+            const tone = evalReportTone(status);
+            const rerun = nullableString(gate.rerun);
+            return (
+              <li className="rounded-md bg-muted px-3 py-2 text-sm" key={`${title}-${index}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium">{formatLabel(String(gate.name ?? "gate"))}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {String(gate.score ?? 0)}/{String(gate.total ?? 0)}
+                    </div>
+                  </div>
+                  <span className={tonePillClass(tone)}>{formatLabel(status)}</span>
+                </div>
+                {rerun ? (
+                  <code className="mt-2 block break-all rounded bg-card px-2 py-1 text-xs text-muted-foreground">
+                    {rerun}
+                  </code>
+                ) : null}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function EvalTrendSummary({ trends }: { trends: Array<Record<string, unknown>> }) {
+  const recent = trends.slice(-5).reverse();
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Recent trend rows
+      </h4>
+      {recent.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No trend records.</p>
+      ) : (
+        <ol className="mt-2 space-y-2">
+          {recent.map((trend, index) => {
+            const status = String(trend.status ?? (trend.passed ? "pass" : "fail"));
+            return (
+              <li className="rounded-md bg-muted px-3 py-2 text-xs" key={`trend-${index}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <span>{nullableString(trend.generated_at) ?? "unknown run"}</span>
+                  <span className={tonePillClass(evalReportTone(status))}>
+                    {formatLabel(status)}
+                  </span>
+                </div>
+                <div className="mt-1 text-muted-foreground">
+                  {String(trend.score ?? 0)}/{String(trend.total ?? 0)} · commit{" "}
+                  {String(trend.git_commit ?? "unknown")}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
   );
 }
 
@@ -6607,6 +6802,60 @@ function stringsFromUnknown(value: unknown) {
 
 function valuesFromUnknown(value: unknown) {
   return Array.isArray(value) ? value : [];
+}
+
+function evalGateRecords(report: Record<string, unknown> | null) {
+  const gates = valuesFromUnknown(report?.gates ?? report?.reports);
+  return gates
+    .map(asRecord)
+    .filter((gate): gate is Record<string, unknown> => gate !== null);
+}
+
+function evalReportStatus(report: Record<string, unknown> | null) {
+  const status = nullableString(report?.status);
+  if (status) {
+    return status;
+  }
+  if (report?.passed === true) {
+    return "pass";
+  }
+  if (report?.passed === false) {
+    return "fail";
+  }
+  return "unavailable";
+}
+
+function evalReportTone(status: string): HealthTone {
+  const normalized = status.toLowerCase();
+  if (normalized === "pass" || normalized === "passed") {
+    return "good";
+  }
+  if (normalized === "warn" || normalized === "warning" || normalized === "unavailable") {
+    return "warning";
+  }
+  if (normalized === "fail" || normalized === "failed") {
+    return "danger";
+  }
+  return "neutral";
+}
+
+function evalScore(report: Record<string, unknown> | null) {
+  const score = report?.score;
+  const total = report?.total;
+  if ((typeof score === "number" || typeof score === "string") && typeof total === "number") {
+    return `${score}/${total}`;
+  }
+  return null;
+}
+
+function metricValue(metric: { value: number; unit: string } | undefined) {
+  if (!metric) {
+    return 0;
+  }
+  if (metric.unit === "USD") {
+    return `$${metric.value.toFixed(4)}`;
+  }
+  return metric.value;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

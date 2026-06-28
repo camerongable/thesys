@@ -12253,6 +12253,24 @@ gaps are explicitly implemented, tested, and documented:
 | Sprint 59 | Sprint 49 code cleanup | Characterization tests are added before code movement; oversized validation, research, guide, evidence, retrieval, tool, MCP, and eval services are split into cohesive feature packages; typed DTOs replace large untyped cross-service dicts; duplication in prompt assembly, structured-output repair, retrieval shaping, audit metadata, and proposal creation is removed; public API behavior and persisted schemas remain unchanged. |
 | Sprint 60 | Sprint 50 developer docs and production readiness | Diagrams reflect the implemented post-refactor system; README/developer docs explain where to add workflows, memory types, context profiles, MCP tools, retrieval providers, rerankers, and eval cases; public service entrypoints and DTOs have useful docstrings; comments document security, approval, Temporal, and prompt-injection invariants; deployment, object-storage, backup/restore, hosted-demo smoke, and advanced integration settings are documented without cluttering the primary workflow. |
 
+## Residual Gap Register
+
+The follow-up sprints must explicitly carry these unfinished pieces from the
+Sprint 41-50 audit:
+
+| Gap source | Remaining work | Owner |
+|---|---|---|
+| Sprint 41 | Strict dependency auditing needs `pip-audit` plus stable npm registry access; hosted-production posture still needs OIDC/JWKS docs, rotation/revocation runbooks, backup/restore guidance, and hosted-demo smoke verification. | Sprint 56 gates audit availability; Sprint 60 documents/verifies hosted posture. |
+| Sprint 42 | Context/compiler code exists, but memory/context Inspect browser QA was blocked by registry failures and post-refactor context-profile developer docs remain. | Sprint 60 |
+| Sprint 43 | Memory compaction/preferences/conflicts exist, but memory lifecycle diagrams, extension docs, post-refactor docstrings/comments, and browser QA for Inspect surfaces remain. | Sprint 60 |
+| Sprint 44 | MCP JSON-RPC/stdio behavior exists, but lifecycle diagrams, client docs after the refactor, advanced integration settings, and hosted-demo read-tool smoke coverage remain. | Sprint 60 |
+| Sprint 45 | Retrieval/citation quality exists, but cache-aware retrieval/rerank metrics, stale-cache denial coverage, and post-refactor provider/reranker extension docs remain. | Sprint 57 and Sprint 60 |
+| Sprint 46 | Ask Thesys streaming/citations exist, but web typecheck/tests and browser QA for streaming, cancellation, timeout, and citation drilldowns remain blocked until npm registry access is stable. | Sprint 60 |
+| Sprint 47 | Observability gates/reports exist after Sprint 56, but browser QA for the hidden report surface, real cache metrics from Sprint 57, and hosted/CI documentation remain. | Sprint 57 and Sprint 60 |
+| Sprint 48 | Current extraction work covers guards, low-text PDF fallback, multimodal boundaries, provenance, and eval gates, but maintained readability extraction, snapshots, OCR, table extraction, richer source-quality scoring, and extraction-provenance citation UI remain. | Sprint 58 |
+| Sprint 49 | Shared utilities were added, but validation, research, guide, evidence/retrieval, tool/MCP, and eval/reporting code still need a real feature-package refactor. | Sprint 59 |
+| Sprint 50 | README/docs improved, but final diagrams, code navigation, docstrings/comments, deployment docs, and honest limits must be regenerated after Sprints 57-59 land. | Sprint 60 |
+
 ---
 
 # V1 Sprint 51: Unified Context Compiler, Memory V2, and Context Evals
@@ -12568,6 +12586,18 @@ Make AI quality, cost, and safety checks repeatable engineering gates.
 - Environment-limited checks such as strict dependency audit failures are
   surfaced as explicit warn/fail states rather than silently omitted.
 
+## Branch Implementation Note
+
+The `codex/v1-sprints-51-60` branch implements this sprint with
+`scripts/eval_quality_gate.py`, `scripts/eval_extraction_quality.py`, local
+JSON/Markdown/HTML reports under `reports/evals/`, JSONL trends, guarded API
+endpoints for latest report/trend/observability metrics, a hidden Inspect report
+surface, `docs/AI_CHANGELOG.md`, optional redacted LangSmith export/upload, and
+focused report/metric tests. Report persistence is intentionally file-backed for
+the local portfolio mode; browser QA for the hidden report surface remains owned
+by Sprint 60 because npm registry failures blocked web typecheck/test runs in
+this environment.
+
 ---
 
 # V1 Sprint 57: Semantic Caching and Cost Optimization
@@ -12603,6 +12633,10 @@ opaque.
   independently.
 - Add cache-hit, cache-miss, stale-cache-denial, saved-token, saved-cost, and
   latency metrics to AI runs/evals.
+- Wire cache metrics into the Sprint 56 quality report service and hidden Inspect
+  surface so cache regressions are visible without cluttering the homepage.
+- Extend the aggregate quality gate with cache hit/miss/stale-denial, saved
+  token/cost, isolation, and stale-context recomputation checks.
 - Add eval cases that prove cached and uncached answers match when context is
   unchanged and diverge correctly after evidence, memory, or thesis changes.
 
@@ -12612,6 +12646,8 @@ opaque.
 - Cached guide answers never cross workspace/project boundaries and never serve
   after stale-context changes.
 - Cost/latency reports show cache hit rates.
+- Eval reports and hidden Inspect diagnostics show cache hit/miss/stale-denial
+  behavior and saved token/cost estimates.
 - Tests prove invalidation for evidence, memory, thesis, prompt, schema,
   retrieval, provider, and source-quality changes.
 
@@ -12656,6 +12692,13 @@ provenance.
 - Add fixtures for messy HTML, prompt-injected HTML, scanned PDFs, low-text
   PDFs, table-heavy PDFs, duplicate canonical URLs, stale sources, and
   live-provider-unavailable fallback.
+- Extend `scripts/eval_extraction_quality.py` from readiness checks into
+  fixture-backed extraction regression cases with expected extracted text,
+  provenance spans, source-quality outcomes, and provider-unavailable fallback
+  results.
+- Store raw snapshot metadata and normalized extraction artifacts separately
+  enough that citations can explain whether a quote came from raw HTML,
+  readability text, OCR, a table, a PDF page, or a screenshot region.
 
 ## Acceptance Criteria
 
@@ -12664,6 +12707,8 @@ provenance.
 - Source quality signals can influence retrieval and context compilation.
 - Extraction improvements are covered by deterministic evals and do not require
   live provider credentials to verify the local path.
+- Citation and evidence Inspect surfaces expose extraction method, confidence,
+  and page/section/table/region provenance without adding homepage complexity.
 
 ---
 
@@ -12685,6 +12730,11 @@ and extend.
   `validation`, `decisions`, `memory`, `governance/tools`, `mcp`, and `evals`,
   plus shared packages only for `common/ai`, `common/db`, `common/security`,
   `common/observability`, and `common/types`.
+- Start with the largest mixed-responsibility modules and their routers:
+  `validation_service.py`, `agentic_research_service.py`, `guide_service.py`,
+  `tool_service.py`, `retrieval_service.py`, `evidence_service.py`,
+  `eval_service.py`, and `eval_report_service.py`. Move them only after
+  characterization tests protect the current behavior.
 - Define dependency rules: routers call feature service entrypoints; feature
   packages depend on common packages; cross-feature behavior uses explicit DTOs
   or orchestration services; feature packages should not import each other
@@ -12695,6 +12745,9 @@ and extend.
   evidence ingestion/parsing/chunking/retrieval/source quality, tool
   definitions/guards/execution/proposal application, MCP schemas/transports, and
   eval case/report/trend execution.
+- Keep scripts as thin CLIs over package-owned services when script logic is also
+  used by API routes or tests, especially eval gate/report/trend/LangSmith export
+  behavior.
 - Add typed internal transfer objects to replace large ad hoc dict payloads.
 - Establish explicit module ownership boundaries and dependency rules so feature
   packages do not import across each other through hidden side effects.
@@ -12758,6 +12811,11 @@ interviewers to understand without overwhelming the core workflow.
   AI workflow entrypoints, context profiles, memory manager, retrieval pipeline,
   source ingestion/extraction, MCP tools, eval gates/reports, security/auth
   policy, observability, and frontend Inspect surfaces.
+- Add a short AI engineering tour for interview prep that maps features to
+  patterns and technologies: LangGraph agentic research, LiteLLM gateway,
+  Pydantic structured outputs, pgvector/Postgres retrieval, MCP JSON-RPC,
+  ContextCompiler/MemoryManager, eval gates/reports, LangSmith/OpenTelemetry
+  observability, and governed tool approvals.
 - Build diagrams from implemented code paths and include source file references
   near diagrams so maintainers can verify them.
 - Add targeted code documentation after refactors:
@@ -12770,6 +12828,9 @@ interviewers to understand without overwhelming the core workflow.
 - Retry deferred web/browser checks from Sprints 51 and 53: memory/context
   Inspect, Ask Thesys streaming, cancellation/timeout UI, citation drilldowns,
   and advanced report/settings surfaces.
+- Retry deferred web/browser checks from Sprint 56: hidden eval-report Inspect
+  panel, collapsed gate status, trend rows, cache/cost metrics, failing-case
+  links, and confirmation that no new homepage/dashboard clutter was added.
 - Add workspace/team collaboration flows if product direction requires it.
 - Add multi-project portfolio views only after single-project workflow remains
   simple.

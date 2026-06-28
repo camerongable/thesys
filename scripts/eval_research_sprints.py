@@ -46,6 +46,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate research sprint readiness.")
     parser.add_argument("--api-base", default="http://localhost:8000")
     parser.add_argument("--project-id", default=None)
+    parser.add_argument("--json", action="store_true", dest="json_output")
     args = parser.parse_args()
 
     cases = _load_cases()
@@ -58,14 +59,21 @@ def main() -> int:
     passed = sum(1 for metric in metrics if metric["passed"])
     total = len(metrics)
 
-    print("Research Sprint Eval")
-    print(f"Dataset: {DATASET_PATH}")
-    print(f"Result: {passed}/{total} checks passed")
-    for metric in metrics:
-        status = "PASS" if metric["passed"] else "FAIL"
-        print(f"- [{status}] {metric['label']}: {metric['observed']} (expected {metric['expected']})")
+    report = {"passed": passed == total, "score": passed, "total": total, "metrics": metrics}
+    if args.json_output:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print("Research Sprint Eval")
+        print(f"Dataset: {DATASET_PATH}")
+        print(f"Result: {passed}/{total} checks passed")
+        for metric in metrics:
+            status = "PASS" if metric["passed"] else "FAIL"
+            print(
+                f"- [{status}] {metric['label']}: {metric['observed']} "
+                f"(expected {metric['expected']})"
+            )
 
-    return 0 if passed == total else 1
+    return 0 if report["passed"] else 1
 
 
 def _load_cases() -> list[dict[str, Any]]:

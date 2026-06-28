@@ -2304,3 +2304,39 @@ Sprint 55 verification run:
 - [x] `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_citation_verifier.py app/tests/test_retrieval_quality_eval.py app/tests/test_opportunity_brief.py app/tests/test_competitors.py app/tests/test_agentic_research.py app/tests/test_guide.py app/tests/test_validation.py app/tests/test_demo_eval_workflows.py app/tests/test_research_history_eval.py -q --maxfail=1` (`68 passed`)
 - [x] `cd apps/api && .venv/bin/pytest -q` (`164 passed`)
 - [x] `python3 scripts/eval_ai_quality.py --json` (`10/10`)
+
+## V1 Sprint 56 Branch Progress
+
+Sprint 56 is implemented on `codex/v1-sprints-51-60`:
+
+- Added `scripts/eval_quality_gate.py` as the aggregate local quality gate for
+  AI quality, retrieval quality, research-sprint evals, extraction readiness,
+  MCP contract availability, pytest slices, security checks, and optional
+  LangSmith export/upload.
+- Added `scripts/eval_extraction_quality.py` for credential-free checks covering
+  URL fetch policy, canonical dedupe, prompt-injection markers, PDF page
+  lineage, multimodal boundaries, and source-quality signals.
+- Added file-backed local eval artifacts under `reports/evals/`: latest JSON,
+  Markdown, HTML, per-run JSON/Markdown/HTML, and JSONL trend history.
+- Added guarded report and observability endpoints for latest eval report, trend
+  history, and OpenTelemetry-compatible project metrics.
+- Added hidden-by-default Inspect UI for quality-gate status, failing gates,
+  trend rows, cache/cost/egress metrics, and report artifact paths.
+- Added `docs/AI_CHANGELOG.md` for prompt, schema, context-pack, retrieval,
+  memory, provider/reranker, and tool-schema changes.
+- Added focused report generation, trend persistence, metric payload, and API
+  access-control tests.
+
+Sprint 56 verification run:
+
+- [x] `python3 scripts/eval_extraction_quality.py --json` (`6/6`)
+- [x] `cd apps/api && .venv/bin/ruff check ...` on touched eval/report/schema/router files and eval scripts
+- [x] `cd apps/api && .venv/bin/python -m compileall ...` on touched eval/report/schema/router files and eval scripts
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py -q` (`3 passed`)
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-default LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json` (`warn`, `32/32`, only MCP contract warned because no running project/API was provided)
+- [x] `python3 scripts/security_check.py` (security slice passed; strict dependency audit remained environment-limited)
+- [x] `cd apps/api && .venv/bin/pytest -q` (`167 passed`)
+- [ ] `pnpm --filter thesys-web typecheck` and `pnpm --filter thesys-web test`
+  could not complete because pnpm repeatedly failed while fetching npm registry
+  packages (`ECONNRESET` / `fetch failed`). Sprint 60 owns the retry plus IDE
+  browser QA for the hidden eval-report Inspect surface.

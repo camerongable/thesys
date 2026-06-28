@@ -1510,6 +1510,28 @@ export type ContextEval = {
   };
 };
 
+export type EvalReport = {
+  report: Record<string, unknown>;
+};
+
+export type EvalTrendList = {
+  trends: Array<Record<string, unknown>>;
+};
+
+export type EvalMetricPoint = {
+  name: string;
+  value: number;
+  unit: string;
+  attributes: Record<string, string>;
+  temporality: string;
+};
+
+export type EvalObservabilityMetrics = {
+  generated_at: string;
+  project_id: string;
+  metrics: EvalMetricPoint[];
+};
+
 export type StrategicRecommendation = {
   id: string;
   project_id: string;
@@ -1799,7 +1821,7 @@ export type AIStatus = {
   retrieval_vector_path: "auto" | "sql" | "python";
   retrieval_python_fallback_enabled: boolean;
   retrieval_reranking_enabled: boolean;
-  retrieval_reranker_provider: "deterministic" | "litellm";
+  retrieval_reranker_provider: "none" | "deterministic" | "litellm";
   retrieval_context_token_budget: number;
   retrieval_max_chunks_per_source: number;
   retrieval_min_context_score: number;
@@ -2776,6 +2798,20 @@ export function getV1ResearchEval(projectId: string) {
 
 export function getContextEval(projectId: string) {
   return apiFetch<ContextEval>(`/api/projects/${projectId}/evals/context`);
+}
+
+export function getLatestEvalReport(projectId: string) {
+  return apiFetch<EvalReport>(`/api/projects/${projectId}/evals/reports/latest`);
+}
+
+export function getEvalTrends(projectId: string) {
+  return apiFetch<EvalTrendList>(`/api/projects/${projectId}/evals/reports/trends`);
+}
+
+export function getEvalObservabilityMetrics(projectId: string) {
+  return apiFetch<EvalObservabilityMetrics>(
+    `/api/projects/${projectId}/evals/observability-metrics`,
+  );
 }
 
 export function getAIStatus() {

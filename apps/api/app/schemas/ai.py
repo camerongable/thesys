@@ -112,7 +112,7 @@ class AIStatusRead(BaseModel):
     retrieval_vector_path: Literal["auto", "sql", "python"]
     retrieval_python_fallback_enabled: bool
     retrieval_reranking_enabled: bool
-    retrieval_reranker_provider: Literal["deterministic", "litellm"]
+    retrieval_reranker_provider: Literal["none", "deterministic", "litellm"]
     retrieval_context_token_budget: int
     retrieval_max_chunks_per_source: int
     retrieval_min_context_score: float
