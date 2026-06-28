@@ -5,10 +5,7 @@ vector/fallback path, reranking, context assembly, and quality proxies so AI
 answers can be debugged without exposing those details in the main workflow UI.
 """
 
-import json
-import re
 import uuid
-from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
@@ -18,18 +15,21 @@ from sqlalchemy import Select, cast, desc, func, literal, or_, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
-from app.ai.litellm_client import ChatMessage, LiteLLMClient, LiteLLMClientError
 from app.ai.prompts import EVIDENCE_RETRIEVAL_PROMPT_VERSION
 from app.core.auth import AuthContext
 from app.core.config import Settings
 from app.db.models import AIRun, AIStep, EvidenceChunk, EvidenceSource
+from app.features.retrieval import context_selection as retrieval_context_selection_feature
+from app.features.retrieval import diagnostics as retrieval_diagnostics_feature
+from app.features.retrieval import planning as retrieval_planning_feature
+from app.features.retrieval import reranker as retrieval_reranker_feature
+from app.features.retrieval import result_shaping as retrieval_result_shaping_feature
+from app.features.retrieval import scoring as retrieval_scoring_feature
 from app.schemas.evidence import (
     EvidenceRetrievalResultRead,
     EvidenceRetrieveCreate,
-    RetrievalContextDiagnosticsRead,
     RetrievalDiagnosticsRead,
     RetrievalMode,
-    RetrievalQualityReportRead,
     RetrievalQueryPlanRead,
     RetrievalRerankerDiagnosticsRead,
 )
@@ -43,38 +43,7 @@ from app.services import (
 from app.services.common import workflow as workflow_utils
 
 SQL_VECTOR_CANDIDATE_MULTIPLIER = 4
-PIPELINE_SUBQUERY_LIMIT = 5
 RERANK_CANDIDATE_LIMIT = 16
-APPROX_CHARS_PER_TOKEN = 4
-STOPWORDS = {
-    "and",
-    "are",
-    "but",
-    "can",
-    "for",
-    "from",
-    "had",
-    "has",
-    "have",
-    "how",
-    "into",
-    "not",
-    "our",
-    "that",
-    "the",
-    "this",
-    "was",
-    "were",
-    "what",
-    "when",
-    "where",
-    "which",
-    "while",
-    "why",
-    "with",
-    "without",
-    "would",
-}
 
 
 @dataclass(frozen=True)
@@ -269,22 +238,16 @@ def retrieve_evidence_pipeline(
             fallback_reason=None,
         )
     )
-    diagnostic_payload = primary.model_dump()
-    diagnostic_payload.update(
-        {
-            "candidate_count": sum(item.candidate_count for item in diagnostics),
-            "query_latency_ms": total_latency,
-            "used_sql_vector_search": any(item.used_sql_vector_search for item in diagnostics),
-            "fallback_path_used": any(item.fallback_path_used for item in diagnostics),
-            "fallback_reason": _combine_fallback_reasons(diagnostics),
-            "query_plan": plan,
-            "reranker": reranker,
-            "context": context,
-            "quality_report": quality,
-            "cache": ai_cache_service.cache_event_diagnostics(cache_lookup.event),
-        }
+    pipeline_diagnostics = _pipeline_diagnostics(
+        primary,
+        diagnostics,
+        total_latency_ms=total_latency,
+        query_plan=plan,
+        reranker=reranker,
+        context=context,
+        quality_report=quality,
+        cache=ai_cache_service.cache_event_diagnostics(cache_lookup.event),
     )
-    pipeline_diagnostics = RetrievalDiagnosticsRead.model_validate(diagnostic_payload)
     ai_cache_service.store(
         db,
         auth,
@@ -500,103 +463,12 @@ def _retrieve_with_python_scoring(
     )
 
 
-def _plan_query(query: str) -> RetrievalQueryPlanRead:
-    """Create a deterministic lightweight query plan for broad strategic questions."""
-    terms = _term_set(query)
-    raw_terms = _raw_term_set(query)
-    lowered = query.casefold()
-    intent = "general_research"
-    intent_markers = {
-        "wedge_selection": {"wedge", "positioning", "segment", "focus", "strongest"},
-        "pricing": {"pricing", "price", "pay", "willingness", "budget", "monetization"},
-        "competitor_analysis": {"competitor", "alternative", "substitute", "incumbent"},
-        "validation": {"validate", "validation", "proof", "test", "experiment", "unknown"},
-        "customer_pain": {"pain", "problem", "workflow", "urgent", "current"},
-    }
-    for candidate, markers in intent_markers.items():
-        if terms & markers:
-            intent = candidate
-            break
-
-    needed_evidence_types: list[str] = []
-    if terms & {"competitor", "alternative", "substitute", "incumbent"}:
-        needed_evidence_types.append("competitor")
-    if terms & {"pricing", "price", "pay", "willingness", "budget"}:
-        needed_evidence_types.append("pricing")
-    if terms & {"pain", "problem", "workflow", "urgent"}:
-        needed_evidence_types.append("customer_pain")
-    if terms & {"validate", "validation", "proof", "test", "experiment"}:
-        needed_evidence_types.append("validation")
-    if not needed_evidence_types:
-        needed_evidence_types = ["market", "customer_pain", "competitor"]
-
-    target_entities = _target_entities(query)
-    broad = (
-        len(terms) >= 8
-        or " and " in lowered
-        or " or " in lowered
-        or any(
-            marker in raw_terms for marker in {"which", "what", "compare", "strongest", "missing"}
-        )
-    )
-    subqueries = [query.strip()]
-    if broad:
-        expansions = {
-            "competitor": "competitors substitutes alternatives positioning pressure",
-            "pricing": "pricing willingness to pay budget paid pilot",
-            "customer_pain": "customer pain urgency current workaround workflow",
-            "validation": "validation proof experiment success criteria blocker",
-            "market": "market landscape trend adoption category",
-        }
-        for evidence_type in needed_evidence_types:
-            expansion = expansions.get(evidence_type)
-            if expansion:
-                subqueries.append(f"{query.strip()} {expansion}")
-        if intent == "wedge_selection":
-            subqueries.append(f"{query.strip()} wedge target segment differentiation first proof")
-    subqueries = _dedupe_strings([item for item in subqueries if item])[:PIPELINE_SUBQUERY_LIMIT]
-    return RetrievalQueryPlanRead(
-        intent=intent,
-        target_entities=target_entities,
-        needed_evidence_types=needed_evidence_types,
-        subqueries=subqueries,
-        decomposed=len(subqueries) > 1,
-    )
+_plan_query = retrieval_planning_feature.plan_query
+_target_entities = retrieval_planning_feature.target_entities
+_dedupe_strings = retrieval_planning_feature.dedupe_strings
 
 
-def _target_entities(query: str) -> list[str]:
-    matches = re.findall(r"\b[A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){0,2}\b", query)
-    ignored = {"What", "Which", "Why", "How", "Should", "Can", "The", "A", "An"}
-    return _dedupe_strings([match for match in matches if match.split()[0] not in ignored])[:6]
-
-
-def _dedupe_strings(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for value in values:
-        key = value.strip().casefold()
-        if key and key not in seen:
-            seen.add(key)
-            deduped.append(value.strip())
-    return deduped
-
-
-def _fuse_results(
-    results: list[EvidenceRetrievalResultRead],
-) -> list[EvidenceRetrievalResultRead]:
-    by_chunk: dict[uuid.UUID, EvidenceRetrievalResultRead] = {}
-    match_counts: defaultdict[uuid.UUID, int] = defaultdict(int)
-    for result in results:
-        match_counts[result.chunk_id] += 1
-        existing = by_chunk.get(result.chunk_id)
-        if existing is None or result.score > existing.score:
-            by_chunk[result.chunk_id] = result
-    fused: list[EvidenceRetrievalResultRead] = []
-    for result in by_chunk.values():
-        metadata = dict(result.metadata)
-        metadata["retrieval_match_count"] = match_counts[result.chunk_id]
-        fused.append(result.model_copy(update={"metadata": metadata}))
-    return sorted(fused, key=lambda item: (item.score, item.created_at), reverse=True)
+_fuse_results = retrieval_result_shaping_feature.fuse_results
 
 
 def _rerank_results(
@@ -671,335 +543,17 @@ def _rerank_results(
     return reranked.results, diagnostics
 
 
-def _litellm_rerank_order(
-    settings: Settings,
-    query: str,
-    plan: RetrievalQueryPlanRead,
-    results: list[EvidenceRetrievalResultRead],
-) -> list[uuid.UUID]:
-    candidates = results[:RERANK_CANDIDATE_LIMIT]
-    if not candidates:
-        return []
-    payload = {
-        "query": query,
-        "intent": plan.intent,
-        "needed_evidence_types": plan.needed_evidence_types,
-        "candidates": [
-            {
-                "chunk_id": str(result.chunk_id),
-                "title": result.title,
-                "source_type": result.source_type,
-                "score": result.score,
-                "text": result.text[:900],
-            }
-            for result in candidates
-        ],
-    }
-    messages = [
-        ChatMessage(
-            role="system",
-            content=(
-                "Rerank retrieved evidence for a founder strategic RAG workflow. "
-                "Return JSON only with key ranked_chunk_ids as an ordered array "
-                "of chunk_id strings. "
-                "Prefer specific, source-backed evidence and reject generic or weak snippets."
-            ),
-        ),
-        ChatMessage(role="user", content=json.dumps(payload, ensure_ascii=True, default=str)),
-    ]
-    completion = LiteLLMClient(settings).complete(
-        messages,
-        model=settings.litellm_model,
-        temperature=0.0,
-        response_format_json=True,
-        max_tokens=600,
-    )
-    try:
-        body = json.loads(completion.content)
-        raw_ids = body.get("ranked_chunk_ids")
-    except json.JSONDecodeError as exc:
-        raise LiteLLMClientError("LiteLLM reranker did not return valid JSON.") from exc
-    if not isinstance(raw_ids, list):
-        raise LiteLLMClientError("LiteLLM reranker response omitted ranked_chunk_ids.")
-    valid_ids = {result.chunk_id for result in candidates}
-    ordered: list[uuid.UUID] = []
-    for raw_id in raw_ids:
-        try:
-            chunk_id = uuid.UUID(str(raw_id))
-        except ValueError:
-            continue
-        if chunk_id in valid_ids and chunk_id not in ordered:
-            ordered.append(chunk_id)
-    return ordered
+_litellm_rerank_order = retrieval_reranker_feature._litellm_rerank_order
+_deterministic_rerank = retrieval_reranker_feature._deterministic_rerank
 
 
-def _deterministic_rerank(
-    query: str,
-    plan: RetrievalQueryPlanRead,
-    results: list[EvidenceRetrievalResultRead],
-    *,
-    ordered_ids: list[uuid.UUID] | None,
-) -> list[EvidenceRetrievalResultRead]:
-    query_terms = _term_set(query)
-    planned_terms = _term_set(" ".join(plan.needed_evidence_types))
-    explicit_rank = {chunk_id: index for index, chunk_id in enumerate(ordered_ids or [])}
-    scored: list[tuple[float, EvidenceRetrievalResultRead]] = []
-    for result in results:
-        text_terms = _term_set(result.text)
-        overlap = len(query_terms & text_terms) / max(len(query_terms), 1)
-        type_overlap = len(planned_terms & text_terms) / max(len(planned_terms), 1)
-        credibility = _metadata_float(result.metadata, "source_credibility_score") or 0.5
-        freshness = _freshness_boost(result)
-        match_count = _metadata_float(result.metadata, "retrieval_match_count") or 1.0
-        quality_weight = _metadata_float(result.metadata, "source_quality_retrieval_weight")
-        if quality_weight is None:
-            quality = result.metadata.get("source_quality")
-            if isinstance(quality, dict):
-                quality_weight = _metadata_float(quality, "retrieval_weight")
-        quality_weight = quality_weight if quality_weight is not None else credibility
-        provider_rank_boost = 0.0
-        if result.chunk_id in explicit_rank:
-            provider_rank_boost = max(0.0, 0.25 - (explicit_rank[result.chunk_id] * 0.01))
-        rerank_score = (
-            result.score * 0.55
-            + overlap * 0.18
-            + type_overlap * 0.08
-            + min(quality_weight, 1.0) * 0.08
-            + freshness * 0.06
-            + min(match_count / 4.0, 1.0) * 0.05
-            + provider_rank_boost
-        )
-        if overlap == 0 and type_overlap == 0 and result.keyword_score == 0:
-            rerank_score *= 0.6
-        scored.append((round(min(rerank_score, 1.0), 6), result))
-    scored.sort(key=lambda item: (item[0], item[1].created_at), reverse=True)
-    return [
-        result.model_copy(
-            update={
-                "rerank_score": score,
-                "final_rank": index + 1,
-                "selection_reason": _selection_reason(result, score),
-            }
-        )
-        for index, (score, result) in enumerate(scored)
-    ]
-
-
-def assemble_context_results(
-    settings: Settings,
-    results: list[EvidenceRetrievalResultRead],
-    *,
-    top_k: int | None = None,
-) -> tuple[list[EvidenceRetrievalResultRead], RetrievalContextDiagnosticsRead]:
-    """Select final prompt context under token, diversity, and dedupe constraints."""
-    selected: list[EvidenceRetrievalResultRead] = []
-    per_source: defaultdict[uuid.UUID, int] = defaultdict(int)
-    per_domain: defaultdict[str, int] = defaultdict(int)
-    per_source_type: defaultdict[str, int] = defaultdict(int)
-    per_competitor: defaultdict[str, int] = defaultdict(int)
-    token_count = 0
-    deduped_count = 0
-    dropped_count = 0
-    max_results = top_k or len(results)
-    signatures: list[set[str]] = []
-    for result in _diversify_context_candidates(settings, results):
-        score = result.rerank_score if result.rerank_score is not None else result.score
-        if score < settings.retrieval_min_context_score:
-            dropped_count += 1
-            continue
-        if per_source[result.source_id] >= settings.retrieval_max_chunks_per_source:
-            dropped_count += 1
-            continue
-        domain = _result_domain(result)
-        if domain and per_domain[domain] >= settings.retrieval_max_chunks_per_domain:
-            dropped_count += 1
-            continue
-        source_type = result.source_type
-        if per_source_type[source_type] >= settings.retrieval_max_chunks_per_source_type:
-            dropped_count += 1
-            continue
-        competitor_id = _result_competitor_id(result)
-        if (
-            competitor_id
-            and per_competitor[competitor_id] >= settings.retrieval_max_chunks_per_competitor
-        ):
-            dropped_count += 1
-            continue
-        terms = _signature_terms(result.text)
-        if any(_jaccard(terms, existing) >= 0.88 for existing in signatures):
-            deduped_count += 1
-            continue
-        estimated_tokens = _estimate_tokens(result.text)
-        if selected and token_count + estimated_tokens > settings.retrieval_context_token_budget:
-            dropped_count += 1
-            continue
-        selected.append(
-            result.model_copy(
-                update={
-                    "context_included": True,
-                    "selection_reason": (
-                        _context_selection_reason(result, per_source[result.source_id])
-                    ),
-                }
-            )
-        )
-        signatures.append(terms)
-        per_source[result.source_id] += 1
-        if domain:
-            per_domain[domain] += 1
-        per_source_type[source_type] += 1
-        if competitor_id:
-            per_competitor[competitor_id] += 1
-        token_count += estimated_tokens
-        if len(selected) >= max_results:
-            break
-    context = RetrievalContextDiagnosticsRead(
-        token_budget=settings.retrieval_context_token_budget,
-        token_count=token_count,
-        selected_count=len(selected),
-        dropped_count=dropped_count,
-        deduped_count=deduped_count,
-        max_chunks_per_source=settings.retrieval_max_chunks_per_source,
-        max_chunks_per_domain=settings.retrieval_max_chunks_per_domain,
-        max_chunks_per_source_type=settings.retrieval_max_chunks_per_source_type,
-        max_chunks_per_competitor=settings.retrieval_max_chunks_per_competitor,
-        mmr_enabled=settings.retrieval_mmr_enabled,
-        mmr_lambda=settings.retrieval_mmr_lambda,
-        min_context_score=settings.retrieval_min_context_score,
-    )
-    return selected, context
-
-
-def _diversify_context_candidates(
-    settings: Settings,
-    results: list[EvidenceRetrievalResultRead],
-) -> list[EvidenceRetrievalResultRead]:
-    if settings.retrieval_mmr_enabled:
-        return _mmr_order(results, lambda_weight=settings.retrieval_mmr_lambda)
-
-    by_source: dict[uuid.UUID, list[EvidenceRetrievalResultRead]] = defaultdict(list)
-    for result in results:
-        by_source[result.source_id].append(result)
-    diversified: list[EvidenceRetrievalResultRead] = []
-    while by_source:
-        for source_id in list(by_source):
-            candidates = by_source[source_id]
-            if candidates:
-                diversified.append(candidates.pop(0))
-            if not candidates:
-                del by_source[source_id]
-    return diversified
-
-
-def _mmr_order(
-    results: list[EvidenceRetrievalResultRead],
-    *,
-    lambda_weight: float,
-) -> list[EvidenceRetrievalResultRead]:
-    """Order candidates with maximal marginal relevance for diverse context."""
-    remaining = list(results)
-    selected: list[EvidenceRetrievalResultRead] = []
-    while remaining:
-        best_index = 0
-        best_score = float("-inf")
-        for index, candidate in enumerate(remaining):
-            relevance = (
-                candidate.rerank_score
-                if candidate.rerank_score is not None
-                else candidate.score
-            )
-            similarity = max(
-                (
-                    _text_similarity(candidate.text, selected_item.text)
-                    for selected_item in selected
-                ),
-                default=0.0,
-            )
-            if any(selected_item.source_id == candidate.source_id for selected_item in selected):
-                similarity = max(similarity, 1.0)
-            mmr_score = (lambda_weight * relevance) - ((1.0 - lambda_weight) * similarity)
-            if mmr_score > best_score:
-                best_index = index
-                best_score = mmr_score
-        selected.append(remaining.pop(best_index))
-    return selected
-
-
-def _context_selection_reason(result: EvidenceRetrievalResultRead, prior_source_count: int) -> str:
-    base = result.selection_reason or "Selected for synthesis context."
-    if prior_source_count == 0:
-        return f"{base} Prioritized for source diversity."
-    return base
-
-
-def _quality_report(
-    *,
-    selected: list[EvidenceRetrievalResultRead],
-    candidate_count: int,
-    total_latency_ms: int,
-    reranker_used: bool,
-    token_count: int,
-) -> RetrievalQualityReportRead:
-    """Compute cheap retrieval-quality proxies for evals and trace inspection."""
-    source_count = len({result.source_id for result in selected})
-    selected_count = len(selected)
-    recall_proxy = min(1.0, selected_count / max(candidate_count, 1))
-    precision_proxy = sum(
-        1 for result in selected if (result.rerank_score or result.score) >= 0.35
-    ) / max(selected_count, 1)
-    relevance_by_rank = [
-        min(1.0, max(result.rerank_score if result.rerank_score is not None else result.score, 0.0))
-        for result in selected
-    ]
-    relevant_flags = [score >= 0.35 for score in relevance_by_rank]
-    first_relevant = next(
-        (index + 1 for index, relevant in enumerate(relevant_flags) if relevant),
-        0,
-    )
-    mrr = 1 / first_relevant if first_relevant else 0.0
-    ndcg = _ndcg_proxy(relevance_by_rank)
-    citation_coverage_proxy = sum(
-        1 for result in selected if result.source_id and result.chunk_id
-    ) / max(selected_count, 1)
-    if source_count >= 3 and selected_count >= 3:
-        recall_proxy = max(recall_proxy, 0.75)
-    return RetrievalQualityReportRead(
-        recall_proxy=round(recall_proxy, 3),
-        precision_proxy=round(precision_proxy, 3),
-        recall_at_k=round(recall_proxy, 3),
-        precision_at_k=round(precision_proxy, 3),
-        mrr=round(mrr, 3),
-        ndcg_proxy=round(ndcg, 3),
-        citation_coverage_proxy=round(citation_coverage_proxy, 3),
-        citation_support_rate=round(citation_coverage_proxy, 3),
-        unsupported_claim_count=0,
-        unsupported_claim_rate=0.0,
-        average_retrieval_latency_ms=total_latency_ms,
-        reranker_used=reranker_used,
-        context_token_count=token_count,
-    )
-
-
-def _ndcg_proxy(relevance_scores: list[float]) -> float:
-    if not relevance_scores:
-        return 0.0
-    dcg = sum(score / _log2(index + 2) for index, score in enumerate(relevance_scores))
-    ideal = sorted(relevance_scores, reverse=True)
-    idcg = sum(score / _log2(index + 2) for index, score in enumerate(ideal))
-    return dcg / max(idcg, 0.0001)
-
-
-def _log2(value: int) -> float:
-    # Avoid a new dependency/import for this tiny ranking proxy.
-    lookup = {2: 1.0, 3: 1.585, 4: 2.0, 5: 2.322, 6: 2.585, 7: 2.807, 8: 3.0}
-    return lookup.get(value, 3.0)
-
-
-def _combine_fallback_reasons(diagnostics: list[RetrievalDiagnosticsRead]) -> str | None:
-    reasons = _dedupe_strings(
-        [item.fallback_reason for item in diagnostics if item.fallback_reason]
-    )
-    return "; ".join(reasons) if reasons else None
+assemble_context_results = retrieval_context_selection_feature.assemble_context_results
+_diversify_context_candidates = retrieval_context_selection_feature.diversify_context_candidates
+_mmr_order = retrieval_context_selection_feature.mmr_order
+_context_selection_reason = retrieval_context_selection_feature.context_selection_reason
+_quality_report = retrieval_context_selection_feature.quality_report
+_ndcg_proxy = retrieval_context_selection_feature.ndcg_proxy
+_combine_fallback_reasons = retrieval_context_selection_feature.combine_fallback_reasons
 
 
 def _metadata_float(metadata: dict[str, object], key: str) -> float | None:
@@ -1010,13 +564,6 @@ def _metadata_float(metadata: dict[str, object], key: str) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def _freshness_boost(result: EvidenceRetrievalResultRead) -> float:
-    created_at = result.created_at
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=UTC)
-    return _freshness_score(created_at)
 
 
 def _freshness_score(created_at: datetime | None) -> float:
@@ -1041,57 +588,12 @@ def _domain_from_url(url: str | None) -> str | None:
     return parsed.hostname.casefold() if parsed.hostname else None
 
 
-def _selection_reason(result: EvidenceRetrievalResultRead, rerank_score: float) -> str:
-    reasons: list[str] = []
-    if result.keyword_score > 0:
-        reasons.append("keyword overlap")
-    if result.semantic_score > 0:
-        reasons.append("semantic similarity")
-    if (_metadata_float(result.metadata, "retrieval_match_count") or 0) > 1:
-        reasons.append("matched multiple subqueries")
-    if not reasons:
-        reasons.append("retrieval score")
-    return f"Selected by {', '.join(reasons)}; rerank score {rerank_score:.2f}."
-
-
-def _signature_terms(text_value: str) -> set[str]:
-    terms = list(_term_set(text_value))
-    return set(terms[:120])
-
-
-def _jaccard(left: set[str], right: set[str]) -> float:
-    if not left or not right:
-        return 0.0
-    return len(left & right) / len(left | right)
-
-
-def _text_similarity(left: str, right: str) -> float:
-    return _jaccard(_signature_terms(left), _signature_terms(right))
-
-
-def _result_domain(result: EvidenceRetrievalResultRead) -> str | None:
-    metadata_domain = result.metadata.get("domain")
-    if isinstance(metadata_domain, str) and metadata_domain.strip():
-        return metadata_domain.strip().casefold()
-    if not result.url:
-        return None
-    parsed = urlparse(result.url)
-    return parsed.hostname.casefold() if parsed.hostname else None
-
-
-def _result_competitor_id(result: EvidenceRetrievalResultRead) -> str | None:
-    metadata = result.metadata
-    value = metadata.get("competitor_id")
-    if value:
-        return str(value)
-    values = metadata.get("competitor_ids")
-    if isinstance(values, list) and values:
-        return str(values[0])
-    return None
-
-
-def _estimate_tokens(text_value: str) -> int:
-    return max(1, int(len(text_value) / APPROX_CHARS_PER_TOKEN))
+_signature_terms = retrieval_context_selection_feature.signature_terms
+_jaccard = retrieval_context_selection_feature.jaccard
+_text_similarity = retrieval_context_selection_feature.text_similarity
+_result_domain = retrieval_context_selection_feature.result_domain
+_result_competitor_id = retrieval_context_selection_feature.result_competitor_id
+_estimate_tokens = retrieval_context_selection_feature.estimate_tokens
 
 
 def _base_conditions(
@@ -1324,83 +826,32 @@ def _combined_score(
     keyword_score: float,
     settings: Settings,
 ) -> float:
-    if mode == "semantic":
-        return semantic_score
-    if mode == "keyword":
-        return keyword_score
-    text_weight = (
-        settings.retrieval_text_search_weight
-        if settings.retrieval_text_search_enabled
-        else 0.35
+    return retrieval_scoring_feature.combined_score(
+        mode,
+        semantic_score,
+        keyword_score,
+        text_search_enabled=settings.retrieval_text_search_enabled,
+        text_search_weight=settings.retrieval_text_search_weight,
     )
-    return (semantic_score * (1.0 - text_weight)) + (keyword_score * text_weight)
 
 
-def _keyword_score(query_terms: set[str], text: str) -> float:
-    if not query_terms:
-        return 0.0
-    text_terms = _term_set(text)
-    if not text_terms:
-        return 0.0
-    overlap = query_terms & text_terms
-    if not overlap:
-        return 0.0
-    return len(overlap) / len(query_terms)
+_keyword_score = retrieval_scoring_feature.keyword_score
 
 
 def _bm25_keyword_scores(
     query_terms: set[str],
     candidates: list[RetrievalCandidate],
 ) -> dict[uuid.UUID, float]:
-    if not query_terms or not candidates:
-        return {}
-    docs = {candidate.chunk.id: _term_list(candidate.chunk.text) for candidate in candidates}
-    doc_count = len(docs)
-    avgdl = sum(len(terms) for terms in docs.values()) / max(doc_count, 1)
-    doc_freq: Counter[str] = Counter()
-    for terms in docs.values():
-        doc_freq.update(set(terms))
-
-    raw_scores: dict[uuid.UUID, float] = {}
-    k1 = 1.5
-    b = 0.75
-    for chunk_id, terms in docs.items():
-        frequencies = Counter(terms)
-        score = 0.0
-        doc_len = len(terms)
-        for term in query_terms:
-            if frequencies[term] == 0:
-                continue
-            idf = max(0.0, ((doc_count - doc_freq[term] + 0.5) / (doc_freq[term] + 0.5)))
-            tf = frequencies[term]
-            denominator = tf + k1 * (1 - b + b * (doc_len / max(avgdl, 1.0)))
-            score += idf * ((tf * (k1 + 1)) / max(denominator, 0.0001))
-        raw_scores[chunk_id] = score
-
-    max_score = max(raw_scores.values(), default=0.0)
-    if max_score <= 0:
-        return {chunk_id: 0.0 for chunk_id in raw_scores}
-    return {chunk_id: round(score / max_score, 6) for chunk_id, score in raw_scores.items()}
+    return retrieval_scoring_feature.bm25_keyword_scores(
+        query_terms,
+        {candidate.chunk.id: candidate.chunk.text for candidate in candidates},
+    )
 
 
-def _term_set(text: str) -> set[str]:
-    return {term for term in _raw_term_set(text) if term not in STOPWORDS}
-
-
-def _term_list(text: str) -> list[str]:
-    return [term for term in _raw_terms(text) if term not in STOPWORDS]
-
-
-def _raw_term_set(text: str) -> set[str]:
-    return set(_raw_terms(text))
-
-
-def _raw_terms(text: str) -> list[str]:
-    return [
-        term
-        for term in (part.strip(".,:;!?()[]{}\"'").casefold() for part in text.split())
-        if len(term) > 2
-    ]
+_term_set = retrieval_planning_feature.term_set
+_term_list = retrieval_planning_feature.term_list
+_raw_term_set = retrieval_planning_feature.raw_term_set
+_raw_terms = retrieval_planning_feature.raw_terms
 
 
 def _should_use_sql_vector_search(db: Session, settings: Settings) -> bool:
@@ -1434,27 +885,5 @@ def _pgvector_index_status(db: Session) -> tuple[str | None, bool]:
     return None, False
 
 
-def _diagnostics(
-    settings: Settings,
-    started: float,
-    *,
-    index_name: str | None,
-    index_available: bool,
-    candidate_count: int,
-    used_sql_vector_search: bool,
-    fallback_path_used: bool,
-    fallback_reason: str | None,
-) -> RetrievalDiagnosticsRead:
-    return RetrievalDiagnosticsRead(
-        embedding_provider=settings.embedding_provider,
-        embedding_model=settings.embedding_model,
-        embedding_dimension=settings.embedding_dimension,
-        embedding_version=settings.embedding_version,
-        index_name=index_name,
-        index_available=index_available,
-        candidate_count=candidate_count,
-        query_latency_ms=int((perf_counter() - started) * 1000),
-        used_sql_vector_search=used_sql_vector_search,
-        fallback_path_used=fallback_path_used,
-        fallback_reason=fallback_reason,
-    )
+_diagnostics = retrieval_diagnostics_feature.base_diagnostics
+_pipeline_diagnostics = retrieval_diagnostics_feature.pipeline_diagnostics

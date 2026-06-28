@@ -459,8 +459,10 @@ the domain workflow, then follow the AI services behind each step.
 | Area | Path | What to look for |
 |---|---|---|
 | API entrypoints | `apps/api/app/routers/` | FastAPI routes for projects, evidence, research sprints, guide chat, tools, workflows, evals, and governance. |
+| Feature packages | `apps/api/app/features/` | Sprint 59 feature-owned modules. Evidence extraction/provenance/citations, retrieval planning/reranking/context selection, validation generation/result interpretation, research planning/memo rendering/prompting/citation-audit/source-discovery shaping, guide routing/streaming/citations/context projection/prompt assembly, memory context-pack/Inspect serialization, decision recommendation shaping, governed tool guards, MCP protocol serialization, eval report file readers/writers/summary/failure-payload shaping, research eval case loading/scoring, shared eval metric-record helpers, and eval observability metric assembly have moved here behind compatibility shims. Remaining Sprint 59 feature-package gaps are tracked in `SPRINT_51_60_TODO.md`. |
+| Shared backend utilities | `apps/api/app/common/` | Cross-feature helpers that are not owned by the service layer, such as metadata merging. |
 | AI service layer | `apps/api/app/services/` | The main AI/product behavior: retrieval, embeddings, source discovery, agentic research, guide chat, validation, governance, and observability. |
-| LLM helpers | `apps/api/app/ai/` | LiteLLM client, structured-output validation/repair, prompt versions, fallback policy, and shared prompt-safety rules. |
+| LLM helpers | `apps/api/app/ai/` | LiteLLM client, structured-output validation/repair, prompt versions, fallback policy, deterministic fallback completion metadata, and shared prompt-safety rules. |
 | Domain models | `apps/api/app/db/models/` | SQLAlchemy models for project memory, evidence, artifacts, claims, tools, approvals, AI runs, and research workflow state. |
 | Schemas | `apps/api/app/schemas/` | Pydantic request/response contracts and structured AI output shapes. |
 | Durable workflows | `apps/api/app/temporal/` | Temporal workflow and activities for long-running research sprints. |
@@ -471,17 +473,44 @@ the domain workflow, then follow the AI services behind each step.
 Useful codepaths for AI reviewers:
 
 - Agentic research graph: `apps/api/app/services/agentic_research_service.py`
+- Research sprint planning prompts/fallbacks: `apps/api/app/features/research/planning.py`
+- Research memo rendering: `apps/api/app/features/research/memo_rendering.py`
+- Research memo prompt assembly: `apps/api/app/features/research/memo_prompting.py`
+- Research citation audit shaping: `apps/api/app/features/research/citation_audit.py`
 - Retrieval pipeline: `apps/api/app/services/retrieval_service.py`
 - Embedding provider boundary: `apps/api/app/services/embedding_service.py`
 - Context packs: `apps/api/app/services/context_service.py`
 - Typed memory: `apps/api/app/services/memory_service.py`
+- Memory Inspect serialization: `apps/api/app/features/memory/inspection.py`
 - Ask Thesys grounded guide: `apps/api/app/services/guide_service.py`
+- Ask Thesys intent/action routing: `apps/api/app/features/guide/routing.py`
+- Ask Thesys stage recommendations: `apps/api/app/features/guide/recommendations.py`
+- Ask Thesys streaming events: `apps/api/app/features/guide/events.py`
+- Ask Thesys citation drilldowns: `apps/api/app/features/guide/citations.py`
+- Ask Thesys grounded answer shaping: `apps/api/app/features/guide/grounding.py`
+- Ask Thesys guide eval shaping: `apps/api/app/features/guide/evals.py`
+- Validation generation prompts/fallbacks:
+  `apps/api/app/features/validation/generation.py`
+- Validation plan rendering: `apps/api/app/features/validation/plan_rendering.py`
+- Decision recommendation shaping: `apps/api/app/features/decisions/recommendation.py`
 - Tool governance boundary: `apps/api/app/services/tool_service.py`
+- Tool schema guards: `apps/api/app/features/governance_tools/schema_guard.py`
 - MCP adapter: `apps/api/app/mcp/adapter.py`
 - Source discovery and external search: `apps/api/app/services/source_discovery_service.py`
   and `apps/api/app/services/external_search_service.py`
-- Source provenance: `apps/api/app/services/source_provenance_service.py`
+- Evidence feature package map: `docs/BACKEND_FEATURE_PACKAGE_MAP.md`
+- Source provenance and extraction:
+  `apps/api/app/features/evidence/source_provenance.py` and
+  `apps/api/app/features/evidence/extraction.py`
 - Multimodal extraction: `apps/api/app/services/multimodal_extraction_service.py`
+- Citation verification: `apps/api/app/features/evidence/citation_verifier.py`
+- Retrieval planning and reranking:
+  `apps/api/app/features/retrieval/planning.py` and
+  `apps/api/app/features/retrieval/reranker.py`
+- Retrieval diagnostics: `apps/api/app/features/retrieval/diagnostics.py`
+- Eval report file readers: `apps/api/app/features/evals/report_files.py`
+- Eval report writer/renderers: `apps/api/app/features/evals/report_writer.py`
+- Eval report summary shaping: `apps/api/app/features/evals/report_summary.py`
 - Observability/evals: `apps/api/app/services/langsmith_observability_service.py`
   and `apps/api/app/services/eval_service.py`
 - Shared service utilities: `apps/api/app/services/common/`
@@ -911,7 +940,57 @@ Implemented or demonstrated:
 Gap-closure roadmap:
 
 `SPRINT_51_60_TODO.md` now contains the execution-level gap ledger for every
-unfinished Sprint 41-50 item. The list below is the reader-friendly summary.
+unfinished Sprint 41-50 item. It uses stable `G41-*` through `G50-*` work-item
+IDs and pickup-ready Sprint 59/60 artifacts so each gap can close with
+verification, be marked intentionally out of V1 scope, or receive a named future
+owner. It also includes residual routing for completed Sprints 51-58, a
+per-sprint residual handoff checklist directly under each completed Sprint
+51-58 section, a file-level Sprint 59 cleanup punch list, and step-by-step
+Sprint 60 pickup notes. The TODO now also includes an audit gap crosswalk, a
+per-sprint completion-gate table, and a per-ID pickup checklist for each
+`G41-*` through `G50-*` gap so future work has exact edit targets, behavioral
+expectations, verification commands, blocker-recording rules, and
+status-disposition requirements. It also defines a required disposition row
+format covering status, owner sprint item, source/doc links, exact verification
+or blocker text, future owner, and portfolio-claim impact. The audit crosswalk
+is the "did we capture it?"
+check: every unfinished Sprint 41-50 objective maps to a `G*` ID, a Sprint 59
+or Sprint 60 pickup item, and concrete file-level directions. The list below is
+the reader-friendly summary.
+
+The TODO now also has a `Gap Capture Control` rule plus closure checklists for
+Sprint 59 and Sprint 60. Those checklists spell out the exact service
+entrypoints, feature-module targets, service-owned side effects, docs, README
+links, status rows, verification commands, and blocker text required before a
+future engineer can mark each remaining gap complete.
+
+It also has a `Gap-Patching Rule for Completed Sprints`: Sprints 51-58 are
+code-landed only. Their original Sprint 41-50 gaps stay open until the owning
+`S60-P*` package patches the named doc/source artifacts, records exact commands
+or blockers, updates README/navigation language when needed, and writes final
+`IMPLEMENTATION_STATUS.md` rows for every related `G*` ID.
+
+It also now includes an `Original Sprint 41-50 Gap Patch Manifest`. That
+manifest is the first pickup surface for remaining work: for each partially
+complete original sprint, it names the owning `S59-R*` or `S60-P*` item, first
+files to open, exact docs/code artifacts to patch, commands to run, blocker text
+to capture, and `IMPLEMENTATION_STATUS.md` rows required before closure.
+
+For pickup, use the `No-Ambiguity Sprint Pickup Contract` near the top of
+`SPRINT_51_60_TODO.md`. It maps each follow-up sprint to the exact original
+`G41-*` through `G50-*` gaps, first files to open, required docs/code targets,
+verification commands or blocker rules, and the `IMPLEMENTATION_STATUS.md`
+disposition rows that must exist before a sprint can be called complete.
+
+Completion semantics: a checked Sprint 51-58 implementation item means code has
+landed, not that the original Sprint 41-50 gap is fully closed. The `G41-*`
+through `G50-*` items in `SPRINT_51_60_TODO.md` are the authoritative ledger,
+and each one must receive an `implemented`, `intentionally out of V1`, or
+`future owner` disposition in `IMPLEMENTATION_STATUS.md` before the roadmap can
+claim complete gap closure. The TODO now uses **code-landed** versus
+**gap-closed** terminology and avoids checked "close gap" items for Sprints
+51-58 unless the related docs, QA, provider/audit checks, blocker records, and
+final status dispositions also exist.
 
 - Sprint 53 is implemented on this branch: Ask Thesys now has incremental
   answer deltas/provider streaming support, live retrieval/tool/proposal events,
@@ -945,16 +1024,82 @@ unfinished Sprint 41-50 item. The list below is the reader-friendly summary.
   fallback, true screenshot/page artifact storage, screenshot-region OCR/table
   provenance, live-provider credential QA, web/browser provenance QA, and
   Project Inspect trust-summary QA.
-- Sprint 59 is still pending and must close the architecture cleanup gap by
-  splitting oversized services into feature packages, adding characterization
-  tests, enforcing dependency rules, adding typed DTO boundaries, removing
-  duplication, checking import cycles, and preserving public API behavior.
+- Sprint 59 is implemented on this branch: it closes the architecture cleanup
+  gap with characterization coverage, feature-owned packages, typed boundary
+  ledgers, compatibility shims, duplication disposition, import-boundary checks,
+  and preserved public API behavior. The pickup artifacts are concrete:
+  `docs/BACKEND_FEATURE_PACKAGE_MAP.md` now contains the target package map,
+  implemented characterization matrix, DTO boundary ledger, shim/migration
+  ledger, implemented function-level slices for retrieval context selection and
+  retrieval result fusion/scoring, validation generation/result interpretation
+  fallback, citation de-duplication/retrieved-ID checks, governed tool registry
+  contracts, eval gate diagnostics, command-gate result parsing/shaping, shared
+  eval metric records for the AI/extraction scripts, LangSmith export
+  payload/result shaping, memory selection/conflict policy, and deterministic
+  fallback completion metadata. Shared eval metric records now cover the AI
+  quality, extraction quality, MCP contract, and research sprint eval scripts,
+  research eval case loading/scoring is feature-owned, and missing/malformed/
+  unreadable report plus malformed/unreadable/unwritable trend payloads and
+  live-provider-unavailable warning metrics, rerun metadata, and local metric
+  export payloads are feature-owned. Typed eval boundary validation now covers
+  gate results, shared metric records, report failures, LangSmith export
+  results, OpenTelemetry metric points, eval-run summaries, token/cost summaries,
+  and cache diagnostics; full gate execution, trend persistence, and upload
+  side-effect ownership remain future cleanup. Fallback completion metadata now
+  also records provider mode, fallback reason, redacted provider failure
+  details, timeout/cause classification, token/cost defaults, and redacted
+  trace/run metadata. Decision recommendation and decision-coach responses now
+  expose typed weak-evidence labels without mutating decision state. Validation
+  result interpretation now also has feature-owned mission-context projection,
+  prompt payload construction, and approval proposed-update payload shaping in
+  `app.features.validation.result_interpretation`; provider calls, approval
+  persistence, memory writes, confidence mutation, audit persistence, DB
+  commits, and route orchestration remain service-owned. Research graph step
+  output serialization now lives in `app.features.research.graph_state` behind
+  service aliases, deterministic research strategy helpers now live in
+  `app.features.research.strategy`, and final memo prompt assembly now lives in
+  `app.features.research.memo_prompting` with trusted/untrusted context
+  splitting and untrusted retrieved-content wrapping. Memo citation-audit
+  shaping now lives in `app.features.research.citation_audit` with claim
+  support downgrades, finding-level citation filtering, citation enrichment,
+  and citation de-duplication. Research sprint planning prompt/fallback shaping
+  now lives in `app.features.research.planning`, source-discovery prompt
+  payloads now live in `app.features.research.source_discovery` alongside
+  candidate specs and provenance shaping, and research memo proposal payloads
+  now live in `app.features.research.proposals`; LangGraph execution,
+  context-pack construction, tracing, persistence, tool/retrieval execution,
+  provider calls, structured-output parsing, external-search execution, tool
+  proposal/approval writes, claim/artifact/plan/sprint writes, evidence
+  ingestion, Temporal signaling, and DB writes remain service-owned.
+  Ask Thesys guide context projection and grounded prompt assembly now live in
+  `app.features.guide.context_projection` and `app.features.guide.prompting`,
+  covering recent-turn bounding, risk/unknown projection, overview-to-context
+  shaping, trusted/untrusted context splitting, and untrusted retrieved-content
+  wrapping; active workflow lookup, retrieval execution, context-pack
+  construction, provider generation, cache, run accounting, proposals, nudge
+  persistence, approvals, and routes remain service-owned.
+  `SPRINT_51_60_TODO.md` still calls out Sprint 59 must-not-miss edge cases so
+  broad refactor work cannot hide unverified behavior. MCP/stdout/HTTP approval
+  parity is now pinned for automated routes, including direct MCP HTTP,
+  JSON-RPC, tool-invocation reads, approval-list reads, rejection transitions,
+  denial audit metadata, and redacted persisted summaries; only live stdio
+  read/proposal smoke remains in Sprint 60. Approval rejection/audit payloads,
+  context compression/conflict/Inspect serialization, and route contract parity
+  are now pinned by focused tests, with memory review metadata shaped in
+  `app.features.memory.review`. Evidence extraction metadata ownership now also
+  covers direct URL response metadata, file identity metadata, image upload
+  metadata, text upload metadata, PDF parser metadata, and OCR fallback
+  metadata in `app.features.evidence.extraction`, while fetch/storage/parser/
+  provider/embedding/audit/transaction orchestration remains service-owned.
 - Sprint 60 is still pending and must close the documentation/readiness gap with
   architecture diagrams, post-refactor navigation, targeted
   docstrings/comments, deployment docs, object-storage backup guidance, advanced
   integration settings, deferred browser QA retry, Sprint 58 extraction UI QA,
   hosted-demo smoke tests, a final carried-gap audit, and honest
-  remaining-limit notes.
+  remaining-limit notes. The TODO now orders this work as `S60-P1` through
+  `S60-P10`, covering final gap disposition, context, memory, MCP, retrieval,
+  Ask Thesys streaming, evals/observability, source intelligence,
+  security/deployment, and post-refactor developer navigation.
 
 ---
 

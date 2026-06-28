@@ -19,6 +19,16 @@ API_DIR = ROOT / "apps" / "api"
 DEFAULT_REPORT_DIR = ROOT / "reports" / "evals"
 REPORT_DIR_ENV = "THESYS_EVAL_REPORT_DIR"
 
+if str(API_DIR) not in sys.path:
+    sys.path.insert(0, str(API_DIR))
+
+from app.features.evals import (  # noqa: E402
+    gate_results,
+    langsmith_export,
+    report_summary,
+    report_writer,
+)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run Thesys AI quality gates.")
@@ -121,22 +131,14 @@ def _project_args(args: argparse.Namespace) -> list[str]:
 
 def _run_json_gate(name: str, command: list[str], *, purpose: str) -> dict[str, Any]:
     result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
-    parsed = _parse_json_output(result.stdout)
-    status = "pass" if result.returncode == 0 and bool(parsed.get("passed")) else "fail"
-    return {
-        "name": name,
-        "purpose": purpose,
-        "status": status,
-        "passed": status == "pass",
-        "score": int(parsed.get("score") or (1 if status == "pass" else 0)),
-        "total": int(parsed.get("total") or 1),
-        "metrics": parsed.get("metrics") or [],
-        "command": command,
-        "returncode": result.returncode,
-        "stdout_tail": result.stdout[-2500:],
-        "stderr_tail": result.stderr[-2500:],
-        "rerun": " ".join(command),
-    }
+    return gate_results.json_command_gate(
+        name,
+        command,
+        purpose=purpose,
+        returncode=result.returncode,
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
 
 
 def _cache_quality_gate() -> dict[str, Any]:
@@ -147,6 +149,9 @@ def _cache_quality_gate() -> dict[str, Any]:
     retrieval_service_source = _read("apps/api/app/services/retrieval_service.py")
     guide_service_source = _read("apps/api/app/services/guide_service.py")
     report_service_source = _read("apps/api/app/services/eval_report_service.py")
+    observability_metrics_source = _read(
+        "apps/api/app/features/evals/observability_metrics.py"
+    )
     gate_source = _read("scripts/eval_quality_gate.py")
     checks = [
         (
@@ -185,7 +190,10 @@ def _cache_quality_gate() -> dict[str, Any]:
         ),
         (
             "cache_report_metrics",
-            "thesys.ai.cache.saved_tokens" in report_service_source
+            (
+                "thesys.ai.cache.saved_tokens" in report_service_source
+                or "thesys.ai.cache.saved_tokens" in observability_metrics_source
+            )
             and "cache_quality" in gate_source,
             "cache hit/miss/stale/savings metrics reach reports and quality gates",
         ),
@@ -308,54 +316,17 @@ def _run_command_gate(
     purpose: str,
 ) -> dict[str, Any]:
     result = subprocess.run(command, cwd=cwd, text=True, capture_output=True, check=False)
-    status = "pass" if result.returncode == 0 else "fail"
-    return {
-        "name": name,
-        "purpose": purpose,
-        "status": status,
-        "passed": status == "pass",
-        "score": 1 if status == "pass" else 0,
-        "total": 1,
-        "metrics": [
-            {
-                "key": name,
-                "label": name.replace("_", " ").title(),
-                "passed": status == "pass",
-                "observed": f"exit {result.returncode}",
-                "expected": "exit 0",
-            }
-        ],
-        "command": command,
-        "returncode": result.returncode,
-        "stdout_tail": result.stdout[-2500:],
-        "stderr_tail": result.stderr[-2500:],
-        "rerun": " ".join(command),
-    }
+    return gate_results.command_gate(
+        name,
+        command,
+        purpose=purpose,
+        returncode=result.returncode,
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
 
 
-def _warning_gate(name: str, message: str, rerun: str) -> dict[str, Any]:
-    return {
-        "name": name,
-        "purpose": message,
-        "status": "warn",
-        "passed": True,
-        "score": 0,
-        "total": 0,
-        "metrics": [
-            {
-                "key": f"{name}_unavailable",
-                "label": name.replace("_", " ").title(),
-                "passed": True,
-                "observed": "unavailable",
-                "expected": message,
-            }
-        ],
-        "command": [],
-        "returncode": None,
-        "stdout_tail": "",
-        "stderr_tail": "",
-        "rerun": rerun,
-    }
+_warning_gate = gate_results.warning_gate
 
 
 def _summary(
@@ -364,38 +335,7 @@ def _summary(
     *,
     live_snapshot: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    failed = [gate for gate in gates if gate["status"] == "fail"]
-    warnings = [gate for gate in gates if gate["status"] == "warn"]
-    score = sum(int(gate.get("score") or 0) for gate in gates)
-    total = sum(int(gate.get("total") or 0) for gate in gates)
-    failed_check_ids = [
-        metric.get("key", gate["name"])
-        for gate in gates
-        for metric in gate.get("metrics", [])
-        if not metric.get("passed", False)
-    ]
-    live_ai_report = as_dict(live_snapshot.get("ai_report")) if live_snapshot else {}
-    cache_snapshot = _cache_from_live_snapshot(live_snapshot)
-    return {
-        **metadata,
-        "available": True,
-        "passed": not failed,
-        "status": "pass" if not failed and not warnings else ("fail" if failed else "warn"),
-        "score": score,
-        "total": total,
-        "failed_check_ids": failed_check_ids,
-        "warning_gate_ids": [gate["name"] for gate in warnings],
-        "gates": gates,
-        "reports": gates,
-        "cache": cache_snapshot,
-        "latency_ms": live_ai_report.get("average_step_latency_ms"),
-        "token_cost": {
-            "total_tokens": live_ai_report.get("total_tokens"),
-            "total_cost": live_ai_report.get("total_cost"),
-        },
-        "trace_ids": live_snapshot.get("trace_ids", []) if live_snapshot else [],
-        "changelog": "docs/AI_CHANGELOG.md",
-    }
+    return report_summary.summary(metadata, gates, live_snapshot=live_snapshot)
 
 
 def _live_project_snapshot(args: argparse.Namespace) -> dict[str, Any] | None:
@@ -422,37 +362,7 @@ def _live_project_snapshot(args: argparse.Namespace) -> dict[str, Any] | None:
 
 
 def _cache_from_live_snapshot(live_snapshot: dict[str, Any] | None) -> dict[str, Any]:
-    cache = {
-        "hits": 0,
-        "misses": 0,
-        "stale_denials": 0,
-        "saved_tokens": 0,
-        "saved_cost": "0",
-        "latency_saved_ms": 0,
-    }
-    if not live_snapshot:
-        return cache
-    observability = as_dict(live_snapshot.get("observability"))
-    metrics = observability.get("metrics", [])
-    if not isinstance(metrics, list):
-        return cache
-    name_map = {
-        "thesys.ai.cache.hits": "hits",
-        "thesys.ai.cache.misses": "misses",
-        "thesys.ai.cache.stale_denials": "stale_denials",
-        "thesys.ai.cache.saved_tokens": "saved_tokens",
-        "thesys.ai.cache.saved_cost": "saved_cost",
-        "thesys.ai.cache.latency_saved": "latency_saved_ms",
-    }
-    for metric in metrics:
-        if not isinstance(metric, dict):
-            continue
-        target = name_map.get(str(metric.get("name")))
-        if not target:
-            continue
-        value = metric.get("value", 0)
-        cache[target] = str(value) if target == "saved_cost" else int(float(value or 0))
-    return cache
+    return report_summary.cache_from_live_snapshot(live_snapshot)
 
 
 def _fetch_json(url: str) -> dict[str, Any]:
@@ -464,158 +374,24 @@ def _fetch_json(url: str) -> dict[str, Any]:
         return {}
 
 
-def _write_reports(summary: dict[str, Any], report_dir: Path) -> dict[str, str]:
-    stamp = summary["generated_at"].replace(":", "").replace("+00:00", "Z")
-    stem = f"eval_report_{stamp}"
-    json_path = report_dir / f"{stem}.json"
-    markdown_path = report_dir / f"{stem}.md"
-    html_path = report_dir / f"{stem}.html"
-    latest_json = report_dir / "latest.json"
-    latest_md = report_dir / "latest.md"
-    latest_html = report_dir / "latest.html"
-    trend_path = report_dir / "eval_runs.jsonl"
-
-    json_body = json.dumps(summary, indent=2, sort_keys=True)
-    markdown_body = _render_markdown(summary)
-    html_body = _render_html(summary)
-    json_path.write_text(json_body, encoding="utf-8")
-    markdown_path.write_text(markdown_body, encoding="utf-8")
-    html_path.write_text(html_body, encoding="utf-8")
-    latest_json.write_text(json_body, encoding="utf-8")
-    latest_md.write_text(markdown_body, encoding="utf-8")
-    latest_html.write_text(html_body, encoding="utf-8")
-    with trend_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(_trend_record(summary), sort_keys=True) + "\n")
-
-    return {
-        "json": _display_path(json_path),
-        "markdown": _display_path(markdown_path),
-        "html": _display_path(html_path),
-        "latest_json": _display_path(latest_json),
-        "latest_markdown": _display_path(latest_md),
-        "latest_html": _display_path(latest_html),
-        "trends": _display_path(trend_path),
-    }
+def _write_reports(summary: dict[str, Any], report_dir: Path) -> dict[str, Any]:
+    return report_writer.write_reports(summary, report_dir, repo_root=ROOT)
 
 
 def _trend_record(summary: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "generated_at": summary["generated_at"],
-        "sprint": summary["sprint"],
-        "git_commit": summary["git_commit"],
-        "git_branch": summary["git_branch"],
-        "passed": summary["passed"],
-        "status": summary["status"],
-        "score": summary["score"],
-        "total": summary["total"],
-        "prompt_version": summary["prompt_version"],
-        "schema_version": summary["schema_version"],
-        "context_profile_version": summary["context_profile_version"],
-        "retrieval_policy_version": summary["retrieval_policy_version"],
-        "memory_policy_version": summary["memory_policy_version"],
-        "model_mode": summary["model_mode"],
-        "provider_mode": summary["provider_mode"],
-        "failed_check_ids": summary["failed_check_ids"],
-        "warning_gate_ids": summary["warning_gate_ids"],
-        "gates": [
-            {
-                "name": gate["name"],
-                "status": gate["status"],
-                "score": gate["score"],
-                "total": gate["total"],
-            }
-            for gate in summary["gates"]
-        ],
-    }
+    return report_writer.trend_record(summary)
 
 
 def _render_text_summary(summary: dict[str, Any]) -> str:
-    lines = [
-        "Thesys Eval Quality Gate",
-        f"Result: {summary['status']} ({summary['score']}/{summary['total']})",
-    ]
-    for gate in summary["gates"]:
-        lines.append(
-            f"- [{gate['status'].upper()}] {gate['name']}: "
-            f"{gate['score']}/{gate['total']}"
-        )
-    lines.append(f"Report: {summary['paths']['latest_markdown']}")
-    return "\n".join(lines)
+    return report_writer.render_text_summary(summary)
 
 
 def _render_markdown(summary: dict[str, Any]) -> str:
-    lines = [
-        "# Thesys Eval Report",
-        "",
-        f"- Generated: `{summary['generated_at']}`",
-        f"- Sprint: `{summary['sprint']}`",
-        f"- Commit: `{summary['git_commit']}`",
-        f"- Result: `{summary['status']}`",
-        f"- Score: `{summary['score']}/{summary['total']}`",
-        "",
-        "## Gates",
-        "",
-    ]
-    for gate in summary["gates"]:
-        lines.append(f"### {gate['name']}")
-        lines.append("")
-        lines.append(f"- Status: `{gate['status']}`")
-        lines.append(f"- Score: `{gate['score']}/{gate['total']}`")
-        lines.append(f"- Purpose: {gate['purpose']}")
-        lines.append(f"- Rerun: `{gate['rerun']}`")
-        failed = [metric for metric in gate.get("metrics", []) if not metric.get("passed", False)]
-        if failed:
-            lines.append("- Failing cases:")
-            for metric in failed:
-                lines.append(
-                    f"  - `{metric.get('key', gate['name'])}`: observed "
-                    f"`{metric.get('observed')}`, expected `{metric.get('expected')}`"
-                )
-        lines.append("")
-    lines.extend(
-        [
-            "## Versions",
-            "",
-            f"- Prompt version: `{summary['prompt_version']}`",
-            f"- Schema version: `{summary['schema_version']}`",
-            f"- Context profile version: `{summary['context_profile_version']}`",
-            f"- Retrieval policy version: `{summary['retrieval_policy_version']}`",
-            f"- Memory policy version: `{summary['memory_policy_version']}`",
-            f"- Tool schema version: `{summary['tool_schema_version']}`",
-            "",
-            "## Changelog",
-            "",
-            "See `docs/AI_CHANGELOG.md`.",
-        ]
-    )
-    return "\n".join(lines) + "\n"
+    return report_writer.render_markdown(summary)
 
 
 def _render_html(summary: dict[str, Any]) -> str:
-    rows = "\n".join(
-        "<tr>"
-        f"<td>{_escape(gate['name'])}</td>"
-        f"<td>{_escape(gate['status'].upper())}</td>"
-        f"<td>{gate['score']}/{gate['total']}</td>"
-        f"<td><code>{_escape(gate['rerun'])}</code></td>"
-        "</tr>"
-        for gate in summary["gates"]
-    )
-    return f"""<!doctype html>
-<html>
-<head><meta charset="utf-8"><title>Thesys Eval Report</title></head>
-<body>
-<h1>Thesys Eval Report</h1>
-<p>Generated: {_escape(summary['generated_at'])}</p>
-<p>Result: {_escape(summary['status'])} ({summary['score']}/{summary['total']})</p>
-<table border="1" cellspacing="0" cellpadding="6">
-<tr><th>Gate</th><th>Status</th><th>Score</th><th>Rerun</th></tr>
-{rows}
-</table>
-<p>Changelog: docs/AI_CHANGELOG.md</p>
-</body>
-</html>
-"""
+    return report_writer.render_html(summary)
 
 
 def _export_langsmith(
@@ -625,18 +401,19 @@ def _export_langsmith(
     upload: bool,
 ) -> dict[str, Any]:
     payload = _redact(summary)
-    export_path = report_dir / f"langsmith_export_{summary['generated_at'].replace(':', '')}.json"
+    export_path = langsmith_export.export_path(report_dir, summary)
     export_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    result = {
-        "path": _display_path(export_path),
-        "uploaded": False,
-        "status": "exported",
-    }
+    result = langsmith_export.export_result(export_path, repo_root=ROOT)
     if not upload:
         return result
     api_key = os.environ.get("LANGSMITH_API_KEY")
     if not api_key:
-        return {**result, "status": "warning", "message": "LANGSMITH_API_KEY is not configured."}
+        return langsmith_export.export_result(
+            export_path,
+            repo_root=ROOT,
+            status="warning",
+            message="LANGSMITH_API_KEY is not configured.",
+        )
     try:
         sys.path.insert(0, str(API_DIR))
         from langsmith import Client
@@ -646,38 +423,33 @@ def _export_langsmith(
         client.create_run(
             name="thesys_eval_quality_gate",
             run_type="chain",
-            inputs={"sprint": summary["sprint"], "git_commit": summary["git_commit"]},
+            inputs=langsmith_export.run_inputs(summary),
             outputs=payload,
             project_name=project_name,
         )
-        return {**result, "uploaded": True, "status": "uploaded"}
+        return langsmith_export.export_result(
+            export_path,
+            repo_root=ROOT,
+            uploaded=True,
+            status="uploaded",
+        )
     except Exception as exc:  # pragma: no cover - external telemetry is best-effort
-        return {**result, "status": "warning", "message": str(exc)}
+        return langsmith_export.export_result(
+            export_path,
+            repo_root=ROOT,
+            status="warning",
+            message=str(exc),
+        )
 
 
-def _redact(value: Any) -> Any:
-    sys.path.insert(0, str(API_DIR))
-    from app.core.redaction import redact_payload
-
-    return redact_payload(value, redact_emails=True, max_string_length=2000)
+_redact = langsmith_export.redacted_export_payload
 
 
-def _parse_json_output(stdout: str) -> dict[str, Any]:
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError:
-        start = stdout.find("{")
-        end = stdout.rfind("}")
-        if start >= 0 and end > start:
-            try:
-                return json.loads(stdout[start : end + 1])
-            except json.JSONDecodeError:
-                pass
-    return {"passed": False, "score": 0, "total": 1, "metrics": []}
+_parse_json_output = gate_results.parse_json_output
 
 
 def as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+    return report_summary.as_dict(value)
 
 
 def _read(relative_path: str) -> str:
@@ -700,17 +472,11 @@ def _git(args: list[str]) -> str:
 
 
 def _display_path(path: Path) -> str:
-    return str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
+    return report_writer.display_path(path, repo_root=ROOT)
 
 
 def _escape(value: Any) -> str:
-    return (
-        str(value)
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
+    return report_writer.escape(value)
 
 
 if __name__ == "__main__":

@@ -12224,15 +12224,15 @@ Every incomplete Sprint 41-50 gap should be owned by one of the future sprints:
 
 | Prior gap | Future sprint owner |
 |---|---|
-| Sprint 41 security rate limits, concurrency limits, dependency audits, live-provider egress, production auth, and threat model | Sprint 54, with CI/eval reporting in Sprint 56 |
-| Sprint 42 central context compiler, workflow profiles, memory integration, compression, conflict detection, and context evals | Sprint 51 |
-| Sprint 43 memory compaction, preference capture, conflict resolution, memory browser, memory write review, and context-pack integration | Sprint 51 |
-| Sprint 44 real MCP transport, JSON-RPC/protocol compatibility, stdio/SSE, real client configs, and integration harnesses | Sprint 52 |
-| Sprint 45 Postgres full-text search, BM25-like ranking, MMR/domain caps, cross-encoder reranking, golden retrieval evals, and cross-artifact citation verification | Sprint 55 |
-| Sprint 46 true Ask Thesys provider streaming, cancellation, live retrieval/tool events, citation drilldowns, and stronger guide evals | Sprint 53, with eval gates in Sprint 56 |
-| Sprint 47 OpenTelemetry, CI gates, eval trends, prompt/schema changelog, pre-call budget enforcement, and dashboard/report output | Sprint 54 and Sprint 56 |
+| Sprint 41 security rate limits, concurrency limits, dependency audits, live-provider egress, production auth, and threat model | Sprint 54 for enforcement, Sprint 56 for gates/reports, Sprint 60 for dependency-audit disposition, hosted-demo/production runbooks, backup/restore, and hosted smoke. |
+| Sprint 42 central context compiler, workflow profiles, memory integration, compression, conflict detection, and context evals | Sprint 51 for implementation, Sprint 56 for eval/reporting, Sprint 60 for context docs, profile inventory, Inspect browser QA, and final `G42-*` disposition. |
+| Sprint 43 memory compaction, preference capture, conflict resolution, memory browser, memory write review, and context-pack integration | Sprint 51 for implementation, Sprint 60 for memory lifecycle docs, memory type extension guide, Inspect browser QA, and final `G43-*` disposition. |
+| Sprint 44 real MCP transport, JSON-RPC/protocol compatibility, stdio/SSE, real client configs, and integration harnesses | Sprint 52 for implementation, Sprint 56 for MCP contract gates, Sprint 60 for client docs, stdio/API smoke output, advanced settings placement, and final `G44-*` disposition. |
+| Sprint 45 Postgres full-text search, BM25-like ranking, MMR/domain caps, cross-encoder reranking, golden retrieval evals, and cross-artifact citation verification | Sprint 55 for implementation, Sprint 56 for regression gates, Sprint 57 for cache metrics/invalidation, Sprint 60 for retrieval/citation docs and final `G45-*` disposition. |
+| Sprint 46 true Ask Thesys provider streaming, cancellation, live retrieval/tool events, citation drilldowns, and stronger guide evals | Sprint 53 for implementation, Sprint 56 for guide gates, Sprint 60 for stream docs, web/browser QA retry, and final `G46-*` disposition. |
+| Sprint 47 OpenTelemetry, CI gates, eval trends, prompt/schema changelog, pre-call budget enforcement, and dashboard/report output | Sprint 54 for pre-call budgets, Sprint 56 for eval/observability implementation, Sprint 57 for cache metrics, Sprint 60 for CI/runbook docs, hidden report QA, and final `G47-*` disposition. |
 | Sprint 48 readability extraction, screenshots/snapshots, OCR, tables, source-quality scoring, and live-provider QA | Sprint 58, with Sprint 56 consuming the new evals and Sprint 60 documenting/QAing provider and UI surfaces |
-| Sprint 49 feature-package refactor, oversized-service splits, typed DTOs, characterization coverage, and layout docs | Sprint 59 |
+| Sprint 49 feature-package refactor, oversized-service splits, typed DTOs, characterization coverage, and layout docs | Sprint 59 for implementation/verification, Sprint 60 for post-refactor navigation, diagrams, docstrings, and final `G49-*` disposition. |
 | Sprint 50 architecture diagrams, expanded developer navigation, code docs after refactors, and production/security posture docs | Sprint 60 |
 
 ## Gap Closure Acceptance Map
@@ -12253,6 +12253,67 @@ gaps are explicitly implemented, tested, and documented:
 | Sprint 59 | Sprint 49 code cleanup | Characterization tests are added before code movement; oversized validation, research, guide, evidence, retrieval, tool, MCP, and eval services are split into cohesive feature packages; typed DTOs replace large untyped cross-service dicts; duplication in prompt assembly, structured-output repair, retrieval shaping, audit metadata, and proposal creation is removed; public API behavior and persisted schemas remain unchanged. |
 | Sprint 60 | Sprint 50 developer docs and production readiness | Diagrams reflect the implemented post-refactor system; README/developer docs explain where to add workflows, memory types, context profiles, MCP tools, retrieval providers, rerankers, and eval cases; public service entrypoints and DTOs have useful docstrings; comments document security, approval, Temporal, and prompt-injection invariants; deployment, object-storage, backup/restore, hosted-demo smoke, and advanced integration settings are documented without cluttering the primary workflow. |
 
+Completion semantics for Sprints 51-60:
+
+- The checked implementation work in Sprints 51-58 proves that branch code
+  landed for the relevant capability. It does not, by itself, close the
+  original Sprint 41-50 gap.
+- The `G41-*` through `G50-*` work-item ledger is authoritative. A carried gap
+  is closed only when the matching `G*` item has a status row in
+  `IMPLEMENTATION_STATUS.md` with source/docs, verification output or exact
+  blocker, and either `implemented`, `intentionally out of V1`, or
+  `future owner` disposition.
+- Sprint 59 must close `G49-A` through `G49-E` through the `S59-P*` and
+  `S59-R*` queues. Sprint 60 must close or explicitly defer every remaining
+  `G41-*` through `G50-*` item through `S60-P1` through `S60-P10`.
+- `SPRINT_51_60_TODO.md` now also places residual handoff blocks directly under
+  the completed Sprint 51-58 sections. Those blocks are part of the sprint
+  contract, not commentary: a future pickup should follow the referenced
+  `S60-P*` item, update `IMPLEMENTATION_STATUS.md` for the named `G*` IDs, and
+  record exact verification output or blocker text before claiming the original
+  Sprint 41-50 gap is closed.
+
+Per-sprint closeout gates:
+
+| Sprint | Do not claim complete until |
+|---|---|
+| Sprint 51 | `S60-P2/G42-A` through `G42-D` and `S60-P3/G43-A` through `G43-D` are closed with context/memory docs, profile and memory-type inventories, token/compression/stale/conflict policy docs, extension steps, eval commands, and Context/Memory Inspect browser QA or exact blockers. |
+| Sprint 52 | `S60-P4/G44-A` through `G44-D` are closed with MCP lifecycle docs, stdio and HTTP/SSE client commands, auth/project scoping, approval/denial/error/redaction examples, advanced settings notes, and read/proposal smoke output or exact blockers. |
+| Sprint 53 | `S60-P6/G46-A` through `G46-D` are closed with the Ask Thesys stream event contract, cancellation/timeout behavior, final payload parity, citation/action-card drilldowns, guide eval handoff, web checks, and browser QA or exact blockers. |
+| Sprint 54 | `S60-P9/G41-A` through `G41-E`, the deployment-doc portion of `G50-D`, and the budget portions of `S60-P7/G47-A`/`G47-C` are closed with dependency audit disposition, auth mode table, JWT/OIDC/JWKS and key lifecycle runbooks, provider egress/SSRF evidence, backup/restore boundaries, environment/deployment docs, and hosted-demo smoke disposition. |
+| Sprint 55 | `S60-P5/G45-A` through `G45-D` are closed with retrieval/citation docs, ranking limitations, reranker/cache extension notes, citation-verifier ownership, artifact coverage, unsupported/weak-claim behavior, golden fixture IDs, commands, and current eval output. |
+| Sprint 56 | `S60-P7/G47-A` through `G47-D` are closed with eval/observability runbooks, report/trend artifact docs, unavailable-gate policy, changelog locations, OpenTelemetry/LangSmith settings, cache/cost examples, CI usage, and hidden report browser QA or exact blocker. |
+| Sprint 57 | Cache documentation and QA are closed through `S60-P5/G45-B`, `S60-P7/G47-A`, `S60-P7/G47-C`, and `S60-P7/G47-D`, including cache keys, invalidation inputs, stale-cache denial, saved cost/latency metrics, report surfacing, and browser QA or exact blocker. |
+| Sprint 58 | `S60-P8/G48-A` through `G48-E` are closed with parser dependency/fallback disposition, page/screenshot storage disposition, screenshot-region OCR/table scope, Tavily/multimodal smoke output or unavailable warnings, provenance docs, and browser QA for Evidence/retrieval/guide/research/source-discovery/Project Inspect surfaces. |
+| Sprint 59 | `S59-R1` through `S59-R10` close `G49-A` through `G49-E` with characterization tests, feature-package movement or service-owned dispositions, DTO ledger rows, shim/migration records, duplication cleanup, package-map/status/TODO updates, and focused/full verification. |
+| Sprint 60 | `S60-P1` through `S60-P10` close or explicitly defer every `G41-*` through `G50-*` item with source/doc links, commands/output or exact blockers, future owner when deferred, README navigation, AI engineering tour, targeted code docs, and honest portfolio limits. |
+
+No-ambiguity pickup contract:
+
+| Follow-up sprint | First pickup action | Required artifacts before completion |
+|---|---|---|
+| Sprint 51 | Treat the context/memory code as landed but not fully gap-closed. Pick up `S60-P2/G42-A` through `G42-D` and `S60-P3/G43-A` through `G43-D` instead of reopening broad Sprint 51 work. | `docs/CONTEXT_ENGINEERING.md`, `docs/MEMORY_SYSTEM.md`, README links, context/memory status rows, backend context/memory tests, and Context/Memory Inspect browser QA or exact blocker. |
+| Sprint 52 | Pick up `S60-P4/G44-A` through `G44-D` for MCP docs and smoke evidence. | `docs/MCP_INTEGRATION.md`, client command examples, stdio/API read and proposal smoke output or blocker, MCP/tool tests, advanced settings placement notes, and `G44-*` status rows. |
+| Sprint 53 | Pick up `S60-P6/G46-A` through `G46-D` for Ask Thesys stream docs and QA. | Stream event contract, cancellation/timeout/final-parity docs, guide eval handoff, web typecheck/tests, IDE browser QA or exact npm/browser blocker, and `G46-*` status rows. |
+| Sprint 54 | Pick up `S60-P9/G41-A` through `G41-E` plus the deployment piece of `G50-D`. | `docs/DEPLOYMENT_SECURITY.md`, dependency audit outputs/blockers, auth-mode table, JWT/OIDC/JWKS and key lifecycle runbooks, egress/SSRF proof, backup/restore docs, hosted smoke disposition, and `G41-*`/`G50-D` status rows. |
+| Sprint 55 | Pick up `S60-P5/G45-A` through `G45-D` for retrieval/citation docs and eval handoff. | `docs/RETRIEVAL_AND_CITATIONS.md`, ranking-limit and reranker/cache extension notes, citation verifier matrix, retrieval/citation tests/evals, and `G45-*` status rows. |
+| Sprint 56 | Pick up `S60-P7/G47-A` through `G47-D` for eval/observability docs and hidden report QA. | `docs/EVALS_AND_OBSERVABILITY.md`, quality-gate output, report/trend artifact docs, metric/LangSmith/redaction/cache notes, hidden report browser QA or blocker, and `G47-*` status rows. |
+| Sprint 57 | Close cache documentation through the owning Sprint 60 rows, not a standalone completion claim. | Cache key/invalidation/stale-denial docs in retrieval/eval docs, cost/latency metric examples, cache diagnostics QA or blocker, and updates to the related `G45-*`/`G47-*` rows. |
+| Sprint 58 | Pick up `S60-P8/G48-A` through `G48-E` for source-intelligence dispositions. | `docs/SOURCE_INTELLIGENCE.md`, parser/screenshot/screenshot-OCR decisions, extraction eval output, live Tavily/multimodal smoke or blocker, provenance browser QA or blocker, and `G48-*` status rows. |
+| Sprint 59 | Finish `S59-R1` through `S59-R10` before any Sprint 59 commit. | Characterization tests, feature-package or service-owned disposition per moved helper, DTO/shim ledgers, boundary check output, full/focused verification, updated README/status/brief/TODO/package map, and `G49-*` status rows. |
+| Sprint 60 | Start with `S60-P1`, then complete `S60-P2` through `S60-P10` in order. | Final disposition table with every `G41-*` through `G50-*` ID exactly once, all docs linked from README, deferred browser/provider/audit blockers recorded exactly, targeted code docs, and honest portfolio claims. |
+
+Detailed pickup rule: `SPRINT_51_60_TODO.md` now includes an `Original Sprint
+41-50 Gap Patch Manifest`. Treat that manifest as the first work queue when
+resuming Sprints 59 and 60. It expands each partially complete Sprint 41-50
+goal into exact `S59-R*` or `S60-P*` ownership, first files to open, doc/code
+artifacts to patch, commands to run, blocker text to capture, and
+`IMPLEMENTATION_STATUS.md` disposition rows to add. The manifest is intentionally
+specific so none of the remaining security, context, memory, MCP, retrieval,
+streaming, observability, source-intelligence, architecture-cleanup, or
+developer-documentation gaps can be hidden behind a checked implementation
+slice.
+
 ## Residual Gap Register
 
 The follow-up sprints must explicitly carry these unfinished pieces from the
@@ -12270,6 +12331,66 @@ Sprint 41-50 audit:
 | Sprint 48 | Sprint 58 closes the local deterministic document-intelligence path with parser/readability metadata, explicit snapshot metadata, OCR confidence/page metadata, table artifacts, quote offsets, source-quality factors/explanations, retrieval weighting, enriched citation metadata, collapsed provenance UI, and fixture-backed extraction evals. Remaining gaps are intentionally explicit: decide whether to add a maintained parser dependency or document the deterministic parser as the V1 fallback; add true page/screenshot object-storage capture if productizing beyond metadata; run live Tavily/multimodal credential QA; retry web/browser provenance QA; and verify hidden Project Inspect trust summaries. | Sprint 60 for final docs/QA/audit; future backlog only for productization items intentionally left outside V1. |
 | Sprint 49 | Shared utilities were added, but validation, research, guide, evidence/retrieval, tool/MCP, eval/reporting, prompt assembly, structured-output repair, proposal creation, and audit metadata paths still need a real feature-package refactor with typed DTO boundaries. | Sprint 59 |
 | Sprint 50 | README/docs improved, but final diagrams, code navigation, docstrings/comments, deployment docs, hosted-demo runbooks, and honest limits must be regenerated after Sprints 57-59 land and deferred browser checks are retried. | Sprint 60 |
+
+## Carried Gap Work Item IDs
+
+`SPRINT_51_60_TODO.md` is the execution-level checklist. The IDs below are the
+implementation brief contract: the branch is not complete until each ID is
+implemented with verification, intentionally marked out of V1 scope with a
+reason, or assigned to a named future owner.
+
+Use the "Per-ID Pickup Checklist" in `SPRINT_51_60_TODO.md` as the source of
+truth when resuming work. The table below defines the required outcome; the TODO
+adds the exact owning Sprint 59/60 package, edit targets, browser/provider/audit
+checks, blocker-recording requirements, and status-disposition rules for each
+ID. Do not mark a Sprint 51-60 item complete from this brief alone.
+
+| ID | Required outcome |
+|---|---|
+| `G41-A` | Dependency audit closure: run security/dependency commands, record pass/warn/fail output, and document strict CI behavior for unavailable tools or registry failures. |
+| `G41-B` | Hosted-demo auth posture: document local, deterministic demo, provider-backed demo, staging-like, and production-like auth modes with env vars and dev-auth isolation. |
+| `G41-C` | Production auth runbook: document JWT/OIDC/JWKS, API keys, service accounts, rotation, revocation, audit attribution, workspace membership, and limitations. |
+| `G41-D` | Provider egress verification: document provider allowlists, SSRF/provider denial behavior, timeouts, response-size limits, redaction, and denied-call audit tests. |
+| `G41-E` | Backup/restore and hosted smoke: document data boundaries and run or explicitly block hosted smoke checks for the critical AI workflow. |
+| `G42-A` | Context architecture docs: source-linked diagram for profiles, sources, retrieval, memory, compression, stale/conflict handling, dropped rows, and injection boundaries. |
+| `G42-B` | Context profile inventory: document every profile's owner, budget, item policy, memory filters, untrusted wrapping, and eval coverage. |
+| `G42-C` | Context Inspect browser QA: verify included/dropped/compressed/stale/conflicting/unsafe/tool-output rows and hidden-by-default advanced details. |
+| `G42-D` | Context eval handoff: document commands, fixture IDs, report paths, failure interpretation, and profile/eval extension steps. |
+| `G43-A` | Memory lifecycle docs: source-linked diagram for proposal, approval, active, compacted, preference, conflict, supersession, archive, audit, and context links. |
+| `G43-B` | Memory type inventory: document memory types, selection, compaction, conflict, preference edit/archive, provenance, and owner files. |
+| `G43-C` | Memory extension docs: document adding a memory type, profile eligibility, stale/conflict tests, and write-review audit behavior. |
+| `G43-D` | Memory Inspect browser QA: verify filters, proposals, compaction, selection reasons, conflict actions, and no primary-workflow clutter. |
+| `G44-A` | MCP lifecycle docs: source-linked initialize/list/call/RBAC/approval/denial/audit/redaction/stdio/HTTP-SSE diagrams. |
+| `G44-B` | MCP client setup: document stdio and HTTP/SSE commands, client config, env vars, auth headers, scoping, and limitations. |
+| `G44-C` | MCP smoke checks: run or explicitly block read/proposal tool smoke commands plus structured error, denied write, invalid params, scope, and redaction examples. |
+| `G44-D` | MCP advanced settings: keep any client/provider settings behind developer navigation and verify the main workflow is unchanged. |
+| `G45-A` | Retrieval architecture docs: source-linked pipeline for planning, text rank, vector fallback, hybrid scoring, MMR, source quality, reranking, cache, context, and citations. |
+| `G45-B` | Ranking limits and extension docs: document BM25-like approximation, `ts_rank` limits, fallback behavior, reranker interface, cache invalidation, and provider extension. |
+| `G45-C` | Citation verifier ownership: document artifact coverage, not-applicable paths, weak/unsupported claim handling, and how to add verifier coverage. |
+| `G45-D` | Retrieval/citation eval handoff: document golden fixtures, commands, metrics, report paths, and expected pass/warn/fail behavior. |
+| `G46-A` | Streaming event contract docs: document event names, IDs, final parity, cancellation, timeout, fallback, proposal, and citation fields. |
+| `G46-B` | Web/typecheck retry: rerun web checks after registry access is stable and record output or exact blocker. |
+| `G46-C` | Ask Thesys browser QA: verify streaming deltas, live events, cancellation, timeout, final parity, action cards, citation drilldowns, and no clutter. |
+| `G46-D` | Guide eval handoff: document guide eval commands, fixtures, event-order expectations, failure interpretation, and extension steps. |
+| `G47-A` | Quality-gate runbook: document aggregate/individual commands, pass/warn/fail policy, unavailable gates, artifact paths, rerun commands, and CI usage. |
+| `G47-B` | Report/trend docs: document report paths, trend persistence, metadata fields, changelog location, and regression interpretation. |
+| `G47-C` | Observability setup: document metric names, LangSmith settings, redaction, cache/cost examples, trace IDs, and local/external export behavior. |
+| `G47-D` | Eval report browser QA: verify hidden report UI, collapsed gates, trend rows, failing-case links, budget/cache/cost metrics, and no clutter. |
+| `G48-A` | Parser dependency decision: add a maintained readability dependency or document deterministic `html.parser` as the V1 fallback with tradeoffs. |
+| `G48-B` | Page/screenshot storage decision: implement true capture/storage or create a named future backlog item and keep local-mode metadata limits honest. |
+| `G48-C` | Screenshot-region OCR/table decision: implement only with screenshot capture or mark out of V1 with reason and future owner. |
+| `G48-D` | Live provider QA: run Tavily/multimodal provider smoke with credentials and egress, or record unavailable warnings and rerun commands. |
+| `G48-E` | Provenance browser QA: verify Evidence, retrieval, guide, research, source-discovery, Project Inspect trust summaries, warnings, and no clutter. |
+| `G49-A` | Characterization matrix: add focused tests before risky moves across workflows, tools, evals, structured outputs, and context profiles. |
+| `G49-B` | Feature package movement: split validation, research, guide, evidence/retrieval, tool/MCP, eval/reporting, prompt repair, proposals, and audit metadata. |
+| `G49-C` | DTO boundary ledger: define DTOs, old/new fields, conversion boundaries, owner packages, and compatibility serializers. |
+| `G49-D` | Duplication cleanup: centralize prompt/schema repair, retrieval shaping, audit merge/redaction, and proposal creation without API-shape changes. |
+| `G49-E` | Migration evidence: record shims, target modules, parity tests, boundary-check output, model ownership decisions, and future cleanup backlog. |
+| `G50-A` | Source-linked diagrams: add context, memory, MCP, eval, retrieval, and deployment/security diagrams with owner file references. |
+| `G50-B` | README navigation and AI tour: map features to patterns/technologies and developer entrypoints. |
+| `G50-C` | Code documentation: add useful docstrings/comments around service entrypoints, DTOs, approvals, security, Temporal, injection boundaries, and orchestration. |
+| `G50-D` | Deployment docs: add environment profiles, env vars, provider/cache/auth/egress posture, object storage, backups, hosted smoke, and audit commands. |
+| `G50-E` | Final honest-limit audit: update docs/status so every Sprint 41-50 gap has `implemented`, `intentionally out of V1`, or `future owner` status. |
 
 ---
 
@@ -12813,14 +12934,46 @@ summaries must be verified in the browser.
 ## Goal
 
 Finish the codebase cleanup by making service ownership easier to understand
-and extend.
+and extend. This sprint closes carried gap IDs `G49-A` through `G49-E`.
 
 ## Scope
 
 - Add characterization tests around each workflow before moving code: evidence
   ingestion/retrieval, guide chat, research sprint, opportunity brief,
   competitor analysis, validation planning/result interpretation, decision
-  recommendation, memory management, MCP tools, and eval endpoints.
+  recommendation, memory management, MCP tools, and eval endpoints. The
+  remaining high-risk tests must explicitly cover remaining validation
+  proposal/audit path shapes, malformed eval report handling, and
+  structured-output stub/repair/fallback dispatch. MCP request/error/proposal
+  parity is now pinned for automated routes, including direct MCP HTTP,
+  JSON-RPC, tool-invocation reads, approval-list reads, approval rejection,
+  denial audit metadata, and redacted persisted summaries; live stdio
+  read/proposal smoke remains `S60-P4/G44-C`. Approval rejection paths are now
+  pinned by validation, governed-tool, and memory proposal-review tests. Context
+  profile/drop/conflict/Inspect serialization is now pinned by focused context
+  and memory tests.
+- Close the Sprint 49 gap IDs with pickup-ready artifacts:
+  - `G49-A`: maintain a characterization matrix with service path, feature
+    target, pinned route/API shape, focused pytest command, and unpinned edge
+    cases for each moved workflow slice.
+  - `G49-B`: for `evidence_service.py`, `retrieval_service.py`,
+    `validation_service.py`, `agentic_research_service.py`, `guide_service.py`,
+    `tool_service.py`, MCP adapters, `eval_service.py`,
+    `eval_report_service.py`, `context_service.py`, and `memory_service.py`,
+    either move pure/domain helpers into `app.features.*` or explicitly record
+    the service-owned orchestration that stays centralized.
+  - `G49-C`: create a DTO boundary ledger for context packs, retrieval,
+    citations, guide events, tool outcomes/proposals, eval gates/reports, cache
+    diagnostics, extraction artifacts, memory selection, and decision
+    recommendations with old keys, typed fields, conversion point, owner, and
+    compatibility serializer.
+  - `G49-D`: only remove duplication after tests pin behavior; prioritize
+    prompt/schema repair dispatch, retrieval result shaping, citation/provenance
+    shaping, audit metadata merge/redaction, proposal/action-card creation,
+    Markdown rendering, and deterministic fallback serialization.
+  - `G49-E`: add a migration ledger with old import path, new feature module,
+    shim type, parity test, boundary-check result, temporary/permanent status,
+    and follow-up needed to remove the shim.
 - Create a target package map before moving files. Expected direction:
   feature packages for `evidence`, `retrieval`, `research`, `guide`,
   `validation`, `decisions`, `memory`, `governance/tools`, `mcp`, and `evals`,
@@ -12828,11 +12981,417 @@ and extend.
   `common/observability`, and `common/types`. Record package ownership before
   code movement, including owned routers, service entrypoints, DTOs, DB models
   touched, tests, and allowed dependencies.
-- Start with the largest mixed-responsibility modules and their routers:
-  `validation_service.py`, `agentic_research_service.py`, `guide_service.py`,
-  `tool_service.py`, `retrieval_service.py`, `evidence_service.py`,
-  `eval_service.py`, and `eval_report_service.py`. Move them only after
-  characterization tests protect the current behavior.
+- Start with the largest mixed-responsibility modules and their routers, and
+  move them only after characterization tests protect current behavior. Work in
+  pickup-sized slices:
+  - finish evidence/retrieval package movement for URL fetch, upload/PDF
+    parsing, multimodal/OCR adapters, chunk persistence, embedding, retrieval
+    planning/execution, source-quality scoring, and citation enrichment
+  - split validation planning, generation prompts/fallbacks, result
+    interpretation, experiment parsing, approval/proposal path creation, and
+    validation DTOs
+  - split agentic research graph construction, state transitions, governed tool
+    adapters, retrieval orchestration, synthesis, citation audit, memory
+    proposal generation, and Temporal-facing adapters
+  - split guide intent routing, context compiler adapter, grounded answer
+    generation, streaming events, proposal routing, citation drilldowns, and
+    guide eval fixtures
+  - split governed tool definitions, risk/permission guards, execution,
+    proposal application, MCP schema generation, transport adapters, audit
+    events, and redaction helpers
+  - split eval/report helpers: case loading/scoring is implemented; remaining
+    work is gate execution/report/export DTO typing. Trend failure surfaces,
+    local metric export payloads, unavailable-provider warnings, and LangSmith
+    export payloads are implemented.
+  - split context-pack serialization, memory selection payload shaping,
+    selected/excluded/conflict normalization, memory proposal/review helpers,
+    compaction policy helpers, conflict-resolution helpers, and context
+    metadata shaping into `app.features.memory`, while keeping DB writes and
+    approval orchestration in services until typed boundaries and tests are
+    pinned
+- Use these function-level pickup candidates/status records to avoid another
+  broad service audit before Sprint 59 can continue:
+  - retrieval context selection implemented: `assemble_context_results`,
+    `_diversify_context_candidates`, `_mmr_order`,
+    `_context_selection_reason`, `_quality_report`, `_ndcg_proxy`,
+    `_combine_fallback_reasons`, `_result_domain`, `_result_competitor_id`, and
+    `_estimate_tokens` now live in `app.features.retrieval.context_selection`;
+    keep service aliases and verify
+    with `test_evidence.py::test_context_assembly_prioritizes_source_diversity`,
+    `test_retrieval_quality_eval.py`, `test_feature_package_boundaries.py`, and
+    `scripts/check_feature_boundaries.py`.
+  - retrieval result fusion implemented: `_fuse_results` now lives in
+    `app.features.retrieval.result_shaping` as `fuse_results`; keep the private
+    service alias while DB retrieval execution, cache lookup/invalidation,
+    reranking, citation enrichment, and route orchestration remain service-owned.
+    Verify duplicate chunk dedupe, highest-score selection,
+    `retrieval_match_count`, and final ordering with the direct feature-boundary
+    test plus the broad evidence retrieval test.
+  - retrieval diagnostic DTO shaping implemented:
+    `app.features.retrieval.diagnostics` owns base and multi-query pipeline
+    diagnostics for candidate-count aggregation, SQL/fallback aggregation, query
+    plan, reranker, context, quality-report, and cache fields.
+    `retrieval_service.py` keeps `_diagnostics` and `_pipeline_diagnostics`
+    aliases while timing, cache lookup/write, DB query paths, result
+    serialization, citation enrichment, and route orchestration remain
+    service-owned. Verify with
+    `test_feature_package_boundaries.py::test_retrieval_diagnostic_helpers_are_feature_owned_and_service_compatible`,
+    `test_evidence.py::test_broad_evidence_retrieval_plans_reranks_and_assembles_context`,
+    and `test_retrieval_quality_eval.py`.
+  - retrieval scoring implemented: semantic/keyword/hybrid score weighting,
+    keyword-overlap scoring, and normalized BM25-like text scoring now live in
+    `app.features.retrieval.scoring`; keep service wrappers for settings-backed
+    combined scoring and ORM-backed candidate inputs while candidate loading,
+    embedding similarity, SQL/vector execution, cache lookup/invalidation, and
+    result serialization remain service-owned.
+  - citation de-duplication and retrieved-ID checks implemented:
+    `_dedupe_citations` and `_citation_is_valid` across opportunity brief,
+    competitor analysis, and agentic research now delegate to
+    `app.features.evidence.citation_verifier.dedupe_citations` and
+    `citation_has_retrieved_id`. Keep artifact-specific citation audit
+    decisions, AI run steps, DB writes, and citation persistence service-owned
+    until typed citation-set/audit DTOs exist.
+  - validation result interpretation fallback implemented:
+    `_fallback_validation_interpretation`, `_result_delta`, `_extract_quotes`,
+    `_extract_objections`, `_fallback_current_workaround`, and
+    `_assumption_status_for_outcome` now live in
+    `app.features.validation.result_interpretation`; keep approval persistence,
+    memory writes, DB access, and route orchestration service-owned, and verify
+    with the interpretation/rejection/decision-coach validation tests.
+  - validation generation prompts and fallbacks implemented:
+    `_assumption_messages`, `_validation_plan_messages`,
+    `_fallback_assumption_extraction`, `_fallback_validation_plan`, and
+    `_fallback_validation_plan_item` now live in
+    `app.features.validation.generation`; keep provider calls,
+    structured-output repair, AI run accounting, DB writes, approvals,
+    artifact/mission creation, and route orchestration service-owned until
+    typed generation input/outcome DTOs exist.
+  - governed tool registry implemented: tool literal types, `ToolDefinition`,
+    role constants, `TOOL_REGISTRY`, `list_tool_definitions`, `_definition`,
+    `_approval_request_type_for_tool`, and `_summarize_output` now live in
+    `app.features.governance_tools.registry`; keep execution, authorization,
+    approval writes, and audit writes service-owned, and verify registry/MCP
+    schema parity tests.
+  - MCP stdio bridge failure characterization implemented:
+    `scripts/mcp_stdio_server.py` has focused coverage proving HTTP forwarding
+    failures are returned as structured `-32000` JSON-RPC errors with the
+    original request ID preserved. Live stdio read/proposal smoke remains a
+    Sprint 60 environment check.
+  - eval gate diagnostics implemented: `_Check`, `_ResearchMetric`, and
+    retrieval diagnostic/section-check helpers through `_quality_report_observed`
+    now live in `app.features.evals.gate_checks`; keep `_secret_redaction_check`
+    service-owned unless sanitizer ownership moves in the same slice, and verify
+    demo/research-history eval tests.
+  - eval report writer/rendering implemented: `_write_reports`,
+    `_trend_record`, `_render_text_summary`, `_render_markdown`,
+    `_render_html`, `_display_path`, and `_escape` now live in
+    `app.features.evals.report_writer`; keep quality-gate CLI arguments,
+    subprocess gate execution, live API fetches, and LangSmith export side
+    effects script-owned until typed eval report DTOs exist.
+  - eval report summary shaping implemented: `_summary`,
+    `_cache_from_live_snapshot`, and `as_dict` now live in
+    `app.features.evals.report_summary`; keep subprocess gate execution, live
+    API fetches, CLI arguments, and LangSmith export side effects script-owned
+    until typed eval gate/result DTOs exist.
+  - eval gate result parsing/shaping implemented: `_parse_json_output` now
+    delegates to `app.features.evals.gate_results.parse_json_output`, while
+    `_run_json_gate`, `_run_command_gate`, and `_warning_gate` delegate pure
+    result DTO construction to `app.features.evals.gate_results`. JSON stdout
+    parsing, JSON/plain command gate DTOs, warning-gate DTOs, tail projection,
+    metrics passthrough, and rerun metadata are feature-owned; CLI arguments,
+    subprocess execution/cwd selection, live API fetches, report writing, and
+    LangSmith export side effects remain script-owned.
+  - eval LangSmith export payload shaping implemented: `_redact` now aliases
+    `app.features.evals.langsmith_export.redacted_export_payload`, while
+    `_export_langsmith` delegates export filename/path, status result DTO, and
+    run input shaping to `app.features.evals.langsmith_export`. Keep local JSON
+    file writes, `LANGSMITH_*` environment reads, dynamic client import,
+    external upload, and exception handling script-owned until a dedicated
+    export service boundary exists.
+  - shared eval metric-record construction implemented: `_metric` aliases in
+    `scripts/eval_ai_quality.py`, `scripts/eval_extraction_quality.py`,
+    `scripts/eval_mcp_contract.py`, and `scripts/eval_research_sprints.py` now
+    point to `app.features.evals.metric_records.metric`; metric key/label/
+    passed/observed/expected fields and optional warnings are feature-owned
+    while repo/file checks, live API fetches, extraction fixture setup, provider
+    settings, required live API/project setup, process re-exec, and report
+    printing stay script-owned.
+  - research eval case loading/scoring implemented: dataset path resolution,
+    raw JSON loading, schema validation, required category/field constants, and
+    dataset coverage metrics now live in `app.features.evals.research_cases`.
+    `eval_service._research_eval_cases` and `scripts/eval_research_sprints.py`
+    preserve compatibility wrappers while live project metric fetching, API
+    route orchestration, CLI args, and report printing stay service/script-owned.
+  - eval report failure payload shaping implemented: missing-report,
+    malformed-report, unreadable-report, malformed-trend-record, and
+    unreadable-trend-file warning payloads now live in
+    `app.features.evals.report_failures`; `report_files.py` keeps file IO and
+    path selection.
+  - eval trend-write warning payload shaping implemented:
+    `report_writer.write_reports` now keeps JSON/Markdown/HTML artifacts
+    available when appending `eval_runs.jsonl` fails and returns a UI-safe
+    `paths.trend_write` warning from `app.features.evals.report_failures`.
+  - live-provider-unavailable warning metric shaping implemented:
+    `app.features.evals.provider_warnings` owns the warning text and metric
+    payload used by `scripts/eval_extraction_quality.py`, while the script keeps
+    settings/env lookup.
+  - typed eval/report DTO validation implemented for `S59-P6`/`S59-R7`:
+    `EvalGateResultRead`, `EvalGateMetricRecord`, `EvalReportFailureRead`,
+    `EvalExportResultRead`, `EvalMetricPointRead`, `EvalReportSummaryRead`,
+    `EvalReportTokenCostRead`, and `EvalCacheDiagnosticRead` validate gate
+    result, metric record, UI-safe failure, LangSmith export-result,
+    OpenTelemetry-compatible metric-point, eval-run summary, token/cost, and
+    cache diagnostic payloads at the feature boundary. Full gate execution,
+    trend persistence policy, and upload side effects remain future cleanup.
+  - memory selection/conflict policy implemented: `MemorySelection`,
+    `_memory_exclusion_reason`, `_excluded`, `_conflict_key`, `_normalize_text`,
+    and `_ensure_conflict_member` are now backed by
+    `app.features.memory.selection_policy`; the feature package raises a
+    feature-level conflict-membership error, while `memory_service.py` keeps the
+    existing HTTP 409 wrapper and DB reads/writes, approvals, compaction,
+    conflict-resolution orchestration, and Inspect routes service-owned.
+  - memory Inspect serialization implemented: `serialize_memory_item`, selected/
+    excluded/proposed/conflict Inspect payload assembly, and explanation payload
+    shaping now live in `app.features.memory.inspection`; keep DB lookups,
+    workflow memory selection, proposed-memory queries, approvals, compaction,
+    conflict resolution, and route orchestration service-owned.
+  - deterministic fallback completion metadata implemented:
+    `app.ai.fallback_completion` now owns local fallback `LLMCompletion`
+    construction, token/cost accounting, fallback key prefixing, error
+    truncation, provider-mode metadata, timeout/cause classification, redacted
+    trace/run metadata passthrough, and optional deterministic-stub provider
+    naming; service-private wrappers preserve workflow-specific fallback
+    semantics until generation modules own typed fallback DTOs.
+- Finish Sprint 59 through the explicit pickup queue in `SPRINT_51_60_TODO.md`.
+  These are not optional polish items; they are the concrete closure path for
+  `G49-A` through `G49-E`:
+  - `S59-P1` evidence/retrieval feature ownership: finish pure helper movement
+    for URL fetch normalization, upload/PDF extraction metadata, OCR/
+    multimodal fallback metadata, chunk/result DTO shaping, retrieval execution
+    result shaping, cache-key diagnostics, citation enrichment payloads, and
+    source-quality explanation helpers. Keep DB writes and transactions
+    service-owned unless typed DTOs are introduced.
+  - `S59-P2` validation and decision boundaries: finish validation generation
+    input/output DTOs, interpretation outcomes, experiment-result parsing,
+    remaining proposal/audit payloads, and any remaining decision recommendation
+    DTOs while leaving approval persistence and memory writes in services.
+    Validation result interpretation fallback heuristics, mission context
+    projection, prompt payload construction, proposed-update payload shaping,
+    deterministic validation generation prompts/fallbacks, and weak-evidence
+    decision labels are implemented in feature-owned modules behind service
+    aliases. Remaining validation cleanup is now limited to experiment-result
+    parsing, broader validation generation/result DTOs, DB-backed decision
+    proposal boundaries, and any audit/proposal helpers not yet feature-owned.
+    Weak-evidence decision labels, route DTO fields, suggested action cards,
+    linked evidence IDs, and no-direct-mutation recommendation/chat behavior
+    are implemented in `app.features.decisions.recommendation` and
+    `schemas.validation`.
+  - `S59-P3` research workflow boundaries: add tests before moving graph or
+    Temporal-adjacent helpers; move only pure state serialization, plan/memo
+    shaping, selected-evidence bundles, citation-audit payloads,
+    source-discovery metadata, and memory-proposal DTO helpers.
+	  - `S59-P4` guide and streaming boundaries: finish context adapter output,
+	    stage recommendation copy, grounded deterministic answer shaping,
+	    proposal/action-card routing, citation drilldown DTOs, stream event DTOs,
+	    final-payload parity, and guide eval fixture shaping. Implemented slices
+	    now cover stream event DTOs, citation drilldowns, deterministic routing,
+	    action cards, nudge action payloads, recommendation copy, and grounded
+	    answer draft/response DTO shaping, and guide eval read-model shaping;
+	    provider-backed generation, guide eval fixture loading beyond DB counts,
+	    AI run/cache/cancellation side effects, DB-backed proposals, approval
+	    lookup, and route orchestration remain service-owned until typed boundaries
+	    are added.
+  - `S59-P5` governed tools and MCP boundaries: finish execution-dispatch DTOs,
+    proposal payload shaping, audit metadata shaping, redaction helpers, stdio
+    bridge serialization, JSON-RPC envelopes, and schema generation while
+    keeping auth/RBAC/approval/audit writes at service edges. Stdio bridge
+    command failure is now pinned by test. MCP proposal approval parity is also
+    pinned across direct MCP HTTP, JSON-RPC, HTTP tool-invocation and
+    approval-list routes, approval rejection, denial audit metadata, and redacted
+    `ToolInvocation.output_summary` persistence; live stdio smoke remains
+    Sprint 60.
+  - `S59-P6` eval/report boundaries: typed gate result, metric record,
+    report-failure, export-result, metric-point, eval-run summary, token/cost,
+    and cache diagnostic DTO validation is implemented. Research eval case
+    loading/scoring, gate result
+    parsing/shaping, metric record shaping, report/trend failure payload
+    shaping, live-provider-unavailable warning metric shaping, local metric
+    export payload assembly, rerun metadata, and LangSmith export
+    payload/path/result/run-input shaping are implemented; subprocess/upload
+    side effects remain script-owned. Future cleanup should move gate execution,
+    trend persistence policy, or upload ownership only after their side effects
+    are explicitly bounded.
+  - `S59-P7` context and memory boundaries: finish context-pack DTO
+    serialization, selected/dropped/compressed/stale/conflict item shapes,
+    memory proposal/review DTOs, compaction/conflict payload helpers,
+    explanation payloads, and token estimate helpers.
+  - `S59-P8` shared duplication cleanup: centralize only duplication pinned by
+    tests, including structured-output repair dispatch, deterministic fallback
+    completion metadata, audit metadata merge/redaction, proposal/action-card
+    creation, citation/provenance shaping, Markdown rendering, and retrieval
+    result shaping.
+  - `S59-P9` final closeout: update README/status/brief/TODO/package map with
+    final package ownership, typed DTO ledger, shim ledger, intentionally
+    centralized service logic, and future cleanup backlog, then run the full
+    backend suite, ruff, compileall, feature-boundary check, whitespace check,
+    and conflict-marker check before committing Sprint 59.
+- Also use the Sprint 59 open code cleanup punch list in
+  `SPRINT_51_60_TODO.md` as the file-level implementation contract. Sprint 59
+  is not complete until each punch-list row has a code move or explicit
+  service-owned disposition, a package-map/status entry, and verification:
+  - `S59-R1` retrieval execution DTOs: retrieval request/result/cache
+    diagnostic shapes, score/context fields, quality report fields, and
+    citation enrichment metadata. Retrieval diagnostic DTO shaping is
+    implemented in `app.features.retrieval.diagnostics`; remaining cleanup is
+    typed request/result/cache-key DTOs plus service-owned DB/cache/citation
+    orchestration.
+  - `S59-R2` evidence extraction boundaries: direct URL response metadata, file
+    identity metadata, image upload metadata, text upload metadata, PDF parser
+    metadata, OCR fallback metadata, HTML parsing, chunking, table artifacts,
+    quote provenance, and source-quality explanations are feature-owned through
+    `app.features.evidence.extraction` and
+    `app.features.evidence.source_provenance`. URL fetch validation/HTTP
+    orchestration, upload validation/object storage, PDF parsing,
+    OCR/multimodal provider calls, chunk persistence, embedding writes,
+    security audit writes, DB transactions, and route orchestration remain
+    service-owned until typed ingestion/extraction DTOs exist.
+  - `S59-R3` validation proposal and parse DTOs: experiment parsing,
+    broader validation generation input/outcome DTOs, validation interpretation
+    outcome DTOs, DB-backed decision recommendation/proposal boundaries, and
+    remaining audit/proposal helpers. Implemented slices now cover validation
+    interpretation fallback heuristics, validation mission context projection,
+    result-interpretation prompt payloads, approval proposed-update payloads,
+    weak-evidence labels, route contract fields, approval rejection/no-mutation
+    behavior, and deterministic validation generation prompts/fallbacks.
+    Provider calls, AI run accounting, artifact/mission creation, approval
+    persistence, memory writes, confidence mutation, audit persistence, DB
+    commits, and route orchestration remain service-owned unless typed
+    boundaries and route tests are added.
+  - `S59-R4` research graph-safe helpers: graph-state serialization,
+    research plan DTOs, selected-evidence bundles, memo prompt payloads,
+    citation-audit payloads, source-discovery candidate metadata, and
+    memory-proposal DTOs, while keeping Temporal and DB orchestration
+    service-owned. JSON-safe graph step output serialization is implemented in
+    `app.features.research.graph_state` behind `_to_jsonable`/`_json_safe`
+    service aliases; LangGraph construction, step persistence/tracing, errors,
+    provider calls, tool execution, DB writes, approvals, and artifact
+    persistence remain service-owned. Deterministic subquestion planning,
+    tool-call strategy, lookup mapping, lookup payload projection,
+    evidence-gap detection, and research text/list normalization are
+    implemented in `app.features.research.strategy` behind service
+    aliases/wrappers; tool execution, retrieval execution, graph transitions,
+    provider calls, DB writes, approvals, and artifact persistence remain
+    service-owned. Final memo prompt assembly is implemented in
+    `app.features.research.memo_prompting`, including trusted/untrusted context
+    splitting, compact payload serialization, untrusted retrieved-content
+    wrapping, and synthesis safety instructions; context-pack construction,
+    provider calls, structured-output parsing, AI run/step writes, tracing,
+    approvals, artifact persistence, and DB writes remain service-owned. Memo
+    citation-audit shaping is implemented in
+    `app.features.research.citation_audit`, including claim support downgrades,
+    unsupported-claim summary updates, finding-level citation filtering,
+    citation enrichment, and final citation de-duplication; citation
+    persistence, claim writes, artifact metadata writes, AI steps, approvals,
+    and DB transactions remain service-owned. Research sprint planning prompt
+    assembly and deterministic fallback plan shaping are implemented in
+    `app.features.research.planning`; LangGraph planning nodes, provider calls,
+    structured-output parsing, AI run/step writes, proposal creation, plan and
+    sprint persistence, approvals, Temporal signaling, and DB transactions
+    remain service-owned. Source-discovery prompt payload assembly is
+    implemented in `app.features.research.source_discovery` alongside candidate
+    specs, search result normalization, URL cleanup, risk/source-type
+    inference, snapshot text, and evidence metadata; LLM structured-output
+    calls, external-search provider execution, DB writes, sprint status
+    changes, and evidence ingestion orchestration remain service-owned.
+    Research memo proposal payload and input JSON shaping for memory updates,
+    validation plans, and decisions is implemented in
+    `app.features.research.proposals`; tool proposal creation, approval rows,
+    audit events, artifact content updates, route orchestration, and DB
+    transactions remain service-owned.
+  - `S59-R5` guide answer and nudge action DTOs: context adapter output,
+    grounded deterministic answer shape, stream final-payload parity, guide eval
+    fixture shape, and nudge action-card copy/route/risk labels. Grounded
+    answer draft/response DTO shaping is implemented in
+    `app.features.guide.grounding`; guide eval read-model shaping is
+    implemented in `app.features.guide.evals`. Recent-turn bounding,
+    overview-to-guide-context projection, risk/unknown projection, and grounded
+    prompt assembly are implemented in `app.features.guide.context_projection`
+    and `app.features.guide.prompting`. Remaining cleanup should focus on
+    active workflow DB lookup, context adapter ownership, provider-backed
+    generation orchestration, guide eval fixture loading beyond DB counts, and
+    service-owned side effects.
+  - `S59-R6` governed tool transport edges: stdio command-failure behavior,
+    JSON-RPC envelopes, approval-required proposal shape, denied write shape,
+    invalid scope behavior, redacted audit payloads, direct MCP HTTP/JSON-RPC
+    schema parity, HTTP tool-invocation/approval-list parity, approval rejection
+    parity, denial audit metadata, and redacted persisted proposal summaries.
+  - `S59-R7` eval/report failure surfaces: typed gate result, metric record,
+    report-failure, export-result, metric-point, eval-run summary, token/cost,
+    and cache diagnostic DTO validation is implemented. Case loading, gate
+    result parsing/shaping, rerun metadata, local metric export payload
+    assembly, report/trend failure payloads, live-provider-unavailable warning
+    metrics, shared metric records, and LangSmith export payload shaping are
+    implemented. Future cleanup should keep full gate execution, trend
+    persistence, and upload ownership script/service-owned until those side
+    effects are bounded by tests and DTOs.
+  - `S59-R8` context and memory policy helpers: context-pack serialization,
+    selected/dropped/compressed/stale/conflict item shapes, compaction
+    source-item selection, compaction proposal payloads, conflict-resolution
+    payloads, memory review DTOs, explanation payloads, and token estimates.
+  - `S59-R9` shared duplication audit: prompt/schema repair, fallback
+    completion metadata, audit metadata merge/redaction, proposal/action-card
+    creation, citation/provenance shaping, Markdown rendering, and retrieval
+    result shaping.
+  - `S59-R10` package-map closeout: final characterization matrix, DTO ledger,
+    shim ledger, dependency rules, intentionally centralized service list,
+    model ownership decision, and future cleanup backlog.
+- Use the `Sprint 59 Row Closure Checklist` in `SPRINT_51_60_TODO.md` before
+  checking any `S59-R*` row. That checklist names the exact service entrypoints
+  and private helpers to review, the feature modules that may own pure logic,
+  the side effects that must stay service-owned without typed DTOs, and the
+  documentation rows required in `docs/BACKEND_FEATURE_PACKAGE_MAP.md`. If a
+  helper is left in place, record why it is service-owned; do not leave it
+  hidden behind "remaining cleanup" language.
+- Sprint 59 also has a must-not-miss edge-case checklist in
+  `SPRINT_51_60_TODO.md`. Treat those rows as part of the sprint scope, not as
+  optional polish:
+  - provider timeout/fallback metadata: implemented in
+    `apps/api/app/ai/fallback_completion.py` and pinned in
+    `apps/api/app/tests/test_ai.py`. Fallback completions preserve legacy
+    fallback/error keys while exposing provider mode, fallback key/reason,
+    model provider/name, redacted provider failure type/message, timeout/cause
+    classification, token/cost defaults, and redacted trace/run metadata.
+    Structured-output repair orchestration remains in
+    `app.ai.structured_output` until a later repair-dispatch extraction.
+  - decision recommendation weak-evidence paths: implemented in
+    `app.features.decisions.recommendation`, `schemas.validation`, and
+    `validation_service.py`. Recommendation and decision-coach responses expose
+    typed `evidence_labels`; tests pin insufficient-evidence copy, suggested
+    action cards, linked evidence IDs, weak-evidence labels, and
+    no-direct-mutation behavior before any DB-backed decision orchestration is
+    moved.
+  - approval rejection and proposal/audit payloads: implemented for validation
+    interpretation rejection, memory proposal rejection, and governed-tool
+    proposal rejection. Tests pin unchanged strategic state after rejection,
+    status transitions, audit metadata, proposed-change shape, reviewer
+    provenance, and hidden Inspect behavior; approval writes, memory mutations,
+    and audit persistence remain service-owned.
+  - context compression/conflict/Inspect serialization: implemented. Focused
+    tests pin selected, dropped, compressed, stale, conflicting, unsafe, and
+    tool-output context rows, token-budget drop reasons, memory conflict IDs,
+    selected/excluded memory metadata, and hidden Inspect payloads before any
+    larger compiler or memory orchestration movement.
+  - route serializer and public contract parity: implemented for evidence,
+    artifact, decision recommendation, approval, tool invocation, audit event,
+    memory item, and Memory Inspect response keys. Add or update the contract
+    tests before any future route serializer movement.
+  - MCP/stdout, HTTP, and approval parity: implemented for JSON-RPC request IDs,
+    structured error codes, missing/invalid project scope, approval-required
+    proposal shape, denied writes, redacted audit payloads, direct MCP
+    HTTP/JSON-RPC structured-content parity, HTTP tool-invocation route parity,
+    approval-list route parity, approval rejection parity, denial audit metadata,
+    and redacted persisted `output_summary` text. Carry live stdio read/proposal
+    smoke to `S60-P4/G44-C` if no live API project is available during Sprint 59.
 - Define dependency rules: routers call feature service entrypoints; feature
   packages depend on common packages; cross-feature behavior uses explicit DTOs
   or orchestration services; feature packages should not import each other
@@ -12851,6 +13410,9 @@ and extend.
   Prioritize DTOs for context packs, retrieval requests/results, citation
   verification outcomes, guide events, tool execution/proposal outcomes, eval
   gate results, cache diagnostics, and extraction artifacts.
+  For each DTO replacement, record old dict keys, new dataclass/Pydantic fields,
+  conversion boundary, owner package, and compatibility serializer. External API
+  shapes must remain pinned by route/contract tests before old keys are removed.
 - Establish explicit module ownership boundaries and dependency rules so feature
   packages do not import across each other through hidden side effects.
 - Apply the refactor incrementally:
@@ -12870,6 +13432,9 @@ and extend.
 - Keep migration/model ownership clear. If DB models remain centralized,
   document that choice; if model modules move, preserve Alembic imports and
   avoid circular model imports.
+- Maintain an import-migration ledger listing old service paths that remain as
+  compatibility shims, their new feature-owned targets, parity tests, and
+  whether each shim is temporary or permanent.
 - Run import-cycle checks or an equivalent static inspection after package
   movement.
 - Update `SPRINT_51_60_TODO.md`, `IMPLEMENTATION_STATUS.md`, README project
@@ -12878,6 +13443,9 @@ and extend.
 
 ## Acceptance Criteria
 
+- `G49-A`, `G49-B`, `G49-C`, `G49-D`, and `G49-E` are each recorded as
+  implemented with verification, intentionally deferred with reason, or moved to
+  a named future owner.
 - No high-traffic service module mixes unrelated concerns.
 - Feature packages have clear owners, dependency direction, and typed public
   boundaries.
@@ -12894,10 +13462,152 @@ and extend.
 
 Prepare the portfolio project for a realistic hosted demo or future product
 direction, and make the upgraded architecture easy for developers and
-interviewers to understand without overwhelming the core workflow.
+interviewers to understand without overwhelming the core workflow. This sprint
+closes final documentation and verification for carried gap IDs `G41-*` through
+`G48-*`, plus `G50-*`, and records the final status of `G49-*`.
 
 ## Scope
 
+- Create or update the concrete Sprint 60 handoff artifacts:
+  - `README.md` for interviewer-facing AI engineering tour, project navigation,
+    feature-to-pattern-to-technology table, current limits, and hidden advanced
+    inspection surfaces.
+  - `IMPLEMENTATION_STATUS.md` for the final `G41-*` through `G50-*`
+    disposition table with `implemented`, `intentionally out of V1`, or
+    `future owner` status and
+    verification commands.
+  - `docs/CONTEXT_ENGINEERING.md` for context profiles, token budgets, source
+    inventory, compression/stale/conflict policy, dropped-context examples,
+    prompt-injection boundaries, Inspect QA, and eval commands.
+  - `docs/MEMORY_SYSTEM.md` for memory types, capture/proposal/approval,
+    compaction, preferences, conflicts, supersession/archive, context-pack
+    linkage, extension steps, and browser QA notes.
+  - `docs/MCP_INTEGRATION.md` for JSON-RPC lifecycle, stdio and HTTP/SSE
+    commands, client config, governed tool behavior, structured errors,
+    redaction/audit examples, and smoke commands.
+  - `docs/RETRIEVAL_AND_CITATIONS.md` for retrieval pipeline, Postgres text-rank
+    and BM25-like limits, MMR/source diversity, reranker/provider extension,
+    cache invalidation, citation verifier ownership, and eval commands.
+  - `docs/EVALS_AND_OBSERVABILITY.md` for quality-gate matrix,
+    pass/warn/fail policy, report/trend artifacts, OpenTelemetry/LangSmith
+    setup, cache/cost metrics, unavailable gates, and CI usage.
+  - `docs/SOURCE_INTELLIGENCE.md` for parser/fallback decision, snapshot and
+    screenshot storage disposition, OCR/table provenance scope, live-provider
+    QA commands, provider-unavailable warnings, and provenance browser QA.
+  - `docs/DEPLOYMENT_SECURITY.md` for environment profiles, auth mode table,
+    JWT/OIDC/JWKS expectations, API key/service-account lifecycle, egress
+    policy, dependency audits, object storage, backup/restore, and hosted smoke
+    commands.
+  - `docs/BACKEND_FEATURE_PACKAGE_MAP.md` for final package map,
+    characterization matrix, DTO boundary ledger, migration/shim ledger,
+    intentionally centralized services, and future cleanup backlog.
+- Complete Sprint 60 in ordered closeout packages, not as one broad docs pass.
+  Use the same `S60-P#` IDs as `SPRINT_51_60_TODO.md` so the work can be
+  picked up without reconciling duplicate labels:
+  - `S60-P1` final gap disposition table in `IMPLEMENTATION_STATUS.md`:
+    enumerate every `G41-*` through `G50-*` item with status, verification
+    command/output summary, source file/doc reference, and future owner when
+    not implemented.
+  - `S60-P2` context engineering docs: source-linked context diagram, profile
+    inventory, token budgets, source inventory, compression/stale/conflict
+    policy, dropped-context examples, prompt-injection boundaries, Inspect QA,
+    eval commands, and "how to add a profile" steps.
+  - `S60-P3` memory system docs: memory type inventory, proposal/approval
+    lifecycle, compaction thresholds, preference edit/archive flow, conflict
+    resolution, supersession/archive behavior, context-pack links, extension
+    steps, and memory Inspect QA.
+  - `S60-P4` MCP integration docs and smoke: initialize, capabilities,
+    `tools/list`, `tools/call`, stdio and HTTP/SSE commands, client config,
+    auth/project scoping, proposal-tool approval example, denied write example,
+    invalid params example, redacted audit example, and smoke command output or
+    explicit blocker.
+  - `S60-P5` retrieval and citation docs: retrieval pipeline diagram, Postgres
+    `ts_rank`/BM25-like limits, vector fallback, hybrid scoring, MMR/source
+    diversity, source-quality weighting, reranker provider interface, cache
+    invalidation, citation verifier ownership, artifact coverage, and eval
+    commands.
+  - `S60-P6` Ask Thesys streaming docs and QA: event names, payload IDs,
+    cancellation, timeout fallback, final parity, proposal/action cards,
+    citation drilldown fields, guide eval commands, browser QA, and no main
+    workflow clutter.
+  - `S60-P7` evals/observability docs and QA: aggregate/per-gate commands,
+    pass/warn/fail policy, unavailable gates, report/trend paths, failed-slice
+    rerun commands, AI changelog locations, OpenTelemetry metric names,
+    LangSmith export settings, redaction behavior, cache/cost examples, CI
+    usage, and hidden Inspect report QA.
+  - `S60-P8` source intelligence disposition and QA: maintained parser decision,
+    page/screenshot storage disposition, screenshot-region OCR/table scope,
+    live Tavily/multimodal credential QA or blocker, Project Inspect
+    trust-summary QA, provider-unavailable warnings, and provenance browser QA.
+  - `S60-P9` security/deployment docs and audits: environment profiles, env vars,
+    auth mode table, JWT/OIDC/JWKS expectations, API-key/service-account
+    lifecycle, token/key rotation, revocation, egress allowlists, SSRF/provider
+    denial behavior, dependency audits, backup/restore boundaries, hosted-demo
+    smoke commands, exact audit blockers, and the deployment-doc portion of
+    `G50-D`.
+  - `S60-P10` post-refactor navigation and code docs: update README and backend
+    package map after Sprint 59, add source links and "how to add" docs, and add
+    targeted docstrings/comments around public entrypoints, DTOs, approval
+    gates, Temporal determinism, security boundaries, prompt-injection
+    handling, and non-obvious orchestration.
+- Use the audit gap crosswalk and explicit Sprint 60 pickup queue in
+  `SPRINT_51_60_TODO.md` to keep the closeout from becoming a generic
+  documentation pass. The crosswalk is the required "did we capture it?"
+  checklist: every unfinished Sprint 41-50 objective must map to a `G*` ID,
+  `S59-R*` or `S60-P*` pickup item, concrete edit targets, and verification or
+  blocker text before Sprint 60 can close the branch:
+  - `S60-P1` final carried-gap audit: every `G41-*` through `G50-*` work item
+    appears once in `IMPLEMENTATION_STATUS.md` with status, source/doc link,
+    verification output, blocker if any, and future owner when deferred.
+  - `S60-P2` context engineering docs and QA: close `G42-A` through `G42-D`
+    with `docs/CONTEXT_ENGINEERING.md`, README links, backend tests/evals, and
+    browser QA or exact blocker.
+  - `S60-P3` memory system docs and QA: close `G43-A` through `G43-D` with
+    `docs/MEMORY_SYSTEM.md`, README links, memory/context tests, and browser QA
+    or exact blocker.
+  - `S60-P4` MCP integration docs and smoke: close `G44-A` through `G44-D` with
+    `docs/MCP_INTEGRATION.md`, tests, stdio/API smoke or exact blocker, and no
+    main-workflow clutter.
+  - `S60-P5` retrieval and citation docs: close `G45-A` through `G45-D` with
+    `docs/RETRIEVAL_AND_CITATIONS.md`, retrieval/citation tests, eval commands,
+    and honest ranking/reranker limitations.
+  - `S60-P6` Ask Thesys streaming docs and QA: close `G46-A` through `G46-D`
+    with event contract docs, guide/context tests, web typecheck/tests, and IDE
+    browser QA or exact registry/browser blocker.
+  - `S60-P7` evals and observability docs: close `G47-A` through `G47-D` with
+    `docs/EVALS_AND_OBSERVABILITY.md`, quality-gate output, hidden report QA,
+    and visible unavailable-gate handling.
+  - `S60-P8` source intelligence dispositions: close `G48-A` through `G48-E`
+    with `docs/SOURCE_INTELLIGENCE.md`, parser/screenshot/live-provider
+    decisions, extraction eval output, provenance browser QA, and exact
+    provider/browser blockers where applicable.
+  - `S60-P9` security and deployment posture: close `G41-A` through `G41-E`
+    plus the deployment-doc portion of `G50-D` with
+    `docs/DEPLOYMENT_SECURITY.md`, dependency-audit results or exact
+    blockers, auth/egress/backup runbooks, and hosted-demo smoke disposition.
+  - `S60-P10` post-refactor navigation and code docs: close `G49-*` and
+    `G50-A` through `G50-E` with README navigation, source-linked diagrams,
+    "how to add" docs, targeted docstrings/comments, and honest portfolio
+    limits after Sprint 59.
+- Follow the Sprint 60 step-by-step pickup notes and the audit gap crosswalk in
+  `SPRINT_51_60_TODO.md`. Those notes are part of the sprint contract: create
+  the final gap disposition table first, then work row-by-row through the
+  crosswalk and write the context, memory, MCP, retrieval, streaming,
+  eval/observability, source-intelligence, security/deployment, and
+  post-refactor navigation docs with the exact verification commands or exact
+  blockers recorded under the relevant `G41-*` through `G50-*` IDs.
+- Use the `Sprint 60 Required Artifact Checklist` in `SPRINT_51_60_TODO.md` as
+  the completion checklist for `S60-P1` through `S60-P10`. Each package must
+  leave a named artifact, README link, status rows for the owned `G*` IDs, and
+  verification output or exact blocker. A broad statement that the docs were
+  updated is not enough to close Sprint 60.
+- Treat the expanded Sprint 60 pickup queue in `SPRINT_51_60_TODO.md` as the
+  no-ambiguity implementation contract. Each row now names the original gap
+  IDs, the doc/source targets to patch, exact command paths, browser/provider/
+  audit checks to run or block, and the portfolio-claim consequence that must
+  be recorded in `IMPLEMENTATION_STATUS.md`. Do not close a Sprint 60 package
+  until the owning doc, README/navigation language, and all related status rows
+  have been updated together.
 - Add architecture diagrams for:
   - context compilation and context-pack inspection
   - memory lifecycle from capture/proposal through approval, compaction,
@@ -12973,7 +13683,42 @@ interviewers to understand without overwhelming the core workflow.
   explicitly defer screenshot-region table/OCR provenance; run live
   Tavily/multimodal smoke tests when credentials and egress allowlists exist, or
   record the exact unavailable warning and rerun command; verify Project Inspect
-  trust summaries in the browser once frontend dependencies are available.
+  trust summaries in the browser once frontend dependencies are available. This
+  closes `G48-A`, `G48-B`, `G48-C`, `G48-D`, and `G48-E`.
+- Close every remaining Sprint 41-50 gap with a concrete doc/status artifact:
+  - Sprint 41: hosted-demo/production auth mode table, JWT/OIDC/JWKS
+    expectations, API-key/service-account rotation and revocation runbook,
+    provider-egress checklist, backup/restore checklist, dependency-audit
+    outcomes, and exact local blockers.
+  - Sprint 42: context profile inventory, owner files, token budgets,
+    compression/stale/conflict policy table, dropped-context examples, eval
+    commands, and context Inspect browser QA notes.
+  - Sprint 43: memory type inventory, lifecycle diagram, write-review approval
+    flow, compaction policy, preference edit/archive flow, conflict resolution
+    flow, extension instructions, and memory Inspect browser QA notes.
+  - Sprint 44: MCP lifecycle diagram, stdio and HTTP/SSE commands, client
+    config, read-tool smoke, proposal-tool approval smoke, structured error
+    examples, redaction/audit examples, and known client limitations.
+  - Sprint 45: retrieval pipeline diagram, Postgres text-rank/BM25 limitation
+    notes, MMR/source-diversity policy, reranker extension steps, citation
+    verifier owner files, cache invalidation notes, and retrieval/citation eval
+    commands.
+  - Sprint 46: streaming event contract, cancellation/timeout behavior, final
+    payload parity notes, citation drilldown fields, guide eval commands, and
+    browser QA notes for streamed events/proposal cards/citation drilldowns.
+  - Sprint 47: quality-gate command matrix, pass/warn/fail policy, report
+    artifact paths, trend persistence path, prompt/schema changelog location,
+    OpenTelemetry/LangSmith setup, cache/cost metric examples, and CI usage.
+  - Sprint 48: parser dependency or deterministic fallback disposition,
+    screenshot/page storage disposition, screenshot-region OCR/table
+    disposition, live-provider QA disposition, provenance browser QA notes, and
+    Project Inspect trust-summary verification.
+  - Sprint 49: final package map, moved-module/shim ledger,
+    dependency-boundary check output, DTO ownership map, characterization test
+    matrix, intentionally centralized services, and future cleanup backlog.
+  - Sprint 50: README navigation, AI engineering tour, source-linked diagrams,
+    targeted docstrings/comments, deployment profiles, hosted-demo smoke
+    commands, and honest remaining-limit notes.
 - Add workspace/team collaboration flows if product direction requires it.
 - Add multi-project portfolio views only after single-project workflow remains
   simple.
@@ -12995,7 +13740,7 @@ interviewers to understand without overwhelming the core workflow.
   41-50 gap in the ledger, record one of: implemented with verification link,
   intentionally out of V1 scope with reason, or still open with a new backlog
   owner. Do not let a broad sprint title stand in for a concrete completion
-  record.
+  record. The audit must enumerate every `G41-*` through `G50-*` work item ID.
 
 ## Acceptance Criteria
 
@@ -13014,3 +13759,4 @@ interviewers to understand without overwhelming the core workflow.
 - No README, status file, or portfolio summary claims a Sprint 51-60 capability
   is implemented unless the implementation, tests/evals, docs, and verification
   entry are present.
+- Every `G41-*` through `G50-*` work item has a final documented disposition.

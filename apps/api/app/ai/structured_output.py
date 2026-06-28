@@ -51,7 +51,7 @@ def generate_structured_output(
     if settings.should_use_llm_stub:
         return _stub_structured_output(output_schema, messages, model or settings.litellm_model)
 
-    schema_instruction = _schema_instruction(output_schema)
+    schema_instruction = schema_instruction_message(output_schema)
     client = LiteLLMClient(settings)
     completions: list[LLMCompletion] = []
     completion = client.complete(
@@ -100,7 +100,12 @@ def generate_structured_output(
     return StructuredOutputResult(parsed=parsed, completion=completion)
 
 
-def _schema_instruction(output_schema: type[BaseModel]) -> ChatMessage:
+def schema_instruction_message(output_schema: type[BaseModel]) -> ChatMessage:
+    """Build the shared JSON-schema instruction used for structured outputs.
+
+    Streaming and non-streaming model calls should use the same instruction so
+    schema drift is handled by one AI gateway instead of by feature services.
+    """
     return ChatMessage(
         role="system",
         content=(
@@ -109,6 +114,9 @@ def _schema_instruction(output_schema: type[BaseModel]) -> ChatMessage:
             f"{json.dumps(output_schema.model_json_schema(), separators=(',', ':'))}"
         ),
     )
+
+
+_schema_instruction = schema_instruction_message
 
 
 def _repair_messages(

@@ -6,7 +6,6 @@ clients get a standard integration surface while policy stays centralized.
 """
 
 import uuid
-import json
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
@@ -19,18 +18,19 @@ from app.core.auth import AuthContext
 from app.core.config import Settings
 from app.core.redaction import redact_payload
 from app.db.models import ApprovalRequest, ToolInvocation
-from app.schemas.mcp import MCPJSONRPCError, MCPJSONRPCRequest, MCPJSONRPCResponse, MCPToolCallRead, MCPToolRead
+from app.features.mcp import protocol
+from app.schemas.mcp import MCPJSONRPCRequest, MCPJSONRPCResponse, MCPToolCallRead, MCPToolRead
 from app.services import governance_service, project_service, tool_service
 
-ADAPTER_VERSION = "thesys-mcp-adapter:v1"
-MCP_PROTOCOL_VERSION = "2025-11-25"
-SERVER_INFO = {"name": "thesys", "version": ADAPTER_VERSION}
+ADAPTER_VERSION = protocol.ADAPTER_VERSION
+MCP_PROTOCOL_VERSION = protocol.MCP_PROTOCOL_VERSION
+SERVER_INFO = protocol.SERVER_INFO
 READ_TOOL_LIMIT = 100
-JSONRPC_INVALID_REQUEST = -32600
-JSONRPC_METHOD_NOT_FOUND = -32601
-JSONRPC_INVALID_PARAMS = -32602
-JSONRPC_INTERNAL_ERROR = -32603
-JSONRPC_AUTHORIZATION_ERROR = -32001
+JSONRPC_INVALID_REQUEST = protocol.JSONRPC_INVALID_REQUEST
+JSONRPC_METHOD_NOT_FOUND = protocol.JSONRPC_METHOD_NOT_FOUND
+JSONRPC_INVALID_PARAMS = protocol.JSONRPC_INVALID_PARAMS
+JSONRPC_INTERNAL_ERROR = protocol.JSONRPC_INTERNAL_ERROR
+JSONRPC_AUTHORIZATION_ERROR = protocol.JSONRPC_AUTHORIZATION_ERROR
 
 
 @dataclass(frozen=True)
@@ -108,12 +108,21 @@ def handle_jsonrpc(
     except HTTPException as exc:
         return _rpc_error(
             request.id,
-            JSONRPC_AUTHORIZATION_ERROR if exc.status_code in {401, 403} else JSONRPC_INVALID_PARAMS,
+            (
+                JSONRPC_AUTHORIZATION_ERROR
+                if exc.status_code in {401, 403}
+                else JSONRPC_INVALID_PARAMS
+            ),
             str(exc.detail),
             data={"status_code": exc.status_code},
         )
     except Exception as exc:
-        return _rpc_error(request.id, JSONRPC_INTERNAL_ERROR, "MCP request failed.", data={"error": str(exc)})
+        return _rpc_error(
+            request.id,
+            JSONRPC_INTERNAL_ERROR,
+            "MCP request failed.",
+            data={"error": str(exc)},
+        )
 
 
 def call_tool(
@@ -170,38 +179,6 @@ def call_tool(
     )
 
 
-def _initialize_result(params: dict[str, Any]) -> dict[str, Any]:
-    client_protocol = params.get("protocolVersion")
-    protocol_version = (
-        client_protocol if client_protocol == MCP_PROTOCOL_VERSION else MCP_PROTOCOL_VERSION
-    )
-    return {
-        "protocolVersion": protocol_version,
-        "capabilities": {"tools": {"listChanged": False}},
-        "serverInfo": SERVER_INFO,
-        "instructions": (
-            "Thesys MCP tools are project-scoped and governed by the same RBAC, "
-            "approval, audit, and redaction policies as the web app."
-        ),
-    }
-
-
-def _jsonrpc_tool_schema(tool: MCPToolRead) -> dict[str, Any]:
-    return {
-        "name": tool.name,
-        "title": tool.title,
-        "description": tool.description,
-        "inputSchema": tool.input_schema,
-        "outputSchema": tool.output_schema,
-        "annotations": {
-            "accessMode": tool.access_mode,
-            "riskLevel": tool.risk_level,
-            "approvalPolicy": tool.approval_policy,
-            "adapterVersion": ADAPTER_VERSION,
-        },
-    }
-
-
 def _call_tool_result(
     db: Session,
     auth: AuthContext,
@@ -212,16 +189,8 @@ def _call_tool_result(
     tool_name = str(params.get("name") or "")
     if not tool_name:
         raise ValueError("tools/call params.name is required.")
-    arguments = params.get("arguments") or {}
-    if not isinstance(arguments, dict):
-        raise ValueError("tools/call params.arguments must be an object.")
-    metadata = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
-    client_id = str(
-        metadata.get("client_id")
-        or metadata.get("clientId")
-        or params.get("client_id")
-        or "mcp-jsonrpc-client"
-    )
+    arguments = _tool_arguments_from_params(params)
+    client_id = _client_id_from_tool_call_params(params)
     call = call_tool(
         db,
         auth,
@@ -231,34 +200,7 @@ def _call_tool_result(
         arguments=arguments,
         client_id=client_id,
     )
-    structured = call.model_dump(mode="json")
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": json.dumps(call.output, default=str, sort_keys=True),
-            }
-        ],
-        "structuredContent": structured,
-        "isError": False,
-    }
-
-
-def _rpc_result(request_id: str | int | None, result: dict[str, Any]) -> MCPJSONRPCResponse:
-    return MCPJSONRPCResponse(id=request_id, result=result)
-
-
-def _rpc_error(
-    request_id: str | int | None,
-    code: int,
-    message: str,
-    *,
-    data: dict[str, Any] | None = None,
-) -> MCPJSONRPCResponse:
-    return MCPJSONRPCResponse(
-        id=request_id,
-        error=MCPJSONRPCError(code=code, message=message, data=data),
-    )
+    return _jsonrpc_tool_call_result(call)
 
 
 def _attach_mcp_metadata(
@@ -271,16 +213,9 @@ def _attach_mcp_metadata(
 ) -> None:
     """Annotate the tool invocation and audit log with MCP client metadata."""
 
-    mcp_metadata = {
-        "client_id": client_id,
-        "adapter_version": ADAPTER_VERSION,
-        "duration_ms": duration_ms,
-    }
+    mcp_metadata = _mcp_invocation_metadata(client_id, duration_ms)
     invocation.input_json = redact_payload(
-        {
-            "tool_input": invocation.input_json or {},
-            "mcp": mcp_metadata,
-        },
+        _mcp_tool_input_payload(invocation.input_json, mcp_metadata),
         redact_emails=True,
     )
     governance_service.record_audit_event(
@@ -292,36 +227,25 @@ def _attach_mcp_metadata(
         entity_type="tool_invocation",
         entity_id=invocation.id,
         risk_level=invocation.risk_level,
-        summary=f"MCP client invoked {invocation.tool_name}.",
-        metadata={"tool_name": invocation.tool_name, **mcp_metadata},
+        summary=_mcp_audit_summary(invocation.tool_name),
+        metadata=_mcp_audit_metadata(invocation.tool_name, mcp_metadata),
     )
     db.commit()
     db.refresh(invocation)
 
 
-def _read(
-    invocation: ToolInvocation,
-    *,
-    duration_ms: int,
-    approval_request_id: str | None,
-    output: dict[str, Any],
-) -> MCPToolCallRead:
-    return MCPToolCallRead(
-        tool_name=invocation.tool_name,
-        access_mode=invocation.access_mode,  # type: ignore[arg-type]
-        risk_level=invocation.risk_level,  # type: ignore[arg-type]
-        status=invocation.status,
-        invocation_id=str(invocation.id),
-        approval_required=invocation.access_mode == "proposal",
-        approval_request_id=approval_request_id,
-        duration_ms=duration_ms,
-        output=output,
-        trace={
-            "tool_invocation_id": str(invocation.id),
-            "requested_by": invocation.requested_by,
-            "mcp_adapter_version": ADAPTER_VERSION,
-        },
-    )
+_initialize_result = protocol.initialize_result
+_jsonrpc_tool_schema = protocol.jsonrpc_tool_schema
+_client_id_from_tool_call_params = protocol.client_id_from_tool_call_params
+_tool_arguments_from_params = protocol.tool_arguments_from_params
+_jsonrpc_tool_call_result = protocol.jsonrpc_tool_call_result
+_rpc_result = protocol.rpc_result
+_rpc_error = protocol.rpc_error
+_mcp_invocation_metadata = protocol.mcp_invocation_metadata
+_mcp_tool_input_payload = protocol.mcp_tool_input_payload
+_mcp_audit_metadata = protocol.mcp_audit_metadata
+_mcp_audit_summary = protocol.mcp_audit_summary
+_read = protocol.tool_call_read
 
 
 def _approval_for_invocation(db: Session, invocation: ToolInvocation) -> ApprovalRequest | None:

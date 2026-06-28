@@ -8,7 +8,16 @@ import json
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+API_DIR = REPO_ROOT / "apps" / "api"
+
+if str(API_DIR) not in sys.path:
+    sys.path.insert(0, str(API_DIR))
+
+from app.features.evals import metric_records  # noqa: E402
 
 
 def main() -> int:
@@ -26,7 +35,12 @@ def main() -> int:
         _proposal_tool_metric(endpoint),
     ]
     passed = sum(1 for metric in metrics if metric["passed"])
-    report = {"passed": passed == len(metrics), "score": passed, "total": len(metrics), "metrics": metrics}
+    report = {
+        "passed": passed == len(metrics),
+        "score": passed,
+        "total": len(metrics),
+        "metrics": metrics,
+    }
     if args.json_output:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
@@ -34,7 +48,10 @@ def main() -> int:
         print(f"Result: {passed}/{len(metrics)} checks passed")
         for metric in metrics:
             status = "PASS" if metric["passed"] else "FAIL"
-            print(f"- [{status}] {metric['label']}: {metric['observed']} (expected {metric['expected']})")
+            print(
+                f"- [{status}] {metric['label']}: {metric['observed']} "
+                f"(expected {metric['expected']})"
+            )
     return 0 if report["passed"] else 1
 
 
@@ -124,14 +141,7 @@ def _rpc(endpoint: str, method: str, params: dict[str, Any], request_id: str) ->
         raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
 
 
-def _metric(key: str, label: str, passed: bool, observed: Any, expected: str) -> dict[str, Any]:
-    return {
-        "key": key,
-        "label": label,
-        "passed": passed,
-        "observed": observed,
-        "expected": expected,
-    }
+_metric = metric_records.metric
 
 
 if __name__ == "__main__":

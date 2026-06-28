@@ -16,6 +16,12 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+API_DIR = REPO_ROOT / "apps" / "api"
+
+if str(API_DIR) not in sys.path:
+    sys.path.insert(0, str(API_DIR))
+
+from app.features.evals import metric_records  # noqa: E402
 
 
 def main() -> int:
@@ -60,7 +66,9 @@ def _static_metrics() -> list[dict[str, Any]]:
         _metric(
             "citation_verifier",
             "Citation verifier",
-            (REPO_ROOT / "apps/api/app/services/citation_verifier_service.py").exists(),
+            (
+                REPO_ROOT / "apps/api/app/features/evidence/citation_verifier.py"
+            ).exists(),
             "present",
             "shared citation verifier exists",
         ),
@@ -74,7 +82,10 @@ def _static_metrics() -> list[dict[str, Any]]:
         _metric(
             "security_tests",
             "AI security tests",
-            _contains("apps/api/app/tests/test_security_governance.py", "evidence_url_fetch_blocked")
+            _contains(
+                "apps/api/app/tests/test_security_governance.py",
+                "evidence_url_fetch_blocked",
+            )
             and _contains("apps/api/app/core/security.py", "validate_url_fetch_target"),
             "present",
             "security fixtures and URL fetch guard exist",
@@ -104,7 +115,9 @@ def _static_metrics() -> list[dict[str, Any]]:
         _metric(
             "source_provenance",
             "Source provenance service",
-            (REPO_ROOT / "apps/api/app/services/source_provenance_service.py").exists()
+            (
+                REPO_ROOT / "apps/api/app/features/evidence/source_provenance.py"
+            ).exists()
             and _contains("apps/api/app/services/evidence_service.py", "content_hash"),
             "present",
             "canonical URL, hash, and provenance helpers exist",
@@ -112,7 +125,10 @@ def _static_metrics() -> list[dict[str, Any]]:
         _metric(
             "prompt_injection_markers",
             "Fetched-page prompt injection markers",
-            _contains("apps/api/app/services/source_provenance_service.py", "PROMPT_INJECTION_PATTERNS")
+            _contains(
+                "apps/api/app/features/evidence/source_provenance.py",
+                "PROMPT_INJECTION_PATTERNS",
+            )
             and _contains("apps/api/app/tests/test_evidence.py", "prompt_injection_markers"),
             "present",
             "fetched-page prompt-injection detection is tested",
@@ -120,7 +136,11 @@ def _static_metrics() -> list[dict[str, Any]]:
         _metric(
             "multimodal_lineage",
             "Multimodal extraction lineage",
-            _contains("apps/api/app/services/evidence_service.py", "pdf_page_lineage")
+            _contains("apps/api/app/features/evidence/extraction.py", "pdf_page_lineage")
+            and _contains(
+                "apps/api/app/features/evidence/source_provenance.py",
+                "def pdf_page_lineage",
+            )
             and _contains("apps/api/app/tests/test_evidence.py", "pdf_page_lineage"),
             "present",
             "PDF page lineage is recorded and tested",
@@ -161,20 +181,7 @@ def _contains(relative_path: str, needle: str) -> bool:
     return path.exists() and needle in path.read_text(encoding="utf-8")
 
 
-def _metric(
-    key: str,
-    label: str,
-    passed: bool,
-    observed: Any,
-    expected: str,
-) -> dict[str, Any]:
-    return {
-        "key": key,
-        "label": label,
-        "passed": passed,
-        "observed": observed,
-        "expected": expected,
-    }
+_metric = metric_records.metric
 
 
 if __name__ == "__main__":

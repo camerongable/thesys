@@ -1,10 +1,8 @@
 """Evidence ingestion, extraction, chunking, embedding, and source serialization."""
 
-import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from html.parser import HTMLParser
 from io import BytesIO
 from time import perf_counter
 from typing import Any
@@ -16,6 +14,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.prompts import EVIDENCE_INGESTION_PROMPT_VERSION
+from app.common import metadata as metadata_utils
 from app.core.auth import AuthContext
 from app.core.config import Settings
 from app.core.security import (
@@ -25,6 +24,7 @@ from app.core.security import (
     validate_url_response_content_type,
 )
 from app.db.models import EvidenceChunk, EvidenceSource
+from app.features.evidence import extraction as evidence_extraction
 from app.schemas.evidence import EvidenceNoteCreate, EvidenceUrlCreate
 from app.services import (
     ai_run_service,
@@ -35,11 +35,24 @@ from app.services import (
     project_service,
     source_provenance_service,
 )
-from app.services.common import metadata as metadata_utils
 from app.services.common import workflow as workflow_utils
 
-TOKEN_RE = re.compile(r"\S+")
-SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+ParsedSource = evidence_extraction.ParsedSource
+_chunk_text = evidence_extraction.chunk_text
+_classify = evidence_extraction.classify_text
+_decode_bytes = evidence_extraction.decode_bytes
+_direct_response_metadata = evidence_extraction.direct_response_metadata
+_file_metadata = evidence_extraction.file_metadata
+_image_upload_metadata = evidence_extraction.image_upload_metadata
+_normalize_text = evidence_extraction.normalize_text
+_parse_html = evidence_extraction.parse_html
+_pdf_ocr_fallback_metadata = evidence_extraction.pdf_ocr_fallback_metadata
+_pdf_text_metadata = evidence_extraction.pdf_text_metadata
+_preview = evidence_extraction.preview_text
+_summarize = evidence_extraction.summarize_text
+_text_upload_metadata = evidence_extraction.text_upload_metadata
+_tokens = evidence_extraction.tokens
+_truncate = evidence_extraction.truncate_text
 
 
 class EvidenceIngestionError(RuntimeError):
@@ -48,16 +61,6 @@ class EvidenceIngestionError(RuntimeError):
 
 class EvidenceSecurityError(EvidenceIngestionError):
     pass
-
-
-@dataclass(frozen=True)
-class ParsedSource:
-    """Normalized extraction result passed into the chunking/embedding pipeline."""
-
-    title: str | None
-    text: str
-    content_type: str | None = None
-    metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -81,13 +84,6 @@ class ReembedResult:
     reembedded_count: int
     failed_count: int
     failures: list[ReembedFailure]
-
-
-@dataclass(frozen=True)
-class TextChunk:
-    text: str
-    char_start: int
-    char_end: int
 
 
 def list_sources(db: Session, auth: AuthContext, project_id: uuid.UUID) -> list[EvidenceSource]:
@@ -959,23 +955,17 @@ def _fetch_url(settings: Settings, url: str) -> ParsedSource:
         )
 
     text = _decode_bytes(response.content)
-    canonical_url = source_provenance_service.canonicalize_url(str(response.url))
-    markers = source_provenance_service.detect_prompt_injection_markers(text)
     return ParsedSource(
         title=None,
         text=text,
         content_type=content_type or None,
-        metadata={
-            "canonical_url": canonical_url,
-            "final_url": str(response.url),
-            "domain": source_provenance_service.source_domain(canonical_url),
-            "fetched_at": fetched_at.isoformat(),
-            "retrieved_at": fetched_at.isoformat(),
-            "response_content_type": content_type or None,
-            "response_byte_length": len(response.content),
-            "prompt_injection_markers": markers,
-            "extraction_method": "direct_response_decode",
-        },
+        metadata=_direct_response_metadata(
+            content=response.content,
+            text=text,
+            content_type=content_type or None,
+            final_url=str(response.url),
+            fetched_at=fetched_at,
+        ),
     )
 
 
@@ -988,11 +978,6 @@ def _parse_file(
 ) -> ParsedSource:
     """Route supported uploads through text, PDF, image, or multimodal extraction."""
     lowered = filename.casefold()
-    file_metadata = {
-        "filename": filename,
-        "file_size_bytes": len(body),
-        "file_content_hash": source_provenance_service.byte_hash(body),
-    }
     if multimodal_extraction_service.is_image_content(filename, content_type):
         extraction = multimodal_extraction_service.extract_file(
             settings,
@@ -1005,18 +990,11 @@ def _parse_file(
             title=extraction.title or filename,
             text=extraction.text,
             content_type=content_type,
-            metadata=_merge_metadata(
-                file_metadata,
-                _merge_metadata(
-                    extraction.metadata,
-                    {
-                        "image_metadata": {
-                            "content_type": content_type,
-                            "byte_length": len(body),
-                            "content_hash": source_provenance_service.byte_hash(body),
-                        }
-                    },
-                ),
+            metadata=_image_upload_metadata(
+                filename=filename,
+                content_type=content_type,
+                body=body,
+                extraction_metadata=extraction.metadata,
             ),
         )
 
@@ -1028,17 +1006,12 @@ def _parse_file(
         page_texts = [page.extract_text() or "" for page in reader.pages]
         text = "\n\n".join(page_texts)
         normalized = _normalize_text(text)
-        metadata: dict[str, Any] = {
-            **file_metadata,
-            "media_type": "pdf",
-            "content_type": "application/pdf",
-            "extraction_method": "pypdf",
-            "extraction_confidence": 0.86,
-            "pdf_text_extraction": "pypdf",
-            "pdf_page_count": len(page_texts),
-            "pdf_page_lineage": source_provenance_service.pdf_page_lineage(page_texts),
-            "extracted_text_length": len(normalized),
-        }
+        metadata = _pdf_text_metadata(
+            filename=filename,
+            body=body,
+            page_texts=page_texts,
+            normalized_text=normalized,
+        )
         if (
             settings.multimodal_pdf_fallback_enabled
             and len(normalized) < settings.multimodal_pdf_min_text_chars
@@ -1050,41 +1023,13 @@ def _parse_file(
                 body=body,
                 media_type="pdf",
             )
-            metadata = _merge_metadata(
-                metadata,
-                {
-                    **extraction.metadata,
-                    "pdf_text_extraction": "multimodal_fallback",
-                    "pypdf_extracted_text_length": len(normalized),
-                    "ocr_fallback_used": True,
-                    "extraction_method": extraction.metadata.get(
-                        "extraction_method",
-                        "pdf_ocr_deterministic"
-                        if extraction.provider == "deterministic"
-                        else "pdf_ocr_litellm",
-                    ),
-                    "extraction_confidence": extraction.metadata.get(
-                        "extraction_confidence",
-                        0.72,
-                    ),
-                    "ocr_confidence": extraction.metadata.get("ocr_confidence", 0.72),
-                    "ocr_fallback": extraction.metadata.get(
-                        "ocr_fallback",
-                        {
-                            "used": True,
-                            "provider": extraction.provider,
-                            "model": extraction.model,
-                            "method": (
-                                "pdf_ocr_deterministic"
-                                if extraction.provider == "deterministic"
-                                else "pdf_ocr_litellm"
-                            ),
-                            "confidence": extraction.metadata.get("ocr_confidence", 0.72),
-                            "page_numbers": [1],
-                            "warnings": extraction.warnings,
-                        },
-                    ),
-                },
+            metadata = _pdf_ocr_fallback_metadata(
+                base_metadata=metadata,
+                extraction_metadata=extraction.metadata,
+                extraction_provider=extraction.provider,
+                extraction_model=extraction.model,
+                extraction_warnings=extraction.warnings,
+                pypdf_text_length=len(normalized),
             )
             return ParsedSource(
                 title=extraction.title or filename,
@@ -1109,148 +1054,16 @@ def _parse_file(
             title=filename,
             text=_decode_bytes(body),
             content_type=content_type,
-            metadata={
-                **file_metadata,
-                "media_type": "text",
-                "content_type": content_type,
-                "extraction_method": "direct_decode",
-                "extraction_confidence": 0.9,
-                "text_extraction": "direct_decode",
-            },
+            metadata=_text_upload_metadata(
+                filename=filename,
+                content_type=content_type,
+                body=body,
+            ),
         )
 
     raise EvidenceIngestionError(
         "Only PDF, text, Markdown, PNG, JPG, JPEG, and WebP uploads are supported."
     )
-
-
-def _parse_html(
-    html: str,
-    *,
-    content_type: str,
-    final_url: str | None = None,
-    fetched_at: datetime | None = None,
-) -> ParsedSource:
-    """Extract readable page text plus snapshot and section-lineage metadata."""
-    parser = _ReadableHtmlParser()
-    parser.feed(html)
-    title = _normalize_text(parser.title) or None
-    text = _normalize_text(" ".join(parser.text_parts))
-    canonical_url = source_provenance_service.canonicalize_url(final_url) if final_url else None
-    markers = source_provenance_service.detect_prompt_injection_markers(text)
-    metadata: dict[str, Any] = {
-        "canonical_url": canonical_url,
-        "final_url": final_url,
-        "domain": source_provenance_service.source_domain(canonical_url),
-        "fetched_at": fetched_at.isoformat() if fetched_at else None,
-        "retrieved_at": fetched_at.isoformat() if fetched_at else None,
-        "response_content_type": content_type,
-        "extraction_method": "readable_html_parser_v3",
-        "extraction_provider": "python_html_parser",
-        "extraction_confidence": parser.confidence,
-        "readability": {
-            "parser": "html.parser",
-            "parser_version": "stdlib",
-            "policy_version": "readability-html:v3",
-            "fallback_used": parser.fallback_used,
-            "fallback_reason": parser.fallback_reason,
-            "warnings": parser.warnings,
-            "maintained_parser": "python-stdlib-html.parser",
-        },
-        "prompt_injection_markers": markers,
-        "text_lineage": {
-            "page_title": title,
-            "sections": parser.sections[:50],
-        },
-    }
-    if final_url and fetched_at:
-        metadata = _merge_metadata(
-            metadata,
-            source_provenance_service.html_snapshot_metadata(
-                html=html,
-                final_url=final_url,
-                fetched_at=fetched_at,
-                canonical_url=canonical_url,
-            ),
-        )
-    return ParsedSource(title=title, text=text, content_type=content_type, metadata=metadata)
-
-
-def _decode_bytes(body: bytes) -> str:
-    try:
-        return body.decode("utf-8")
-    except UnicodeDecodeError:
-        return body.decode("latin-1", errors="ignore")
-
-
-def _normalize_text(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def _chunk_text(
-    text: str,
-    *,
-    target_tokens: int = 950,
-    overlap_tokens: int = 150,
-) -> list[TextChunk]:
-    tokens = _tokens(text)
-    if len(tokens) <= target_tokens:
-        return [TextChunk(text=text, char_start=0, char_end=len(text))] if text else []
-
-    chunks: list[TextChunk] = []
-    start = 0
-    search_from = 0
-    while start < len(tokens):
-        end = min(start + target_tokens, len(tokens))
-        chunk_text = " ".join(tokens[start:end])
-        char_start = text.find(chunk_text, search_from)
-        if char_start < 0:
-            char_start = text.find(chunk_text)
-        if char_start < 0:
-            char_start = search_from
-        char_end = min(len(text), char_start + len(chunk_text))
-        chunks.append(TextChunk(text=chunk_text, char_start=char_start, char_end=char_end))
-        search_from = max(char_start + 1, char_end - max(overlap_tokens, 1))
-        if end == len(tokens):
-            break
-        start = max(0, end - overlap_tokens)
-    return chunks
-
-
-def _tokens(text: str) -> list[str]:
-    return [match.group(0) for match in TOKEN_RE.finditer(text)]
-
-
-def _summarize(text: str) -> str:
-    sentences = [sentence.strip() for sentence in SENTENCE_RE.split(text) if sentence.strip()]
-    if not sentences:
-        return _truncate(text, 500)
-    return _truncate(" ".join(sentences[:2]), 700)
-
-
-def _classify(source_type: str, title: str | None, text: str) -> str:
-    combined = f"{title or ''} {text[:3000]}".casefold()
-    if source_type == "transcript" or any(
-        word in combined for word in ["interview", "customer said", "respondent"]
-    ):
-        return "customer_discovery"
-    if any(word in combined for word in ["pricing", "features", "competitor", "alternative"]):
-        return "competitor_research"
-    if any(word in combined for word in ["market", "report", "trend", "industry", "category"]):
-        return "market_research"
-    if any(word in combined for word in ["assumption", "risk", "experiment", "validation"]):
-        return "validation"
-    return "project_note"
-
-
-def _preview(text: str | None) -> str | None:
-    if not text:
-        return None
-    return _truncate(text, 220)
-
-
-def _truncate(value: str, max_length: int) -> str:
-    return value[:max_length]
 
 
 def _validate_fetch_target(url: str, settings: Settings | None = None) -> None:
@@ -1284,76 +1097,3 @@ def _record_ingestion_security_event(
         metadata={"reason": reason, **metadata},
     )
     db.commit()
-
-
-class _ReadableHtmlParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.title = ""
-        self.text_parts: list[str] = []
-        self.sections: list[dict[str, Any]] = []
-        self.warnings: list[str] = []
-        self.fallback_used = False
-        self.fallback_reason: str | None = None
-        self.confidence = 0.78
-        self._skip_depth = 0
-        self._boilerplate_depth = 0
-        self._in_title = False
-        self._heading_tag: str | None = None
-        self._heading_parts: list[str] = []
-        self._current_heading: str | None = None
-        self._cursor = 0
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in {"script", "style", "noscript", "svg"}:
-            self._skip_depth += 1
-        if tag in {"nav", "footer", "header", "aside", "form"}:
-            self._boilerplate_depth += 1
-        if tag == "title":
-            self._in_title = True
-        if tag in {"h1", "h2", "h3"} and self._skip_depth == 0:
-            self._heading_tag = tag
-            self._heading_parts = []
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in {"script", "style", "noscript", "svg"} and self._skip_depth > 0:
-            self._skip_depth -= 1
-        if tag in {"nav", "footer", "header", "aside", "form"} and self._boilerplate_depth > 0:
-            self._boilerplate_depth -= 1
-        if tag == "title":
-            self._in_title = False
-        if tag == self._heading_tag:
-            heading = _normalize_text(" ".join(self._heading_parts))
-            if heading:
-                self._current_heading = heading[:200]
-            self._heading_tag = None
-            self._heading_parts = []
-
-    def handle_data(self, data: str) -> None:
-        if self._in_title:
-            self.title += f" {data}"
-            return
-        if self._skip_depth > 0:
-            return
-        text = _normalize_text(data)
-        if not text:
-            return
-        if self._boilerplate_depth > 0:
-            self.warnings.append("boilerplate_text_skipped")
-            return
-        if self._heading_tag:
-            self._heading_parts.append(text)
-        start = self._cursor
-        end = start + len(text)
-        self.text_parts.append(text)
-        self.sections.append(
-            {
-                "section": self._current_heading or _normalize_text(self.title) or None,
-                "section_heading": self._current_heading or _normalize_text(self.title) or None,
-                "heading_tag": self._heading_tag,
-                "char_start": start,
-                "char_end": end,
-                "text_preview": _truncate(text, 300),
-            }
-        )
-        self._cursor = end + 1

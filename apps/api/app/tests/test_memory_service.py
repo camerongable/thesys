@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import ProjectMemoryItem, ToolInvocation
+from app.db.models import AuditEvent, ProjectMemoryItem, ToolInvocation
 from app.services import memory_service, tool_service
 from app.services.identity_service import ensure_dev_identity
 
@@ -291,7 +291,9 @@ def test_memory_proposals_and_inspect_endpoint(
     assert preference["memory_type"] == "preference"
     assert preference["status"] == "proposed"
 
-    inspect_response = client.get(f"/api/projects/{project_id}/memory/inspect?workflow_type=guide_chat")
+    inspect_response = client.get(
+        f"/api/projects/{project_id}/memory/inspect?workflow_type=guide_chat"
+    )
     assert inspect_response.status_code == 200
     inspect = inspect_response.json()
     assert inspect["policy"]["workflow_type"] == "guide_chat"
@@ -314,11 +316,64 @@ def test_memory_proposals_and_inspect_endpoint(
     assert compact_response.status_code == 200
     compacted = compact_response.json()
     assert compacted["status"] == "proposed"
+    assert compacted["title"] == "Compacted guide_chat memory"
+    assert compacted["summary"] == "Two coaches asked for triage before calls."
+    assert compacted["content"] == {
+        "summary": "Two coaches asked for triage before calls.",
+        "source_memory_ids": [str(source.id)],
+        "source_memory_titles": ["Research finding"],
+        "workflow_type": "guide_chat",
+    }
     assert compacted["provenance_metadata"]["source_memory_ids"] == [str(source.id)]
+    assert compacted["provenance_metadata"]["source_entity_refs"] == [
+        {
+            "memory_id": str(source.id),
+            "source_entity_type": "artifact_version",
+            "source_entity_id": str(source.source_entity_id),
+            "superseded_by_id": None,
+        }
+    ]
 
     reject_response = client.post(f"/api/projects/{project_id}/memory/{compacted['id']}/reject")
     assert reject_response.status_code == 200
     assert reject_response.json()["status"] == "archived"
+    rejected = db_session.scalar(
+        select(ProjectMemoryItem).where(ProjectMemoryItem.id == uuid.UUID(compacted["id"]))
+    )
+    assert rejected is not None
+    assert rejected.status == "archived"
+    assert rejected.provenance_metadata["rejected_by_user_id"] == str(auth.user_id)
+    assert rejected.provenance_metadata["rejected_at"]
+    assert rejected.provenance_metadata["source"] == "memory_compaction"
+    review_event = db_session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.event_type == "memory_update_rejected",
+            AuditEvent.entity_type == "project_memory_item",
+            AuditEvent.entity_id == rejected.id,
+        )
+    )
+    assert review_event is not None
+    assert review_event.risk_level == "medium"
+    assert review_event.event_metadata == {
+        "memory_item_id": str(rejected.id),
+        "memory_type": "semantic",
+        "status": "rejected",
+        "proposal_kind": "memory_compaction",
+        "source_entity_type": "memory_compaction",
+        "source_entity_id": None,
+    }
+
+    inspect_after_reject_response = client.get(
+        f"/api/projects/{project_id}/memory/inspect?workflow_type=guide_chat"
+    )
+    assert inspect_after_reject_response.status_code == 200
+    inspect_after_reject = inspect_after_reject_response.json()
+    assert all(
+        item["id"] != compacted["id"] for item in inspect_after_reject["proposed_memory"]
+    )
+    assert all(
+        item["id"] != compacted["id"] for item in inspect_after_reject["selected_memory"]
+    )
 
 
 def _create_project(client: TestClient) -> str:

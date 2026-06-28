@@ -17,6 +17,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.ai.fallback_completion import fallback_completion
 from app.ai.fallback_policy import (
     should_use_fallback_after_error,
     should_use_fallback_without_model,
@@ -707,23 +708,7 @@ def _fallback_completion(
     fallback_name: str,
     error: BaseException | None = None,
 ) -> LLMCompletion:
-    content = draft.model_dump_json()
-    prompt_tokens = sum(len(message.content.split()) for message in messages)
-    completion_tokens = len(content.split())
-    return LLMCompletion(
-        content=content,
-        model_provider="local-fallback",
-        model_name=settings.litellm_model,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=prompt_tokens + completion_tokens,
-        total_cost=Decimal("0"),
-        raw_response={
-            "fallback": fallback_name,
-            "error": str(error)[:500] if error is not None else None,
-        },
-        used_stub=True,
-    )
+    return fallback_completion(settings, messages, draft, fallback_name, error)
 
 
 def _audit_citations(
@@ -770,26 +755,8 @@ def _audit_citations(
     )
 
 
-def _citation_is_valid(
-    citation: Citation,
-    valid_by_chunk: dict[uuid.UUID, Any],
-    valid_by_source: dict[uuid.UUID, Any],
-) -> bool:
-    if citation.chunk_id is not None:
-        return citation.chunk_id in valid_by_chunk
-    return citation.source_id in valid_by_source
-
-
-def _dedupe_citations(citations: list[Citation]) -> list[Citation]:
-    seen: set[tuple[str, str | None]] = set()
-    deduped: list[Citation] = []
-    for citation in citations:
-        key = (str(citation.source_id), str(citation.chunk_id) if citation.chunk_id else None)
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(citation)
-    return deduped
+_citation_is_valid = citation_verifier_service.citation_has_retrieved_id
+_dedupe_citations = citation_verifier_service.dedupe_citations
 
 
 def _get_or_create_opportunity_brief_artifact(

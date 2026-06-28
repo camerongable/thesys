@@ -16,6 +16,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.ai.fallback_completion import fallback_completion
 from app.ai.fallback_policy import (
     should_use_fallback_after_error,
     should_use_fallback_without_model,
@@ -555,26 +556,14 @@ def _fallback_completion(
     fallback_name: str,
     error: BaseException | None = None,
 ) -> LLMCompletion:
-    content = draft.model_dump_json()
-    prompt_tokens = sum(len(message.content.split()) for message in messages)
-    completion_tokens = len(content.split())
-    return LLMCompletion(
-        content=content,
-        model_provider="stub" if settings.should_use_llm_stub else "local-fallback",
-        model_name=(
-            f"deterministic-dev-stub:{settings.litellm_model}"
-            if settings.should_use_llm_stub
-            else settings.litellm_model
-        ),
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=prompt_tokens + completion_tokens,
-        total_cost=Decimal("0"),
-        raw_response={
-            "fallback": f"competitor_discovery_{fallback_name}",
-            "error": str(error)[:500] if error is not None else None,
-        },
-        used_stub=True,
+    return fallback_completion(
+        settings,
+        messages,
+        draft,
+        fallback_name,
+        error,
+        fallback_prefix="competitor_discovery",
+        use_stub_provider=True,
     )
 
 

@@ -6,7 +6,6 @@ memory, and each workflow selects only the memory types it is allowed to use.
 """
 
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -17,8 +16,12 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext, require_permission
 from app.db.models import Assumption, ProjectMemoryItem, Risk
-from app.schemas.memory import MemoryType, MemoryWritePolicy, ProjectMemoryItemRead
-from app.services import project_service
+from app.features.memory import compaction as memory_compaction
+from app.features.memory import inspection as memory_inspection
+from app.features.memory import review as memory_review
+from app.features.memory import selection_policy as memory_selection_policy
+from app.schemas.memory import MemoryType, MemoryWritePolicy
+from app.services import governance_service, project_service
 
 ACTIVE_MEMORY_STATUSES = {"active", "proposed"}
 WORKFLOW_MEMORY_TYPES: dict[str, set[str]] = {
@@ -38,15 +41,15 @@ WORKFLOW_STALE_HISTORY_ALLOWED = {
     "decision_recommendation",
 }
 
-
-@dataclass(frozen=True)
-class MemorySelection:
-    """Inspectable memory-selection result for context compilation and UI review."""
-
-    selected: list[ProjectMemoryItem]
-    excluded: list[dict[str, Any]]
-    conflicts: list[dict[str, Any]]
-    policy: dict[str, Any]
+MemorySelection = memory_selection_policy.MemorySelection
+_memory_exclusion_reason = memory_selection_policy.memory_exclusion_reason
+_excluded = memory_selection_policy.excluded
+_conflict_key = memory_selection_policy.conflict_key
+_normalize_text = memory_selection_policy.normalize_text
+serialize_memory_item = memory_inspection.serialize_memory_item
+_compacted_memory_payload = memory_compaction.compacted_memory_payload
+_reviewed_memory_metadata = memory_review.reviewed_memory_metadata
+_memory_review_audit_metadata = memory_review.memory_review_audit_metadata
 
 
 def list_memory(
@@ -188,14 +191,11 @@ def inspect_memory(
         for item in list_memory(db, auth, project_id, include_stale=True, limit=100)
         if item.status == "proposed"
     ]
-    return {
-        "workflow_type": workflow_type,
-        "selected_memory": [serialize_memory_item(item) for item in selection.selected],
-        "excluded_memory": selection.excluded,
-        "proposed_memory": [serialize_memory_item(item) for item in proposed],
-        "conflicts": selection.conflicts,
-        "policy": selection.policy,
-    }
+    return memory_inspection.inspect_payload(
+        workflow_type=workflow_type,
+        selection=selection,
+        proposed=proposed,
+    )
 
 
 def explain_memory(
@@ -206,17 +206,7 @@ def explain_memory(
 ) -> dict[str, Any]:
     """Return an inspectable explanation of why a memory item exists."""
     item = get_memory_item(db, auth, project_id, memory_id)
-    provenance = item.provenance_metadata or {}
-    source = provenance.get("source") or item.source_entity_type or item.entity_type or "unknown"
-    explanation = (
-        f"{item.title} is {item.memory_type} memory with {item.write_policy} write policy. "
-        f"It came from {source} and is currently {item.status}."
-    )
-    return {
-        "memory_item": serialize_memory_item(item),
-        "explanation": explanation,
-        "provenance": provenance,
-    }
+    return memory_inspection.explanation_payload(item)
 
 
 def get_memory_item(
@@ -362,38 +352,22 @@ def propose_compacted_memory(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="No source memory items are eligible for compaction.",
         )
-    summary_parts = [item.summary.strip() for item in source_items if item.summary.strip()]
-    summary = " ".join(summary_parts)[:1800]
+    compacted = memory_compaction.compacted_memory_payload(
+        workflow_type=workflow_type,
+        source_items=source_items,
+        title=title,
+    )
     item = upsert_memory_item(
         db,
         auth,
         project_id,
         memory_type=memory_type,
         write_policy="approval_required",
-        title=title or f"Compacted {workflow_type} memory",
-        summary=summary,
-        content={
-            "summary": summary,
-            "source_memory_ids": [str(item.id) for item in source_items],
-            "source_memory_titles": [item.title for item in source_items],
-            "workflow_type": workflow_type,
-        },
+        title=compacted.title,
+        summary=compacted.summary,
+        content=compacted.content,
         source_entity_type="memory_compaction",
-        provenance_metadata={
-            "source": "memory_compaction",
-            "workflow_type": workflow_type,
-            "source_memory_ids": [str(item.id) for item in source_items],
-            "source_entity_refs": [
-                {
-                    "memory_id": str(item.id),
-                    "source_entity_type": item.source_entity_type,
-                    "source_entity_id": str(item.source_entity_id) if item.source_entity_id else None,
-                    "superseded_by_id": str(item.superseded_by_id) if item.superseded_by_id else None,
-                }
-                for item in source_items
-            ],
-            "requires_human_approval": True,
-        },
+        provenance_metadata=compacted.provenance_metadata,
         status_value="proposed",
     )
     db.commit()
@@ -416,10 +390,25 @@ def approve_memory_proposal(
             detail="Only proposed memory can be approved.",
         )
     item.status = "active"
-    metadata = dict(item.provenance_metadata or {})
-    metadata["approved_by_user_id"] = str(auth.user_id)
-    metadata["approved_at"] = datetime.now(UTC).isoformat()
-    item.provenance_metadata = metadata
+    reviewed_at = datetime.now(UTC)
+    item.provenance_metadata = _reviewed_memory_metadata(
+        item.provenance_metadata,
+        status="approved",
+        user_id=auth.user_id,
+        reviewed_at=reviewed_at,
+    )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="memory_update_approved",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="project_memory_item",
+        entity_id=item.id,
+        risk_level="medium",
+        summary=f"Approved proposed {item.memory_type} memory.",
+        metadata=_memory_review_audit_metadata(item, status="approved"),
+    )
     db.commit()
     db.refresh(item)
     return item
@@ -440,10 +429,25 @@ def reject_memory_proposal(
             detail="Only proposed memory can be rejected.",
         )
     item.status = "archived"
-    metadata = dict(item.provenance_metadata or {})
-    metadata["rejected_by_user_id"] = str(auth.user_id)
-    metadata["rejected_at"] = datetime.now(UTC).isoformat()
-    item.provenance_metadata = metadata
+    reviewed_at = datetime.now(UTC)
+    item.provenance_metadata = _reviewed_memory_metadata(
+        item.provenance_metadata,
+        status="rejected",
+        user_id=auth.user_id,
+        reviewed_at=reviewed_at,
+    )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="memory_update_rejected",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="project_memory_item",
+        entity_id=item.id,
+        risk_level="medium",
+        summary=f"Rejected proposed {item.memory_type} memory.",
+        metadata=_memory_review_audit_metadata(item, status="rejected"),
+    )
     db.commit()
     db.refresh(item)
     return item
@@ -611,7 +615,9 @@ def detect_memory_conflicts(
         summaries = {_normalize_text(item.summary) for item in candidates}
         if len(candidates) < 2 or len(summaries) < 2:
             continue
-        conflict_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"thesys:memory-conflict:{project_id}:{key}"))
+        conflict_id = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"thesys:memory-conflict:{project_id}:{key}")
+        )
         if mark:
             for item in candidates:
                 metadata = dict(item.provenance_metadata or {})
@@ -676,40 +682,6 @@ def resolve_memory_conflict(
     return keeper
 
 
-def serialize_memory_item(item: ProjectMemoryItem) -> dict[str, Any]:
-    return ProjectMemoryItemRead.model_validate(item).model_dump(mode="json")
-
-
-def _memory_exclusion_reason(
-    item: ProjectMemoryItem,
-    *,
-    allowed_types: set[str],
-    include_stale_history: bool,
-    now: datetime,
-) -> str | None:
-    if item.memory_type not in allowed_types:
-        return "memory_type_not_allowed_for_workflow"
-    if item.expires_at is not None and item.expires_at <= now:
-        return "expired"
-    if item.status == "active":
-        return None
-    if item.status == "stale" and include_stale_history:
-        return None
-    if item.status == "proposed":
-        return "pending_human_review"
-    return f"status_{item.status}"
-
-
-def _excluded(item: ProjectMemoryItem, reason: str) -> dict[str, Any]:
-    return {
-        "id": item.id,
-        "memory_type": item.memory_type,
-        "status": item.status,
-        "title": item.title,
-        "reason": reason,
-    }
-
-
 def _compaction_source_items(
     db: Session,
     auth: AuthContext,
@@ -735,19 +707,11 @@ def _compaction_source_items(
     ][:8]
 
 
-def _conflict_key(item: ProjectMemoryItem) -> str:
-    entity = str(item.entity_id) if item.entity_id else _normalize_text(item.title)
-    return f"{item.memory_type}:{item.entity_type or 'title'}:{entity}"
-
-
-def _normalize_text(value: str) -> str:
-    return " ".join(value.casefold().split())
-
-
 def _ensure_conflict_member(item: ProjectMemoryItem, conflict_group_id: str) -> None:
-    metadata = item.provenance_metadata or {}
-    if metadata.get("conflict_group_id") != conflict_group_id:
+    try:
+        memory_selection_policy.ensure_conflict_member(item, conflict_group_id)
+    except memory_selection_policy.MemoryConflictMembershipError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Memory item is not part of the requested conflict group.",
-        )
+        ) from exc

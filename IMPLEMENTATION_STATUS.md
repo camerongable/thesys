@@ -48,12 +48,19 @@ The follow-up audit and next ordered upgrade backlog are captured in
 `IMPLEMENTATION_BRIEF.md` under "Post-Sprint 50 Audit and Future Upgrade
 Backlog." The execution-level handoff is `SPRINT_51_60_TODO.md`, which now
 contains a gap coverage ledger, deferred verification list, and specific
-acceptance work for each remaining sprint. The audit keeps the completed
-portfolio work visible while assigning each unfinished gap to Sprints 51-60.
+acceptance work for each remaining sprint. It also assigns stable work-item IDs
+(`G41-*` through `G50-*`) to every remaining Sprint 41-50 carry-forward so the
+final sprint audit can record `implemented`, `intentionally out of V1`, or
+`future owner` status for each gap. The TODO also includes residual routing for
+completed Sprints 51-58, a file-level Sprint 59 cleanup punch list,
+step-by-step Sprint 60 pickup notes, an audit gap crosswalk, a per-sprint
+completion-gate table, and a per-ID pickup checklist. Each unfinished gap now
+has an exact owner, edit target, status update, verification bar,
+blocker-recording rule, and completion disposition.
 
-Current branch status: Sprints 51-58 are implemented; Sprints 59-60 remain
-pending. Sprint 58 closes the local document-AI gap with parser/snapshot
-metadata, deterministic OCR and table extraction, quote provenance,
+Current branch status: Sprints 51-59 are implemented and Sprint 60 remains
+pending. Sprint 58 closes the local document-AI gap with
+parser/snapshot metadata, deterministic OCR and table extraction, quote provenance,
 source-quality weighting, enriched citation metadata, collapsed Inspect
 surfaces, and fixture-backed extraction evals. Live Tavily and multimodal
 provider QA remain opt-in and surface explicit unavailable warnings when
@@ -62,8 +69,115 @@ explicitly defer the remaining document-intelligence carry-forwards: maintained
 parser dependency versus deterministic fallback, true screenshot/page artifact
 storage, screenshot-region OCR/table provenance, frontend browser QA, and
 Project Inspect trust-summary QA. Sprint 60 must finish with a carried-gap audit
-that records implemented, intentionally out-of-scope, or still-open status for
+that records `implemented`, `intentionally out of V1`, or `future owner` status for
 every Sprint 41-50 gap.
+
+Completion semantics: checked Sprint 51-58 implementation items show that code
+landed on this branch, but they do not fully close the original Sprint 41-50
+gaps. The `G41-*` through `G50-*` work items in `SPRINT_51_60_TODO.md` are the
+source of truth. Each must receive an `implemented`,
+`intentionally out of V1`, or `future owner` disposition with source/docs and
+verification output or exact blocker before the branch can claim full gap
+closure.
+
+Latest planning patch: `SPRINT_51_60_TODO.md` and `IMPLEMENTATION_BRIEF.md`
+now include explicit Sprint 51-60 completion gates and status terms. A checked
+Sprint 51-58 item means code-landed, not gap-closed. The original Sprint 41-50
+gap is not closed until every related `G41-*` through `G50-*` item has a final
+disposition row with source/doc links, verification output or exact blocker
+text, and a future owner when deferred. The TODO also replaces misleading
+"close gaps" checked items with "land code for..." wording and keeps the final
+docs, browser QA, provider QA, hosted smoke, audit output, and honest-limit work
+assigned to the exact `S59-R*` or `S60-P*` package.
+
+Latest gap-capture patch: the TODO now defines a `Gap Capture Control` rule so a
+Sprint 41-50 gap is not considered captured unless it has a stable `G*` ID, an
+audit-crosswalk row, an owning Sprint 59/60 queue row with concrete edit targets
+and verification, and a required final disposition row in this file. It also
+adds a `Sprint 59 Row Closure Checklist` with the exact service entrypoints,
+private helpers, feature-module targets, service-owned side effects, and package
+map rows required for `S59-R1` through `S59-R10`, plus a `Sprint 60 Required
+Artifact Checklist` that requires named docs, README links, status rows, and
+verification or exact blockers for `S60-P1` through `S60-P10`.
+
+Latest sprint-pickup patch: `SPRINT_51_60_TODO.md` now has a
+`Gap-Patching Rule for Completed Sprints`, and the Sprint 60 pickup queue has
+been expanded so each `S60-P*` row names the exact `G*` IDs, doc/source targets,
+commands to run, browser/provider/audit checks to complete or block, status rows
+to write, and README/portfolio claim impact. The implementation brief mirrors
+this rule: a Sprint 60 package is not complete until its owning doc or source
+artifact, README/navigation language, and all related `IMPLEMENTATION_STATUS.md`
+rows are updated together.
+
+Latest Sprint 59 closeout patch: `docs/BACKEND_FEATURE_PACKAGE_MAP.md` now
+includes shared duplication disposition, intentionally centralized services and
+models, and a future cleanup backlog. `SPRINT_51_60_TODO.md` marks `S59-R8` and
+`S59-R9` closed at the row level because context/memory ownership and
+duplication decisions are now recorded with service-owned boundaries. `S59-R10`
+now records the final package-map closeout verification: focused R8/R9 tests,
+full backend pytest, ruff, compileall, feature-boundary check, quality gate,
+diff check, conflict-marker scan, and `__pycache__` cleanup.
+
+Latest Sprint 59 row-closure patch: the authoritative
+`Sprint 59 Row Closure Checklist` in `SPRINT_51_60_TODO.md` now has no unchecked
+`S59-R*` items. `S59-R1` explicitly defers broader retrieval execution DTOs to
+future cleanup while marking SQL/vector execution, cache lookup/invalidation,
+embedding similarity, candidate loading, citation persistence, and route
+orchestration service-owned. `S59-R2` records evidence ingestion/storage/
+security-event boundaries as service-owned. `S59-R3` records validation
+experiment-result parsing, broader validation DTOs, DB-backed proposal
+orchestration, provider calls, approvals, memory writes, confidence mutation,
+and DB commits as service-owned or future cleanup. `S59-R4` records the
+research graph review and keeps LangGraph, Temporal, DB, tool, provider, and
+approval side effects service-owned.
+
+Latest sprint-specific gap patch: `SPRINT_51_60_TODO.md` and
+`IMPLEMENTATION_BRIEF.md` now make the incomplete validation/decision cleanup
+work explicit in `S59-P2` and `S59-R3`. The sprint docs distinguish the
+implemented validation interpretation fallback, mission-context projection,
+prompt payloads, proposed-update payloads, weak-evidence labels, rejection
+tests, and generation prompt/fallback helpers from the still-open
+experiment-result parsing, broader validation DTOs, DB-backed decision proposal
+boundaries, audit/proposal helpers, and service-owned provider/approval/memory/
+confidence/DB orchestration.
+
+Latest no-ambiguity sprint patch: `SPRINT_51_60_TODO.md` now has a
+`No-Ambiguity Sprint Pickup Contract`, and `IMPLEMENTATION_BRIEF.md` mirrors it.
+Each follow-up sprint now has exact original gap IDs, first files to open,
+required docs/code targets, verification commands or blocker rules, and required
+`IMPLEMENTATION_STATUS.md` disposition rows. This is the pickup surface for the
+previous audit concern that Sprints 41-50 were only partially complete:
+
+| Follow-up sprint | Still-open gap IDs | Pickup package |
+|---|---|---|
+| Sprint 51 closeout | `G42-A` through `G42-D`, `G43-A` through `G43-D` | `S60-P2` context docs/QA and `S60-P3` memory docs/QA |
+| Sprint 52 closeout | `G44-A` through `G44-D` | `S60-P4` MCP docs/smoke |
+| Sprint 53 closeout | `G46-A` through `G46-D` | `S60-P6` Ask Thesys streaming docs/QA |
+| Sprint 54 closeout | `G41-A` through `G41-E`, deployment portion of `G50-D` | `S60-P9` security/deployment docs/audits |
+| Sprint 55 closeout | `G45-A` through `G45-D` | `S60-P5` retrieval/citation docs/evals |
+| Sprint 56 closeout | `G47-A` through `G47-D` | `S60-P7` evals/observability docs/QA |
+| Sprint 57 closeout | cache portions of `G45-B`, `G47-A`, `G47-C`, `G47-D` | `S60-P5` and `S60-P7` cache docs/diagnostics |
+| Sprint 58 closeout | `G48-A` through `G48-E` | `S60-P8` source-intelligence dispositions/provider/browser QA |
+| Sprint 59 refactor closeout | `G49-A` through `G49-E` | `S59-R1` through `S59-R10` plus final package-map closeout |
+| Sprint 60 final closeout | all remaining `G41-*` through `G50-*` | `S60-P1` through `S60-P10`, starting with the final disposition table |
+
+Do not mark any row above complete from implementation prose alone. Each gap ID
+needs a source/doc link, exact command output or exact blocker, a future owner
+when deferred, and a portfolio-claim consequence in this file.
+
+Latest original-sprint gap manifest patch: `SPRINT_51_60_TODO.md` now also has
+an `Original Sprint 41-50 Gap Patch Manifest`. It enumerates each partially
+complete original sprint, the owning `S59-R*` or `S60-P*` pickup items, first
+files to open, exact artifacts to patch, commands to run, blocker wording to
+record, and status rows required before closure. This is now the first place to
+look when resuming work. The manifest explicitly keeps the following gaps open:
+Sprint 41 security/deployment audit and hosted posture, Sprint 42 context docs
+and Inspect QA, Sprint 43 memory lifecycle/docs/QA, Sprint 44 MCP docs and live
+smoke, Sprint 45 retrieval/citation docs/evals, Sprint 46 Ask Thesys web/browser
+QA and event docs, Sprint 47 eval/observability runbooks and hidden report QA,
+Sprint 48 source-intelligence productization/provider/browser dispositions,
+Sprint 49 feature-package cleanup, and Sprint 50 post-refactor navigation,
+diagrams, code docs, deployment docs, and honest-limit audit.
 
 ## Sprint 0 Scope
 
@@ -2458,3 +2572,1048 @@ Sprint 58 verification run:
   parser dependency versus deterministic fallback, true page/screenshot artifact
   storage, screenshot-region OCR/table provenance, Project Inspect trust-summary
   browser QA, and live-provider credential smoke tests.
+
+## V1 Sprint 59 Branch Progress
+
+Sprint 59 is implemented on `codex/v1-sprints-51-60`:
+
+- Added `docs/BACKEND_FEATURE_PACKAGE_MAP.md` with target feature packages,
+  owners, entrypoints, DTO/schema boundaries, model ownership, characterization
+  tests, dependency rules, and migration sequence.
+- Added `scripts/check_feature_boundaries.py`, a static import-boundary check
+  that prevents `app.features.*` modules from importing compatibility services
+  or routers.
+- Added `app.common.metadata` and kept `app.services.common.metadata` as a
+  compatibility shim.
+- Created `app.features.evidence` and moved source provenance, HTML/text
+  extraction helpers, and citation verification into feature-owned modules while
+  preserving service compatibility shims.
+- Moved shared citation de-duplication and retrieved-ID checks into
+  `app.features.evidence.citation_verifier`. Opportunity brief, competitor
+  analysis, and agentic research preserve private `_dedupe_citations` and
+  `_citation_is_valid` aliases while artifact-specific citation audit decisions,
+  AI run steps, DB writes, and citation persistence remain service-owned.
+- Created `app.features.retrieval` and moved the reranker adapter into a
+  feature-owned module while preserving the old service import path.
+- Moved deterministic retrieval query planning, target-entity extraction,
+  deduplication, and tokenization helpers into
+  `app.features.retrieval.planning` while preserving `retrieval_service.py`
+  private aliases for current callers.
+- Removed duplicate private reranker logic from `retrieval_service.py`; the
+  feature-owned reranker now owns source-quality retrieval weighting and
+  created-at freshness scoring, and `retrieval_service.py` keeps private aliases
+  for compatibility.
+- Moved retrieval context selection, MMR ordering, dedupe signatures,
+  source/domain/type/competitor caps, selected/dropped counts, token estimates,
+  retrieval-quality proxies, and fallback reason aggregation into
+  `app.features.retrieval.context_selection` while preserving
+  `retrieval_service.py` aliases. DB retrieval execution, cache
+  lookup/invalidation, citation enrichment, and route orchestration remain
+  service-owned.
+- Moved retrieval result fusion into `app.features.retrieval.result_shaping`.
+  The feature helper dedupes duplicate subquery hits by `chunk_id`, keeps the
+  highest-scoring result, adds `retrieval_match_count`, and preserves score/date
+  ordering. `retrieval_service.py` keeps `_fuse_results` as a private
+  compatibility alias while DB retrieval execution, cache lookup/invalidation,
+  reranking, citation enrichment, and route orchestration remain service-owned.
+- Moved retrieval score math into `app.features.retrieval.scoring`, including
+  semantic/keyword/hybrid score weighting, keyword-overlap scoring, and
+  normalized BM25-like text scoring. `retrieval_service.py` keeps wrappers for
+  settings-backed combined scoring and ORM-backed candidate scoring while
+  candidate loading, embedding similarity, SQL/vector execution, cache
+  lookup/invalidation, result serialization, citation enrichment, and route
+  orchestration remain service-owned.
+- Moved retrieval diagnostic DTO shaping into
+  `app.features.retrieval.diagnostics`, including base diagnostics and
+  multi-query pipeline diagnostics for candidate-count aggregation, SQL/fallback
+  aggregation, query plan, reranker, context, quality-report, and cache fields.
+  `retrieval_service.py` preserves `_diagnostics` and `_pipeline_diagnostics`
+  aliases while timing, cache lookup/write, DB query paths, result serialization,
+  and route orchestration remain service-owned.
+- Created `app.features.evals` and moved local latest-report/trend file readers
+  into `app.features.evals.report_files` while preserving
+  `eval_report_service.py` public wrappers.
+- Moved OpenTelemetry-compatible local metric payload assembly, workflow/model/
+  retrieval latency helpers, timeout counters, approval wait calculations,
+  cache metric coercion, audit-event denial counting, and UTC normalization into
+  `app.features.evals.observability_metrics` while preserving
+  `eval_report_service.py` private aliases. Audit-event DB queries remain in
+  `eval_report_service.py`.
+- Moved MVP/research eval section constants, lightweight check/metric records,
+  section coverage, retrieval diagnostic observation, reranker diagnostic
+  observation, context assembly observation, and quality-report interpretation
+  into `app.features.evals.gate_checks` while preserving `eval_service.py`
+  private aliases. DB-backed eval orchestration and secret redaction checks
+  remain service-owned.
+- Moved eval report file writing, latest aliases, trend-record projection,
+  Markdown rendering, HTML rendering, terminal summary rendering, display paths,
+  and HTML escaping into `app.features.evals.report_writer` while preserving
+  `scripts/eval_quality_gate.py` private wrappers. CLI arguments, subprocess
+  gate execution, live API fetches, and LangSmith export side effects remain
+  script-owned.
+- Moved eval report summary shaping into `app.features.evals.report_summary`,
+  including aggregate pass/warn/fail status, failed/warning IDs, token/cost
+  projection, trace IDs, and cache metric projection from live observability
+  snapshots. `scripts/eval_quality_gate.py` preserves private wrappers while
+  subprocess gate execution, live API fetches, CLI arguments, and LangSmith
+  export side effects remain script-owned.
+- Moved eval gate result parsing and shaping into
+  `app.features.evals.gate_results`, including JSON stdout parsing,
+  JSON-command gate DTOs, plain command gate DTOs, unavailable/skipped gate
+  DTOs, stdout/stderr tail projection, metrics passthrough, and rerun metadata.
+  `scripts/eval_quality_gate.py` preserves `_parse_json_output`,
+  `_run_json_gate`, `_run_command_gate`, and `_warning_gate` as compatibility
+  aliases/wrappers while CLI arguments, subprocess execution, live API fetches,
+  report writing, and LangSmith export side effects remain script-owned.
+- Moved eval LangSmith export payload shaping into
+  `app.features.evals.langsmith_export`, including redacted payload projection,
+  export filename/path derivation, status result DTOs, and LangSmith run input
+  projection. `scripts/eval_quality_gate.py` preserves `_redact` and
+  `_export_langsmith` as compatibility wrappers while local JSON file writes,
+  `LANGSMITH_*` environment lookup, dynamic client import, external upload, and
+  best-effort exception handling remain script-owned.
+- Moved shared eval metric-record construction into
+  `app.features.evals.metric_records`, including optional warnings used by
+  extraction-provider checks. `scripts/eval_ai_quality.py`,
+  `scripts/eval_extraction_quality.py`, `scripts/eval_mcp_contract.py`, and
+  `scripts/eval_research_sprints.py` preserve private `_metric` aliases while
+  static repo/file checks, live API fetches, extraction fixture setup, provider
+  settings, required live API/project setup, process re-exec, and report
+  printing remain script-owned.
+- Moved research eval case loading and dataset scoring into
+  `app.features.evals.research_cases`. Dataset path resolution, raw JSON
+  loading, Pydantic schema validation, required category/field constants, and
+  dataset coverage metrics are feature-owned. `eval_service._research_eval_cases`
+  and `scripts/eval_research_sprints.py` preserve compatibility wrappers while
+  live project metric fetches, API route orchestration, CLI argument parsing,
+  and report printing remain service/script-owned.
+- Moved eval report failure payload shaping into
+  `app.features.evals.report_failures`. Missing-report, malformed-report,
+  unreadable-report, malformed-trend-record, and unreadable-trend-file payloads
+  are feature-owned while `report_files.py` keeps path selection and file IO.
+- Moved eval trend-write warning payload shaping into
+  `app.features.evals.report_failures`. `report_writer.write_reports` keeps
+  JSON/Markdown/HTML artifacts available when the append-only trend file cannot
+  be written and returns a UI-safe `paths.trend_write` warning.
+- Moved live-provider-unavailable warning metric shaping into
+  `app.features.evals.provider_warnings`. The extraction eval script keeps
+  settings/env lookup and delegates the warning messages plus metric payload to
+  the feature module through a compatibility alias.
+- Added typed eval/report DTO boundary validation for `S59-R7`:
+  `EvalGateResultRead`, `EvalGateMetricRecord`, `EvalReportFailureRead`,
+  `EvalExportResultRead`, `EvalMetricPointRead`, `EvalReportSummaryRead`,
+  `EvalReportTokenCostRead`, and `EvalCacheDiagnosticRead` now validate gate
+  result, metric record, UI-safe failure, LangSmith export-result,
+  OpenTelemetry-compatible metric-point, aggregate summary, token/cost, and
+  cache diagnostic payloads at the feature boundary. Rerun metadata and local
+  metric export payload assembly are feature-owned through
+  `app.features.evals.gate_results` and
+  `app.features.evals.observability_metrics`; aggregate summary and live cache
+  projection validation are feature-owned through
+  `app.features.evals.report_summary`. Full gate execution, trend persistence
+  policy, and upload side effects remain script/service-owned future cleanup.
+- Created `app.features.governance_tools` and moved tool schema, JSON,
+  metadata, requested-by, proposal, output, and research-sprint-scope guards
+  into `app.features.governance_tools.schema_guard` while preserving
+  `tool_service.py` private aliases and the public `ToolGuardViolation` symbol.
+- Moved static governed tool contracts, role groups, stable registry listing,
+  tool lookup, approval-request type mapping, and output summaries into
+  `app.features.governance_tools.registry` while preserving `tool_service.py`
+  public/private aliases. Tool execution, authorization, approval writes/lookups,
+  and audit writes remain service-owned.
+- Moved pure governed-tool audit/proposal payload shaping into
+  `app.features.governance_tools.audit`, including requested/executed/status/
+  denial audit metadata, approval summaries, and approval proposed-change
+  payloads. `tool_service.py` preserves private aliases while audit
+  persistence, redaction calls, authorization, approval writes/lookups, and DB
+  transactions remain service-owned.
+- Created `app.features.mcp` and moved pure MCP protocol constants,
+  initialize negotiation, JSON-RPC tool schema serialization, client ID and
+  argument extraction, JSON-RPC result/error envelopes, MCP invocation metadata,
+  and tool-call read serialization into `app.features.mcp.protocol` while
+  preserving `app.mcp.adapter` aliases.
+- Moved pure MCP metadata payload shaping into `app.features.mcp.protocol`,
+  including input payload wrapping, MCP audit metadata, and MCP audit summary
+  helpers. `app.mcp.adapter._attach_mcp_metadata` still owns redaction, audit
+  persistence, commit, refresh, and transport orchestration.
+- Pinned MCP stdio bridge HTTP failure behavior in
+  `scripts/mcp_stdio_server.py`: the bridge preserves the JSON-RPC request ID,
+  forwards `--dev-role`, skips blank stdin lines, and returns a structured
+  `-32000` JSON-RPC error when HTTP forwarding fails. Live stdio read/proposal
+  smoke remains Sprint 60 environment QA.
+- Pinned MCP proposal approval parity across direct MCP HTTP calls, JSON-RPC
+  calls, HTTP tool-invocation reads, approval-list reads, approval rejection, and
+  denial audit metadata. `tool_service.py` now redacts persisted
+  `ToolInvocation.output_summary` text for governed tool/proposal outputs so
+  MCP-originated proposal summaries do not leak raw emails or secrets through
+  the tool invocation surface.
+- Created `app.features.validation` and moved validation mission step/asset
+  builders plus validation plan and experiment markdown rendering into
+  `app.features.validation.plan_rendering` while preserving
+  `validation_service.py` private aliases.
+- Moved validation result interpretation fallback heuristics, confidence delta
+  defaults, quote extraction, objection extraction, current-workaround fallback,
+  and assumption-status mapping into
+  `app.features.validation.result_interpretation` while preserving
+  `validation_service.py` private aliases. Provider-backed interpretation,
+  approval persistence, memory writes, DB access, and route orchestration remain
+  service-owned.
+- Moved validation assumption-extraction and validation-plan prompt construction
+  plus deterministic fallback draft shaping into
+  `app.features.validation.generation` while preserving
+  `validation_service.py` private wrappers. Provider calls, structured-output
+  repair, AI run accounting, approval persistence, DB writes,
+  artifact/mission creation, and route orchestration remain service-owned.
+- Created `app.features.decisions` and moved deterministic decision
+  recommendation shaping, context/untrusted-input serialization,
+  supporting/missing-evidence/risk derivation, suggested decision record
+  shaping, action cards, labels, markdown, and link dedupe into
+  `app.features.decisions.recommendation` while preserving
+  `validation_service.py` private aliases.
+- Created `app.features.research` and moved research memo markdown rendering
+  plus selected-evidence bundle serialization into
+  `app.features.research.memo_rendering` while preserving
+  `agentic_research_service.py` private aliases/wrappers.
+- Moved source-discovery candidate shaping, external-search result normalization
+  into candidate specs, deterministic fallback candidate specs, source
+  type/risk inference, URL cleanup/deduplication, discovery snapshot text, and
+  evidence-ingestion metadata into `app.features.research.source_discovery`
+  while preserving `source_discovery_service.py` private aliases.
+- Created `app.features.guide` and moved Ask Thesys retrieval event
+  serialization, answer delta chunking, final stream metadata shaping, and
+  partial JSON answer parsing into `app.features.guide.events`, plus citation
+  drilldown shaping into `app.features.guide.citations` and deterministic
+  intent/action routing into `app.features.guide.routing`, while preserving
+  `guide_service.py` private aliases.
+- Moved Ask Thesys action-card DTO shaping into `app.features.guide.actions`,
+  including available action dedupe, next-best action copy, decision-coach
+  action cards, support action cards, target modals, action types, and risk
+  labels. `guide_service.py` preserves private aliases. Project-nudge
+  action-card route, modal, risk, and `project_nudge` payload shaping now also
+  live in `app.features.guide.actions` behind the `nudge_service.py`
+  `_guide_action` alias; nudge candidate selection, persistence, dismissal, and
+  serialization remain service-owned.
+- Moved stage-aware Ask Thesys recommendation copy into
+  `app.features.guide.recommendations`, including stage copy, suggested
+  questions, fallback stage copy, after-that follow-up text, and readable list
+  joining. `guide_service.py` preserves private aliases while overview loading,
+  active validation/research lookups, chat/proposal/retrieval orchestration,
+  provider calls, AI run writes, approvals, and route orchestration remain
+  service-owned.
+- Moved grounded Ask Thesys answer DTO shaping into
+  `app.features.guide.grounding`, including the structured grounded-answer draft
+  schema, prompt evidence-context projection, cited-source filtering, suggested
+  action resolution, unsupported-claim fallback, assumption ID truncation,
+  related entity projection, and retrieval diagnostic passthrough.
+  `guide_service.py` preserves private aliases while retrieval execution,
+  context-pack assembly, provider calls, cache lookup/write, citation detail
+  enrichment, AI run writes, approvals, cancellation, and route orchestration
+  remain service-owned.
+- Moved Ask Thesys guide context projection and grounded prompt assembly into
+  `app.features.guide.context_projection` and `app.features.guide.prompting`.
+  Recent-turn bounding, overview-to-guide-context projection, risk-level
+  selection, biggest-unknown selection, grounded prompt message assembly,
+  trusted/untrusted context splitting, and untrusted retrieved-content wrapping
+  are feature-owned. Active validation/research DB lookups, context-pack
+  construction, retrieval execution, provider calls, cache lookup/write, AI run
+  writes, approvals, cancellation, proposal creation, nudge candidate
+  persistence, and route orchestration remain service-owned.
+- Moved Ask Thesys guide eval read-model shaping into
+  `app.features.guide.evals`, including stable metric keys, score/total/pass
+  derivation, proposal/direct-write observed text, and direct-write failure
+  shape. `eval_service.py` still owns project authorization, DB counts, eval
+  route orchestration, and any future guide eval fixture loading.
+- Created `app.features.context` and moved context-pack budget application,
+  priority ordering, max-item and token-budget drop reasons, prompt pack
+  metadata, safety rule metadata, and available citation ID projection into
+  `app.features.context.packing`. `context_service.py` preserves private
+  `_pack` and `_dropped` aliases while `ContextCompiler`, settings/profile
+  selection, workflow-specific evidence/tool/memory item assembly, and eval
+  route orchestration remain service-owned.
+- Moved guide/workflow evidence result context-item conversion into
+  `app.features.context.evidence_items`, including dict/object result inputs,
+  900-character truncation, citation ID construction/omission, metadata
+  projection, priority assignment, entity typing, and untrusted safety flags.
+  `context_service.py` preserves private aliases while guide/research context
+  assembly, retrieval/tool orchestration, workflow metadata, and route/eval
+  orchestration remain service-owned.
+- Created `app.features.memory` and moved memory context-pack item
+  serialization, selected/excluded/conflict list normalization, memory-policy
+  metadata, and local token estimates into `app.features.memory.context_pack`
+  while preserving `context_service.py` private aliases.
+- Moved compacted-memory proposal summary/content/provenance shaping into
+  `app.features.memory.compaction`, including default/custom titles, summary
+  caps, empty-summary handling, source-memory IDs/titles, source-entity refs,
+  and approval-required provenance. `memory_service.py` preserves a private
+  alias while auth, source loading, `upsert_memory_item`, commit/refresh,
+  empty-source HTTP errors, and route orchestration remain service-owned.
+- Moved memory selection/conflict policy helpers into
+  `app.features.memory.selection_policy`, including `MemorySelection`,
+  exclusion reasons, excluded-memory rows, conflict-key normalization, text
+  normalization, and feature-level conflict-membership checks. `memory_service.py`
+  preserves aliases/wrappers and keeps the existing HTTP 409 behavior for
+  conflict-membership mismatches while DB reads/writes, approvals, compaction,
+  conflict-resolution orchestration, and Inspect routes remain service-owned.
+- Moved memory Inspect serialization and explanation payload helpers into
+  `app.features.memory.inspection`, including `serialize_memory_item`, selected/
+  excluded/proposed/conflict Inspect payload assembly, and provenance-backed
+  explanation shaping. `memory_service.py` preserves the public
+  `serialize_memory_item` alias while DB lookup, workflow memory selection,
+  proposed-memory queries, approvals, compaction, conflict resolution, and route
+  orchestration remain service-owned.
+- Added `app.ai.fallback_completion` and routed repeated service-private
+  `_fallback_completion` wrappers through it for intake, opportunity brief,
+  competitor analysis/discovery, research planning, agentic research, source
+  discovery, and validation workflows. Workflow-specific fallback names,
+  deterministic-stub provider naming, token/cost accounting, error truncation,
+  and route behavior remain compatible.
+- Exposed `app.ai.structured_output.schema_instruction_message` as the shared
+  JSON-schema system prompt builder for structured outputs. The normal
+  structured-output gateway and Ask Thesys provider streaming now use the same
+  prompt text, with private aliases preserving existing service call sites.
+- Added `test_feature_package_boundaries.py` to protect compatibility shims,
+  feature-owned extraction behavior, common metadata behavior, and reranker
+  exports.
+- Added `test_contract_shapes.py` to pin evidence response serialization and
+  artifact/version structured-content shapes before larger route/service
+  movement.
+- Extended `test_tool_boundary.py` so every read tool is executed through the
+  governed service boundary and checked against its declared output schema keys.
+- Expanded Sprint 59 characterization coverage for context profile metadata,
+  token budgets, dropped-context reasons, untrusted input fallback, tool-output
+  context items, MCP schema parity, JSON-RPC invalid-param/no-invocation
+  behavior, client ID aliases, redacted MCP proposal payloads, malformed eval
+  reports, eval cache metric precedence, structured-output stub/repair behavior,
+  and validation rejection/context metadata.
+- Updated `scripts/eval_ai_quality.py` and `scripts/eval_extraction_quality.py`
+  to point at the feature-owned modules instead of private service paths.
+- Updated README navigation with the feature-package map and current moved AI
+  feature modules.
+- Expanded `docs/BACKEND_FEATURE_PACKAGE_MAP.md` with an implemented
+  characterization matrix, DTO boundary ledger, shim/migration ledger, and
+  function-level next-pickup slices for retrieval context selection, memory
+  selection/conflict policy, validation interpretation fallback, governed tool
+  registry contracts, and eval gate diagnostics.
+- Added an S59-R2 evidence extraction boundary slice:
+  `app.features.evidence.extraction` now owns direct URL response metadata,
+  file identity metadata, image upload metadata, text upload metadata, PDF
+  parser metadata, and OCR fallback metadata. `evidence_service.py` preserves
+  private aliases while URL fetch validation/HTTP orchestration, upload
+  validation/object storage, PDF parsing, OCR/multimodal provider calls, chunk
+  persistence, embedding writes, security audit writes, DB transactions, and
+  route orchestration remain service-owned until typed ingestion/extraction DTOs
+  exist.
+- Added an S59-R4 research graph-state boundary slice:
+  `app.features.research.graph_state` now owns JSON-safe graph step output
+  serialization through `_to_jsonable` and `_json_safe` compatibility aliases in
+  `agentic_research_service.py`. LangGraph node execution, AI step
+  persistence, tracing, error handling, provider calls, tool execution, DB
+  writes, approvals, artifact persistence, and Temporal boundaries remain
+  service-owned until typed graph-state/read-model DTOs exist.
+- Added an S59-R4 research strategy boundary slice:
+  `app.features.research.strategy` now owns deterministic subquestion planning,
+  bounded tool-call strategy, lookup-tool mapping, lookup payload projection,
+  evidence-gap detection, and research text/list normalization behind
+  compatibility aliases/wrappers in `agentic_research_service.py`. Tool
+  execution, retrieval execution, LangGraph transitions, provider calls, AI
+  step persistence, approvals, DB writes, artifact persistence, and Temporal
+  boundaries remain service-owned.
+- Added an S59-R4 research memo prompt boundary slice:
+  `app.features.research.memo_prompting` now owns final research memo prompt
+  assembly, including trusted/untrusted context splitting, compact payload
+  serialization, untrusted retrieved-content wrapping, and synthesis safety
+  instructions behind the `_memo_messages` compatibility alias in
+  `agentic_research_service.py`. Context-pack construction, provider calls,
+  structured-output parsing, AI run/step persistence, tracing, approvals,
+  artifact persistence, DB writes, and Temporal boundaries remain service-owned.
+- Added an S59-R4 research citation-audit boundary slice:
+  `app.features.research.citation_audit` now owns memo citation audit shaping,
+  including claim support downgrades, unsupported-claim summary updates,
+  finding-level citation filtering, citation enrichment, and final citation
+  de-duplication behind the `_audit_citations` compatibility alias in
+  `agentic_research_service.py`. Citation persistence, claim writes, artifact
+  metadata writes, AI step persistence, approvals, DB transactions, and Temporal
+  boundaries remain service-owned.
+- Added an S59-R4 research planning boundary slice:
+  `app.features.research.planning` now owns research sprint planning prompt
+  assembly and deterministic fallback `ResearchPlanDraft` shaping behind
+  `_planning_messages` and `_fallback_research_plan` compatibility aliases in
+  `research_sprint_service.py`. LangGraph planning nodes, provider calls,
+  structured-output parsing, AI run/step persistence, proposal creation, plan
+  and sprint persistence, approvals, Temporal signaling, DB transactions, and
+  route orchestration remain service-owned.
+- Added an S59-R4 source-discovery prompt boundary slice:
+  `app.features.research.source_discovery` now owns source-discovery prompt
+  payload assembly in addition to candidate specs, external-search result
+  normalization, deterministic fallback candidate specs, URL cleanup,
+  source-type/risk inference, snapshot text, and evidence metadata behind
+  compatibility aliases in `source_discovery_service.py`. LLM
+  structured-output calls, external-search provider execution, DB writes,
+  sprint status changes, evidence ingestion orchestration, and route
+  orchestration remain service-owned.
+- Added an S59-R4 research memo proposal boundary slice:
+  `app.features.research.proposals` now owns memory-update, validation-plan,
+  and decision proposal payload/input JSON shaping for research memo review
+  behind the `_research_memo_proposal_payloads` compatibility alias in
+  `agentic_research_service.py`. Tool proposal creation, approval rows, audit
+  events, artifact structured-content updates, route orchestration, DB
+  transactions, and Temporal boundaries remain service-owned.
+- Patched `SPRINT_51_60_TODO.md` and `IMPLEMENTATION_BRIEF.md` so Sprint 59 and
+  Sprint 60 use pickup-ready work packages with exact target modules, functions,
+  commands, and closeout artifacts instead of broad cleanup titles.
+- Added the explicit remaining pickup queues:
+  - Sprint 59 now has `S59-P1` through `S59-P9` for evidence/retrieval,
+    validation/decisions, research, guide/streaming, governed tools/MCP,
+    eval/reporting, context/memory, shared duplication cleanup, and final
+    refactor closeout. Each item names the owning `G49-*` gaps, the
+    implementation boundary, required docs/status updates, and verification.
+  - Sprint 60 now has `S60-P1` through `S60-P10` for the final carried-gap
+    audit, context docs/QA, memory docs/QA, MCP docs/smoke, retrieval/citation
+    docs, Ask Thesys streaming QA, eval/observability docs, source-intelligence
+    dispositions, security/deployment posture, and post-refactor navigation/code
+    docs. Each item maps directly back to `G41-*` through `G50-*`.
+
+Sprint 59 verification so far:
+
+- [x] `python3 scripts/check_feature_boundaries.py` passed.
+- [x] `cd apps/api && .venv/bin/ruff check ...` on new common/feature modules,
+  compatibility shims, feature-boundary tests, and touched eval scripts passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall ...` on new common/feature
+  modules, compatibility shims, feature-boundary tests, and touched eval scripts
+  passed.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py app/tests/test_common_services.py app/tests/test_evidence.py app/tests/test_citation_verifier.py app/tests/test_retrieval_quality_eval.py -q --maxfail=1` (`25 passed`).
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_contract_shapes.py app/tests/test_evidence.py app/tests/test_project_overview.py -q --maxfail=1` (`18 passed`).
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_tool_boundary.py app/tests/test_mcp_adapter.py -q --maxfail=1` (`11 passed`).
+- [x] `cd apps/api && .venv/bin/pytest -q` (`183 passed`).
+- [x] `python3 scripts/eval_ai_quality.py --json` (`10/10` passed).
+- [x] `python3 scripts/eval_retrieval_quality.py` (`7/7` passed).
+- [x] `python3 scripts/eval_extraction_quality.py --json` (`7/7` passed with
+  explicit live-provider-unavailable warnings).
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py app/tests/test_eval_reports.py app/tests/test_mcp_adapter.py app/tests/test_ai.py app/tests/test_validation.py -q --maxfail=1` (`41 passed`).
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evals app/services/eval_report_service.py app/tests/test_context_compiler.py app/tests/test_eval_reports.py app/tests/test_mcp_adapter.py app/tests/test_ai.py app/tests/test_validation.py` passed.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the evals
+  feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py app/tests/test_eval_reports.py -q --maxfail=1`
+  (`18 passed`) after the eval observability metrics feature slice.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evals app/services/eval_report_service.py app/tests/test_feature_package_boundaries.py`
+  passed.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_demo_eval_workflows.py::test_seed_demo_project_runs_mvp_eval_and_exposes_workflow_events app/tests/test_research_history_eval.py::test_v1_research_eval_passes_for_completed_research_sprint app/tests/test_feature_package_boundaries.py -q`
+  (`19 passed`) after the eval gate-check feature slice.
+- [x] `cd apps/api && .venv/bin/ruff check app/services/eval_service.py app/features/evals/gate_checks.py app/tests/test_feature_package_boundaries.py`
+  passed after the eval gate-check feature slice.
+- [x] `cd apps/api && .venv/bin/python -m py_compile app/services/eval_service.py app/features/evals/gate_checks.py app/tests/test_feature_package_boundaries.py`
+  passed after the eval gate-check feature slice.
+- [x] `apps/api/.venv/bin/ruff check scripts/eval_quality_gate.py` passed after
+  updating the cache-quality source check for the feature-owned metric module.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-metrics LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-pytest --skip-security`
+  passed with warn status (`39/39`; warning gates: `mcp_contract`,
+  `pytest_quality_slice`, `security_check`).
+- [x] `cd apps/api && .venv/bin/pytest -q` (`201 passed` after the eval
+  observability metrics feature slice).
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py app/tests/test_evidence.py::test_source_quality_weight_affects_deterministic_rerank app/tests/test_retrieval_quality_eval.py -q --maxfail=1` (`8 passed`).
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_agentic_research.py app/tests/test_research_history_eval.py app/tests/test_retrieval_quality_eval.py -q --maxfail=1` (`21 passed`).
+- [x] `cd apps/api && .venv/bin/ruff check app/features/retrieval/planning.py app/features/retrieval/reranker.py app/services/retrieval_service.py` passed.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py::test_context_assembly_prioritizes_source_diversity app/tests/test_retrieval_quality_eval.py app/tests/test_feature_package_boundaries.py -q`
+  (`18 passed`) after the retrieval context-selection feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_retrieval_result_fusion_dedupes_chunks_and_preserves_match_count -q`
+  (`1 passed`) before moving retrieval result fusion.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_retrieval_result_fusion_dedupes_chunks_and_preserves_match_count app/tests/test_evidence.py::test_broad_evidence_retrieval_plans_reranks_and_assembles_context -q`
+  (`2 passed`) after moving retrieval result fusion.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/retrieval/result_shaping.py app/services/retrieval_service.py app/tests/test_feature_package_boundaries.py`
+  passed after the retrieval result-fusion feature slice.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/retrieval/result_shaping.py app/services/retrieval_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the retrieval result-fusion feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_retrieval_scoring_helpers_preserve_hybrid_keyword_and_bm25_behavior -q`
+  (`1 passed`) before moving retrieval score math.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_retrieval_scoring_helpers_preserve_hybrid_keyword_and_bm25_behavior app/tests/test_evidence.py::test_note_ingestion_chunks_embeds_and_retrieves -q`
+  (`2 passed`) after moving retrieval score math.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/retrieval/scoring.py app/services/retrieval_service.py app/tests/test_feature_package_boundaries.py`
+  passed after the retrieval scoring feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_retrieval_scoring_helpers_preserve_hybrid_keyword_and_bm25_behavior app/tests/test_feature_package_boundaries.py::test_retrieval_result_fusion_dedupes_chunks_and_preserves_match_count app/tests/test_evidence.py::test_note_ingestion_chunks_embeds_and_retrieves app/tests/test_evidence.py::test_broad_evidence_retrieval_plans_reranks_and_assembles_context app/tests/test_retrieval_quality_eval.py -q`
+  (`5 passed`) after the retrieval scoring feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_citation_dedupe_helpers_are_feature_owned_and_service_compatible app/tests/test_citation_verifier.py app/tests/test_opportunity_brief.py app/tests/test_competitors.py app/tests/test_agentic_research.py -q`
+  (`19 passed`) after moving shared citation de-duplication and retrieved-ID
+  checks into `app.features.evidence.citation_verifier`.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evidence/citation_verifier.py app/services/opportunity_brief_service.py app/services/competitor_service.py app/services/agentic_research_service.py app/tests/test_feature_package_boundaries.py`
+  passed after the shared citation helper feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_eval_gate_result_helpers_are_feature_owned app/tests/test_eval_reports.py::test_eval_quality_gate_script_writes_reports -q`
+  (`2 passed`) after moving eval gate result shaping.
+- [x] `apps/api/.venv/bin/ruff check apps/api/app/features/evals/gate_results.py apps/api/app/tests/test_feature_package_boundaries.py apps/api/app/tests/test_eval_reports.py scripts/eval_quality_gate.py`
+  passed after the eval gate result slice.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-gate-results LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-pytest --skip-security`
+  passed with warn status (`39/39`; warning gates: `mcp_contract`,
+  `pytest_quality_slice`, `security_check`) after the eval gate result slice.
+- [x] `cd apps/api && .venv/bin/pytest -q` (`231 passed`) after the shared
+  citation helper and eval gate result slices.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/retrieval app/services/retrieval_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the retrieval scoring feature slice.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the retrieval
+  scoring feature slice.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/retrieval/context_selection.py app/services/retrieval_service.py app/tests/test_feature_package_boundaries.py app/features/validation/result_interpretation.py app/services/validation_service.py`
+  passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/retrieval/context_selection.py app/services/retrieval_service.py app/tests/test_feature_package_boundaries.py app/features/validation/result_interpretation.py app/services/validation_service.py -q`
+  passed.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_tool_boundary.py app/tests/test_security_governance.py app/tests/test_mcp_adapter.py -q --maxfail=1` (`34 passed`).
+- [x] `cd apps/api && .venv/bin/ruff check app/features/governance_tools app/services/tool_service.py` passed.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_tool_boundary.py::test_tool_registry_exposes_mcp_style_contracts app/tests/test_tool_boundary.py::test_read_tools_return_declared_output_schema_keys app/tests/test_mcp_adapter.py::test_mcp_jsonrpc_preserves_ids_and_tool_schema_parity app/tests/test_feature_package_boundaries.py -q`
+  (`21 passed`) after the governed tool registry feature slice.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/governance_tools app/services/tool_service.py app/tests/test_feature_package_boundaries.py`
+  passed after the governed tool registry feature slice.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/governance_tools app/services/tool_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the governed tool registry feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py app/tests/test_mcp_adapter.py -q --maxfail=1`
+  (`24 passed`) after the MCP protocol feature slice.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/mcp app/mcp/adapter.py app/tests/test_feature_package_boundaries.py`
+  passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/mcp app/mcp/adapter.py app/tests/test_feature_package_boundaries.py -q`
+  passed.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the MCP
+  protocol feature slice.
+- [x] `cd apps/api && .venv/bin/pytest -q` (`202 passed` after the MCP
+  protocol feature slice).
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_validation.py app/tests/test_project_overview.py app/tests/test_guide.py -q --maxfail=1` (`30 passed`).
+- [x] `cd apps/api && .venv/bin/ruff check app/features/validation app/services/validation_service.py` passed.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py app/tests/test_validation.py -q --maxfail=1` (`21 passed`).
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_validation.py::test_interpret_validation_notes_creates_pending_memory_update app/tests/test_validation.py::test_validation_interpretation_rejection_does_not_write_memory_or_confidence app/tests/test_validation.py::test_decision_coach_uses_interpreted_results_and_prefills_record app/tests/test_feature_package_boundaries.py -q`
+  (`19 passed`) after the validation result-interpretation feature slice.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/decisions app/services/validation_service.py app/tests/test_feature_package_boundaries.py` passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/decisions app/services/validation_service.py app/tests/test_feature_package_boundaries.py -q` passed.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the decisions
+  feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_agentic_research.py app/tests/test_research_history_eval.py -q --maxfail=1` (`6 passed`).
+- [x] `cd apps/api && .venv/bin/ruff check app/features/research app/services/agentic_research_service.py` passed.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py app/tests/test_research_discovery.py -q --maxfail=1`
+  (`23 passed`) after the source-discovery feature slice.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/research app/services/source_discovery_service.py app/tests/test_feature_package_boundaries.py`
+  passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/research app/services/source_discovery_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the
+  source-discovery feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py app/tests/test_guide.py -q --maxfail=1` (`26 passed`).
+- [x] `cd apps/api && .venv/bin/ruff check app/features/guide app/services/guide_service.py app/tests/test_feature_package_boundaries.py` passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/guide app/services/guide_service.py app/tests/test_feature_package_boundaries.py -q` passed.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the guide
+  events feature slice.
+- [x] `cd apps/api && .venv/bin/pytest -q` (`198 passed` after the guide and
+  decision recommendation feature slices).
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py app/tests/test_context_compiler.py app/tests/test_memory_service.py -q --maxfail=1`
+  (`22 passed`) after the memory context-pack feature slice.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/memory app/services/context_service.py app/tests/test_feature_package_boundaries.py`
+  passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/memory app/services/context_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the memory
+  context-pack feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_memory_service.py::test_memory_context_selection_explains_exclusions_and_conflicts app/tests/test_memory_service.py::test_memory_proposals_and_inspect_endpoint app/tests/test_context_compiler.py app/tests/test_feature_package_boundaries.py -q`
+  (`26 passed`) after the memory selection-policy feature slice.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/memory/selection_policy.py app/services/memory_service.py app/tests/test_feature_package_boundaries.py`
+  passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/memory/selection_policy.py app/services/memory_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed.
+- [x] `cd apps/api && .venv/bin/pytest -q` (`207 passed`) after the memory
+  selection-policy feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_ai.py::test_fallback_completion_builds_local_completion_metadata app/tests/test_ai.py::test_fallback_completion_preserves_stub_provider_prefix app/tests/test_validation.py::test_assumption_extraction_can_force_local_fallback_with_always_policy app/tests/test_validation.py::test_assumption_extraction_uses_emergency_fallback_after_generation_failure app/tests/test_validation.py::test_validation_plan_can_force_local_fallback_with_always_policy app/tests/test_validation.py::test_validation_plan_uses_emergency_fallback_after_generation_failure app/tests/test_intake.py::test_structured_intake_answer_can_force_local_fallback_with_always_policy app/tests/test_intake.py::test_structured_intake_uses_emergency_fallback_after_generation_failure app/tests/test_opportunity_brief.py::test_generate_opportunity_brief_can_force_local_fallback_with_always_policy app/tests/test_opportunity_brief.py::test_generate_opportunity_brief_uses_emergency_fallback_after_generation_failure app/tests/test_competitors.py::test_competitor_analysis_can_force_local_fallback_with_always_policy app/tests/test_competitors.py::test_competitor_analysis_uses_emergency_fallback_after_generation_failure -q`
+  (`12 passed`) after centralizing deterministic fallback completion metadata.
+- [x] `cd apps/api && .venv/bin/ruff check app/ai/fallback_completion.py app/services/validation_service.py app/services/intake_service.py app/services/opportunity_brief_service.py app/services/competitor_service.py app/services/research_sprint_service.py app/services/agentic_research_service.py app/services/source_discovery_service.py app/services/competitor_discovery_service.py app/tests/test_ai.py`
+  passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/ai/fallback_completion.py app/services/validation_service.py app/services/intake_service.py app/services/opportunity_brief_service.py app/services/competitor_service.py app/services/research_sprint_service.py app/services/agentic_research_service.py app/services/source_discovery_service.py app/services/competitor_discovery_service.py app/tests/test_ai.py -q`
+  passed.
+- [x] `cd apps/api && .venv/bin/pytest -q` (`209 passed`) after centralizing
+  deterministic fallback completion metadata.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_validation.py::test_assumption_extraction_can_force_local_fallback_with_always_policy app/tests/test_validation.py::test_assumption_extraction_uses_emergency_fallback_after_generation_failure app/tests/test_validation.py::test_generate_validation_plan_and_log_result_updates_confidence app/tests/test_validation.py::test_validation_plan_can_force_local_fallback_with_always_policy app/tests/test_validation.py::test_validation_plan_uses_emergency_fallback_after_generation_failure app/tests/test_feature_package_boundaries.py -q`
+  (`25 passed`) after moving validation generation prompt/fallback helpers.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/validation/generation.py app/services/validation_service.py app/tests/test_feature_package_boundaries.py`
+  passed.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the validation
+  generation feature slice.
+- [x] `git diff --check` passed after the validation generation feature slice.
+- [x] `cd apps/api && .venv/bin/pytest -q` (`210 passed`) after the validation
+  generation feature slice and sprint handoff patches.
+- [x] `rg -n "<{7}|={7}|>{7}" .` returned no conflict markers after the
+  validation generation feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py::test_eval_report_writer_creates_reports_latest_aliases_and_trend app/tests/test_eval_reports.py::test_eval_quality_gate_script_writes_reports -q`
+  (`2 passed`) after moving eval report writer/rendering helpers.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  (`27 passed`) after adding direct feature-boundary coverage for eval report
+  writer helpers and stdout/file `paths` compatibility.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evals/report_writer.py app/tests/test_eval_reports.py ../../scripts/eval_quality_gate.py`
+  passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/evals/report_writer.py app/tests/test_eval_reports.py ../../scripts/eval_quality_gate.py -q`
+  passed.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-writer LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-pytest --skip-security`
+  passed with warn status (`39/39`; warning gates: `mcp_contract`,
+  `pytest_quality_slice`, `security_check`) and generated `latest.md`,
+  `latest.html`, and `latest.json` without changing the existing file/stdout
+  `paths` behavior.
+- [x] `cd apps/api && .venv/bin/pytest -q` (`212 passed`) after the eval report
+  writer feature slice.
+- [x] `git diff --check` passed and `rg -n "<{7}|={7}|>{7}" .` returned no
+  conflict markers after the eval report writer feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_memory_inspection_helpers_are_feature_owned_and_service_compatible app/tests/test_memory_service.py::test_memory_explanation_and_duplicate_merge app/tests/test_memory_service.py::test_memory_proposals_and_inspect_endpoint -q`
+  (`3 passed`) after moving memory Inspect serialization helpers.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/memory/inspection.py app/services/memory_service.py app/tests/test_feature_package_boundaries.py`
+  passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/memory/inspection.py app/services/memory_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_memory_service.py app/tests/test_context_compiler.py app/tests/test_feature_package_boundaries.py -q`
+  (`33 passed`) after the memory Inspect feature slice.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the memory
+  Inspect feature slice.
+- [x] `cd apps/api && .venv/bin/pytest -q` (`213 passed`) after the memory
+  Inspect feature slice.
+- [x] `git diff --check` passed and `rg -n "<{7}|={7}|>{7}" .` returned no
+  conflict markers after the memory Inspect feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py::test_eval_report_summary_shapes_status_failures_and_live_cache app/tests/test_feature_package_boundaries.py::test_eval_report_summary_helpers_are_feature_owned app/tests/test_eval_reports.py::test_eval_quality_gate_script_writes_reports -q`
+  (`3 passed`) after moving eval report summary shaping helpers.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evals/report_summary.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_quality_gate.py`
+  passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/evals/report_summary.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_quality_gate.py -q`
+  passed.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  (`30 passed`) after the eval report summary feature slice.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-summary LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-pytest --skip-security`
+  passed with warn status (`39/39`; warning gates: `mcp_contract`,
+  `pytest_quality_slice`, `security_check`) after the eval report summary
+  feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py::test_eval_langsmith_export_helpers_redact_payload_and_shape_status app/tests/test_eval_reports.py::test_eval_quality_gate_script_exports_langsmith_payload_without_upload app/tests/test_feature_package_boundaries.py::test_eval_langsmith_export_helpers_are_feature_owned_and_script_compatible -q`
+  (`3 passed`) after moving eval LangSmith export payload/result shaping.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py::test_eval_gate_result_helpers_parse_and_shape_command_results app/tests/test_feature_package_boundaries.py::test_eval_gate_result_helpers_are_feature_owned -q`
+  (`2 passed`) after moving eval gate JSON parsing and command result shaping.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py::test_eval_metric_record_helper_shapes_optional_warnings app/tests/test_feature_package_boundaries.py::test_eval_metric_record_helper_is_feature_owned_and_script_compatible -q`
+  (`2 passed`) after first moving shared eval metric-record construction, then
+  (`2 passed`) after extending script alias coverage to the MCP contract and
+  research sprint eval scripts.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_research_history_eval.py app/tests/test_demo_eval_workflows.py app/tests/test_feature_package_boundaries.py -q`
+  (`53 passed`) after the eval LangSmith export feature slice and (`54 passed`)
+  after adding eval gate command-result parsing/shaping coverage.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-langsmith LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-pytest --skip-security --export-langsmith`
+  passed with warn status (`39/39`; warning gates: `mcp_contract`,
+  `pytest_quality_slice`, `security_check`) and wrote a redacted local
+  LangSmith export payload without upload.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the eval
+  LangSmith export feature slice.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-gate-results LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-pytest --skip-security`
+  passed with warn status (`39/39`; warning gates: `mcp_contract`,
+  `pytest_quality_slice`, `security_check`) after moving eval gate command-result
+  parsing/shaping.
+- [x] `python3 scripts/eval_ai_quality.py --json` (`10/10` passed) after moving
+  shared eval metric-record construction.
+- [x] `python3 scripts/eval_extraction_quality.py --json` (`7/7` passed with
+  live-provider unavailable warnings) after moving shared eval metric-record
+  construction.
+- [x] `python3 scripts/eval_research_sprints.py --json` (`7/7` passed) after
+  extending shared eval metric-record aliases to the research sprint eval
+  script.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_research_eval_case_helpers_are_feature_owned_and_script_compatible -q`
+  (`1 passed`) after moving research eval case loading/scoring into
+  `app.features.evals.research_cases`.
+- [x] `python3 scripts/eval_research_sprints.py --json` (`7/7` passed) after
+  moving research eval case loading/scoring into
+  `app.features.evals.research_cases`.
+- [x] `cd apps/api && .venv/bin/python - <<'PY' ... eval_service._research_eval_cases() ... PY`
+  loaded 10 validated research eval cases after moving service case loading to
+  `app.features.evals.research_cases`.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  (`48 passed`) after moving research eval case loading/scoring into
+  `app.features.evals.research_cases`.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-research-cases LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-pytest --skip-security`
+  passed with warn status (`39/39`; warning gates: `mcp_contract`,
+  `pytest_quality_slice`, `security_check`) after moving research eval case
+  loading/scoring.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evals/research_cases.py app/services/eval_service.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_research_sprints.py`
+  passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/evals/research_cases.py app/services/eval_service.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_research_sprints.py -q`
+  passed.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after moving research
+  eval case loading/scoring.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py::test_eval_report_endpoints_surface_missing_and_malformed_reports app/tests/test_eval_reports.py::test_eval_report_failure_helpers_shape_safe_warning_payloads app/tests/test_feature_package_boundaries.py::test_eval_report_failure_helpers_are_feature_owned -q`
+  (`3 passed`) after moving missing/malformed/unreadable report and trend-read
+  failure payload shaping into `app.features.evals.report_failures`.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evals/report_failures.py app/features/evals/report_files.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py`
+  passed after the eval report failure-payload slice.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/evals/report_failures.py app/features/evals/report_files.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the eval report failure-payload slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  (`50 passed`) after the eval report failure-payload docs/status update.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-report-failures LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-pytest --skip-security`
+  passed with warn status (`39/39`; warning gates: `mcp_contract`,
+  `pytest_quality_slice`, `security_check`) after the eval report
+  failure-payload docs/status update.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py::test_eval_report_failure_helpers_shape_safe_warning_payloads app/tests/test_eval_reports.py::test_eval_report_writer_creates_reports_latest_aliases_and_trend app/tests/test_eval_reports.py::test_eval_report_writer_surfaces_trend_write_failure app/tests/test_feature_package_boundaries.py::test_eval_report_failure_helpers_are_feature_owned app/tests/test_feature_package_boundaries.py::test_eval_report_writer_helpers_are_feature_owned -q`
+  (`5 passed`) after adding feature-owned trend-write warning payload shaping.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  (`51 passed`) after adding the trend-write warning payload slice.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evals/report_failures.py app/features/evals/report_writer.py app/features/evals/report_files.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_quality_gate.py`
+  passed after the trend-write warning payload slice.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/evals/report_failures.py app/features/evals/report_writer.py app/features/evals/report_files.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_quality_gate.py -q`
+  passed after the trend-write warning payload slice.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the
+  trend-write warning payload slice.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-trend-write LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-pytest --skip-security`
+  passed with warn status (`39/39`; warning gates: `mcp_contract`,
+  `pytest_quality_slice`, `security_check`) after the trend-write warning
+  payload slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py::test_eval_provider_warning_helper_shapes_live_provider_metric app/tests/test_feature_package_boundaries.py::test_eval_metric_record_helper_is_feature_owned_and_script_compatible -q`
+  (`2 passed`) after moving live-provider-unavailable warning metric shaping
+  into `app.features.evals.provider_warnings`.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  (`52 passed`) after the provider warning helper slice.
+- [x] `python3 scripts/eval_extraction_quality.py --json` (`7/7` passed with
+  live-provider unavailable warnings) after the provider warning helper slice.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evals/provider_warnings.py app/features/evals/report_failures.py app/features/evals/report_writer.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_extraction_quality.py`
+  passed after the provider warning helper slice.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/evals/provider_warnings.py app/features/evals/report_failures.py app/features/evals/report_writer.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_extraction_quality.py -q`
+  passed after the provider warning helper slice.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the provider
+  warning helper slice.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-provider-warnings LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-pytest --skip-security`
+  passed with warn status (`39/39`; warning gates: `mcp_contract`,
+  `pytest_quality_slice`, `security_check`) after the provider warning helper
+  slice.
+- [x] `python3 scripts/eval_mcp_contract.py --help` passed after extending the
+  shared eval metric-record alias to the MCP contract script. Full MCP contract
+  execution still requires a running API and a real `--project-id`.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-metric-records LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-pytest --skip-security`
+  passed with warn status (`39/39`; warning gates: `mcp_contract`,
+  `pytest_quality_slice`, `security_check`) after the shared metric-record
+  slice.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-metric-records-all LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-pytest --skip-security`
+  passed with warn status (`39/39`; warning gates: `mcp_contract`,
+  `pytest_quality_slice`, `security_check`) after extending metric-record
+  aliases to the MCP contract and research sprint eval scripts.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  (`47 passed`) after moving shared eval metric-record construction.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  (`47 passed`) after extending metric-record aliases to all four local eval
+  scripts.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evals/metric_records.py app/features/evals/gate_results.py app/features/evals/langsmith_export.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_ai_quality.py ../../scripts/eval_extraction_quality.py ../../scripts/eval_quality_gate.py`
+  passed.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evals/metric_records.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_ai_quality.py ../../scripts/eval_extraction_quality.py ../../scripts/eval_mcp_contract.py ../../scripts/eval_research_sprints.py`
+  passed after extending metric-record aliases to the MCP contract and research
+  sprint eval scripts.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/evals/metric_records.py app/features/evals/gate_results.py app/features/evals/langsmith_export.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_ai_quality.py ../../scripts/eval_extraction_quality.py ../../scripts/eval_quality_gate.py -q`
+  passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/evals/metric_records.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_ai_quality.py ../../scripts/eval_extraction_quality.py ../../scripts/eval_mcp_contract.py ../../scripts/eval_research_sprints.py -q`
+  passed after extending metric-record aliases to the MCP contract and research
+  sprint eval scripts.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the shared
+  metric-record slice.
+- [x] `git diff --check -- README.md IMPLEMENTATION_STATUS.md IMPLEMENTATION_BRIEF.md SPRINT_51_60_TODO.md docs/BACKEND_FEATURE_PACKAGE_MAP.md apps/api/app/features/evals/metric_records.py apps/api/app/features/evals/gate_results.py apps/api/app/features/evals/langsmith_export.py apps/api/app/tests/test_eval_reports.py apps/api/app/tests/test_feature_package_boundaries.py scripts/eval_ai_quality.py scripts/eval_extraction_quality.py scripts/eval_quality_gate.py`
+  passed.
+- [x] `rg -n "<{7}|={7}|>{7}" README.md IMPLEMENTATION_STATUS.md IMPLEMENTATION_BRIEF.md SPRINT_51_60_TODO.md docs/BACKEND_FEATURE_PACKAGE_MAP.md apps/api/app/features/evals/metric_records.py apps/api/app/features/evals/gate_results.py apps/api/app/features/evals/langsmith_export.py apps/api/app/tests/test_eval_reports.py apps/api/app/tests/test_feature_package_boundaries.py scripts/eval_ai_quality.py scripts/eval_extraction_quality.py scripts/eval_quality_gate.py`
+  returned no conflict markers.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evals/gate_results.py app/features/evals/langsmith_export.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_quality_gate.py`
+  passed after the eval gate result and LangSmith export slices.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/evals/gate_results.py app/features/evals/langsmith_export.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_quality_gate.py -q`
+  passed.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the eval gate
+  result and LangSmith export slices.
+- [x] `git diff --check -- README.md IMPLEMENTATION_STATUS.md IMPLEMENTATION_BRIEF.md SPRINT_51_60_TODO.md docs/BACKEND_FEATURE_PACKAGE_MAP.md apps/api/app/features/evals/gate_results.py apps/api/app/features/evals/langsmith_export.py apps/api/app/tests/test_eval_reports.py apps/api/app/tests/test_feature_package_boundaries.py scripts/eval_quality_gate.py`
+  passed.
+- [x] `rg -n "<{7}|={7}|>{7}" README.md IMPLEMENTATION_STATUS.md IMPLEMENTATION_BRIEF.md SPRINT_51_60_TODO.md docs/BACKEND_FEATURE_PACKAGE_MAP.md apps/api/app/features/evals/gate_results.py apps/api/app/features/evals/langsmith_export.py apps/api/app/tests/test_eval_reports.py apps/api/app/tests/test_feature_package_boundaries.py scripts/eval_quality_gate.py`
+  returned no conflict markers.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evals/langsmith_export.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_quality_gate.py`
+  passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/evals/langsmith_export.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py ../../scripts/eval_quality_gate.py -q`
+  passed.
+- [x] `git diff --check -- README.md IMPLEMENTATION_STATUS.md IMPLEMENTATION_BRIEF.md SPRINT_51_60_TODO.md docs/BACKEND_FEATURE_PACKAGE_MAP.md apps/api/app/features/evals/langsmith_export.py apps/api/app/tests/test_eval_reports.py apps/api/app/tests/test_feature_package_boundaries.py scripts/eval_quality_gate.py`
+  passed.
+- [x] `rg -n "<{7}|={7}|>{7}" README.md IMPLEMENTATION_STATUS.md IMPLEMENTATION_BRIEF.md SPRINT_51_60_TODO.md docs/BACKEND_FEATURE_PACKAGE_MAP.md apps/api/app/features/evals/langsmith_export.py apps/api/app/tests/test_eval_reports.py apps/api/app/tests/test_feature_package_boundaries.py scripts/eval_quality_gate.py`
+  returned no conflict markers.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the eval report
+  summary feature slice.
+- [x] `cd apps/api && .venv/bin/pytest -q` (`215 passed`) after the eval report
+  summary feature slice.
+- [x] `git diff --check` passed and `rg -n "<{7}|={7}|>{7}" .` returned no
+  conflict markers after the eval report summary feature slice.
+- [x] `cd apps/api && .venv/bin/ruff check ...` on current Sprint 59 common,
+  feature, service, script, and characterization-test paths passed.
+- [x] `cd apps/api && .venv/bin/python -m compileall ... -q` on current Sprint
+  59 common, feature, service, script, and characterization-test paths passed.
+- [x] `python3 scripts/eval_ai_quality.py --json` (`10/10` passed).
+- [x] `python3 scripts/eval_retrieval_quality.py` (`7/7` passed).
+- [x] `python3 scripts/eval_extraction_quality.py --json` (`7/7` passed with
+  explicit live-provider-unavailable warnings).
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-current LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-security` passed with warn status (`40/40`; warning gates: `mcp_contract`, `security_check`).
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_ai.py::test_schema_instruction_message_uses_shared_json_schema_prompt app/tests/test_feature_package_boundaries.py::test_guide_stream_schema_instruction_uses_shared_ai_gateway -q`
+  (`2 passed`) after centralizing structured-output schema instruction
+  assembly.
+- [x] `cd apps/api && .venv/bin/ruff check app/ai/structured_output.py app/services/guide_service.py app/tests/test_ai.py app/tests/test_feature_package_boundaries.py`
+  passed after the structured-output schema-instruction cleanup.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/ai/structured_output.py app/services/guide_service.py app/tests/test_ai.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the structured-output schema-instruction cleanup.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_ai.py app/tests/test_guide.py app/tests/test_feature_package_boundaries.py -q`
+  (`54 passed`) after the structured-output schema-instruction cleanup.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the
+  structured-output schema-instruction cleanup.
+- [x] `cd apps/api && .venv/bin/pytest -q` (`217 passed`) after the
+  structured-output schema-instruction cleanup.
+- [x] `git diff --check` passed and `rg -n "<{7}|={7}|>{7}" .` returned no
+  conflict markers after the structured-output schema-instruction cleanup.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_governance_tool_audit_helpers_are_feature_owned_and_service_compatible app/tests/test_security_governance.py::test_tool_denial_is_audited_and_persisted_proposals_are_redacted app/tests/test_tool_boundary.py::test_research_plan_proposal_is_audited_and_approvable -q`
+  (`3 passed`) after moving governed-tool audit/proposal payload shaping.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/governance_tools/audit.py app/services/tool_service.py app/tests/test_feature_package_boundaries.py`
+  passed after the governed-tool audit/proposal payload slice.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/governance_tools/audit.py app/services/tool_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the governed-tool audit/proposal payload slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_tool_boundary.py app/tests/test_mcp_adapter.py app/tests/test_security_governance.py app/tests/test_feature_package_boundaries.py -q`
+  (`59 passed`) after the governed-tool audit/proposal payload slice.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the
+  governed-tool audit/proposal payload slice.
+- [x] `cd apps/api && .venv/bin/pytest -q` (`218 passed`) after the
+  governed-tool audit/proposal payload slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_guide_action_helpers_are_feature_owned_and_service_compatible app/tests/test_guide.py app/tests/test_nudges.py -q`
+  (`21 passed`) after moving guide action-card DTO shaping.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/guide/actions.py app/services/guide_service.py app/tests/test_feature_package_boundaries.py`
+  passed after the guide action-card feature slice.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/guide/actions.py app/services/guide_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the guide action-card feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_guide.py app/tests/test_nudges.py app/tests/test_context_compiler.py app/tests/test_feature_package_boundaries.py -q`
+  (`51 passed`) after the guide action-card feature slice.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the guide
+  action-card feature slice.
+- [x] `cd apps/api && .venv/bin/pytest -q` (`219 passed`) after the guide
+  action-card feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_guide_action_helpers_are_feature_owned_and_service_compatible app/tests/test_nudges.py app/tests/test_guide.py -q`
+  (`21 passed`) after moving nudge action-card shaping behind
+  `app.features.guide.actions.nudge_action`.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/guide/actions.py app/services/nudge_service.py app/tests/test_feature_package_boundaries.py`
+  passed after the nudge action-card extraction.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/guide/actions.py app/services/nudge_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the nudge action-card extraction.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_guide.py app/tests/test_nudges.py app/tests/test_context_compiler.py app/tests/test_contract_shapes.py app/tests/test_feature_package_boundaries.py -q`
+  (`53 passed`) after the nudge action-card extraction.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the nudge
+  action-card extraction.
+- [x] `git diff --check` passed after the nudge action-card extraction; conflict
+  marker scan returned no matches.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_guide_recommendation_helpers_preserve_stage_copy_and_followups -q`
+  (`1 passed`) before moving guide recommendation copy.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_guide_recommendation_helpers_are_feature_owned_and_service_compatible app/tests/test_guide.py::test_guide_context_and_recommendation_are_stage_aware app/tests/test_guide.py::test_guide_action_router_uses_specific_commands_and_aliases app/tests/test_guide.py::test_guide_chat_is_project_scoped_and_rejects_generic_questions app/tests/test_guide.py::test_guide_explains_idea_story_wedge_and_next_proof -q`
+  (`5 passed`) after moving guide recommendation copy.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/guide/recommendations.py app/services/guide_service.py app/tests/test_feature_package_boundaries.py`
+  passed after the guide recommendation feature slice.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/guide/recommendations.py app/services/guide_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the guide recommendation feature slice.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the guide
+  recommendation feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py app/tests/test_guide.py app/tests/test_nudges.py -q`
+  (`51 passed`) after the guide recommendation feature slice.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/guide app/services/guide_service.py app/tests/test_feature_package_boundaries.py`
+  passed after the guide recommendation feature slice.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/guide app/services/guide_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the guide recommendation feature slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_eval_observability_metric_helpers_are_feature_owned_and_service_compatible app/tests/test_eval_reports.py -q`
+  (`8 passed`) after moving audit-event denial counting into
+  `app.features.evals.observability_metrics`.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/evals/observability_metrics.py app/services/eval_report_service.py app/tests/test_feature_package_boundaries.py`
+  passed after the audit-event denial counting extraction.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/evals/observability_metrics.py app/services/eval_report_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the audit-event denial counting extraction.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the
+  audit-event denial counting extraction.
+- [x] `git diff --check` passed after the audit-event denial counting
+  extraction; conflict marker scan returned no matches.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py::test_context_pack_orders_items_by_priority_before_budgeting app/tests/test_context_compiler.py::test_context_pack_records_max_items_exceeded_after_thirty_items -q`
+  (`2 passed`) before moving context packing helpers.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py::test_context_profiles_pin_policy_metadata_budget_and_drop_reasons app/tests/test_context_compiler.py::test_context_compiler_tracks_dropped_items_under_budget app/tests/test_context_compiler.py::test_context_pack_orders_items_by_priority_before_budgeting app/tests/test_context_compiler.py::test_context_pack_records_max_items_exceeded_after_thirty_items app/tests/test_feature_package_boundaries.py::test_memory_context_pack_helpers_are_feature_owned_and_service_compatible -q`
+  (`5 passed`) after moving context packing helpers.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/context/packing.py app/services/context_service.py app/tests/test_context_compiler.py app/tests/test_feature_package_boundaries.py`
+  passed after the context packing extraction.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py app/tests/test_memory_service.py app/tests/test_contract_shapes.py app/tests/test_feature_package_boundaries.py -q`
+  (`41 passed`) after the context packing extraction.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/context/packing.py app/services/context_service.py app/tests/test_context_compiler.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the context packing extraction.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the context
+  packing extraction.
+- [x] `git diff --check` passed after the context packing extraction; conflict
+  marker scan returned no matches.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_memory_service.py::test_memory_proposals_and_inspect_endpoint -q`
+  (`1 passed`) before moving compacted-memory proposal shaping.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_memory_compaction_payload_helpers_are_feature_owned_and_service_compatible app/tests/test_memory_service.py::test_memory_proposals_and_inspect_endpoint -q`
+  (`2 passed`) after moving compacted-memory proposal shaping.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/memory/compaction.py app/services/memory_service.py app/tests/test_memory_service.py app/tests/test_feature_package_boundaries.py`
+  passed after the memory compaction extraction.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py app/tests/test_memory_service.py app/tests/test_contract_shapes.py app/tests/test_feature_package_boundaries.py -q`
+  (`42 passed`) after the memory compaction extraction.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/memory/compaction.py app/services/memory_service.py app/tests/test_memory_service.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the memory compaction extraction.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the memory
+  compaction extraction.
+- [x] `git diff --check` passed after the memory compaction extraction; conflict
+  marker scan returned no matches.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py::test_context_evidence_items_preserve_citation_metadata_and_safety_flags app/tests/test_context_compiler.py::test_context_evidence_result_items_support_dict_and_object_inputs -q`
+  (`2 passed`) before moving context evidence item shaping.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py::test_context_evidence_items_preserve_citation_metadata_and_safety_flags app/tests/test_context_compiler.py::test_context_evidence_result_items_support_dict_and_object_inputs app/tests/test_feature_package_boundaries.py::test_context_evidence_item_helpers_are_feature_owned_and_service_compatible -q`
+  (`3 passed`) after moving context evidence item shaping.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/context/evidence_items.py app/services/context_service.py app/tests/test_context_compiler.py app/tests/test_feature_package_boundaries.py`
+  passed after the context evidence item extraction.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py app/tests/test_guide.py::test_guide_chat_attaches_grounded_retrieval_metadata_and_trace app/tests/test_agentic_research.py::test_agentic_research_runs_multi_step_rag_and_writes_reviewable_memo app/tests/test_feature_package_boundaries.py -q`
+  (`39 passed`) after the context evidence item extraction.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/context/evidence_items.py app/services/context_service.py app/tests/test_context_compiler.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the context evidence item extraction.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the context
+  evidence item extraction.
+- [x] `git diff --check` passed after the context evidence item extraction;
+  conflict marker scan returned no matches.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_mcp_protocol_helpers_are_feature_owned_and_adapter_compatible app/tests/test_mcp_adapter.py::test_mcp_jsonrpc_client_id_alias_and_redaction_are_preserved app/tests/test_mcp_adapter.py::test_mcp_read_tool_uses_existing_governance_and_audit -q`
+  (`3 passed`) after moving MCP metadata payload shaping.
+- [x] `cd apps/api && .venv/bin/ruff check app/features/mcp/protocol.py app/mcp/adapter.py app/tests/test_feature_package_boundaries.py`
+  passed after the MCP metadata payload slice.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/mcp/protocol.py app/mcp/adapter.py app/tests/test_feature_package_boundaries.py -q`
+  passed after the MCP metadata payload slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_mcp_adapter.py app/tests/test_tool_boundary.py app/tests/test_security_governance.py app/tests/test_feature_package_boundaries.py -q`
+  (`60 passed`) after the MCP metadata payload slice.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the MCP
+  metadata payload slice.
+- [x] `cd apps/api && .venv/bin/pytest -q` (`219 passed`) after the MCP metadata
+  payload slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py::test_eval_helpers_validate_typed_dto_boundaries -q`
+  (`1 passed`) after adding typed eval/report DTO boundary validation.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  (`53 passed`) after typed eval/report DTO boundary validation.
+- [x] `cd apps/api && .venv/bin/ruff check app/schemas/evals.py app/features/evals/metric_records.py app/features/evals/gate_results.py app/features/evals/report_failures.py app/features/evals/langsmith_export.py app/features/evals/observability_metrics.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py`
+  passed after typed eval/report DTO boundary validation.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/schemas/evals.py app/features/evals/metric_records.py app/features/evals/gate_results.py app/features/evals/report_failures.py app/features/evals/langsmith_export.py app/features/evals/observability_metrics.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  passed after typed eval/report DTO boundary validation.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after typed
+  eval/report DTO boundary validation.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-typed-dtos LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-security`
+  passed with warn status (`40/40`; warning gates: `mcp_contract`,
+  `security_check`) after typed eval/report DTO boundary validation.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_research_history_eval.py app/tests/test_demo_eval_workflows.py app/tests/test_feature_package_boundaries.py -q`
+  (`62 passed`) after typed eval/report DTO boundary validation.
+- [x] `python3 scripts/eval_mcp_contract.py --help` passed after typed
+  eval/report DTO boundary validation. Full MCP contract still requires
+  `--project-id` and a running API project.
+- [x] `git diff --check` passed and `rg -n "<{7}|={7}|>{7}" .` returned no
+  conflict markers after typed eval/report DTO boundary validation.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_mcp_adapter.py::test_mcp_stdio_bridge_returns_jsonrpc_error_on_http_failure -q`
+  (`1 passed`) after pinning MCP stdio bridge HTTP failure behavior.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_mcp_adapter.py app/tests/test_tool_boundary.py app/tests/test_security_governance.py app/tests/test_feature_package_boundaries.py -q`
+  (`73 passed`) after pinning MCP stdio bridge HTTP failure behavior.
+- [x] `cd apps/api && .venv/bin/ruff check app/tests/test_mcp_adapter.py`
+  passed after pinning MCP stdio bridge HTTP failure behavior.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/tests/test_mcp_adapter.py -q`
+  passed after pinning MCP stdio bridge HTTP failure behavior.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after pinning MCP
+  stdio bridge HTTP failure behavior.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py::test_eval_report_summary_shapes_status_failures_and_live_cache app/tests/test_eval_reports.py::test_eval_helpers_validate_typed_dto_boundaries -q`
+  (`2 passed`) after adding typed eval-run summary and cache diagnostic DTO
+  validation.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  (`53 passed`) after adding typed eval-run summary and cache diagnostic DTO
+  validation.
+- [x] `cd apps/api && .venv/bin/ruff check app/schemas/evals.py app/features/evals/report_summary.py app/tests/test_eval_reports.py`
+  passed after adding typed eval-run summary and cache diagnostic DTO
+  validation.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/schemas/evals.py app/features/evals/report_summary.py app/tests/test_eval_reports.py -q`
+  passed after adding typed eval-run summary and cache diagnostic DTO
+  validation.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after adding typed
+  eval-run summary and cache diagnostic DTO validation.
+- [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s59-summary-dtos LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-pytest --skip-security`
+  passed with warn status (`39/39`; warning gates: `mcp_contract`,
+  `pytest_quality_slice`, `security_check`) after adding typed eval-run summary
+  and cache diagnostic DTO validation.
+- [x] `git diff --check -- README.md IMPLEMENTATION_STATUS.md IMPLEMENTATION_BRIEF.md SPRINT_51_60_TODO.md docs/BACKEND_FEATURE_PACKAGE_MAP.md apps/api/app/schemas/evals.py apps/api/app/features/evals/report_summary.py apps/api/app/tests/test_eval_reports.py`
+  passed after adding typed eval-run summary and cache diagnostic DTO
+  validation.
+- [x] `rg -n "<{7}|={7}|>{7}" README.md IMPLEMENTATION_STATUS.md IMPLEMENTATION_BRIEF.md SPRINT_51_60_TODO.md docs/BACKEND_FEATURE_PACKAGE_MAP.md apps/api/app/schemas/evals.py apps/api/app/features/evals/report_summary.py apps/api/app/tests/test_eval_reports.py`
+  returned no conflict markers after adding typed eval-run summary and cache
+  diagnostic DTO validation.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py::test_eval_report_summary_shapes_status_failures_and_live_cache app/tests/test_eval_reports.py::test_eval_report_summary_falls_back_to_gate_id_for_partial_failures app/tests/test_feature_package_boundaries.py::test_eval_report_summary_helpers_are_feature_owned -q`
+  (`3 passed`) after pinning partial gate failure summary fallback.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/features/evals/report_summary.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  passed after pinning partial gate failure summary fallback.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  (`54 passed`) after pinning partial gate failure summary fallback.
+- [x] `cd apps/api && .venv/bin/ruff check app/schemas/evals.py app/features/evals/report_summary.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py`
+  passed after pinning partial gate failure summary fallback.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/schemas/evals.py app/features/evals/report_summary.py app/tests/test_eval_reports.py app/tests/test_feature_package_boundaries.py -q`
+  passed after pinning partial gate failure summary fallback.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after pinning partial
+  gate failure summary fallback.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_ai.py -q` (`14 passed`)
+  after centralizing provider timeout/fallback metadata, timeout/cause
+  classification, token/cost defaults, and redacted trace/run metadata in
+  `app.ai.fallback_completion`.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_ai.py app/tests/test_contract_shapes.py app/tests/test_feature_package_boundaries.py -q`
+  (`54 passed`) for the provider timeout/fallback metadata edge-case slice.
+- [x] `cd apps/api && .venv/bin/ruff check app/ai/fallback_completion.py app/tests/test_ai.py`
+  passed after the provider timeout/fallback metadata slice.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/ai/fallback_completion.py app/tests/test_ai.py -q`
+  passed after the provider timeout/fallback metadata slice.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the provider
+  timeout/fallback metadata slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_validation.py app/tests/test_project_overview.py app/tests/test_contract_shapes.py app/tests/test_feature_package_boundaries.py -q`
+  (`55 passed`) after adding typed weak-evidence decision labels, route
+  contract fields, suggested action-card assertions, linked evidence checks, and
+  no-direct-mutation coverage for decision recommendation/chat.
+- [x] `cd apps/api && .venv/bin/ruff check app/schemas/validation.py app/features/decisions/recommendation.py app/services/validation_service.py app/tests/test_validation.py app/tests/test_feature_package_boundaries.py app/tests/test_contract_shapes.py`
+  passed after the weak-evidence decision-label slice.
+- [x] `cd apps/api && .venv/bin/python -m compileall app/schemas/validation.py app/features/decisions/recommendation.py app/services/validation_service.py app/tests/test_validation.py app/tests/test_feature_package_boundaries.py app/tests/test_contract_shapes.py -q`
+  passed after the weak-evidence decision-label slice.
+- [x] `python3 scripts/check_feature_boundaries.py` passed after the
+  weak-evidence decision-label slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_validation.py::test_validation_interpretation_rejection_does_not_write_memory_or_confidence app/tests/test_tool_boundary.py::test_tool_proposal_rejection_resolves_approval_and_writes_audit_event app/tests/test_memory_service.py::test_memory_proposals_and_inspect_endpoint app/tests/test_feature_package_boundaries.py::test_memory_review_payload_helpers_are_feature_owned_and_service_compatible -q`
+  (`4 passed`) after the approval rejection/proposal-audit slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_validation.py app/tests/test_tool_boundary.py app/tests/test_memory_service.py app/tests/test_contract_shapes.py app/tests/test_feature_package_boundaries.py -q`
+  (`65 passed`) after the approval rejection/proposal-audit slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py::test_context_compiler_serializes_memory_conflicts_compression_and_drops app/tests/test_context_compiler.py::test_context_profiles_pin_policy_metadata_budget_and_drop_reasons app/tests/test_memory_service.py::test_memory_context_selection_explains_exclusions_and_conflicts app/tests/test_feature_package_boundaries.py::test_memory_context_pack_helpers_are_feature_owned_and_service_compatible app/tests/test_feature_package_boundaries.py::test_memory_inspection_helpers_are_feature_owned_and_service_compatible -q`
+  (`5 passed`) after the context compression/conflict/Inspect serialization slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py app/tests/test_memory_service.py app/tests/test_contract_shapes.py app/tests/test_feature_package_boundaries.py -q`
+  (`58 passed`) after the context compression/conflict/Inspect serialization slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_contract_shapes.py -q`
+  (`4 passed`) after adding governance/tool/memory route contract parity
+  coverage.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_contract_shapes.py app/tests/test_tool_boundary.py app/tests/test_memory_service.py app/tests/test_mcp_adapter.py app/tests/test_feature_package_boundaries.py -q`
+  (`65 passed`) after the route contract parity slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_mcp_adapter.py::test_mcp_jsonrpc_proposal_matches_http_approval_and_audit_contracts -q`
+  (`1 passed`) after adding MCP proposal approval parity and redacted
+  `output_summary` coverage.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_mcp_adapter.py app/tests/test_tool_boundary.py app/tests/test_security_governance.py app/tests/test_contract_shapes.py app/tests/test_feature_package_boundaries.py -q`
+  (`80 passed`) after the MCP/stdout/HTTP approval parity slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_guide_grounding_helpers_are_feature_owned_and_service_compatible -q`
+  (`1 passed`) after moving grounded Ask Thesys draft/response DTO shaping into
+  `app.features.guide.grounding`.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_guide_eval_helpers_are_feature_owned_and_service_compatible app/tests/test_guide.py::test_guide_eval_reports_grounding_and_proposal_governance -q`
+  (`2 passed`) after moving Ask Thesys guide eval read-model shaping into
+  `app.features.guide.evals`.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_guide.py app/tests/test_nudges.py app/tests/test_context_compiler.py app/tests/test_contract_shapes.py app/tests/test_feature_package_boundaries.py -q`
+  (`75 passed`) after the guide grounding/eval shaping slice.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_feature_package_boundaries.py::test_retrieval_diagnostic_helpers_are_feature_owned_and_service_compatible app/tests/test_evidence.py::test_broad_evidence_retrieval_plans_reranks_and_assembles_context app/tests/test_retrieval_quality_eval.py -q`
+  (`3 passed`) after moving retrieval diagnostic DTO shaping into
+  `app.features.retrieval.diagnostics`.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_retrieval_quality_eval.py app/tests/test_contract_shapes.py app/tests/test_feature_package_boundaries.py -q`
+  (`61 passed`) after the retrieval diagnostics slice.
+
+Sprint 59 closeout status:
+
+- `S59-R8`, `S59-R9`, and `S59-R10` now have explicit package-map/status/TODO
+  dispositions. Context/memory policy helpers, shared duplication decisions,
+  intentionally centralized services/models, and the future cleanup backlog are
+  recorded in `docs/BACKEND_FEATURE_PACKAGE_MAP.md`.
+- The final Sprint 59 verification run is recorded in `SPRINT_51_60_TODO.md`:
+  focused R8/R9 slices passed (`70 passed, 1 warning` and `68 passed,
+  1 warning`), the full backend suite passed (`264 passed, 3 warnings`), ruff
+  and compileall passed, `python3 scripts/check_feature_boundaries.py` passed,
+  the quality gate completed with warn status (`40/40`, no failed checks), diff
+  check passed, conflict-marker scan found no matches, and generated
+  `__pycache__` directories were removed.
+- The only Sprint 59 items that should remain visible are explicit future or
+  Sprint 60 handoffs, not vague cleanup. Live MCP stdio read/proposal smoke is
+  still assigned to `S60-P4/G44-C` because it needs a live API project. Final
+  `G49-*` status rows, README navigation, code-doc/comment pass, and final
+  portfolio-claim audit belong to `S60-P10`.
+- Do not mark a carried Sprint 41-50 gap complete from an implementation sprint
+  title alone. `SPRINT_51_60_TODO.md` now requires every `G41-*` through
+  `G50-*` ID to receive a final row with status, owner item, source/doc links,
+  exact verification output or blocker, future owner when deferred, and README
+  portfolio-claim consequence.
+- Sprint 60 has ordered closeout packages (`S60-P1` through `S60-P10`) for the
+  remaining docs, browser QA, provider/audit smoke, security/deployment
+  posture, source-intelligence dispositions, post-refactor navigation, targeted
+  code docs, and honest limits. Those packages are the pickup contract for all
+  remaining gaps after Sprint 59.

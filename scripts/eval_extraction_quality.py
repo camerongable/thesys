@@ -27,11 +27,9 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 from app.core.config import get_settings  # noqa: E402
-from app.services import (  # noqa: E402
-    evidence_service,
-    multimodal_extraction_service,
-    source_provenance_service,
-)
+from app.features.evals import metric_records, provider_warnings  # noqa: E402
+from app.features.evidence import extraction, source_provenance  # noqa: E402
+from app.services import multimodal_extraction_service  # noqa: E402
 
 
 def main() -> int:
@@ -99,7 +97,7 @@ def _messy_html_readability_metric() -> dict[str, Any]:
       </body>
     </html>
     """
-    parsed = evidence_service._parse_html(  # noqa: SLF001
+    parsed = extraction.parse_html(
         html,
         content_type="text/html",
         final_url="https://example.com/pricing?utm_source=newsletter",
@@ -137,7 +135,7 @@ def _messy_html_readability_metric() -> dict[str, Any]:
 
 def _prompt_injected_html_metric() -> dict[str, Any]:
     fixture_id = "prompt_injected_html"
-    parsed = evidence_service._parse_html(  # noqa: SLF001
+    parsed = extraction.parse_html(
         """
         <html><body>
           <h1>Market signal</h1>
@@ -150,7 +148,7 @@ def _prompt_injected_html_metric() -> dict[str, Any]:
         fetched_at=datetime.now(UTC),
     )
     metadata = parsed.metadata or {}
-    quality = source_provenance_service.quality_metadata(
+    quality = source_provenance.quality_metadata(
         source_type="url",
         url="https://example.edu/research",
         source_date=None,
@@ -222,9 +220,9 @@ def _table_extraction_metric() -> dict[str, Any]:
     )
     metadata = {
         "source_snapshot_id": "pdf:fixture",
-        "pdf_page_lineage": source_provenance_service.pdf_page_lineage([text]),
+        "pdf_page_lineage": source_provenance.pdf_page_lineage([text]),
     }
-    table = source_provenance_service.table_extraction_metadata(text, metadata)[
+    table = source_provenance.table_extraction_metadata(text, metadata)[
         "table_extraction"
     ]
     passed = (
@@ -264,7 +262,7 @@ def _quote_provenance_metric() -> dict[str, Any]:
         },
         "extraction_confidence": 0.78,
     }
-    provenance = source_provenance_service.chunk_quote_provenance(
+    provenance = source_provenance.chunk_quote_provenance(
         source_metadata=metadata,
         chunk_text=text,
         char_start=0,
@@ -294,7 +292,7 @@ def _source_quality_metric() -> dict[str, Any]:
     fixture_id = "source_quality_factors"
     fresh = datetime.now(UTC)
     stale = fresh - timedelta(days=900)
-    gov_quality = source_provenance_service.quality_metadata(
+    gov_quality = source_provenance.quality_metadata(
         source_type="url",
         url="https://example.gov/report",
         source_date=fresh,
@@ -303,7 +301,7 @@ def _source_quality_metric() -> dict[str, Any]:
         credibility_score=None,
         metadata={"extraction_method": "readable_html_parser_v3", "extraction_confidence": 0.82},
     )["source_quality"]
-    stale_quality = source_provenance_service.quality_metadata(
+    stale_quality = source_provenance.quality_metadata(
         source_type="url",
         url="https://vendor.example/pricing",
         source_date=stale,
@@ -337,59 +335,16 @@ def _source_quality_metric() -> dict[str, Any]:
 
 
 def _live_provider_unavailable_metric() -> dict[str, Any]:
-    fixture_id = "live_provider_unavailable_warning"
     settings = get_settings()
-    provider = settings.multimodal_extraction_provider
-    has_key = bool(settings.litellm_api_key.strip())
-    tavily_key = bool(os.environ.get("TAVILY_API_KEY", "").strip())
-    warnings: list[str] = []
-    if provider == "litellm" and not has_key:
-        warnings.append(
-            "multimodal live provider skipped: LITELLM_API_KEY missing; "
-            "rerun with provider credentials and egress allowlist"
-        )
-    if not tavily_key:
-        warnings.append(
-            "Tavily live source QA skipped: TAVILY_API_KEY missing; "
-            "rerun with search credentials and egress allowlist"
-        )
-    if provider != "litellm":
-        warnings.append(
-            f"multimodal live provider skipped: provider is {provider}; "
-            "set MULTIMODAL_EXTRACTION_PROVIDER=litellm for live QA"
-        )
-    return _metric(
-        fixture_id,
-        "Live provider unavailable warnings",
-        True,
-        {
-            "multimodal_provider": provider,
-            "litellm_key_configured": has_key,
-            "tavily_key_configured": tavily_key,
-            "warning_count": len(warnings),
-        },
-        "missing or disabled live providers are visible warnings, not silent passes",
-        warnings=warnings,
+    return provider_warnings.live_provider_unavailable_metric(
+        multimodal_provider=settings.multimodal_extraction_provider,
+        litellm_key_configured=bool(settings.litellm_api_key.strip()),
+        tavily_key_configured=bool(os.environ.get("TAVILY_API_KEY", "").strip()),
     )
 
 
-def _metric(
-    key: str,
-    label: str,
-    passed: bool,
-    observed: Any,
-    expected: str,
-    *,
-    warnings: list[str] | None = None,
-) -> dict[str, Any]:
-    return {
-        "key": key,
-        "label": label,
-        "passed": passed,
-        "observed": observed,
-        "expected": expected,
-        "warnings": warnings or [],
-    }
+_metric = metric_records.metric
+_live_provider_warning_messages = provider_warnings.live_provider_warning_messages
 
 
 if __name__ == "__main__":

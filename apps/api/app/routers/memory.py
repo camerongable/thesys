@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session
 from app.core.auth import AuthContextDep
 from app.db.session import get_db
 from app.schemas.memory import (
+    MemoryType,
     ProjectMemoryCompactionCreate,
     ProjectMemoryConflictResolveCreate,
-    MemoryType,
     ProjectMemoryExplainRead,
     ProjectMemoryInspectRead,
     ProjectMemoryItemRead,

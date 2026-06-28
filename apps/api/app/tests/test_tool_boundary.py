@@ -4,8 +4,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import Assumption, ToolInvocation
+from app.core.config import get_settings
+from app.db.models import ApprovalRequest, Assumption, AuditEvent, ToolInvocation
+from app.services import tool_service
 from app.services.evidence_service import ParsedSource
+from app.services.identity_service import ensure_dev_identity
 
 REQUIRED_READ_TOOLS = {
     "get_project_summary",
@@ -37,6 +40,36 @@ def test_tool_registry_exposes_mcp_style_contracts(client: TestClient) -> None:
     assert tools["search_project_evidence"]["approval_policy"] == "never_required"
     assert tools["propose_memory_update"]["approval_policy"] == "always_required"
     assert tools["propose_memory_update"]["risk_level"] == "medium"
+
+
+def test_read_tools_return_declared_output_schema_keys(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session)
+    tool_inputs = {
+        "search_project_evidence": {"query": "pricing", "top_k": 3},
+        "get_research_memo": {},
+        "list_project_memory": {"limit": 5},
+    }
+
+    for definition in tool_service.list_tool_definitions():
+        if definition.access_mode != "read":
+            continue
+        result = tool_service.execute_tool(
+            db_session,
+            auth,
+            get_settings(),
+            project_id,
+            definition.name,
+            tool_inputs.get(definition.name, {}),
+            requested_by="agent",
+        )
+        expected_keys = set(definition.output_schema.get("properties", {}))
+
+        assert expected_keys, f"{definition.name} must declare output properties"
+        assert expected_keys.issubset(result.output), definition.name
 
 
 def test_research_plan_proposal_is_audited_and_approvable(
@@ -78,6 +111,72 @@ def test_research_plan_proposal_is_audited_and_approvable(
     )
     assert stored is not None
     assert stored.status == "approved"
+
+
+def test_tool_proposal_rejection_resolves_approval_and_writes_audit_event(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = _create_project(client)
+
+    plan_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Investigate customer pain before building."},
+    )
+    assert plan_response.status_code == 200
+    sprint_id = plan_response.json()["sprint"]["id"]
+
+    activity_response = client.get(
+        f"/api/projects/{project_id}/tool-invocations",
+        params={"research_sprint_id": sprint_id},
+    )
+    assert activity_response.status_code == 200
+    proposal = next(
+        item
+        for item in activity_response.json()["invocations"]
+        if item["tool_name"] == "propose_research_plan"
+    )
+    invocation_id = uuid.UUID(proposal["id"])
+    approval = db_session.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.entity_type == "tool_invocation",
+            ApprovalRequest.entity_id == invocation_id,
+        )
+    )
+    assert approval is not None
+    assert approval.status == "pending"
+    assert approval.proposed_change["tool_name"] == "propose_research_plan"
+    assert approval.proposed_change["tool_invocation_id"] == str(invocation_id)
+    assert approval.proposed_change["proposal"]["research_sprint_id"] == sprint_id
+
+    reject_response = client.post(
+        f"/api/projects/{project_id}/approvals/{approval.id}/reject"
+    )
+
+    assert reject_response.status_code == 200
+    assert reject_response.json()["approval"]["status"] == "rejected"
+    stored_invocation = db_session.scalar(
+        select(ToolInvocation).where(ToolInvocation.id == invocation_id)
+    )
+    assert stored_invocation is not None
+    assert stored_invocation.status == "rejected"
+    assert stored_invocation.approved_by_user_id is None
+    db_session.refresh(approval)
+    assert approval.status == "rejected"
+    assert approval.resolved_at is not None
+    audit_event = db_session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.event_type == "tool_invocation_denied",
+            AuditEvent.entity_type == "tool_invocation",
+            AuditEvent.entity_id == invocation_id,
+        )
+    )
+    assert audit_event is not None
+    assert audit_event.risk_level == "medium"
+    assert audit_event.event_metadata == {
+        "tool_name": "propose_research_plan",
+        "status": "rejected",
+    }
 
 
 def test_agentic_research_tools_audit_reads_and_gate_memory_updates(
@@ -149,6 +248,16 @@ def _create_project(client: TestClient) -> str:
     )
     assert project_response.status_code == 201
     return project_response.json()["id"]
+
+
+def _dev_auth(db_session: Session):
+    settings = get_settings()
+    return ensure_dev_identity(
+        db_session,
+        email=settings.dev_auth_default_email,
+        display_name=settings.dev_auth_default_name,
+        role="owner",
+    )
 
 
 def _approved_research_sprint_with_evidence(
