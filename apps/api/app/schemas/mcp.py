@@ -36,3 +36,23 @@ class MCPToolCallRead(BaseModel):
     duration_ms: int
     output: dict[str, Any]
     trace: dict[str, Any]
+
+
+class MCPJSONRPCRequest(BaseModel):
+    jsonrpc: Literal["2.0"]
+    id: str | int | None = None
+    method: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class MCPJSONRPCError(BaseModel):
+    code: int
+    message: str
+    data: dict[str, Any] | None = None
+
+
+class MCPJSONRPCResponse(BaseModel):
+    jsonrpc: Literal["2.0"] = "2.0"
+    id: str | int | None = None
+    result: dict[str, Any] | None = None
+    error: MCPJSONRPCError | None = None

@@ -209,7 +209,7 @@ Thesys is built to show the difference between a thin LLM wrapper and a durable 
 | Model gateway and deterministic fallback | Chat, embedding, reranking, and multimodal extraction paths are configurable. Local demos and tests can run without provider credentials. | LiteLLM Proxy, httpx, Ollama, OpenAI-compatible APIs, Gemini, deterministic stubs |
 | Persistent project memory | The product stores thesis versions, evidence, artifacts, claims, assumptions, validation missions, decisions, AI runs, AI steps, tool calls, approvals, and audit events instead of relying on chat history. | PostgreSQL, SQLAlchemy, Alembic |
 | Unified context engineering | Major AI workflows compile typed context packs with domain state, retrieval results, selected memory, untrusted inputs, tool output metadata, token budgets, dropped-item reasons, and workflow-specific context profiles. | ContextCompiler, Pydantic context schemas, FastAPI services, SQLAlchemy-backed memory |
-| Tool governance and MCP adapter | Project capabilities are exposed through explicit tool contracts with schemas, risk levels, access modes, approval policy, audit logging, and an MCP-shaped HTTP adapter. | Internal tool registry, MCP adapter, approval requests, RBAC, audit events |
+| Tool governance and MCP adapter | Project capabilities are exposed through explicit tool contracts with schemas, risk levels, access modes, approval policy, audit logging, legacy MCP-shaped HTTP routes, and project-scoped MCP JSON-RPC. | Internal tool registry, MCP JSON-RPC adapter, approval requests, RBAC, audit events |
 | Human-in-the-loop agents | AI workflows can propose research plans, memory updates, validation plans, and decisions, but important strategic state changes require user approval. | Tool registry, approval requests, Temporal signals, role-based project permissions |
 | Prompt-injection and ingestion safety | Retrieved content is treated as untrusted evidence, URL fetches are SSRF-guarded, uploads are validated, fetched-page injection markers are recorded, and secrets are redacted from traces. | Shared prompt rules, SSRF guards, upload validation, cited synthesis prompts, secret redaction utilities |
 | External research connectors | Source discovery can use deterministic local results or live Tavily search. Approved ingestion preserves canonical URLs, content hashes, provider/query/rank provenance, fetch timestamps, and source quality signals. | Tavily API, httpx, source discovery service, source provenance service |
@@ -254,7 +254,8 @@ Thesys is built to show the difference between a thin LLM wrapper and a durable 
 **Tool Governance and MCP**
 
 - Defines read, proposal, and write tools with schemas, risk levels, and approval policies.
-- Exposes the same governed tool boundary through `/api/mcp/tools` and `/api/mcp/projects/{project_id}/tools/{tool_name}/call`.
+- Exposes the same governed tool boundary through MCP JSON-RPC at `/api/mcp/rpc` and `/api/mcp/projects/{project_id}/rpc`.
+- Keeps compatibility routes at `/api/mcp/tools` and `/api/mcp/projects/{project_id}/tools/{tool_name}/call`.
 - Logs MCP-originated tool calls and preserves approval gates for proposal tools.
 
 **Source and Competitor Discovery**
@@ -863,7 +864,7 @@ Implemented or demonstrated:
 - unified context compiler, workflow context profiles, typed context packs,
   multiple memory types, memory proposal review, context diagnostics, and
   workflow-aware memory selection
-- MCP-shaped adapter over the governed tool registry
+- MCP JSON-RPC adapter and stdio bridge over the governed tool registry
 - AI cost accounting, provider-failure circuit checks, and local AI eval gates
 - shared service utilities, source provenance utilities, developer docs, and
   code navigation guides
@@ -872,8 +873,8 @@ Planned future work:
 
 - deeper context compression and visual diffing for older guide turns, long
   evidence sets, and historical research traces
-- real MCP server transport for external agent clients, beyond the current
-  MCP-shaped HTTP adapter
+- production hardening for remote MCP deployment, client authentication, and
+  hosted integration settings
 - true token/step streaming in Ask Thesys with cancellation and live tool events
 - production security follow-ups: rate limits, workflow concurrency limits,
   dependency/security audit scripts, production auth, and formal threat modeling
@@ -947,21 +948,39 @@ Read tools allow agents to inspect project context. Proposal tools allow agents
 to suggest changes, but final state mutation requires human approval. This
 creates a safer boundary between model reasoning and application state.
 
-The MCP adapter wraps the same governed tools through HTTP endpoints so external
-developer agents can inspect project state and propose changes without bypassing
-project permissions, approval gates, or audit logging. It is an MCP-shaped
-adapter around Thesys tools, not an ungoverned parallel tool system.
+The MCP adapter wraps the same governed tools through project-scoped JSON-RPC so
+external developer agents can inspect project state and propose changes without
+bypassing project permissions, approval gates, or audit logging. Legacy
+HTTP-shaped MCP routes remain available for simple local clients.
 
 The local API exposes:
 
 ```bash
 curl http://localhost:8000/api/tools
 curl http://localhost:8000/api/mcp/tools
+curl -X POST http://localhost:8000/api/mcp/projects/<project_id>/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"tools","method":"tools/list","params":{"includeProposals":false}}'
+curl -X POST http://localhost:8000/api/mcp/projects/<project_id>/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":"get_project_summary","arguments":{},"_meta":{"client_id":"local-agent"}}}'
 curl -X POST http://localhost:8000/api/mcp/projects/<project_id>/tools/search_project_evidence/call \
   -H "Content-Type: application/json" \
   -d '{"client_id":"local-agent","arguments":{"query":"pricing risk","mode":"hybrid","top_k":5}}'
 curl http://localhost:8000/api/projects/<project_id>/tool-invocations
 curl http://localhost:8000/api/projects/<project_id>/tool-invocations?research_sprint_id=<sprint_id>
+```
+
+For local stdio-based clients, run:
+
+```bash
+python3 scripts/mcp_stdio_server.py --api-base http://localhost:8000 --project-id <project_id>
+```
+
+The live MCP contract harness is:
+
+```bash
+python3 scripts/eval_mcp_contract.py --project-id <project_id> --json
 ```
 
 Project pages also include a secondary Tool Activity panel in the evidence

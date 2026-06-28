@@ -59,19 +59,19 @@ sprint must end with a focused commit before the next sprint begins.
 
 ## Sprint 52: Real MCP Server and External Agent Harness
 
-- [ ] Add real MCP JSON-RPC lifecycle: `initialize`, `tools/list`,
+- [x] Add real MCP JSON-RPC lifecycle: `initialize`, `tools/list`,
   `tools/call`, structured errors, request IDs, and capability negotiation.
-- [ ] Add stdio transport for local developer agents and streamable HTTP/SSE
+- [x] Add stdio transport for local developer agents and streamable HTTP/SSE
   where practical.
-- [ ] Generate MCP tool schemas from the governed internal tool registry.
-- [ ] Preserve auth, RBAC, approval gates, audit events, redaction, risk levels,
+- [x] Generate MCP tool schemas from the governed internal tool registry.
+- [x] Preserve auth, RBAC, approval gates, audit events, redaction, risk levels,
   and project/workspace scoping.
-- [ ] Add tested client configs for local Codex/IDE-style clients.
-- [ ] Add MCP eval harness for read tools and approval-gated proposal tools.
-- [ ] Add contract tests against a real MCP client or SDK.
-- [ ] Document MCP capabilities and limits.
-- [ ] Run backend MCP tests and security/governance tests.
-- [ ] Commit Sprint 52.
+- [x] Add tested client configs for local Codex/IDE-style clients.
+- [x] Add MCP eval harness for read tools and approval-gated proposal tools.
+- [x] Add contract tests against a real MCP client or SDK.
+- [x] Document MCP capabilities and limits.
+- [x] Run backend MCP tests and security/governance tests.
+- [x] Commit Sprint 52.
 
 ## Sprint 53: True Ask Thesys Streaming and Live Tool Events
 

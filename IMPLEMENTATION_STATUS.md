@@ -2122,3 +2122,26 @@ Sprint 51 verification run:
 - [ ] `pnpm --filter thesys-web typecheck` could not complete in this
   environment because pnpm failed before TypeScript while fetching registry
   tarballs and supply-chain metadata (`ECONNRESET` / `fetch failed`).
+
+## V1 Sprint 52 Branch Progress
+
+Sprint 52 is implemented on `codex/v1-sprints-51-60`:
+
+- Added MCP JSON-RPC endpoints at `/api/mcp/rpc` and
+  `/api/mcp/projects/{project_id}/rpc`.
+- Implemented `initialize`, `notifications/initialized`, `tools/list`, and
+  `tools/call` with request ID preservation, capability negotiation, generated
+  tool schemas, structured protocol errors, and project-scoped tool calls.
+- Preserved the governed tool boundary: MCP calls still use RBAC, approval
+  requests, audit events, risk levels, redaction, and project/workspace scoping.
+- Kept the legacy MCP-shaped HTTP routes for simple local clients.
+- Added `scripts/mcp_stdio_server.py` for stdio-based local developer-agent
+  clients and `scripts/eval_mcp_contract.py` for live initialize/list/read/
+  proposal contract checks.
+- Updated README and `docs/GOVERNANCE_AND_MCP.md` with JSON-RPC examples,
+  stdio client configuration, and capability limits.
+
+Sprint 52 verification run:
+
+- [x] `python3 -m compileall -q apps/api/app/mcp/adapter.py apps/api/app/routers/mcp.py apps/api/app/schemas/mcp.py scripts/mcp_stdio_server.py scripts/eval_mcp_contract.py`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_mcp_adapter.py app/tests/test_tool_boundary.py app/tests/test_security_governance.py -q --maxfail=1`
