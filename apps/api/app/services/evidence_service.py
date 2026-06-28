@@ -18,7 +18,12 @@ from sqlalchemy.orm import Session, selectinload
 from app.ai.prompts import EVIDENCE_INGESTION_PROMPT_VERSION
 from app.core.auth import AuthContext
 from app.core.config import Settings
-from app.core.security import SecurityValidationError, validate_upload, validate_url_fetch_target
+from app.core.security import (
+    SecurityValidationError,
+    validate_upload,
+    validate_url_fetch_target,
+    validate_url_response_content_type,
+)
 from app.db.models import EvidenceChunk, EvidenceSource
 from app.schemas.evidence import EvidenceNoteCreate, EvidenceUrlCreate
 from app.services import (
@@ -860,7 +865,7 @@ def _merge_metadata(
 
 def _fetch_url(settings: Settings, url: str) -> ParsedSource:
     """Fetch a URL with redirect revalidation and response-size limits."""
-    _validate_fetch_target(url)
+    _validate_fetch_target(url, settings)
     fetched_at = datetime.now(UTC)
 
     try:
@@ -871,7 +876,7 @@ def _fetch_url(settings: Settings, url: str) -> ParsedSource:
             current_url = url
             response: httpx.Response | None = None
             for redirect_count in range(settings.url_fetch_max_redirects + 1):
-                _validate_fetch_target(current_url)
+                _validate_fetch_target(current_url, settings)
                 response = client.get(current_url, follow_redirects=False)
                 if response.is_redirect:
                     if redirect_count >= settings.url_fetch_max_redirects:
@@ -891,6 +896,10 @@ def _fetch_url(settings: Settings, url: str) -> ParsedSource:
         raise EvidenceIngestionError(f"Could not fetch URL: {exc}") from exc
 
     content_type = response.headers.get("content-type", "").split(";")[0].strip().casefold()
+    try:
+        validate_url_response_content_type(content_type, settings)
+    except SecurityValidationError as exc:
+        raise EvidenceSecurityError(exc.reason) from exc
     content_length = response.headers.get("content-length")
     if content_length:
         try:
@@ -1151,9 +1160,9 @@ def _truncate(value: str, max_length: int) -> str:
     return value[:max_length]
 
 
-def _validate_fetch_target(url: str) -> None:
+def _validate_fetch_target(url: str, settings: Settings | None = None) -> None:
     try:
-        validate_url_fetch_target(url)
+        validate_url_fetch_target(url, settings)
     except SecurityValidationError as exc:
         raise EvidenceSecurityError(exc.reason) from exc
 

@@ -10,16 +10,19 @@ from app.core.config import get_settings
 from app.db.models import Base
 from app.db.session import get_db
 from app.main import app
+from app.services.security_policy_service import reset_policy_state
 
 
 @pytest.fixture(autouse=True)
 def force_llm_stub(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     monkeypatch.setenv("LLM_STUB_MODE", "always")
     get_settings.cache_clear()
+    reset_policy_state()
     try:
         yield
     finally:
         get_settings.cache_clear()
+        reset_policy_state()
 
 
 @pytest.fixture

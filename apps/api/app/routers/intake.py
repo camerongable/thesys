@@ -24,7 +24,7 @@ from app.schemas.intake import (
     StructuredIntakeRunRead,
 )
 from app.schemas.projects import ProjectRead
-from app.services import intake_service, project_service
+from app.services import intake_service, project_service, security_policy_service
 
 router = APIRouter(prefix="/api/projects/{project_id}/intake", tags=["intake"])
 investigation_router = APIRouter(prefix="/api/intake", tags=["intake"])
@@ -50,13 +50,24 @@ def analyze_intake(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> StructuredIntakeRunRead:
-    try:
-        result = intake_service.analyze_intake(db, auth, settings, project_id, payload)
-    except intake_service.IntakeWorkflowError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=public_error_detail("Structured intake analysis failed.", exc),
-        ) from exc
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="structured_intake",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        try:
+            result = intake_service.analyze_intake(db, auth, settings, project_id, payload)
+        except intake_service.IntakeWorkflowError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=public_error_detail("Structured intake analysis failed.", exc),
+            ) from exc
 
     return StructuredIntakeRunRead(
         ai_run_id=result.run.id,
@@ -81,13 +92,24 @@ def preview_conversational_investigation(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> ConversationalInvestigationPreviewRead:
-    try:
-        result = intake_service.preview_investigation(db, auth, settings, payload)
-    except intake_service.IntakeWorkflowError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=public_error_detail("Conversational investigation preview failed.", exc),
-        ) from exc
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=None,
+        workflow_type="conversational_investigation_intake",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        try:
+            result = intake_service.preview_investigation(db, auth, settings, payload)
+        except intake_service.IntakeWorkflowError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=public_error_detail("Conversational investigation preview failed.", exc),
+            ) from exc
 
     return ConversationalInvestigationPreviewRead(
         ai_run_id=result.run.id,
@@ -120,13 +142,24 @@ def answer_intake(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> StructuredIntakeRunRead:
-    try:
-        result = intake_service.answer_intake(db, auth, settings, project_id, payload)
-    except intake_service.IntakeWorkflowError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=public_error_detail("Structured intake answer processing failed.", exc),
-        ) from exc
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="structured_intake",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        try:
+            result = intake_service.answer_intake(db, auth, settings, project_id, payload)
+        except intake_service.IntakeWorkflowError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=public_error_detail("Structured intake answer processing failed.", exc),
+            ) from exc
 
     return StructuredIntakeRunRead(
         ai_run_id=result.run.id,

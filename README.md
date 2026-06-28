@@ -298,6 +298,12 @@ Tool schemas are enforced at runtime. Guard checks validate the requesting
 actor, accepted input fields, bounded payload sizes, output shape, and
 research-sprint scope before any tool logic runs.
 
+Sprint 54 adds a production-security shape around expensive AI workflows:
+per-user and per-workspace rate limits, max concurrent workflow guards, pre-call
+token/cost budget checks, provider-egress allowlists, JWT/API-key auth modes,
+stricter dev-auth isolation, URL fetch domain/port/content-type policy, and
+formal threat-model documentation.
+
 The API persists governance events and generic approval requests for research
 plans, memory updates, tool invocations, validation plans, and decisions. The
 project workspace includes a governance approval queue with pending summaries,
@@ -312,7 +318,11 @@ errors pass through secret redaction for API keys, bearer tokens, JWT-like
 tokens, sensitive key names, secret values, and emails.
 
 In local dev auth, `X-Dev-User-Role` can be set to one of `owner`, `admin`,
-`editor`, or `viewer` to exercise governance behavior.
+`editor`, or `viewer` to exercise governance behavior. Outside `AUTH_MODE=dev`,
+development auth headers are rejected. `AUTH_MODE=jwt` verifies signed bearer
+tokens, and `AUTH_MODE=api_key` verifies hashed service-account API keys for
+integration-style access. JWT key IDs, revoked JWT IDs, and revoked API-key
+hashes are configurable to model rotation and revocation behavior.
 
 ---
 
@@ -839,7 +849,7 @@ The core workflow is designed to prevent premature building by identifying the m
 This is a V1 portfolio proof-of-concept. Sprint 41-50 established the first AI
 engineering upgrade baseline; they are not treated as fully complete
 production-grade work. Sprints 51-60 are the explicit gap-closure track, and the
-current branch has implemented Sprint 51, Sprint 52, and Sprint 53.
+current branch has implemented Sprint 51, Sprint 52, Sprint 53, and Sprint 54.
 
 Implemented or demonstrated:
 
@@ -864,6 +874,9 @@ Implemented or demonstrated:
   multimodal provider boundary
 - URL/upload security guards, fetched-page prompt-injection markers, source
   quality signals, canonical URL/content-hash dedupe, and PDF page lineage
+- JWT/API-key production-auth shape, dev-auth isolation, expensive-workflow
+  rate/concurrency limits, pre-call AI budget enforcement, live-provider egress
+  allowlists, dependency/security check scripts, and a formal threat model
 - unified context compiler, workflow context profiles, typed context packs,
   multiple memory types, memory proposal review, context diagnostics, and
   workflow-aware memory selection
@@ -877,10 +890,10 @@ Gap-closure roadmap:
 - Sprint 53 is implemented on this branch: Ask Thesys now has incremental
   answer deltas/provider streaming support, live retrieval/tool/proposal events,
   cancellation persistence, timeouts, and collapsed citation drilldowns.
-- Sprint 54 closes the security gap with rate limits, workflow concurrency
+- Sprint 54 is implemented on this branch: rate limits, workflow concurrency
   limits, pre-call token/cost budget enforcement, dependency audit commands,
-  production auth, SSRF hardening, provider-egress controls, and threat
-  modeling.
+  JWT/API-key production auth, SSRF hardening, provider-egress controls, and
+  threat modeling are in place.
 - Sprint 55 closes the retrieval/citation gap with Postgres full-text search,
   BM25-like ranking documentation, diversity controls, swappable reranking,
   golden retrieval evals, and artifact-wide citation verification.

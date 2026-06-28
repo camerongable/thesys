@@ -10,6 +10,10 @@ import httpx
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings
+from app.services.security_policy_service import (
+    ProviderEgressDeniedError,
+    enforce_provider_egress_policy,
+)
 
 ChatRole = Literal["system", "user", "assistant"]
 
@@ -67,6 +71,7 @@ class LiteLLMClient:
             payload["max_tokens"] = max_tokens
 
         url = f"{self.settings.litellm_base_url.rstrip('/')}/v1/chat/completions"
+        self._enforce_egress(url)
         headers = {
             "Authorization": f"Bearer {self.settings.litellm_api_key}",
             "Content-Type": "application/json",
@@ -127,6 +132,7 @@ class LiteLLMClient:
             payload["max_tokens"] = max_tokens
 
         url = f"{self.settings.litellm_base_url.rstrip('/')}/v1/chat/completions"
+        self._enforce_egress(url)
         headers = {
             "Authorization": f"Bearer {self.settings.litellm_api_key}",
             "Content-Type": "application/json",
@@ -156,6 +162,12 @@ class LiteLLMClient:
             ) from exc
         except httpx.HTTPError as exc:
             raise LiteLLMClientError(f"LiteLLM stream failed: {exc}") from exc
+
+    def _enforce_egress(self, url: str) -> None:
+        try:
+            enforce_provider_egress_policy(self.settings, url)
+        except ProviderEgressDeniedError as exc:
+            raise LiteLLMClientError(f"LiteLLM provider egress denied: {exc}") from exc
 
 
 def _parse_cost_header(value: str | None) -> Decimal | None:

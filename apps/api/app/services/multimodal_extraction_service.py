@@ -10,6 +10,10 @@ from typing import Any
 import httpx
 
 from app.core.config import Settings
+from app.services.security_policy_service import (
+    ProviderEgressDeniedError,
+    enforce_provider_egress_policy,
+)
 
 
 class MultimodalExtractionError(RuntimeError):
@@ -102,6 +106,10 @@ def _extract_with_litellm(
         raise MultimodalExtractionError("LiteLLM multimodal extraction requires LITELLM_API_KEY.")
 
     url = f"{settings.litellm_base_url.rstrip('/')}/v1/chat/completions"
+    try:
+        enforce_provider_egress_policy(settings, url)
+    except ProviderEgressDeniedError as exc:
+        raise MultimodalExtractionError(f"LiteLLM multimodal egress denied: {exc}") from exc
     headers = {
         "Authorization": f"Bearer {settings.litellm_api_key}",
         "Content-Type": "application/json",

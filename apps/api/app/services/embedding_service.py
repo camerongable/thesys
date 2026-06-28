@@ -11,6 +11,10 @@ from typing import Any
 import httpx
 
 from app.core.config import Settings
+from app.services.security_policy_service import (
+    ProviderEgressDeniedError,
+    enforce_provider_egress_policy,
+)
 
 TOKEN_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]*")
 
@@ -74,6 +78,10 @@ def deterministic_hash_embedding(dimension: int, text: str) -> list[float]:
 def _embed_with_litellm(settings: Settings, text: str) -> list[float]:
     payload = {"model": settings.embedding_model, "input": text}
     url = f"{settings.litellm_base_url.rstrip('/')}/v1/embeddings"
+    try:
+        enforce_provider_egress_policy(settings, url)
+    except ProviderEgressDeniedError as exc:
+        raise EmbeddingProviderError(f"LiteLLM embedding egress denied: {exc}") from exc
     headers = {
         "Authorization": f"Bearer {settings.litellm_api_key}",
         "Content-Type": "application/json",

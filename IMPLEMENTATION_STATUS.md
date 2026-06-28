@@ -2205,3 +2205,54 @@ Sprint 53 verification run:
   packages and npm attestation metadata (`ECONNRESET`). The retrying process was
   stopped after several minutes, so web tests and IDE browser QA remain blocked
   until registry access is stable.
+
+## V1 Sprint 54 Branch Progress
+
+Sprint 54 is implemented on `codex/v1-sprints-51-60`:
+
+- Added production-auth shape for `AUTH_MODE=jwt` and `AUTH_MODE=api_key`.
+  JWT mode verifies HS256 bearer tokens with issuer, audience, expiry, role, and
+  workspace claims, plus active key IDs and revoked token IDs for rotation and
+  revocation behavior. API-key mode verifies SHA-256 key hashes, denies revoked
+  key hashes, and maps accepted keys to a service-account workspace membership.
+- Dev auth remains local-only: `X-Dev-User-*` headers are rejected outside
+  `AUTH_MODE=dev`.
+- Added `security_policy_service.guarded_workflow` for expensive workflow
+  policy: per-user/per-workspace rate limits, per-user/per-workspace
+  concurrency limits, pre-call token/cost budget checks, provider-egress
+  allowlist checks, and redacted audit events for denied route work.
+- Routed the policy guard through Ask Thesys, research sprint planning, Temporal
+  research starts/retries, source discovery, source candidate ingestion,
+  competitor discovery, agentic research, evidence ingestion/retrieval/
+  reembedding/reprocessing, opportunity briefs, competitor analysis,
+  assumption/risk extraction, validation planning, validation interpretation,
+  decision guidance, intake analysis, MCP JSON-RPC/tool calls, eval endpoints,
+  and AI structured-output smoke tests.
+- Added live-provider egress checks to LiteLLM chat/streaming, LiteLLM
+  embeddings, LiteLLM multimodal extraction, Tavily search, and LiteLLM health
+  probes.
+- Hardened URL fetch validation with optional domain allow/deny lists, port
+  allowlists, fetched response content-type allowlists, redirect revalidation,
+  and existing private/link-local/metadata-address protections.
+- Added `scripts/audit_dependencies.py` and `scripts/security_check.py` for
+  local/CI-friendly dependency, redaction, SSRF, auth/RBAC, MCP/tool-boundary,
+  budget, and provider-egress checks.
+- Replaced the placeholder `docs/security.md` with current security posture and
+  added `docs/THREAT_MODEL.md` covering uploads, URL fetching, DNS rebinding,
+  prompt injection, model egress, MCP/tool access, Temporal activities, object
+  storage, database multi-tenancy, auth tokens/API keys, logs/traces, and eval
+  artifacts.
+
+Sprint 54 verification run:
+
+- [x] `cd apps/api && .venv/bin/ruff check ...` on touched security/auth/policy/router/test files
+- [x] `python3 -m compileall -q` on touched API modules and security scripts
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_security_governance.py -q --maxfail=1` (`20 passed`)
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_security_governance.py app/tests/test_tool_boundary.py app/tests/test_mcp_adapter.py app/tests/test_ai.py app/tests/test_guide.py app/tests/test_research_sprints.py app/tests/test_research_discovery.py app/tests/test_opportunity_brief.py app/tests/test_competitors.py app/tests/test_validation.py app/tests/test_intake.py -q --maxfail=1`
+- [x] `cd apps/api && .venv/bin/pytest -q` (`162 passed`)
+- [x] `python3 scripts/security_check.py` (`31 passed` in the focused security slice, AI quality `10/10`, Docker Compose image inventory printed)
+- [ ] Strict dependency audits are not fully runnable in this environment:
+  `pip-audit` is not installed in the API venv and `pnpm audit --prod` hit npm
+  registry `ECONNRESET` / `fetch failed`. The non-strict security check reported
+  those issues and exited successfully after security tests and AI-quality evals
+  passed.

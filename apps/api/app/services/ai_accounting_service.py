@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -62,6 +63,41 @@ def project_ai_cost_report(
         circuit_breaker_status=_circuit_status(settings, failed_run_count),
         workflow_breakdown=_workflow_breakdown(runs),
     )
+
+
+def assert_project_budget_available(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    *,
+    estimated_tokens: int,
+    estimated_cost: Decimal,
+) -> None:
+    """Fail before provider work when a project would exceed token or cost budgets."""
+    if not settings.ai_workflow_budget_preflight_enabled:
+        return
+
+    report = project_ai_cost_report(db, auth, settings, project_id)
+    projected_tokens = report.total_tokens + max(estimated_tokens, 0)
+    projected_cost = report.total_cost + max(estimated_cost, Decimal("0"))
+    if projected_tokens > settings.ai_workflow_max_tokens:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=(
+                "AI workflow token budget would be exceeded before this request starts. "
+                f"Projected {projected_tokens} tokens, limit {settings.ai_workflow_max_tokens}."
+            ),
+        )
+    max_cost = Decimal(str(settings.ai_workflow_max_cost_usd))
+    if projected_cost > max_cost:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=(
+                "AI workflow cost budget would be exceeded before this request starts. "
+                f"Projected ${projected_cost}, limit ${max_cost}."
+            ),
+        )
 
 
 def _budget_status(settings: Settings, total_tokens: int, total_cost: Decimal) -> str:

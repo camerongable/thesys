@@ -12450,6 +12450,15 @@ Close the remaining production-security gaps before adding broader integrations.
   URL fetching, MCP tools, model egress, Temporal activities, object storage,
   and multi-tenant access.
 
+## Branch Implementation Note
+
+The `codex/v1-sprints-51-60` branch implements this sprint with a shared
+`security_policy_service`, JWT/API-key auth modes, revocation/rotation knobs,
+provider-egress checks in outbound clients, URL fetch policy hardening,
+`scripts/audit_dependencies.py`, `scripts/security_check.py`, and
+`docs/THREAT_MODEL.md`. Full OIDC/JWKS validation remains a future hosted-auth
+upgrade beyond the portfolio-project implementation.
+
 ---
 
 # V1 Sprint 55: Retrieval Quality V2 and Golden Evals

@@ -17,7 +17,7 @@ from app.schemas.evidence import (
     ReembedEvidenceRead,
     ReembedFailureRead,
 )
-from app.services import evidence_service, retrieval_service
+from app.services import evidence_service, retrieval_service, security_policy_service
 
 router = APIRouter(prefix="/api/projects/{project_id}/evidence", tags=["evidence"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -46,13 +46,25 @@ def add_url_evidence(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> EvidenceSourceRead:
-    try:
-        source = evidence_service.add_url_source(db, auth, settings, project_id, payload)
-    except evidence_service.EvidenceIngestionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="URL evidence ingestion failed.",
-        ) from exc
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="evidence_url_ingestion",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=0.5,
+            provider_urls=security_policy_service.embedding_provider_urls(settings),
+        ),
+    ):
+        try:
+            source = evidence_service.add_url_source(db, auth, settings, project_id, payload)
+        except evidence_service.EvidenceIngestionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="URL evidence ingestion failed.",
+            ) from exc
     return serialize_source(source)
 
 
@@ -64,13 +76,25 @@ def add_note_evidence(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> EvidenceSourceRead:
-    try:
-        source = evidence_service.add_note_source(db, auth, settings, project_id, payload)
-    except evidence_service.EvidenceIngestionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Note evidence ingestion failed.",
-        ) from exc
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="evidence_note_ingestion",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=0.25,
+            provider_urls=security_policy_service.embedding_provider_urls(settings),
+        ),
+    ):
+        try:
+            source = evidence_service.add_note_source(db, auth, settings, project_id, payload)
+        except evidence_service.EvidenceIngestionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Note evidence ingestion failed.",
+            ) from exc
     return serialize_source(source)
 
 
@@ -82,13 +106,28 @@ def add_file_evidence(
     settings: SettingsDep,
     file: EvidenceUploadFile,
 ) -> EvidenceSourceRead:
-    try:
-        source = evidence_service.add_file_source(db, auth, settings, project_id, file)
-    except evidence_service.EvidenceIngestionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="File evidence ingestion failed.",
-        ) from exc
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="evidence_file_ingestion",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=1.5,
+            provider_urls=(
+                security_policy_service.embedding_provider_urls(settings)
+                + security_policy_service.multimodal_provider_urls(settings)
+            ),
+        ),
+    ):
+        try:
+            source = evidence_service.add_file_source(db, auth, settings, project_id, file)
+        except evidence_service.EvidenceIngestionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="File evidence ingestion failed.",
+            ) from exc
     return serialize_source(source)
 
 
@@ -100,7 +139,22 @@ def retrieve_evidence(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> EvidenceRetrieveRead:
-    result = retrieval_service.retrieve_evidence(db, auth, settings, project_id, payload)
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="evidence_retrieval",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=0.5,
+            provider_urls=(
+                security_policy_service.embedding_provider_urls(settings)
+                + security_policy_service.llm_provider_urls(settings)
+            ),
+        ),
+    ):
+        result = retrieval_service.retrieve_evidence(db, auth, settings, project_id, payload)
     return EvidenceRetrieveRead(
         ai_run_id=result.run.id,
         ai_step_id=result.step.id,
@@ -119,15 +173,27 @@ def reembed_project_evidence(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> ReembedEvidenceRead:
-    result = evidence_service.reembed_evidence(
+    with security_policy_service.guarded_workflow(
         db,
         auth,
         settings,
-        project_id,
-        dry_run=payload.dry_run,
-        force=payload.force,
-        scope=payload.scope,
-    )
+        project_id=project_id,
+        workflow_type="evidence_reembedding",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=2.0,
+            provider_urls=security_policy_service.embedding_provider_urls(settings),
+        ),
+    ):
+        result = evidence_service.reembed_evidence(
+            db,
+            auth,
+            settings,
+            project_id,
+            dry_run=payload.dry_run,
+            force=payload.force,
+            scope=payload.scope,
+        )
     return ReembedEvidenceRead(
         dry_run=result.dry_run,
         scope=result.scope,  # type: ignore[arg-type]
@@ -170,13 +236,28 @@ def reprocess_evidence_source(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> EvidenceSourceRead:
-    try:
-        source = evidence_service.reprocess_source(db, auth, settings, project_id, source_id)
-    except evidence_service.EvidenceIngestionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Evidence source reprocessing failed.",
-        ) from exc
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="evidence_reprocessing",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=1.5,
+            provider_urls=(
+                security_policy_service.embedding_provider_urls(settings)
+                + security_policy_service.multimodal_provider_urls(settings)
+            ),
+        ),
+    ):
+        try:
+            source = evidence_service.reprocess_source(db, auth, settings, project_id, source_id)
+        except evidence_service.EvidenceIngestionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Evidence source reprocessing failed.",
+            ) from exc
     return serialize_source(source)
 
 

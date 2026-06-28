@@ -17,6 +17,37 @@ class Settings(BaseSettings):
         validation_alias="DEV_AUTH_DEFAULT_EMAIL",
     )
     dev_auth_default_name: str = Field(default="Dev User", validation_alias="DEV_AUTH_DEFAULT_NAME")
+    auth_jwt_secret: str | None = Field(default=None, validation_alias="AUTH_JWT_SECRET")
+    auth_jwt_issuer: str | None = Field(default=None, validation_alias="AUTH_JWT_ISSUER")
+    auth_jwt_audience: str | None = Field(default=None, validation_alias="AUTH_JWT_AUDIENCE")
+    auth_jwt_allowed_key_ids: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        validation_alias="AUTH_JWT_ALLOWED_KEY_IDS",
+    )
+    auth_jwt_revoked_ids: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        validation_alias="AUTH_JWT_REVOKED_IDS",
+    )
+    auth_api_key_hashes: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        validation_alias="AUTH_API_KEY_HASHES",
+    )
+    auth_revoked_api_key_hashes: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        validation_alias="AUTH_REVOKED_API_KEY_HASHES",
+    )
+    auth_service_account_email: str = Field(
+        default="service-account@thesys.local",
+        validation_alias="AUTH_SERVICE_ACCOUNT_EMAIL",
+    )
+    auth_service_account_workspace: str = Field(
+        default="Thesys Service Workspace",
+        validation_alias="AUTH_SERVICE_ACCOUNT_WORKSPACE",
+    )
+    auth_service_account_role: Literal["owner", "admin", "editor", "viewer"] = Field(
+        default="admin",
+        validation_alias="AUTH_SERVICE_ACCOUNT_ROLE",
+    )
 
     database_url: str = Field(
         default="postgresql+psycopg://thesys:thesys@localhost:5432/thesys",
@@ -66,6 +97,21 @@ class Settings(BaseSettings):
         le=100,
         validation_alias="AI_PROVIDER_FAILURE_CIRCUIT_THRESHOLD",
     )
+    ai_workflow_budget_preflight_enabled: bool = Field(
+        default=True,
+        validation_alias="AI_WORKFLOW_BUDGET_PREFLIGHT_ENABLED",
+    )
+    ai_workflow_default_estimated_tokens: int = Field(
+        default=4_000,
+        ge=1,
+        le=100_000,
+        validation_alias="AI_WORKFLOW_DEFAULT_ESTIMATED_TOKENS",
+    )
+    ai_workflow_default_estimated_cost_usd: float = Field(
+        default=0.05,
+        ge=0.0,
+        validation_alias="AI_WORKFLOW_DEFAULT_ESTIMATED_COST_USD",
+    )
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
@@ -101,6 +147,28 @@ class Settings(BaseSettings):
         ge=0,
         le=10,
         validation_alias="URL_FETCH_MAX_REDIRECTS",
+    )
+    url_fetch_allowed_ports: Annotated[list[int], NoDecode] = Field(
+        default_factory=lambda: [80, 443],
+        validation_alias="URL_FETCH_ALLOWED_PORTS",
+    )
+    url_fetch_allowed_domains: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        validation_alias="URL_FETCH_ALLOWED_DOMAINS",
+    )
+    url_fetch_denied_domains: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        validation_alias="URL_FETCH_DENIED_DOMAINS",
+    )
+    url_fetch_allowed_content_types: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [
+            "text/html",
+            "text/plain",
+            "text/markdown",
+            "application/pdf",
+            "application/xhtml+xml",
+        ],
+        validation_alias="URL_FETCH_ALLOWED_CONTENT_TYPES",
     )
     max_extracted_text_chars: int = Field(
         default=200_000,
@@ -224,6 +292,55 @@ class Settings(BaseSettings):
         default="https://smith.langchain.com",
         validation_alias="LANGSMITH_PUBLIC_URL_BASE",
     )
+    provider_egress_policy_enabled: bool = Field(
+        default=True,
+        validation_alias="PROVIDER_EGRESS_POLICY_ENABLED",
+    )
+    provider_egress_allowed_hosts: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [
+            "localhost",
+            "127.0.0.1",
+            "::1",
+            "api.openai.com",
+            "api.anthropic.com",
+            "generativelanguage.googleapis.com",
+            "api.tavily.com",
+            "api.smith.langchain.com",
+            "smith.langchain.com",
+        ],
+        validation_alias="PROVIDER_EGRESS_ALLOWED_HOSTS",
+    )
+    provider_egress_max_response_bytes: int = Field(
+        default=5_000_000,
+        ge=100_000,
+        le=50_000_000,
+        validation_alias="PROVIDER_EGRESS_MAX_RESPONSE_BYTES",
+    )
+    security_rate_limit_enabled: bool = Field(
+        default=True,
+        validation_alias="SECURITY_RATE_LIMIT_ENABLED",
+    )
+    security_rate_limit_window_seconds: int = Field(
+        default=60,
+        ge=1,
+        le=86_400,
+        validation_alias="SECURITY_RATE_LIMIT_WINDOW_SECONDS",
+    )
+    security_rate_limit_user_max_requests: int = Field(
+        default=120,
+        ge=1,
+        validation_alias="SECURITY_RATE_LIMIT_USER_MAX_REQUESTS",
+    )
+    security_rate_limit_workspace_max_requests: int = Field(
+        default=1_000,
+        ge=1,
+        validation_alias="SECURITY_RATE_LIMIT_WORKSPACE_MAX_REQUESTS",
+    )
+    security_max_concurrent_workflows: int = Field(
+        default=8,
+        ge=1,
+        validation_alias="SECURITY_MAX_CONCURRENT_WORKFLOWS",
+    )
     temporal_enabled: bool = Field(default=False, validation_alias="TEMPORAL_ENABLED")
     temporal_address: str = Field(default="localhost:7233", validation_alias="TEMPORAL_ADDRESS")
     temporal_namespace: str = Field(default="default", validation_alias="TEMPORAL_NAMESPACE")
@@ -247,6 +364,30 @@ class Settings(BaseSettings):
     def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
+
+    @field_validator(
+        "auth_api_key_hashes",
+        "auth_revoked_api_key_hashes",
+        "auth_jwt_allowed_key_ids",
+        "auth_jwt_revoked_ids",
+        "url_fetch_allowed_domains",
+        "url_fetch_denied_domains",
+        "url_fetch_allowed_content_types",
+        "provider_egress_allowed_hosts",
+        mode="before",
+    )
+    @classmethod
+    def parse_csv_list(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("url_fetch_allowed_ports", mode="before")
+    @classmethod
+    def parse_csv_int_list(cls, value: str | list[int]) -> list[int]:
+        if isinstance(value, str):
+            return [int(item.strip()) for item in value.split(",") if item.strip()]
         return value
 
     @property

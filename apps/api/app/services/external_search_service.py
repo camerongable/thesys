@@ -10,6 +10,10 @@ from urllib.parse import urlparse
 import httpx
 
 from app.core.config import Settings
+from app.services.security_policy_service import (
+    ProviderEgressDeniedError,
+    enforce_provider_egress_policy,
+)
 
 
 class ExternalSearchError(RuntimeError):
@@ -105,6 +109,12 @@ def _search_tavily(settings: Settings, queries: list[str]) -> list[ExternalSearc
     if not settings.tavily_api_key or not settings.tavily_api_key.strip():
         raise ExternalSearchError("Tavily search requires TAVILY_API_KEY.")
 
+    endpoint = "https://api.tavily.com/search"
+    try:
+        enforce_provider_egress_policy(settings, endpoint)
+    except ProviderEgressDeniedError as exc:
+        raise ExternalSearchError(f"Tavily egress denied: {exc}") from exc
+
     results: list[ExternalSearchResult] = []
     headers = {
         "Authorization": f"Bearer {settings.tavily_api_key}",
@@ -114,7 +124,7 @@ def _search_tavily(settings: Settings, queries: list[str]) -> list[ExternalSearc
         with httpx.Client(timeout=settings.external_search_timeout_seconds) as client:
             for query in queries:
                 response = client.post(
-                    "https://api.tavily.com/search",
+                    endpoint,
                     headers=headers,
                     json={
                         "query": query,

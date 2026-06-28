@@ -25,7 +25,7 @@ from app.schemas.validation import (
     ValidationResultInterpretationCreate,
     ValidationResultInterpretationRunRead,
 )
-from app.services import validation_service
+from app.services import security_policy_service, validation_service
 
 router = APIRouter(prefix="/api/projects/{project_id}/experiments", tags=["experiments"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -94,14 +94,25 @@ def interpret_validation_mission(
     settings: SettingsDep,
     payload: ValidationResultInterpretationCreate | None = None,
 ) -> ValidationResultInterpretationRunRead:
-    result = validation_service.interpret_validation_results(
+    with security_policy_service.guarded_workflow(
         db,
         auth,
         settings,
-        project_id,
-        mission_id,
-        payload,
-    )
+        project_id=project_id,
+        workflow_type="validation_result_interpretation",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        result = validation_service.interpret_validation_results(
+            db,
+            auth,
+            settings,
+            project_id,
+            mission_id,
+            payload,
+        )
     return ValidationResultInterpretationRunRead(
         ai_run_id=result.run.id,
         ai_step_id=result.step.id,
@@ -125,7 +136,25 @@ def generate_validation_plan(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> ValidationPlanGenerateRead:
-    result = validation_service.generate_validation_plan(db, auth, settings, project_id, payload)
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="validation_plan",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=1.25,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        result = validation_service.generate_validation_plan(
+            db,
+            auth,
+            settings,
+            project_id,
+            payload,
+        )
     return ValidationPlanGenerateRead(
         ai_run_id=result.run.id,
         ai_step_id=result.step.id,

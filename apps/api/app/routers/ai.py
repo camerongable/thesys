@@ -21,7 +21,7 @@ from app.schemas.ai import (
     StructuredOutputTestCreate,
     StructuredOutputTestRead,
 )
-from app.services import ai_run_service, project_service
+from app.services import ai_run_service, project_service, security_policy_service
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -85,6 +85,29 @@ def test_structured_output(
     if project_id is not None:
         project_service.get_project(db, auth, project_id)
 
+    guard = security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="structured_output_smoke_test",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=0.5,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    )
+    with guard:
+        return _run_structured_output_test(payload, db, auth, settings, project_id)
+
+
+def _run_structured_output_test(
+    payload: StructuredOutputTestCreate,
+    db: Session,
+    auth,
+    settings: Settings,
+    project_id,
+) -> StructuredOutputTestRead:
     input_summary = payload.idea.strip()[:500]
     run = ai_run_service.start_run(
         db,
@@ -191,6 +214,7 @@ def _check_litellm_reachability(settings: Settings) -> LiteLLMReachabilityStatus
     endpoint = f"{base_url}/health/liveliness"
     headers = {"Authorization": f"Bearer {settings.litellm_api_key}"}
     try:
+        security_policy_service.enforce_provider_egress_policy(settings, endpoint)
         with httpx.Client(timeout=min(settings.litellm_timeout_seconds, 3.0)) as client:
             response = client.get(endpoint, headers=headers)
         return LiteLLMReachabilityStatus(
@@ -200,7 +224,7 @@ def _check_litellm_reachability(settings: Settings) -> LiteLLMReachabilityStatus
             status_code=response.status_code,
             error=None if response.status_code < 500 else response.text[:300],
         )
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, security_policy_service.ProviderEgressDeniedError) as exc:
         return LiteLLMReachabilityStatus(
             base_url=settings.litellm_base_url,
             endpoint=endpoint,

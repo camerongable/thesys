@@ -33,7 +33,7 @@ _ALLOWED_UPLOADS: dict[str, tuple[str, set[str], set[str]]] = {
 }
 
 
-def validate_url_fetch_target(url: str) -> None:
+def validate_url_fetch_target(url: str, settings: Settings | None = None) -> None:
     """Reject URL fetch targets that could reach local or private infrastructure."""
     parsed = urlparse(url.strip())
     if parsed.scheme.casefold() not in {"http", "https"}:
@@ -44,6 +44,8 @@ def validate_url_fetch_target(url: str) -> None:
         raise SecurityValidationError("URLs with embedded credentials are not allowed.")
 
     host = parsed.hostname.strip("[]")
+    if settings is not None:
+        _validate_domain_policy(host, settings)
     # Resolve before fetching so DNS names that point at private/link-local
     # addresses cannot bypass the scheme/hostname checks.
     for ip_address in _resolve_host_addresses(host):
@@ -51,6 +53,16 @@ def validate_url_fetch_target(url: str) -> None:
             raise SecurityValidationError(
                 f"URL host resolves to a blocked network address: {ip_address}."
             )
+    if settings is not None:
+        _validate_fetch_port(parsed.port, parsed.scheme, settings)
+
+
+def validate_url_response_content_type(content_type: str | None, settings: Settings) -> None:
+    """Reject fetched response types before parsing, storage, or model processing."""
+    normalized = (content_type or "").split(";")[0].strip().casefold()
+    allowed = {item.strip().casefold() for item in settings.url_fetch_allowed_content_types}
+    if normalized and normalized not in allowed:
+        raise SecurityValidationError(f"URL response content type is not allowed: {normalized}.")
 
 
 def validate_upload(
@@ -158,3 +170,30 @@ def _validate_magic_bytes(media_type: str, body: bytes) -> None:
             body.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise SecurityValidationError("Text upload must be valid UTF-8.") from exc
+
+
+def _validate_fetch_port(port: int | None, scheme: str, settings: Settings) -> None:
+    effective_port = port or (443 if scheme.casefold() == "https" else 80)
+    if effective_port not in set(settings.url_fetch_allowed_ports):
+        raise SecurityValidationError(f"URL port is not allowed: {effective_port}.")
+
+
+def _validate_domain_policy(host: str, settings: Settings) -> None:
+    normalized = host.casefold().rstrip(".")
+    denied = [domain.casefold().rstrip(".") for domain in settings.url_fetch_denied_domains]
+    if any(_domain_matches(normalized, domain) for domain in denied):
+        raise SecurityValidationError(f"URL host is denied by policy: {normalized}.")
+
+    allowed = [domain.casefold().rstrip(".") for domain in settings.url_fetch_allowed_domains]
+    if allowed and not any(_domain_matches(normalized, domain) for domain in allowed):
+        raise SecurityValidationError(f"URL host is not allowlisted: {normalized}.")
+
+
+def _domain_matches(host: str, policy: str) -> bool:
+    if not policy:
+        return False
+    if policy.startswith("*."):
+        return host.endswith(policy[1:])
+    if policy.startswith("."):
+        return host.endswith(policy)
+    return host == policy or host.endswith(f".{policy}")

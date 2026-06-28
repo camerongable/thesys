@@ -129,44 +129,47 @@ sprint must end with a focused commit before the next sprint begins.
 
 ## Sprint 54: Security, Abuse, and Production Auth Hardening
 
-- [ ] Close Sprint 41 gaps: add real quota/concurrency protection, dependency
+- [x] Close Sprint 41 gaps: add real quota/concurrency protection, dependency
   audit commands, provider-egress controls, production auth shape, and a formal
   threat model for the concrete attack surfaces already in the repo.
-- [ ] Close the Sprint 47 pre-call budget gap: enforce token/cost budgets before
+- [x] Close the Sprint 47 pre-call budget gap: enforce token/cost budgets before
   expensive model/search/extraction work starts, not only after AI accounting.
-- [ ] Add per-workspace and per-user rate limits for expensive workflows:
+- [x] Add per-workspace and per-user rate limits for expensive workflows:
   research sprint start, source discovery, evidence ingestion/fetching,
   Ask Thesys live-provider calls, opportunity/competitor/validation/decision
   generation, MCP tool calls, and eval/report endpoints.
-- [ ] Add max concurrent workflow limits for agentic research, external search,
+- [x] Add max concurrent workflow limits for agentic research, external search,
   URL fetches, document extraction/OCR, multimodal extraction, and MCP
   proposal-generating tools.
-- [ ] Add budget preflight checks that estimate token/cost exposure from model,
+- [x] Add budget preflight checks that estimate token/cost exposure from model,
   retrieval, rerank, extraction, and search settings; deny or degrade before
   provider calls when workspace/user budgets are exhausted.
-- [ ] Add backend and frontend dependency audit scripts, with clear local
+- [x] Add backend and frontend dependency audit scripts, with clear local
   commands for Python, Node/pnpm, Docker image/dependency review where
   practical, and documented handling for known false positives.
-- [ ] Add CI-friendly `security_check` or equivalent command that runs
+- [x] Add CI-friendly `security_check` or equivalent command that runs
   dependency audits, redaction checks, SSRF tests, auth/RBAC tests,
   tool-boundary tests, and budget/egress policy tests.
-- [ ] Add formal threat model docs for uploads, URL fetching, DNS rebinding,
+- [x] Add formal threat model docs for uploads, URL fetching, DNS rebinding,
   prompt injection, model egress, tool/MCP access, Temporal activities, object
   storage, database multi-tenancy, auth tokens/API keys, logs/traces, and eval
   artifacts.
-- [ ] Add production auth path for JWT/OIDC verification, workspace membership
+- [x] Add production auth path for JWT verification, workspace membership
   enforcement, API keys, service accounts, token rotation/revocation, audit
   attribution, and stricter dev-auth isolation so dev headers cannot be used in
-  production mode.
-- [ ] Harden SSRF controls for redirect chains, DNS rebinding re-checks near
+  production mode. OIDC/JWKS is documented as the next production-auth
+  hardening step.
+- [x] Harden SSRF controls for redirect chains, DNS rebinding re-checks near
   connection time where practical, private/link-local/metadata IP blocks,
   content-type allowlists, max response size, scheme/port policy, and optional
   domain deny/allow lists.
-- [ ] Add live-provider egress allowlist, timeout, response-size, retry,
+- [x] Add live-provider egress allowlist, timeout, response-size, retry,
   redaction, denied-call audit events, and per-provider policy configuration for
   LLM, embedding, search, extraction, OCR, and multimodal providers.
-- [ ] Run security/governance tests and audit scripts.
-- [ ] Commit Sprint 54.
+- [x] Run security/governance tests and audit scripts. Strict dependency audits
+  remain environment-limited until `pip-audit` is installed and npm registry
+  access stops failing with `ECONNRESET`.
+- [x] Commit Sprint 54.
 
 ## Sprint 55: Retrieval Quality V2 and Golden Evals
 

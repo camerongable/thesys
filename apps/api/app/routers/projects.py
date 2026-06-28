@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.core.auth import AuthContextDep
+from app.core.auth import AuthContextDep, SettingsDep
 from app.db.models import Project
 from app.db.session import get_db
 from app.schemas.guide import (
@@ -36,6 +36,7 @@ from app.services import (
     nudge_service,
     project_overview_service,
     project_service,
+    security_policy_service,
     thesis_service,
     wedge_service,
 )
@@ -205,8 +206,20 @@ def generate_project_wedges(
     project_id: uuid.UUID,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> WedgeOptionListRead:
-    return wedge_service.generate_wedge_options(db, auth, project_id)
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="wedge_generation",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        return wedge_service.generate_wedge_options(db, auth, project_id)
 
 
 @router.post("/{project_id}/wedges/{wedge_id}/select", response_model=WedgeActionRead)
@@ -278,8 +291,16 @@ def recommend_project_guide_action(
     project_id: uuid.UUID,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> GuideResponseRead:
-    return guide_service.recommend(db, auth, project_id)
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="guide_recommendation",
+    ):
+        return guide_service.recommend(db, auth, project_id)
 
 
 @router.post("/{project_id}/guide/actions/{action_id}/execute", response_model=GuideActionRead)
@@ -304,8 +325,20 @@ def chat_with_project_guide(
     payload: GuideChatRequest,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> GuideChatResponseRead:
-    return guide_service.chat(db, auth, project_id, payload.message, payload.recent_turns)
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="guide_chat",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        return guide_service.chat(db, auth, project_id, payload.message, payload.recent_turns)
 
 
 @router.post("/{project_id}/guide/chat/stream")
@@ -314,16 +347,28 @@ def stream_project_guide_chat(
     payload: GuideChatRequest,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> StreamingResponse:
     def events():
-        for event, event_payload in guide_service.stream_chat_events(
+        with security_policy_service.guarded_workflow(
             db,
             auth,
-            project_id,
-            payload.message,
-            payload.recent_turns,
+            settings,
+            project_id=project_id,
+            workflow_type="guide_chat",
+            estimate=security_policy_service.merge_estimate(
+                settings,
+                provider_urls=security_policy_service.llm_provider_urls(settings),
+            ),
         ):
-            yield _sse(event, event_payload)
+            for event, event_payload in guide_service.stream_chat_events(
+                db,
+                auth,
+                project_id,
+                payload.message,
+                payload.recent_turns,
+            ):
+                yield _sse(event, event_payload)
 
     return StreamingResponse(events(), media_type="text/event-stream")
 
