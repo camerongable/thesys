@@ -1,3 +1,10 @@
+"""Generate cited opportunity-brief artifacts from project state and evidence.
+
+The service demonstrates retrieval-grounded generation: it loads the current
+project thesis, retrieves project-scoped evidence, asks the model for a typed
+brief, audits the citations, and persists an artifact version with claim links.
+"""
+
 import json
 import uuid
 from dataclasses import dataclass
@@ -43,6 +50,8 @@ from app.services import ai_run_service, project_service, retrieval_service
 
 
 class OpportunityBriefWorkflowError(RuntimeError):
+    """Raised when opportunity-brief generation fails outside expected model errors."""
+
     pass
 
 
@@ -53,6 +62,8 @@ BRIEF_MAX_TOKENS = 4000
 
 @dataclass(frozen=True)
 class OpportunityBriefResult:
+    """Generated opportunity brief plus traceability metadata for the caller."""
+
     run: AIRun
     step: AIStep
     artifact: Artifact
@@ -76,6 +87,8 @@ def list_artifacts(
     project_id: uuid.UUID,
     artifact_type: ArtifactType | None = None,
 ) -> list[Artifact]:
+    """List project artifacts, optionally filtered to one artifact type."""
+
     project_service.get_project(db, auth, project_id)
     stmt = (
         select(Artifact)
@@ -98,6 +111,8 @@ def get_artifact(
     project_id: uuid.UUID,
     artifact_id: uuid.UUID,
 ) -> Artifact:
+    """Load one project artifact with its versions, claims, and evidence links."""
+
     artifact = db.scalar(
         select(Artifact)
         .where(
@@ -122,6 +137,8 @@ def generate_opportunity_brief(
     settings: Settings,
     project_id: uuid.UUID,
 ) -> OpportunityBriefResult:
+    """Create a new evidence-grounded opportunity brief artifact version."""
+
     project = project_service.get_project(db, auth, project_id)
     run = ai_run_service.start_run(
         db,
@@ -181,6 +198,8 @@ def generate_opportunity_brief(
 
 
 def current_version(artifact: Artifact) -> ArtifactVersion | None:
+    """Return the artifact version marked current without issuing another query."""
+
     if artifact.current_version_id is None:
         return None
     return next(
@@ -190,6 +209,8 @@ def current_version(artifact: Artifact) -> ArtifactVersion | None:
 
 
 def _load_project_state_step(db: Session, run: AIRun, project: Project) -> dict[str, Any]:
+    """Capture the project context that will condition the brief prompt."""
+
     step = ai_run_service.start_step(
         db,
         run,
@@ -226,6 +247,8 @@ def _retrieve_evidence_step(
     project: Project,
     project_state: dict[str, Any],
 ):
+    """Retrieve evidence before generation so claims can be grounded and cited."""
+
     query = _brief_retrieval_query(project_state)
     payload = EvidenceRetrieveCreate(query=query, mode="hybrid", top_k=BRIEF_RETRIEVAL_TOP_K)
     step = ai_run_service.start_step(
@@ -265,6 +288,8 @@ def _generate_draft_step(
     project_state: dict[str, Any],
     retrieval_results,
 ):
+    """Ask the configured model for a Pydantic-validated opportunity brief."""
+
     messages = _brief_messages(project_state, _evidence_bundles(retrieval_results))
     step = ai_run_service.start_step(
         db,
@@ -333,6 +358,8 @@ def _citation_audit_step(
     draft: OpportunityBriefDraft,
     retrieval_results,
 ) -> OpportunityBriefDraft:
+    """Drop invalid citations and surface claims that lack retrieved support."""
+
     step = ai_run_service.start_step(
         db,
         run,
@@ -925,10 +952,13 @@ def _render_markdown_brief(project: Project, draft: OpportunityBriefDraft) -> st
     alternatives = "\n".join(f"- {item}" for item in draft.current_alternatives) or "- Unknown"
     assumptions = "\n".join(f"- {item.text}" for item in draft.assumptions) or "- None"
     risks = "\n".join(f"- {item.text}" for item in draft.risks) or "- None"
-    citations = "\n".join(
-        f"- {citation.title or citation.source_id}: {citation.quote or 'No quote captured.'}"
-        for citation in draft.citations
-    ) or "- No cited evidence available."
+    citations = (
+        "\n".join(
+            f"- {citation.title or citation.source_id}: {citation.quote or 'No quote captured.'}"
+            for citation in draft.citations
+        )
+        or "- No cited evidence available."
+    )
     unsupported = "\n".join(f"- {claim}" for claim in draft.unsupported_claims) or "- None"
     return "\n\n".join(
         [

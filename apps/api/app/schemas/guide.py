@@ -104,4 +104,7 @@ class GuideChatResponseRead(BaseModel):
     unsupported_or_missing_evidence: list[str] = Field(default_factory=list)
     used_llm: bool = False
     retrieval_diagnostics: dict[str, Any] | None = None
+    context_pack: dict[str, Any] | None = None
+    proposal_invocation_id: uuid.UUID | None = None
+    approval_request_id: uuid.UUID | None = None
     ai_run_id: uuid.UUID | None = None

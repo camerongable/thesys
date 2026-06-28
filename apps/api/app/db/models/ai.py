@@ -20,6 +20,8 @@ from app.db.models.base import Base, UUIDPrimaryKeyMixin
 
 
 class AIRun(UUIDPrimaryKeyMixin, Base):
+    """Top-level trace record for one AI or AI-adjacent workflow execution."""
+
     __tablename__ = "ai_runs"
     __table_args__ = (
         CheckConstraint(
@@ -68,6 +70,8 @@ class AIRun(UUIDPrimaryKeyMixin, Base):
 
 
 class AIStep(UUIDPrimaryKeyMixin, Base):
+    """Inspectable child step for retrieval, tool calls, model calls, or eval work."""
+
     __tablename__ = "ai_steps"
 
     ai_run_id: Mapped[uuid.UUID] = mapped_column(

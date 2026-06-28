@@ -1,3 +1,5 @@
+"""Governed project tool registry used by agents, guide chat, and MCP clients."""
+
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -25,7 +27,7 @@ from app.db.models import (
     ToolInvocation,
 )
 from app.schemas.evidence import EvidenceRetrieveCreate
-from app.services import governance_service, project_service, retrieval_service
+from app.services import governance_service, memory_service, project_service, retrieval_service
 
 ToolAccessMode = Literal["read", "write", "proposal"]
 ToolRiskLevel = Literal["low", "medium", "high"]
@@ -38,6 +40,8 @@ MAX_TOOL_ARRAY_LENGTH = 100
 
 @dataclass(frozen=True)
 class ToolDefinition:
+    """Static contract for one app-defined agent tool."""
+
     name: str
     title: str
     description: str
@@ -181,6 +185,37 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         approval_policy="never_required",
         allowed_project_roles=PROJECT_READ_ROLES,
     ),
+    "list_project_memory": ToolDefinition(
+        name="list_project_memory",
+        title="List project memory",
+        description="List typed project memory items selected for a workflow or memory type.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "memory_type": {
+                    "type": ["string", "null"],
+                    "enum": [
+                        "working",
+                        "episodic",
+                        "semantic",
+                        "project",
+                        "procedural",
+                        "preference",
+                        None,
+                    ],
+                },
+                "workflow_type": {"type": ["string", "null"], "maxLength": 120},
+                "include_stale": {"type": "boolean"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+            },
+            "additionalProperties": False,
+        },
+        output_schema={"type": "object", "properties": {"memory_items": {"type": "array"}}},
+        access_mode="read",
+        risk_level="low",
+        approval_policy="never_required",
+        allowed_project_roles=PROJECT_READ_ROLES,
+    ),
     "propose_research_plan": ToolDefinition(
         name="propose_research_plan",
         title="Propose research plan",
@@ -263,6 +298,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
 
 
 def list_tool_definitions() -> list[ToolDefinition]:
+    """Return the stable tool registry exposed to UI, agents, and MCP clients."""
     return list(TOOL_REGISTRY.values())
 
 
@@ -281,9 +317,7 @@ def list_tool_invocations(
     )
     if research_sprint_id is not None:
         stmt = stmt.where(ToolInvocation.research_sprint_id == research_sprint_id)
-    return list(
-        db.scalars(stmt.order_by(ToolInvocation.created_at.desc()).limit(min(limit, 100)))
-    )
+    return list(db.scalars(stmt.order_by(ToolInvocation.created_at.desc()).limit(min(limit, 100))))
 
 
 def execute_tool(
@@ -297,6 +331,7 @@ def execute_tool(
     research_sprint_id: uuid.UUID | None = None,
     requested_by: RequestedBy = "agent",
 ) -> ToolExecutionResult:
+    """Execute a read/write tool after schema, role, scope, and output guards."""
     definition = _definition(tool_name)
     project_service.get_project(db, auth, project_id)
     _authorize_tool_invocation(db, auth, project_id, definition)
@@ -413,6 +448,7 @@ def create_proposal(
     requested_by: RequestedBy = "agent",
     input_json: dict[str, Any] | None = None,
 ) -> ToolInvocation:
+    """Create an approval-gated proposal tool invocation without mutating state."""
     definition = _definition(tool_name)
     if definition.access_mode != "proposal":
         raise ValueError(f"{tool_name} is not a proposal tool.")
@@ -477,6 +513,7 @@ def approve_tool_invocation(
     project_id: uuid.UUID,
     invocation_id: uuid.UUID,
 ) -> ToolInvocation:
+    """Approve a pending tool proposal and resolve its associated approval record."""
     invocation = _get_invocation(db, auth, project_id, invocation_id)
     if invocation.access_mode == "read":
         raise HTTPException(
@@ -526,6 +563,7 @@ def reject_tool_invocation(
     project_id: uuid.UUID,
     invocation_id: uuid.UUID,
 ) -> ToolInvocation:
+    """Reject a pending tool proposal and preserve the denial in audit history."""
     invocation = _get_invocation(db, auth, project_id, invocation_id)
     if invocation.access_mode == "read":
         raise HTTPException(
@@ -675,6 +713,8 @@ def _run_tool(
         return _list_decisions(db, auth, project_id)
     if definition.name == "get_research_memo":
         return _get_research_memo(db, auth, project_id, tool_input, research_sprint_id)
+    if definition.name == "list_project_memory":
+        return _list_project_memory(db, auth, project_id, tool_input)
     if definition.access_mode == "proposal":
         return {"proposal": tool_input, "requires_human_approval": True}
     raise ValueError(f"Unsupported tool: {definition.name}")
@@ -970,6 +1010,34 @@ def _get_research_memo(
     return {"memo": None}
 
 
+def _list_project_memory(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    tool_input: dict[str, Any],
+) -> dict[str, Any]:
+    workflow_type = tool_input.get("workflow_type")
+    limit = int(tool_input.get("limit") or 50)
+    if workflow_type:
+        items = memory_service.select_memory_for_workflow(
+            db,
+            auth,
+            project_id,
+            workflow_type=str(workflow_type),
+            limit=limit,
+        )
+    else:
+        items = memory_service.list_memory(
+            db,
+            auth,
+            project_id,
+            memory_type=tool_input.get("memory_type"),
+            include_stale=bool(tool_input.get("include_stale")),
+            limit=limit,
+        )
+    return {"memory_items": [memory_service.serialize_memory_item(item) for item in items]}
+
+
 def _guard_tool_input(
     definition: ToolDefinition,
     tool_input: dict[str, Any],
@@ -977,6 +1045,7 @@ def _guard_tool_input(
     research_sprint_id: uuid.UUID | None,
     requested_by: RequestedBy,
 ) -> dict[str, Any]:
+    """Validate model/client input before any tool logic sees it."""
     _guard_requested_by(requested_by)
     guarded = _validate_schema_payload(
         definition.input_schema,
@@ -1191,6 +1260,7 @@ def _authorize_tool_invocation(
     project_id: uuid.UUID,
     definition: ToolDefinition,
 ) -> None:
+    """Enforce role and risk policy independently of caller type."""
     role = normalized_role(auth.role)
     if role not in definition.allowed_project_roles:
         _audit_tool_denial(db, auth, project_id, definition, "role_not_allowed")
@@ -1346,4 +1416,4 @@ def _decimal_to_float(value: Decimal | None) -> float | None:
 def _truncate(value: str | None, limit: int) -> str | None:
     if value is None:
         return None
-    return value if len(value) <= limit else f"{value[:limit - 1]}..."
+    return value if len(value) <= limit else f"{value[: limit - 1]}..."

@@ -14,6 +14,7 @@ from app.db.models import (
     AssumptionEvidenceLink,
     Claim,
     ClaimEvidenceLink,
+    ProjectMemoryItem,
     ResearchSprint,
     Risk,
 )
@@ -117,9 +118,16 @@ def test_agentic_research_runs_multi_step_rag_and_writes_reviewable_memo(
     )
     retrieval_diagnostics = body["version"]["structured_content"]["retrieval_diagnostics"]
     retrieval_context = body["version"]["structured_content"]["retrieval_context"]
+    context_pack = body["version"]["structured_content"]["context_pack"]
     assert retrieval_diagnostics
     assert retrieval_context["selected_count"] >= 1
     assert retrieval_context["token_count"] <= retrieval_context["token_budget"]
+    assert context_pack["workflow_type"] == "agentic_research"
+    assert context_pack["prompt"]["expected_schema"] == "AgenticResearchMemoDraft"
+    assert context_pack["policy"]["token_budget"] > 0
+    assert context_pack["available_citation_ids"]
+    assert any(item["type"] == "evidence" for item in context_pack["items"])
+    assert all("reason" in item for item in context_pack["dropped_items"])
     first_retrieval = retrieval_diagnostics[0]
     assert first_retrieval["query_plan"]["subqueries"]
     assert first_retrieval["reranker"]["provider"] == "deterministic"
@@ -218,8 +226,10 @@ def test_agentic_research_memo_can_be_approved_after_review(
     assert body["version"]["structured_content"]["memory_update_approved_by"] is not None
     assert body["version"]["structured_content"]["memory_update_summary"]["assumption_ids"]
     assert body["version"]["structured_content"]["memory_update_summary"]["risk_ids"]
+    assert body["version"]["structured_content"]["memory_update_summary"]["memory_item_ids"]
     assert db_session.scalar(select(Assumption)) is not None
     assert db_session.scalar(select(Risk)) is not None
+    assert db_session.scalar(select(ProjectMemoryItem)) is not None
     assert db_session.scalar(select(AssumptionEvidenceLink)) is not None
 
     run = db_session.scalar(select(AIRun).where(AIRun.id == uuid.UUID(body["ai_run_id"])))

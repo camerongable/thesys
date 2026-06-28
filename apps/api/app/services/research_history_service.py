@@ -1,3 +1,10 @@
+"""Research history assembly for sprint timelines.
+
+The history view is derived from durable workflow records: plans, discovered
+sources, competitor candidates, generated memos, approval requests, and sprint
+status transitions are folded into a readable timeline.
+"""
+
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -24,6 +31,8 @@ def get_project_research_history(
     project_id: uuid.UUID,
     limit: int = 10,
 ) -> ProjectResearchHistoryRead:
+    """Return recent research sprints with derived timeline events."""
+
     project_service.get_project(db, auth, project_id)
     sprints = _research_sprints(db, auth, project_id, limit)
     memo_versions = _memo_versions_by_sprint(db, auth, project_id)
@@ -48,6 +57,8 @@ def _research_sprints(
     project_id: uuid.UUID,
     limit: int,
 ) -> list[ResearchSprint]:
+    """Load research sprints with the relationships needed for timeline assembly."""
+
     return list(
         db.scalars(
             select(ResearchSprint)
@@ -71,6 +82,8 @@ def _memo_versions_by_sprint(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> dict[uuid.UUID, tuple[Artifact, ArtifactVersion]]:
+    """Map each sprint to the latest generated research memo version."""
+
     artifacts = list(
         db.scalars(
             select(Artifact)
@@ -99,6 +112,8 @@ def _sprint_history(
     sprint: ResearchSprint,
     memo_pair: tuple[Artifact, ArtifactVersion] | None,
 ) -> ResearchSprintHistoryRead:
+    """Convert one sprint and optional memo into a user-facing history record."""
+
     events: list[ResearchHistoryEventRead] = [_plan_created_event(sprint)]
     if sprint.plan.approved_at:
         events.append(_plan_approved_event(sprint))
@@ -471,6 +486,8 @@ def require_reviewable_research_memo(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> tuple[Artifact, ArtifactVersion]:
+    """Find a generated research memo that can be reviewed or approved."""
+
     memo_versions = _memo_versions_by_sprint(db, auth, project_id)
     memo_pair = memo_versions.get(sprint_id)
     if memo_pair is None:

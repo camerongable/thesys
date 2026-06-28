@@ -44,6 +44,22 @@ class Settings(BaseSettings):
         default="emergency",
         validation_alias="LLM_FALLBACK_POLICY",
     )
+    ai_workflow_max_tokens: int = Field(
+        default=100_000,
+        ge=1_000,
+        validation_alias="AI_WORKFLOW_MAX_TOKENS",
+    )
+    ai_workflow_max_cost_usd: float = Field(
+        default=10.0,
+        ge=0.0,
+        validation_alias="AI_WORKFLOW_MAX_COST_USD",
+    )
+    ai_provider_failure_circuit_threshold: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        validation_alias="AI_PROVIDER_FAILURE_CIRCUIT_THRESHOLD",
+    )
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
@@ -67,6 +83,24 @@ class Settings(BaseSettings):
     url_fetch_timeout_seconds: float = Field(
         default=15.0,
         validation_alias="URL_FETCH_TIMEOUT_SECONDS",
+    )
+    url_fetch_max_bytes: int = Field(
+        default=2_000_000,
+        ge=10_000,
+        le=20_000_000,
+        validation_alias="URL_FETCH_MAX_BYTES",
+    )
+    url_fetch_max_redirects: int = Field(
+        default=5,
+        ge=0,
+        le=10,
+        validation_alias="URL_FETCH_MAX_REDIRECTS",
+    )
+    max_extracted_text_chars: int = Field(
+        default=200_000,
+        ge=1_000,
+        le=2_000_000,
+        validation_alias="MAX_EXTRACTED_TEXT_CHARS",
     )
     embedding_model: str = Field(
         default="deterministic-hash-embedding-1536",

@@ -1,3 +1,10 @@
+"""Validation, assumption memory, experiment results, and decision support.
+
+The validation layer turns model-generated assumptions into testable missions,
+captures real-world results, uses structured LLM interpretation to propose
+project updates, and gates those updates behind approval records.
+"""
+
 import json
 import uuid
 from dataclasses import dataclass
@@ -69,11 +76,15 @@ from app.services import (
 
 
 class ValidationWorkflowError(RuntimeError):
+    """Raised when a validation workflow fails outside expected model errors."""
+
     pass
 
 
 @dataclass(frozen=True)
 class AssumptionExtractionResult:
+    """Assumptions and risks extracted from project state with AI run metadata."""
+
     run: AIRun
     step: AIStep
     assumptions: list[Assumption]
@@ -87,6 +98,8 @@ class AssumptionExtractionResult:
 
 @dataclass(frozen=True)
 class ValidationPlanResult:
+    """Generated validation plans, persisted experiments, and mission records."""
+
     run: AIRun
     step: AIStep
     artifact: Artifact
@@ -101,6 +114,8 @@ class ValidationPlanResult:
 
 @dataclass(frozen=True)
 class ExperimentResultLogResult:
+    """Logged result and the affected confidence state."""
+
     result: ExperimentResult
     experiment: Experiment
     assumption: Assumption | None
@@ -109,6 +124,8 @@ class ExperimentResultLogResult:
 
 @dataclass(frozen=True)
 class ValidationInterpretationResult:
+    """Structured interpretation of results plus any approval request it created."""
+
     run: AIRun
     step: AIStep
     mission: ValidationMissionRead
@@ -122,6 +139,8 @@ class ValidationInterpretationResult:
 
 
 def list_assumptions(db: Session, auth: AuthContext, project_id: uuid.UUID) -> list[Assumption]:
+    """List project assumptions sorted by importance and uncertainty."""
+
     project_service.get_project(db, auth, project_id)
     return _load_assumptions(db, auth, project_id)
 
@@ -133,6 +152,8 @@ def update_assumption(
     assumption_id: uuid.UUID,
     payload: AssumptionUpdate,
 ) -> Assumption:
+    """Update assumption fields and recalculate project confidence."""
+
     assumption = get_assumption(db, auth, project_id, assumption_id)
     update_data = payload.model_dump(exclude_unset=True)
     if "text" in update_data and update_data["text"] is not None:
@@ -160,6 +181,8 @@ def get_assumption(
     project_id: uuid.UUID,
     assumption_id: uuid.UUID,
 ) -> Assumption:
+    """Load a workspace-scoped assumption by project and id."""
+
     assumption = db.scalar(
         select(Assumption).where(
             Assumption.id == assumption_id,
@@ -173,6 +196,8 @@ def get_assumption(
 
 
 def list_risks(db: Session, auth: AuthContext, project_id: uuid.UUID) -> list[Risk]:
+    """List current project risks."""
+
     project_service.get_project(db, auth, project_id)
     return _load_risks(db, auth, project_id)
 
@@ -183,6 +208,8 @@ def extract_assumptions_and_risks(
     settings: Settings,
     project_id: uuid.UUID,
 ) -> AssumptionExtractionResult:
+    """Extract assumptions and risks with structured output from the project thesis."""
+
     require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
     run = ai_run_service.start_run(
@@ -337,6 +364,8 @@ def extract_assumptions_and_risks(
 
 
 def list_experiments(db: Session, auth: AuthContext, project_id: uuid.UUID) -> list[Experiment]:
+    """List validation experiments newest-first."""
+
     project_service.get_project(db, auth, project_id)
     return list(
         db.scalars(
@@ -357,6 +386,8 @@ def get_experiment(
     project_id: uuid.UUID,
     experiment_id: uuid.UUID,
 ) -> Experiment:
+    """Load one experiment scoped to the workspace and project."""
+
     experiment = db.scalar(
         select(Experiment)
         .where(
@@ -376,6 +407,8 @@ def list_validation_missions(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> list[ValidationMissionRead]:
+    """List validation missions with result counts and latest interpretations."""
+
     project_service.get_project(db, auth, project_id)
     missions = list(
         db.scalars(
@@ -399,6 +432,8 @@ def get_current_validation_mission(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> ValidationMissionRead | None:
+    """Return the most recently updated mission that is still actionable."""
+
     project_service.get_project(db, auth, project_id)
     mission = db.scalar(
         select(ValidationMission)
@@ -429,6 +464,8 @@ def start_validation_mission(
     project_id: uuid.UUID,
     mission_id: uuid.UUID,
 ) -> ValidationMissionRead:
+    """Mark a validation mission and its experiment as running."""
+
     require_permission(auth, "run_research")
     mission = _get_validation_mission(db, auth, project_id, mission_id)
     if mission.status == "planned":
@@ -460,6 +497,8 @@ def interpret_validation_mission(
     project_id: uuid.UUID,
     mission_id: uuid.UUID,
 ) -> ValidationInterpretationResult:
+    """Interpret the current mission using previously logged result notes."""
+
     return interpret_validation_results(db, auth, settings, project_id, mission_id, None)
 
 
@@ -471,6 +510,8 @@ def interpret_validation_results(
     mission_id: uuid.UUID,
     payload: ValidationResultInterpretationCreate | None,
 ) -> ValidationInterpretationResult:
+    """Turn validation notes into proposed memory updates behind approval."""
+
     require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
     mission = _get_validation_mission(db, auth, project_id, mission_id)
@@ -557,6 +598,8 @@ def interpret_validation_results(
             draft,
         )
         db.flush()
+        # Interpretation can affect strategic memory, so it creates a proposal
+        # record rather than mutating assumptions, risks, or thesis state inline.
         approval = _create_validation_interpretation_approval(db, auth, interpretation)
         interpretation.approval_request_id = approval.id
         if mission.status in {"planned", "running", "results_logged"}:
@@ -682,6 +725,8 @@ def generate_validation_plan(
     project_id: uuid.UUID,
     payload: ValidationPlanGenerateCreate,
 ) -> ValidationPlanResult:
+    """Generate testable validation missions for selected high-risk assumptions."""
+
     require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
     assumptions = _selected_assumptions(db, auth, project_id, payload)
@@ -875,6 +920,8 @@ def log_experiment_result(
     experiment_id: uuid.UUID,
     payload: ExperimentResultCreate,
 ) -> ExperimentResultLogResult:
+    """Persist field notes for an experiment and update confidence heuristics."""
+
     require_permission(auth, "run_research")
     experiment = get_experiment(db, auth, project_id, experiment_id)
     delta = _result_delta(payload)
@@ -932,6 +979,8 @@ def log_experiment_result(
 
 
 def list_decisions(db: Session, auth: AuthContext, project_id: uuid.UUID) -> list[Decision]:
+    """List recorded strategic decisions for a project."""
+
     project_service.get_project(db, auth, project_id)
     return list(
         db.scalars(
@@ -949,6 +998,8 @@ def get_decision(
     project_id: uuid.UUID,
     decision_id: uuid.UUID,
 ) -> Decision:
+    """Load one recorded decision and its linked evidence entities."""
+
     decision = db.scalar(
         select(Decision)
         .where(
@@ -969,6 +1020,8 @@ def create_decision(
     project_id: uuid.UUID,
     payload: DecisionCreate,
 ) -> Decision:
+    """Record a user decision with validated links to evidence and experiments."""
+
     require_permission(auth, "record_decision")
     project_service.get_project(db, auth, project_id)
     links = _validated_decision_links(db, auth, project_id, payload)
@@ -1010,6 +1063,8 @@ def get_decision_recommendation(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> DecisionRecommendationRead:
+    """Compute deterministic decision guidance from assumptions, results, and evidence."""
+
     project_service.get_project(db, auth, project_id)
     assumptions = _load_assumptions(db, auth, project_id)
     risks = _load_risks(db, auth, project_id)
@@ -1072,6 +1127,8 @@ def chat_decision_coach(
     project_id: uuid.UUID,
     message: str,
 ) -> DecisionCoachChatRead:
+    """Return a bounded decision-coach answer over the deterministic recommendation."""
+
     recommendation = get_decision_recommendation(db, auth, project_id)
     normalized = message.casefold()
     missing = _format_bullets(recommendation.missing_evidence)
@@ -1086,10 +1143,7 @@ def chat_decision_coach(
                 f"supported. Supporting evidence: {supporting}"
             )
         else:
-            answer = (
-                "Do not proceed yet. "
-                f"{recommendation.rationale} Missing proof: {missing}"
-            )
+            answer = f"Do not proceed yet. {recommendation.rationale} Missing proof: {missing}"
     elif "pivot" in normalized:
         answer = (
             "A pivot is warranted when the validation signal weakens the current wedge "
@@ -1228,8 +1282,7 @@ def _decision_recommendation_value(
     if any(experiment.results for experiment in experiments):
         return "continue_research"
     if any(
-        assumption.status == "invalidated" and assumption.kill_risk
-        for assumption in assumptions
+        assumption.status == "invalidated" and assumption.kill_risk for assumption in assumptions
     ):
         return "pivot"
     return "continue_research"
@@ -1386,8 +1439,7 @@ def _suggested_decision_record(
         risks=risks,
     )
     expected_outcome = (
-        f"{_decision_expected_outcome(recommendation)}\n\n"
-        f"Revisit trigger: {revisit_trigger}"
+        f"{_decision_expected_outcome(recommendation)}\n\nRevisit trigger: {revisit_trigger}"
     )
     return SuggestedDecisionRecordRead(
         decision_type=decision_type,
@@ -1527,8 +1579,7 @@ def _decision_revisit_trigger(
         return "Revisit if pilot users do not activate, pay, or switch as expected."
     if recommendation == "pivot":
         return (
-            "Revisit after a new wedge has a cleaner pain, urgency, or "
-            "willingness-to-pay signal."
+            "Revisit after a new wedge has a cleaner pain, urgency, or willingness-to-pay signal."
         )
     if recommendation == "pause":
         return "Revisit only when new evidence changes the biggest unknown."
@@ -1711,10 +1762,7 @@ def _fallback_assumption_extraction(project: Project) -> AssumptionExtractionDra
     return AssumptionExtractionDraft(
         assumptions=[
             AssumptionDraft(
-                text=(
-                    "Target users experience the problem frequently enough to seek a new "
-                    "tool."
-                ),
+                text=("Target users experience the problem frequently enough to seek a new tool."),
                 category="demand",
                 importance="critical",
                 uncertainty="high",
@@ -1759,8 +1807,7 @@ def _fallback_assumption_extraction(project: Project) -> AssumptionExtractionDra
         risks=[
             RiskDraft(
                 text=(
-                    "The current evidence base may be too thin to support confident "
-                    "prioritization."
+                    "The current evidence base may be too thin to support confident prioritization."
                 ),
                 category="evidence",
                 severity="high",
@@ -1916,8 +1963,7 @@ def _fallback_validation_plan_item(assumption: Assumption) -> ValidationPlanDraf
         assumption_text=assumption.text,
         method="customer_discovery_interviews",
         target_respondent=(
-            "People who match the target user profile and recently tried to solve this "
-            "problem."
+            "People who match the target user profile and recently tried to solve this problem."
         ),
         screener_questions=[
             "Are you part of the target customer segment for this workflow?",
@@ -2638,9 +2684,7 @@ def _mission_assets(plan: ValidationPlanDraft) -> list[dict[str, str]]:
             "type": "results_rubric",
             "title": "Result interpretation rubric",
             "content": plan.result_interpretation_rubric
-            or (
-                f"Success: {plan.success_criteria}\n\nFailure: {plan.failure_threshold}"
-            ),
+            or (f"Success: {plan.success_criteria}\n\nFailure: {plan.failure_threshold}"),
         },
     ]
 

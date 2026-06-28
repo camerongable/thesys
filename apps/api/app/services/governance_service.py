@@ -1,3 +1,5 @@
+"""Audit and approval services for human-in-the-loop AI workflows."""
+
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -36,6 +38,7 @@ def record_audit_event(
     risk_level: RiskLevel | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> AuditEvent:
+    """Record a redacted audit event without committing the surrounding transaction."""
     event = AuditEvent(
         workspace_id=auth.workspace_id,
         project_id=project_id,
@@ -88,6 +91,7 @@ def create_approval_request(
     entity_type: str | None = None,
     entity_id: uuid.UUID | None = None,
 ) -> ApprovalRequest:
+    """Create or refresh a pending approval request for a proposed state change."""
     project_service.get_project(db, auth, project_id)
     existing = _pending_approval_for_entity(
         db,
@@ -149,9 +153,7 @@ def list_approval_requests(
     )
     if status_filter is not None:
         stmt = stmt.where(ApprovalRequest.status == status_filter)
-    return list(
-        db.scalars(stmt.order_by(ApprovalRequest.created_at.desc()).limit(min(limit, 100)))
-    )
+    return list(db.scalars(stmt.order_by(ApprovalRequest.created_at.desc()).limit(min(limit, 100))))
 
 
 def approve_approval_request(
@@ -160,6 +162,7 @@ def approve_approval_request(
     project_id: uuid.UUID,
     approval_id: uuid.UUID,
 ) -> ApprovalRequest:
+    """Approve a pending request and write the matching audit event."""
     approval = _get_approval_request(db, auth, project_id, approval_id)
     _require_approval_permission(auth, approval)
     _resolve_approval(db, auth, approval, "approved")
@@ -186,6 +189,7 @@ def reject_approval_request(
     project_id: uuid.UUID,
     approval_id: uuid.UUID,
 ) -> ApprovalRequest:
+    """Reject a pending request and write the matching audit event."""
     approval = _get_approval_request(db, auth, project_id, approval_id)
     _require_approval_permission(auth, approval)
     _resolve_approval(db, auth, approval, "rejected")
@@ -216,6 +220,7 @@ def resolve_pending_approvals_for_entity(
     status_value: Literal["approved", "rejected"],
     request_types: set[str] | None = None,
 ) -> list[ApprovalRequest]:
+    """Resolve any pending approvals attached to a domain entity."""
     stmt = select(ApprovalRequest).where(
         ApprovalRequest.workspace_id == auth.workspace_id,
         ApprovalRequest.project_id == project_id,

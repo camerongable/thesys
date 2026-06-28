@@ -1,3 +1,5 @@
+"""Best-effort secret redaction for logs, traces, tool payloads, and errors."""
+
 import re
 import uuid
 from datetime import date, datetime
@@ -51,16 +53,13 @@ def redact_text(
     redact_emails: bool = False,
     max_string_length: int = MAX_STRING_LENGTH,
 ) -> str:
+    """Redact secret-looking values from free-form text."""
     redacted = value
     for pattern in SECRET_VALUE_PATTERNS:
         redacted = pattern.sub("[redacted]", redacted)
     if redact_emails:
         redacted = EMAIL_PATTERN.sub("[redacted-email]", redacted)
-    return (
-        redacted
-        if len(redacted) <= max_string_length
-        else f"{redacted[:max_string_length]}..."
-    )
+    return redacted if len(redacted) <= max_string_length else f"{redacted[:max_string_length]}..."
 
 
 def redact_payload(
@@ -70,6 +69,7 @@ def redact_payload(
     redact_emails: bool = False,
     max_string_length: int = MAX_STRING_LENGTH,
 ) -> Any:
+    """Recursively redact JSON-like payloads while preserving useful telemetry."""
     if key and is_sensitive_key(key):
         return "[redacted]"
     if isinstance(value, BaseModel):
@@ -128,6 +128,7 @@ def redact_payload(
 
 
 def is_sensitive_key(key: str) -> bool:
+    """Return whether a JSON key should be fully replaced instead of inspected."""
     normalized = key.casefold().replace("-", "_")
     if normalized in NON_SECRET_TELEMETRY_KEYS:
         return False

@@ -301,11 +301,17 @@ export function GuidePanel({
   );
 }
 
+// The guide keeps the default surface short, but this metadata block exposes
+// grounding, approvals, and context-pack budgeting when an interviewer or
+// developer wants to inspect how an answer was formed.
 function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
+  const contextSummary = contextPackSummary(response.context_pack);
   const hasGrounding =
     response.used_llm ||
     response.cited_evidence_ids.length > 0 ||
     response.unsupported_or_missing_evidence.length > 0 ||
+    contextSummary !== null ||
+    response.approval_request_id !== null ||
     response.ai_run_id;
   if (!hasGrounding) {
     return null;
@@ -318,6 +324,9 @@ function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
         <span>Confidence: {formatGuideLabel(response.confidence_level)}</span>
         <span>{response.cited_evidence_ids.length} cited source(s)</span>
         {response.ai_run_id ? <span>Trace: {response.ai_run_id.slice(0, 8)}</span> : null}
+        {response.approval_request_id ? (
+          <span>Approval: {response.approval_request_id.slice(0, 8)}</span>
+        ) : null}
       </div>
       {response.unsupported_or_missing_evidence.length > 0 ? (
         <ul className="mt-2 space-y-1 text-xs leading-5 text-muted-foreground">
@@ -326,8 +335,45 @@ function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
           ))}
         </ul>
       ) : null}
+      {contextSummary ? (
+        <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none">Context pack</summary>
+          <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+            <dt>Items</dt>
+            <dd className="text-right text-foreground">{contextSummary.itemCount}</dd>
+            <dt>Dropped</dt>
+            <dd className="text-right text-foreground">{contextSummary.droppedCount}</dd>
+            <dt>Tokens</dt>
+            <dd className="text-right text-foreground">
+              {contextSummary.tokenCount}/{contextSummary.tokenBudget}
+            </dd>
+          </dl>
+        </details>
+      ) : null}
     </div>
   );
+}
+
+// Context packs are returned as generic JSON so the UI can remain decoupled
+// from backend context-engineering internals while still showing budget health.
+function contextPackSummary(contextPack: Record<string, unknown> | null) {
+  if (!contextPack) {
+    return null;
+  }
+  const items = Array.isArray(contextPack.items) ? contextPack.items.length : 0;
+  const dropped = Array.isArray(contextPack.dropped_items)
+    ? contextPack.dropped_items.length
+    : 0;
+  const policy =
+    contextPack.policy && typeof contextPack.policy === "object"
+      ? (contextPack.policy as Record<string, unknown>)
+      : {};
+  return {
+    itemCount: items,
+    droppedCount: dropped,
+    tokenCount: Number(contextPack.token_count ?? 0),
+    tokenBudget: Number(policy.token_budget ?? 0),
+  };
 }
 
 function GuideNudgeCard({

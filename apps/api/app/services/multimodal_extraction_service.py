@@ -1,3 +1,5 @@
+"""Multimodal extraction boundary for uploaded images and low-text PDFs."""
+
 import base64
 import json
 import re
@@ -16,6 +18,8 @@ class MultimodalExtractionError(RuntimeError):
 
 @dataclass(frozen=True)
 class MultimodalExtraction:
+    """Normalized extraction payload returned by deterministic or live providers."""
+
     text: str
     title: str | None
     provider: str
@@ -36,6 +40,7 @@ def extract_file(
     body: bytes,
     media_type: str,
 ) -> MultimodalExtraction:
+    """Extract visible/source text from an uploaded image or PDF."""
     if settings.multimodal_extraction_provider == "litellm":
         return _extract_with_litellm(settings, filename, content_type, body, media_type)
     return _extract_deterministic(settings, filename, content_type, body, media_type)
@@ -53,6 +58,7 @@ def _extract_deterministic(
     body: bytes,
     media_type: str,
 ) -> MultimodalExtraction:
+    """Use fixture markers so tests can cover multimodal flows without a model."""
     decoded = body.decode("utf-8", errors="ignore")
     match = re.search(r"THESYS_OCR_TEXT:\s*(.+)", decoded, flags=re.DOTALL)
     extracted = " ".join((match.group(1) if match else "").split())
@@ -91,6 +97,7 @@ def _extract_with_litellm(
     body: bytes,
     media_type: str,
 ) -> MultimodalExtraction:
+    """Call a multimodal-capable LiteLLM chat model and normalize JSON output."""
     if not settings.litellm_api_key.strip():
         raise MultimodalExtractionError("LiteLLM multimodal extraction requires LITELLM_API_KEY.")
 

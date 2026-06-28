@@ -1,3 +1,10 @@
+"""Project overview aggregation and deterministic next-action guidance.
+
+The homepage/workflow view is intentionally simple: this service collapses many
+AI artifacts, evidence records, validation results, and decisions into a stage,
+readiness summary, next action, and inspectable supporting updates.
+"""
+
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -40,6 +47,8 @@ from app.services import project_service, research_history_service
 
 @dataclass(frozen=True)
 class _OverviewCounts:
+    """Counts used to infer workflow stage without issuing repeated queries."""
+
     evidence_sources: int
     competitors: int
     analyzed_competitors: int
@@ -61,6 +70,8 @@ class _OverviewCounts:
 
 @dataclass(frozen=True)
 class _OverviewContext:
+    """Loaded project state needed to build one overview response."""
+
     project: Project
     counts: _OverviewCounts
     current_brief: Artifact | None
@@ -75,6 +86,8 @@ def get_project_overview(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> ProjectOverviewRead:
+    """Build the main project workflow summary shown on the project homepage."""
+
     context = _load_context(db, auth, project_id)
     stage = _project_stage(context)
     next_action = _next_best_action(context.project.id, stage)
@@ -95,6 +108,8 @@ def get_project_overview(
 
 
 def _serialize_project(project: Project) -> ProjectRead:
+    """Serialize a project with relationship-derived current thesis fields."""
+
     return ProjectRead.model_validate(
         {
             **project.__dict__,
@@ -110,6 +125,8 @@ def get_idea_readiness(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> IdeaReadinessRead:
+    """Return only the readiness section used by focused UI refreshes."""
+
     context = _load_context(db, auth, project_id)
     stage = _project_stage(context)
     return _idea_readiness(context, _next_best_action(context.project.id, stage).label)
@@ -121,6 +138,8 @@ def get_strategic_updates(
     project_id: uuid.UUID,
     limit: int = 10,
 ) -> list[StrategicUpdateRead]:
+    """Return recent changes that can explain why the recommendation moved."""
+
     project_service.get_project(db, auth, project_id)
     return _strategic_updates(db, auth, project_id, limit)
 
@@ -130,11 +149,15 @@ def execute_next_action(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> NextBestActionRead:
+    """Return the current primary action without rebuilding the full overview."""
+
     context = _load_context(db, auth, project_id)
     return _next_best_action(project_id, _project_stage(context))
 
 
 def _load_context(db: Session, auth: AuthContext, project_id: uuid.UUID) -> _OverviewContext:
+    """Load the small set of records needed for stage and readiness inference."""
+
     project = project_service.get_project(db, auth, project_id)
     current_brief = _current_artifact(db, auth, project_id, "opportunity_brief")
     return _OverviewContext(
@@ -149,6 +172,8 @@ def _load_context(db: Session, auth: AuthContext, project_id: uuid.UUID) -> _Ove
 
 
 def _project_stage(context: _OverviewContext) -> str:
+    """Infer the workflow stage from durable product and validation state."""
+
     project = context.project
     counts = context.counts
     latest_decision = context.latest_decision
@@ -503,9 +528,7 @@ def _idea_readiness(context: _OverviewContext, recommended_action: str) -> IdeaR
             key="validation_plan",
             label="Validation test exists",
             status=(
-                "complete"
-                if counts.validation_plans > 0 or counts.experiments > 0
-                else "missing"
+                "complete" if counts.validation_plans > 0 or counts.experiments > 0 else "missing"
             ),
             related_action="Create the first validation test",
         ),
@@ -585,10 +608,7 @@ def _current_recommendation(
         riskiest.text if riskiest is not None else "the riskiest assumption"
     )
     target = _primary_segment(context.project) or "the target user"
-    problem = _short_text(
-        _primary_problem(context.project)
-        or "the stated problem"
-    )
+    problem = _short_text(_primary_problem(context.project) or "the stated problem")
     latest_decision = context.latest_decision
     recommendations: dict[str, tuple[str, str]] = {
         "draft_idea": (
@@ -656,9 +676,9 @@ def _current_recommendation(
             ),
         ),
     }
-    recommendation, rationale = _project_specific_recommendation(context, stage) or recommendations[
-        stage
-    ]
+    recommendation, rationale = (
+        _project_specific_recommendation(context, stage) or recommendations[stage]
+    )
     return StrategicRecommendationRead(
         id=f"computed:{context.project.id}:{stage}",
         project_id=context.project.id,
@@ -817,8 +837,7 @@ def _assumption_updates(
                 title="Assumption identified",
                 summary=f"A {risk_label} was added: {assumption.text}",
                 why_it_matters=(
-                    "Assumptions are the beliefs to test before investing more build "
-                    "effort."
+                    "Assumptions are the beliefs to test before investing more build effort."
                 ),
                 related_entity_type="assumption",
                 related_entity_id=assumption.id,
@@ -1333,8 +1352,7 @@ def _weakest_evidence_area(context: _OverviewContext) -> str:
         return "Competitor evidence"
     if counts.validated_assumptions == 0:
         if any(
-            "pay" in (assumption.category or "").lower()
-            for assumption in context.key_assumptions
+            "pay" in (assumption.category or "").lower() for assumption in context.key_assumptions
         ):
             return "Willingness to pay"
         return "Validated assumptions"

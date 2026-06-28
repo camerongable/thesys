@@ -1,3 +1,5 @@
+"""Temporal Activities that call normal FastAPI service-layer code."""
+
 import asyncio
 import uuid
 from collections.abc import Callable
@@ -33,6 +35,7 @@ Payload = dict[str, Any]
 
 @activity.defn(name="create_or_load_research_plan_activity")
 async def create_or_load_research_plan_activity(payload: Payload) -> Payload:
+    """Mark the sprint as waiting for plan approval."""
     return await _run_db_activity(
         payload,
         "wait_for_research_plan_approval",
@@ -194,6 +197,8 @@ async def embed_evidence_activity(payload: Payload) -> Payload:
 
 @activity.defn(name="run_langgraph_research_activity")
 async def run_langgraph_research_activity(payload: Payload) -> Payload:
+    """Run the LangGraph research agent inside a retryable Temporal Activity."""
+
     def _run(db: Session, auth: AuthContext, settings: Any, sprint: ResearchSprint) -> Payload:
         existing = _research_memo_for_sprint(db, sprint)
         if existing is None:
@@ -319,6 +324,7 @@ async def _run_db_activity(
     step_name: str,
     fn: Callable[[Session, AuthContext, Any, ResearchSprint], Payload],
 ) -> Payload:
+    """Bridge async Temporal execution into a synchronous SQLAlchemy session."""
     return await asyncio.to_thread(_run_db_activity_sync, payload, step_name, fn)
 
 
@@ -449,9 +455,7 @@ def _research_memo_for_sprint(db: Session, sprint: ResearchSprint) -> Artifact |
     )
     for artifact in artifacts:
         versions = list(
-            db.scalars(
-                select(ArtifactVersion).where(ArtifactVersion.artifact_id == artifact.id)
-            )
+            db.scalars(select(ArtifactVersion).where(ArtifactVersion.artifact_id == artifact.id))
         )
         for version in versions:
             structured = version.structured_content

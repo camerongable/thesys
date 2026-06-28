@@ -48,3 +48,36 @@ class V1ResearchEvalRead(BaseModel):
     dataset_cases: list[ResearchEvalCaseRead]
     dataset_case_count: int
     demo_ready_case_count: int
+
+
+class GuideEvalMetricRead(BaseModel):
+    key: str
+    label: str
+    passed: bool
+    observed: int | bool | str | None = None
+    expected: str
+
+
+class GuideEvalRead(BaseModel):
+    project_id: uuid.UUID
+    passed: bool
+    score: int
+    total: int
+    metrics: list[GuideEvalMetricRead]
+
+
+class AIEvalMetricRead(BaseModel):
+    key: str
+    label: str
+    passed: bool
+    observed: int | bool | str | None = None
+    expected: str
+
+
+class AIEvalRead(BaseModel):
+    project_id: uuid.UUID
+    passed: bool
+    score: int
+    total: int
+    metrics: list[AIEvalMetricRead]
+    report: dict[str, object]

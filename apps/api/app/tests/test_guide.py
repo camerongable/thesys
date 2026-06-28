@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.ai.litellm_client import LLMCompletion
 from app.ai.structured_output import StructuredOutputResult
 from app.core.config import get_settings
-from app.db.models import AIRun, AIStep, ToolInvocation
+from app.db.models import AIRun, AIStep, ApprovalRequest, ToolInvocation
 from app.services import guide_service
 
 
@@ -232,6 +232,11 @@ def test_guide_chat_attaches_grounded_retrieval_metadata_and_trace(
     assert body["cited_evidence_ids"] == [source_response.json()["id"]]
     assert body["confidence_level"] in {"low", "medium", "high"}
     assert body["retrieval_diagnostics"]["quality_report"]["citation_coverage_proxy"] == 1
+    assert body["context_pack"]["workflow_type"] == "guide_chat"
+    assert body["context_pack"]["prompt"]["context_pack_version"] == "context-pack:v1"
+    assert body["context_pack"]["policy"]["token_budget"] > 0
+    assert body["context_pack"]["available_citation_ids"]
+    assert any(item["type"] == "evidence" for item in body["context_pack"]["items"])
 
     run = db_session.scalar(select(AIRun).where(AIRun.id == uuid.UUID(body["ai_run_id"])))
     assert run is not None
@@ -290,12 +295,9 @@ def test_guide_chat_proposal_prompts_do_not_mutate_project_state(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["recommended_action"]["id"] in {
-        "structure_idea",
-        "create_validation_plan",
-        "open_validation_mission",
-        "interpret_validation_notes",
-    }
+    assert body["recommended_action"]["id"] in {"structure_idea", "create_validation_plan"}
+    assert body["proposal_invocation_id"]
+    assert body["approval_request_id"]
     assert body["ai_run_id"]
     proposals = list(
         db_session.scalars(
@@ -305,7 +307,16 @@ def test_guide_chat_proposal_prompts_do_not_mutate_project_state(
             )
         )
     )
-    assert proposals == []
+    assert len(proposals) == 1
+    assert proposals[0].tool_name == "propose_validation_plan"
+    assert proposals[0].status == "requested"
+    approval = db_session.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.id == uuid.UUID(body["approval_request_id"])
+        )
+    )
+    assert approval is not None
+    assert approval.status == "pending"
 
 
 def test_guide_chat_research_plan_prompts_route_to_existing_action(
@@ -325,6 +336,56 @@ def test_guide_chat_research_plan_prompts_route_to_existing_action(
     body = response.json()
     assert body["recommended_action"]["id"] == "plan_research_sprint"
     assert any(action["id"] == "plan_research_sprint" for action in body["action_cards"])
+    assert body["proposal_invocation_id"]
+    assert body["approval_request_id"]
+
+
+def test_guide_chat_stream_emits_delta_and_final_metadata(client: TestClient) -> None:
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Guide stream idea"},
+    ).json()["id"]
+
+    with client.stream(
+        "POST",
+        f"/api/projects/{project_id}/guide/chat/stream",
+        json={"message": "What should I do next?"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: delta" in body
+    assert "event: final" in body
+    assert "recommended_action" in body
+
+
+def test_guide_eval_reports_grounding_and_proposal_governance(
+    client: TestClient,
+) -> None:
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Guide eval idea"},
+    ).json()["id"]
+    client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={
+            "title": "Guide eval evidence",
+            "text": "Coaches need evidence-grounded weekly check-in triage.",
+        },
+    )
+    chat = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={"message": "What evidence supports weekly check-in triage?"},
+    )
+    assert chat.status_code == 200
+
+    eval_response = client.get(f"/api/projects/{project_id}/evals/guide")
+
+    assert eval_response.status_code == 200
+    body = eval_response.json()
+    metric_keys = {metric["key"] for metric in body["metrics"]}
+    assert {"guide_runs", "guide_retrieval", "proposal_governance"} <= metric_keys
+    assert body["score"] >= 2
 
 
 def test_guide_chat_live_mode_uses_structured_grounded_answer(
@@ -349,7 +410,8 @@ def test_guide_chat_live_mode_uses_structured_grounded_answer(
 
     def fake_generate_structured_output(settings, output_schema, messages, **kwargs):
         prompt_text = "\n".join(message.content for message in messages)
-        assert "Recent bounded conversation JSON" in prompt_text
+        assert "Context pack metadata JSON" in prompt_text
+        assert "<untrusted_retrieved_content>" in prompt_text
         assert "Earlier answer about coach check-ins." in prompt_text
         parsed = output_schema(
             answer="The strongest supported point is weekly check-in triage.",
@@ -397,6 +459,8 @@ def test_guide_chat_live_mode_uses_structured_grounded_answer(
     assert body["recommended_action"]["id"] == "show_blocker_evidence"
     assert all(action["id"] != "not_a_real_action" for action in body["action_cards"])
     assert body["retrieval_diagnostics"]["query_plan"]["subqueries"]
+    assert body["context_pack"]["workflow_type"] == "guide_chat"
+    assert any(item["type"] == "conversation_turn" for item in body["context_pack"]["items"])
 
 
 def _guide_context(client: TestClient, project_id: str) -> dict:

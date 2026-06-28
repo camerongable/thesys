@@ -1,3 +1,10 @@
+"""Competitor CRUD and retrieval-grounded competitor landscape generation.
+
+Competitor analysis combines user-seeded companies, optional URL ingestion,
+project-scoped retrieval, structured LLM output, citation auditing, and artifact
+persistence so competitive claims remain inspectable.
+"""
+
 import json
 import uuid
 from dataclasses import dataclass
@@ -49,6 +56,8 @@ from app.services import ai_run_service, evidence_service, project_service, retr
 
 
 class CompetitorAnalysisError(RuntimeError):
+    """Raised when the competitor analysis workflow fails unexpectedly."""
+
     pass
 
 
@@ -59,6 +68,8 @@ COMPETITOR_MAX_TOKENS = 1000
 
 @dataclass(frozen=True)
 class CompetitorAnalysisResult:
+    """Generated competitor landscape plus model, citation, and ingestion metadata."""
+
     run: AIRun
     step: AIStep
     artifact: Artifact
@@ -76,6 +87,8 @@ class CompetitorAnalysisResult:
 
 
 def list_competitors(db: Session, auth: AuthContext, project_id: uuid.UUID) -> list[Competitor]:
+    """Return project competitors with evidence links loaded for display."""
+
     project_service.get_project(db, auth, project_id)
     return list(
         db.scalars(
@@ -96,6 +109,8 @@ def get_competitor(
     project_id: uuid.UUID,
     competitor_id: uuid.UUID,
 ) -> Competitor:
+    """Load a single competitor scoped to the current workspace and project."""
+
     competitor = db.scalar(
         select(Competitor)
         .where(
@@ -116,6 +131,8 @@ def create_competitor(
     project_id: uuid.UUID,
     payload: CompetitorCreate,
 ) -> Competitor:
+    """Create or update a user-seeded competitor before analysis."""
+
     require_permission(auth, "run_research")
     project_service.get_project(db, auth, project_id)
     competitor = _find_existing_competitor(
@@ -150,6 +167,8 @@ def update_competitor(
     competitor_id: uuid.UUID,
     payload: CompetitorUpdate,
 ) -> Competitor:
+    """Apply editable competitor profile fields from the UI."""
+
     require_permission(auth, "run_research")
     competitor = get_competitor(db, auth, project_id, competitor_id)
     update_data = payload.model_dump(exclude_unset=True)
@@ -188,6 +207,8 @@ def analyze_competitors(
     project_id: uuid.UUID,
     payload: CompetitorAnalyzeCreate,
 ) -> CompetitorAnalysisResult:
+    """Generate and persist a cited competitor landscape for the project."""
+
     require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
     run = ai_run_service.start_run(
@@ -265,6 +286,8 @@ def analyze_competitors(
 
 
 def _load_project_state_step(db: Session, run: AIRun, project: Project) -> dict[str, Any]:
+    """Snapshot the strategic context used to frame competitive analysis."""
+
     step = ai_run_service.start_step(
         db,
         run,
@@ -299,6 +322,8 @@ def _load_seeded_competitors_step(
     project: Project,
     payload: CompetitorAnalyzeCreate,
 ) -> list[Competitor]:
+    """Upsert user-provided competitors and record them as a workflow step."""
+
     step = ai_run_service.start_step(
         db,
         run,
@@ -332,6 +357,8 @@ def _ingest_competitor_sources_step(
     competitors: list[Competitor],
     ingest_urls: bool,
 ) -> int:
+    """Fetch competitor URLs into evidence when requested by the caller."""
+
     step = ai_run_service.start_step(
         db,
         run,
@@ -379,6 +406,8 @@ def _retrieve_competitor_evidence_step(
     project_state: dict[str, Any],
     competitors: list[Competitor],
 ):
+    """Retrieve project evidence relevant to the competitor landscape prompt."""
+
     query = _competitor_retrieval_query(project_state, competitors)
     payload = EvidenceRetrieveCreate(query=query, mode="hybrid", top_k=COMPETITOR_RETRIEVAL_TOP_K)
     step = ai_run_service.start_step(
@@ -418,6 +447,8 @@ def _generate_analysis_step(
     competitors: list[Competitor],
     retrieval_results,
 ):
+    """Produce typed competitor profiles and market clusters from evidence bundles."""
+
     messages = _competitor_messages(
         project_state,
         [_competitor_bundle(competitor) for competitor in competitors],
@@ -490,6 +521,8 @@ def _citation_audit_step(
     draft: CompetitorAnalysisDraft,
     retrieval_results,
 ) -> CompetitorAnalysisDraft:
+    """Validate that generated citations point at retrieved evidence chunks."""
+
     step = ai_run_service.start_step(
         db,
         run,
@@ -524,6 +557,8 @@ def _write_analysis_step(
     project: Project,
     draft: CompetitorAnalysisDraft,
 ) -> dict[str, Any]:
+    """Persist the landscape artifact, competitors, claims, and citation links."""
+
     step = ai_run_service.start_step(
         db,
         run,
@@ -981,9 +1016,10 @@ def _competitor_citations(competitor: Competitor, retrieval_results) -> list[Cit
     seen: set[tuple[str | None, str | None, str]] = set()
     for result in retrieval_results:
         metadata = result.metadata or {}
-        if metadata.get("competitor_id") != str(competitor.id) and metadata.get(
-            "competitor_name"
-        ) != competitor.name:
+        if (
+            metadata.get("competitor_id") != str(competitor.id)
+            and metadata.get("competitor_name") != competitor.name
+        ):
             continue
         quote = result.text[:260]
         key = (result.url, result.title, quote)
@@ -1215,16 +1251,20 @@ def _load_claims_for_version(db: Session, version_id: uuid.UUID) -> list[Claim]:
 
 def _render_markdown_landscape(project: Project, draft: CompetitorAnalysisDraft) -> str:
     profiles = "\n\n".join(_render_profile(profile) for profile in draft.competitors)
-    clusters = "\n".join(
-        f"- {cluster.name}: {cluster.positioning_summary}" for cluster in draft.clusters
-    ) or "- No clusters generated."
+    clusters = (
+        "\n".join(f"- {cluster.name}: {cluster.positioning_summary}" for cluster in draft.clusters)
+        or "- No clusters generated."
+    )
     gaps = "\n".join(f"- {gap}" for gap in draft.positioning_gaps) or "- None"
     wedges = "\n".join(f"- {item}" for item in draft.wedge_recommendations) or "- None"
     avoid = "\n".join(f"- {item}" for item in draft.where_not_to_compete) or "- None"
-    citations = "\n".join(
-        f"- {citation.title or citation.source_id}: {citation.quote or 'No quote captured.'}"
-        for citation in draft.citations
-    ) or "- No cited evidence available."
+    citations = (
+        "\n".join(
+            f"- {citation.title or citation.source_id}: {citation.quote or 'No quote captured.'}"
+            for citation in draft.citations
+        )
+        or "- No cited evidence available."
+    )
     unsupported = "\n".join(f"- {claim}" for claim in draft.unsupported_claims) or "- None"
     return "\n\n".join(
         [

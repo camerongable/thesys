@@ -1,3 +1,5 @@
+"""Temporal workflow definitions for durable research sprint orchestration."""
+
 from datetime import timedelta
 from typing import Any
 
@@ -36,6 +38,7 @@ class ResearchSprintWorkflow:
 
     @workflow.run
     async def run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Run the sprint workflow and wait on approval signals at state gates."""
         await _activity("create_or_load_research_plan_activity", payload)
         await _activity(
             "create_approval_request_activity",
@@ -79,6 +82,7 @@ async def _activity(
     *,
     timeout: timedelta = DEFAULT_ACTIVITY_TIMEOUT,
 ) -> dict[str, Any]:
+    """Execute an activity with the retry policy used across research sprints."""
     return await workflow.execute_activity(
         name,
         payload,

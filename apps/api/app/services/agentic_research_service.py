@@ -1,3 +1,10 @@
+"""LangGraph-powered agentic research workflow.
+
+This service owns the bounded agent loop for research sprints: gather project
+context, select retrieval/tool strategies, synthesize a cited memo, critique the
+citations, then stop for human approval before strategic memory is updated.
+"""
+
 import json
 import uuid
 from dataclasses import dataclass
@@ -53,8 +60,11 @@ from app.schemas.research import (
 )
 from app.services import (
     ai_run_service,
+    citation_verifier_service,
+    context_service,
     governance_service,
     langsmith_observability_service,
+    memory_service,
     project_service,
     retrieval_service,
     tool_service,
@@ -97,6 +107,7 @@ class AgenticResearchState(TypedDict, total=False):
     follow_up_results: list[EvidenceRetrievalResultRead]
     memo: AgenticResearchMemoDraft
     critic: dict[str, Any]
+    context_pack: dict[str, Any]
     artifact: Artifact
     version: ArtifactVersion
     claims: list[Claim]
@@ -107,6 +118,8 @@ class AgenticResearchState(TypedDict, total=False):
 
 @dataclass(frozen=True)
 class AgenticResearchResult:
+    """Return object for a research memo that is ready for human review."""
+
     run: AIRun
     step: AIStep
     artifact: Artifact
@@ -148,6 +161,7 @@ def run_agentic_research(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> AgenticResearchResult:
+    """Run a bounded agentic RAG workflow for an approved research sprint."""
     require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
     sprint = _get_sprint(db, auth, project_id, sprint_id)
@@ -306,10 +320,11 @@ def run_agentic_research(
         }
 
     def synthesizer(state: AgenticResearchState) -> AgenticResearchState:
-        memo, completion = _generate_memo(
+        memo, completion, memo_context_pack = _generate_memo(
             db,
             settings,
             run,
+            project_id,
             state["project_context"],
             state["subquestions"],
             state["selected_evidence"],
@@ -317,7 +332,7 @@ def run_agentic_research(
             trace,
         )
         completion_holder["completion"] = completion
-        return {"memo": memo}
+        return {"memo": memo, "context_pack": memo_context_pack}
 
     def critic(state: AgenticResearchState) -> AgenticResearchState:
         audited, critique = _step(
@@ -352,6 +367,7 @@ def run_agentic_research(
             state.get("context_diagnostics", {}),
             state["gaps"],
             state["critic"],
+            state["context_pack"],
             trace,
         )
         return write_result
@@ -365,12 +381,12 @@ def run_agentic_research(
         )
         started = perf_counter()
         output = {
-                "status": "waiting_for_human",
-                "message": (
-                    "Research memo is ready for review. Major project memory updates "
-                    "are intentionally paused until the user approves them."
-                ),
-                "memory_updates_written": False,
+            "status": "waiting_for_human",
+            "message": (
+                "Research memo is ready for review. Major project memory updates "
+                "are intentionally paused until the user approves them."
+            ),
+            "memory_updates_written": False,
         }
         final_step = ai_run_service.complete_step(
             db,
@@ -394,6 +410,9 @@ def run_agentic_research(
         db.commit()
         return {"final_step": final_step}
 
+    # LangGraph coordinates reasoning state only. Persistence, retrieval,
+    # approval gates, and external effects remain in app services so the agent
+    # cannot bypass project permissions or mutate memory directly.
     graph = StateGraph(AgenticResearchState)
     graph.add_node("load_research_context", load_context)
     graph.add_node("research_planner", research_planner)
@@ -748,15 +767,36 @@ def _write_approved_memory_updates(
     risks = _upsert_research_risks(db, auth, project, memo)
     _link_assumptions_to_research_evidence(db, assumptions, memo)
     _refresh_project_confidence_from_research(project, assumptions)
+    memory_items = [
+        memory_service.upsert_from_assumption(
+            db,
+            auth,
+            project.id,
+            assumption,
+            source_entity_type="artifact_version",
+            source_entity_id=version.id,
+        )
+        for assumption in assumptions
+    ]
+    memory_items.extend(
+        memory_service.upsert_from_risk(
+            db,
+            auth,
+            project.id,
+            risk,
+            source_entity_type="artifact_version",
+            source_entity_id=version.id,
+        )
+        for risk in risks
+    )
     db.flush()
     return {
         "research_sprint_id": str(sprint.id),
         "assumption_ids": [str(assumption.id) for assumption in assumptions],
         "risk_ids": [str(risk.id) for risk in risks],
+        "memory_item_ids": [str(item.id) for item in memory_items],
         "recommended_validation_actions": memo.recommended_validation_actions,
-        "first_validation_target_assumption_id": str(assumptions[0].id)
-        if assumptions
-        else None,
+        "first_validation_target_assumption_id": str(assumptions[0].id) if assumptions else None,
     }
 
 
@@ -1148,6 +1188,16 @@ def _research_context(
         research_sprint_id=sprint.id,
         requested_by="agent",
     ).output
+    memory_summary = tool_service.execute_tool(
+        db,
+        auth,
+        settings,
+        project.id,
+        "list_project_memory",
+        {"workflow_type": "agentic_research", "limit": 20},
+        research_sprint_id=sprint.id,
+        requested_by="agent",
+    ).output
     project_payload = project_summary.get("project") or {}
     return {
         "project": project_payload,
@@ -1171,6 +1221,7 @@ def _research_context(
         "risks": assumption_summary.get("risks", []),
         "validation_plans": validation_summary,
         "decisions": decision_summary.get("decisions", []),
+        "project_memory": memory_summary.get("memory_items", []),
         "latest_research_memo": memo_summary.get("memo"),
     }
 
@@ -1324,7 +1375,7 @@ def _lookup_tool_name(tool: ResearchTool) -> str | None:
     if tool == "assumption_lookup":
         return "list_assumptions"
     if tool == "project_memory_lookup":
-        return "get_project_summary"
+        return "list_project_memory"
     return None
 
 
@@ -1341,8 +1392,7 @@ def _lookup_tool_payload(
     if tool == "assumption_lookup":
         return list(project_context.get("assumptions", []))
     if tool == "project_memory_lookup":
-        project = project_context.get("project")
-        return [project] if isinstance(project, dict) else []
+        return list(project_context.get("project_memory", []))
     return []
 
 
@@ -1394,9 +1444,7 @@ def _select_evidence(
             by_chunk[result.chunk_id] = result
     selected = sorted(
         by_chunk.values(),
-        key=lambda result: (
-            result.rerank_score if result.rerank_score is not None else result.score
-        ),
+        key=lambda result: result.rerank_score if result.rerank_score is not None else result.score,
         reverse=True,
     )
     assembled, diagnostics = retrieval_service.assemble_context_results(
@@ -1469,13 +1517,26 @@ def _generate_memo(
     db: Session,
     settings: Settings,
     run: AIRun,
+    project_id: uuid.UUID,
     project_context: dict[str, Any],
     subquestions: list[str],
     selected_evidence: list[EvidenceRetrievalResultRead],
     gaps: list[str],
     trace: langsmith_observability_service.TraceContext,
-) -> tuple[AgenticResearchMemoDraft, LLMCompletion]:
-    messages = _memo_messages(project_context, subquestions, selected_evidence, gaps)
+) -> tuple[AgenticResearchMemoDraft, LLMCompletion, dict[str, Any]]:
+    context_pack = context_service.build_research_context_pack(
+        settings,
+        project_id=project_id,
+        objective=str((project_context.get("research_plan") or {}).get("objective") or ""),
+        project_context=project_context,
+        subquestions=subquestions,
+        selected_evidence=selected_evidence,
+        gaps=gaps,
+        prompt_version=AGENTIC_RESEARCH_PROMPT_VERSION,
+        expected_schema=AgenticResearchMemoDraft.__name__,
+    )
+    context_pack_payload = context_pack.model_dump(mode="json")
+    messages = _memo_messages(context_pack)
     step = ai_run_service.start_step(
         db,
         run,
@@ -1485,6 +1546,7 @@ def _generate_memo(
             "subquestions": subquestions,
             "evidence_count": len(selected_evidence),
             "gap_count": len(gaps),
+            "context_pack": context_pack.prompt_metadata(),
             "messages": [message.model_dump() for message in messages],
         },
     )
@@ -1553,22 +1615,24 @@ def _generate_memo(
         output_json=completed_step.output_json,
         run_type="llm" if completion.model_provider != "stub" else "chain",
     )
-    return memo, completion
+    return memo, completion, context_pack_payload
 
 
 def _memo_messages(
-    project_context: dict[str, Any],
-    subquestions: list[str],
-    selected_evidence: list[EvidenceRetrievalResultRead],
-    gaps: list[str],
+    context_pack,
 ) -> list[ChatMessage]:
+    trusted_items = [
+        item.model_dump(mode="json") for item in context_pack.items if not item.untrusted
+    ]
+    untrusted_items = [
+        item.model_dump(mode="json") for item in context_pack.items if item.untrusted
+    ]
     payload = {
-        "project_context": project_context,
-        "subquestions": subquestions,
-        "detected_evidence_gaps": gaps,
+        "context_pack_metadata": context_pack.prompt_metadata(),
+        "trusted_context_items": trusted_items,
         "required_behavior": [
             "Answer using only project state and selected evidence.",
-            "Cite factual claims with source_id and chunk_id from evidence_bundles.",
+            "Cite factual claims with source_id and chunk_id from context item provenance.",
             "Mark unsupported factual claims as unsupported_claims.",
             "Be opinionated, skeptical, and specific about what to validate next.",
             "The executive verdict must be a strategic recommendation, not a workflow instruction.",
@@ -1578,12 +1642,9 @@ def _memo_messages(
             "concrete do-not-build-yet warning and next test.",
         ],
     }
-    evidence_payload = {
-        "evidence_bundles": _evidence_bundles(selected_evidence),
-    }
     payload_json = json.dumps(payload, ensure_ascii=True, default=str, separators=(",", ":"))
     evidence_json = json.dumps(
-        evidence_payload,
+        {"context_items": untrusted_items},
         ensure_ascii=True,
         default=str,
         separators=(",", ":"),
@@ -1657,6 +1718,7 @@ def _write_research_memo_step(
     context_diagnostics: dict[str, Any],
     gaps: list[str],
     critic: dict[str, Any],
+    context_pack: dict[str, Any],
     trace: langsmith_observability_service.TraceContext,
 ) -> AgenticResearchState:
     step = ai_run_service.start_step(
@@ -1689,6 +1751,7 @@ def _write_research_memo_step(
                 "tool_calls": tool_calls,
                 "retrieval_diagnostics": retrieval_diagnostics,
                 "retrieval_context": context_diagnostics,
+                "context_pack": context_pack,
                 "selected_evidence": [
                     result.model_dump(mode="json") for result in selected_evidence
                 ],
@@ -1713,8 +1776,7 @@ def _write_research_memo_step(
             "propose_memory_update",
             {
                 "summary": (
-                    "Research memo proposes assumption, risk, and validation "
-                    "priority updates."
+                    "Research memo proposes assumption, risk, and validation priority updates."
                 ),
                 "research_sprint_id": str(sprint.id),
                 "artifact_version_id": str(version.id),
@@ -1736,8 +1798,7 @@ def _write_research_memo_step(
             "propose_validation_plan",
             {
                 "summary": (
-                    "Research memo proposes validation actions for the riskiest "
-                    "assumptions."
+                    "Research memo proposes validation actions for the riskiest assumptions."
                 ),
                 "research_sprint_id": str(sprint.id),
                 "artifact_version_id": str(version.id),
@@ -2027,34 +2088,40 @@ def _load_claims_for_version(db: Session, version_id: uuid.UUID) -> list[Claim]:
 
 
 def _render_markdown_memo(project: Project, memo: AgenticResearchMemoDraft) -> str:
-    findings = "\n".join(
-        f"- **{finding.subquestion}**: {finding.finding} "
-        f"({finding.evidence_strength} evidence)"
-        for finding in memo.findings
-    ) or "- No findings generated."
-    risks = "\n".join(
-        f"- **{risk.severity}**: {risk.text}"
-        + (f" Mitigation: {risk.mitigation}" if risk.mitigation else "")
-        for risk in memo.key_risks
-    ) or "- No research-derived risks generated."
-    assumptions = "\n".join(
-        f"- **{assumption.importance} / {assumption.uncertainty} uncertainty**: "
-        f"{assumption.text}"
-        + (f" Test: {assumption.recommended_test}" if assumption.recommended_test else "")
-        for assumption in memo.riskiest_assumptions
-    ) or "- No research-derived assumptions generated."
-    gaps = "\n".join(f"- {gap}" for gap in memo.evidence_gaps) or "- None"
-    unknowns = (
-        "\n".join(f"- {unknown}" for unknown in memo.what_we_still_do_not_know)
-        or gaps
+    findings = (
+        "\n".join(
+            f"- **{finding.subquestion}**: {finding.finding} ({finding.evidence_strength} evidence)"
+            for finding in memo.findings
+        )
+        or "- No findings generated."
     )
-    actions = "\n".join(
-        f"- {action}" for action in memo.recommended_validation_actions
-    ) or "- None"
-    citations = "\n".join(
-        f"- {citation.title or citation.source_id}: {citation.quote or 'No quote captured.'}"
-        for citation in memo.citations
-    ) or "- No cited evidence available."
+    risks = (
+        "\n".join(
+            f"- **{risk.severity}**: {risk.text}"
+            + (f" Mitigation: {risk.mitigation}" if risk.mitigation else "")
+            for risk in memo.key_risks
+        )
+        or "- No research-derived risks generated."
+    )
+    assumptions = (
+        "\n".join(
+            f"- **{assumption.importance} / {assumption.uncertainty} uncertainty**: "
+            f"{assumption.text}"
+            + (f" Test: {assumption.recommended_test}" if assumption.recommended_test else "")
+            for assumption in memo.riskiest_assumptions
+        )
+        or "- No research-derived assumptions generated."
+    )
+    gaps = "\n".join(f"- {gap}" for gap in memo.evidence_gaps) or "- None"
+    unknowns = "\n".join(f"- {unknown}" for unknown in memo.what_we_still_do_not_know) or gaps
+    actions = "\n".join(f"- {action}" for action in memo.recommended_validation_actions) or "- None"
+    citations = (
+        "\n".join(
+            f"- {citation.title or citation.source_id}: {citation.quote or 'No quote captured.'}"
+            for citation in memo.citations
+        )
+        or "- No cited evidence available."
+    )
     unsupported = "\n".join(f"- {claim}" for claim in memo.unsupported_claims) or "- None"
     return "\n\n".join(
         [
@@ -2130,10 +2197,7 @@ def _fallback_memo(
     unsupported = list(gaps) or ["Validated willingness-to-pay evidence remains limited."]
     riskiest_assumptions = [
         ResearchAssumptionDraft(
-            text=(
-                f"{target} has urgent, repeated pain and will make time for a new "
-                "workflow."
-            ),
+            text=(f"{target} has urgent, repeated pain and will make time for a new workflow."),
             category="demand",
             importance="critical",
             uncertainty="high",
@@ -2167,8 +2231,7 @@ def _fallback_memo(
             severity="high",
             likelihood="high" if not citations else "medium",
             mitigation=(
-                "Prioritize willingness-to-pay and urgency questions in the first "
-                "validation pass."
+                "Prioritize willingness-to-pay and urgency questions in the first validation pass."
             ),
             citations=citations[:2],
         ),
@@ -2181,8 +2244,7 @@ def _fallback_memo(
             severity="high",
             likelihood="unknown",
             mitigation=(
-                "Ask users to compare the concept against their current workaround and "
-                "named tools."
+                "Ask users to compare the concept against their current workaround and named tools."
             ),
             citations=citations[:2],
         ),
@@ -2279,38 +2341,50 @@ def _audit_citations(
     memo: AgenticResearchMemoDraft,
     selected_evidence: list[EvidenceRetrievalResultRead],
 ) -> AgenticResearchMemoDraft:
-    valid_by_chunk = {result.chunk_id: result for result in selected_evidence}
-    valid_by_source = {result.source_id: result for result in selected_evidence}
     unsupported = list(memo.unsupported_claims)
     claims: list[ClaimDraft] = []
     citations: list[Citation] = []
-    for claim in memo.claims:
-        valid_citations = [
-            citation
-            for citation in claim.citations
-            if _citation_is_valid(citation, valid_by_chunk, valid_by_source)
-        ]
-        if claim.support_level == "supported" and not valid_citations:
-            unsupported.append(claim.text)
+    for verification in citation_verifier_service.verify_claims(memo.claims, selected_evidence):
+        claim = verification.claim
+        if verification.unsupported_reason:
+            unsupported.append(f"{claim.text} ({verification.unsupported_reason})")
             claims.append(
                 claim.model_copy(update={"support_level": "unsupported", "citations": []})
             )
             continue
-        claims.append(claim.model_copy(update={"citations": valid_citations}))
-        citations.extend(valid_citations)
+        support_level = "partial" if verification.weak_citations else claim.support_level
+        claims.append(
+            claim.model_copy(
+                update={
+                    "support_level": support_level,
+                    "citations": verification.verified_citations,
+                }
+            )
+        )
+        if verification.weak_citations and claim.support_level == "supported":
+            unsupported.append(f"{claim.text} (weak_text_overlap)")
+        citations.extend(verification.verified_citations)
 
     audited_findings: list[ResearchFindingDraft] = []
     for finding in memo.findings:
         valid_citations = [
             citation
             for citation in finding.citations
-            if _citation_is_valid(citation, valid_by_chunk, valid_by_source)
+            if citation_verifier_service.citation_is_supported(
+                citation,
+                finding.finding,
+                selected_evidence,
+            ).supported
         ]
         audited_findings.append(finding.model_copy(update={"citations": valid_citations}))
         citations.extend(valid_citations)
 
     for citation in memo.citations:
-        if _citation_is_valid(citation, valid_by_chunk, valid_by_source):
+        if citation_verifier_service.citation_is_supported(
+            citation,
+            citation.quote or citation.title or "",
+            selected_evidence,
+        ).supported:
             citations.append(citation)
 
     return memo.model_copy(

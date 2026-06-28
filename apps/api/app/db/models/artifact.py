@@ -21,6 +21,8 @@ from app.db.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class Artifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Named generated work product such as a brief, memo, or validation plan."""
+
     __tablename__ = "artifacts"
     __table_args__ = (
         CheckConstraint(
@@ -57,6 +59,8 @@ class Artifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class ArtifactVersion(UUIDPrimaryKeyMixin, Base):
+    """Versioned artifact body with structured AI provenance attached."""
+
     __tablename__ = "artifact_versions"
     __table_args__ = (
         UniqueConstraint("artifact_id", "version", name="uq_artifact_versions_artifact_version"),
@@ -100,6 +104,8 @@ class ArtifactVersion(UUIDPrimaryKeyMixin, Base):
 
 
 class Claim(UUIDPrimaryKeyMixin, Base):
+    """Atomic generated claim that can be linked back to evidence."""
+
     __tablename__ = "claims"
     __table_args__ = (
         CheckConstraint(
@@ -144,6 +150,8 @@ class Claim(UUIDPrimaryKeyMixin, Base):
 
 
 class ClaimEvidenceLink(UUIDPrimaryKeyMixin, Base):
+    """Citation relationship between a claim and source/chunk evidence."""
+
     __tablename__ = "claim_evidence_links"
 
     claim_id: Mapped[uuid.UUID] = mapped_column(

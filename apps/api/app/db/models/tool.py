@@ -11,6 +11,8 @@ from app.db.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class ToolInvocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Audit record for every governed read/proposal/write tool call."""
+
     __tablename__ = "tool_invocations"
     __table_args__ = (
         CheckConstraint(

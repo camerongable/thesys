@@ -1,3 +1,5 @@
+"""FastAPI-facing controls for durable Temporal research sprint workflows."""
+
 import asyncio
 import uuid
 from datetime import timedelta
@@ -27,6 +29,7 @@ def start_research_sprint_workflow(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> ResearchSprint:
+    """Start a Temporal workflow for a research sprint when Temporal is enabled."""
     require_permission(auth, "run_research")
     sprint = _get_sprint(db, auth, project_id, sprint_id)
     if not settings.temporal_enabled:
@@ -63,9 +66,7 @@ def start_research_sprint_workflow(
     if run_id:
         sprint.temporal_run_id = run_id
     sprint.current_step = (
-        "wait_for_research_plan_approval"
-        if sprint.plan.status == "draft"
-        else "discover_sources"
+        "wait_for_research_plan_approval" if sprint.plan.status == "draft" else "discover_sources"
     )
     if sprint.plan.status == "draft":
         sprint.status = "waiting_for_approval"
@@ -84,6 +85,7 @@ def retry_research_sprint_workflow(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> ResearchSprint:
+    """Create a new workflow id and restart a failed/cancelled durable sprint."""
     require_permission(auth, "run_research")
     sprint = _get_sprint(db, auth, project_id, sprint_id)
     if sprint.status not in {"failed", "cancelled"}:
@@ -109,6 +111,7 @@ def cancel_research_sprint_workflow(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> ResearchSprint:
+    """Cancel the durable workflow and mirror cancellation into local sprint state."""
     require_permission(auth, "run_research")
     sprint = _get_sprint(db, auth, project_id, sprint_id)
     if not sprint.temporal_workflow_id:
@@ -174,6 +177,7 @@ def execution_payload(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> dict[str, Any]:
+    """Return local and Temporal execution state for workflow inspect panels."""
     sprint = _get_sprint(db, auth, project_id, sprint_id)
     return {
         "sprint": sprint,

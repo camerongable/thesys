@@ -5,6 +5,7 @@
   "packageManager": "pnpm@10.12.1",
   "scripts": {
     "eval:research": "python3 scripts/eval_research_sprints.py",
+    "eval:ai": "python3 scripts/eval_ai_quality.py",
     "web:dev": "pnpm --filter thesys-web dev",
     "web:build": "pnpm --filter thesys-web build",
     "web:typecheck": "pnpm --filter thesys-web typecheck"

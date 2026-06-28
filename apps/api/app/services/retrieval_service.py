@@ -1,10 +1,16 @@
+"""Evidence retrieval pipeline for project-scoped RAG.
+
+The pipeline is intentionally inspectable: each search records query planning,
+vector/fallback path, reranking, context assembly, and quality proxies so AI
+answers can be debugged without exposing those details in the main workflow UI.
+"""
+
 import json
 import re
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from time import perf_counter
 
 from sqlalchemy import Select, cast, func, or_, select, text
@@ -27,6 +33,7 @@ from app.schemas.evidence import (
     RetrievalRerankerDiagnosticsRead,
 )
 from app.services import ai_run_service, embedding_service, project_service
+from app.services.common import workflow as workflow_utils
 
 SQL_VECTOR_CANDIDATE_MULTIPLIER = 4
 PIPELINE_SUBQUERY_LIMIT = 5
@@ -65,6 +72,8 @@ STOPWORDS = {
 
 @dataclass(frozen=True)
 class RetrievalRunResult:
+    """Retrieval result plus persisted AI run/step records."""
+
     run: AIRun
     step: AIStep
     mode: RetrievalMode
@@ -92,6 +101,7 @@ def retrieve_evidence(
     project_id: uuid.UUID,
     payload: EvidenceRetrieveCreate,
 ) -> RetrievalRunResult:
+    """Run retrieval and persist an observable AI run around the search."""
     project_service.get_project(db, auth, project_id)
     run = ai_run_service.start_run(
         db,
@@ -112,38 +122,30 @@ def retrieve_evidence(
 
     try:
         search = retrieve_evidence_search(db, auth, settings, project_id, payload)
-        step = ai_run_service.complete_step(
+        completed = workflow_utils.complete_zero_cost_step_and_run(
             db,
-            step,
+            run=run,
+            step=step,
             output_json={
                 "result_count": len(search.results),
                 "diagnostics": search.diagnostics.model_dump(mode="json"),
                 "results": [result.model_dump(mode="json") for result in search.results],
             },
             latency_ms=search.diagnostics.query_latency_ms,
-            tokens=None,
-            cost=Decimal("0"),
-        )
-        run = ai_run_service.complete_run(
-            db,
-            run,
             output_summary=f"Retrieved {len(search.results)} chunks for query.",
-            total_tokens=None,
-            total_cost=Decimal("0"),
             model_provider=settings.embedding_provider,
             model_name=settings.embedding_model,
         )
         return RetrievalRunResult(
-            run=run,
-            step=step,
+            run=completed.run,
+            step=completed.step,
             mode=payload.mode,
             query=payload.query,
             diagnostics=search.diagnostics,
             results=search.results,
         )
     except Exception as exc:
-        ai_run_service.fail_step(db, step, error=str(exc))
-        ai_run_service.fail_run(db, run, error=str(exc))
+        workflow_utils.fail_step_and_run(db, run=run, step=step, error=str(exc))
         raise
 
 
@@ -174,6 +176,7 @@ def retrieve_evidence_pipeline(
     project_id: uuid.UUID,
     payload: EvidenceRetrieveCreate,
 ) -> RetrievalSearchResult:
+    """Plan, retrieve, fuse, rerank, and assemble context for one user query."""
     project_service.get_project(db, auth, project_id)
     started = perf_counter()
     plan = _plan_query(payload.query)
@@ -200,15 +203,19 @@ def retrieve_evidence_pipeline(
         reranker_used=reranker.enabled and not reranker.fallback_used,
         token_count=context.token_count,
     )
-    primary = diagnostics[0] if diagnostics else _diagnostics(
-        settings,
-        started,
-        index_name=None,
-        index_available=False,
-        candidate_count=0,
-        used_sql_vector_search=False,
-        fallback_path_used=False,
-        fallback_reason=None,
+    primary = (
+        diagnostics[0]
+        if diagnostics
+        else _diagnostics(
+            settings,
+            started,
+            index_name=None,
+            index_available=False,
+            candidate_count=0,
+            used_sql_vector_search=False,
+            fallback_path_used=False,
+            fallback_reason=None,
+        )
     )
     diagnostic_payload = primary.model_dump()
     diagnostic_payload.update(
@@ -235,6 +242,7 @@ def _retrieve_single_query_search(
     project_id: uuid.UUID,
     payload: EvidenceRetrieveCreate,
 ) -> RetrievalSearchResult:
+    """Retrieve candidates for one subquery using SQL vectors or local fallback."""
     project_service.get_project(db, auth, project_id)
     started = perf_counter()
     index_name, index_available = _pgvector_index_status(db)
@@ -382,6 +390,7 @@ def _retrieve_with_python_scoring(
 
 
 def _plan_query(query: str) -> RetrievalQueryPlanRead:
+    """Create a deterministic lightweight query plan for broad strategic questions."""
     terms = _term_set(query)
     raw_terms = _raw_term_set(query)
     lowered = query.casefold()
@@ -416,8 +425,7 @@ def _plan_query(query: str) -> RetrievalQueryPlanRead:
         or " and " in lowered
         or " or " in lowered
         or any(
-            marker in raw_terms
-            for marker in {"which", "what", "compare", "strongest", "missing"}
+            marker in raw_terms for marker in {"which", "what", "compare", "strongest", "missing"}
         )
     )
     subqueries = [query.strip()]
@@ -486,6 +494,7 @@ def _rerank_results(
     plan: RetrievalQueryPlanRead,
     results: list[EvidenceRetrievalResultRead],
 ) -> tuple[list[EvidenceRetrievalResultRead], RetrievalRerankerDiagnosticsRead]:
+    """Apply optional provider reranking with deterministic fallback visibility."""
     if not settings.retrieval_reranking_enabled:
         ranked = [
             result.model_copy(
@@ -633,6 +642,7 @@ def assemble_context_results(
     *,
     top_k: int | None = None,
 ) -> tuple[list[EvidenceRetrievalResultRead], RetrievalContextDiagnosticsRead]:
+    """Select final prompt context under token, diversity, and dedupe constraints."""
     selected: list[EvidenceRetrievalResultRead] = []
     per_source: defaultdict[uuid.UUID, int] = defaultdict(int)
     token_count = 0
@@ -640,7 +650,7 @@ def assemble_context_results(
     dropped_count = 0
     max_results = top_k or len(results)
     signatures: list[set[str]] = []
-    for result in results:
+    for result in _diversify_context_candidates(results):
         score = result.rerank_score if result.rerank_score is not None else result.score
         if score < settings.retrieval_min_context_score:
             dropped_count += 1
@@ -661,7 +671,7 @@ def assemble_context_results(
                 update={
                     "context_included": True,
                     "selection_reason": (
-                        result.selection_reason or "Selected for synthesis context."
+                        _context_selection_reason(result, per_source[result.source_id])
                     ),
                 }
             )
@@ -683,6 +693,30 @@ def assemble_context_results(
     return selected, context
 
 
+def _diversify_context_candidates(
+    results: list[EvidenceRetrievalResultRead],
+) -> list[EvidenceRetrievalResultRead]:
+    by_source: dict[uuid.UUID, list[EvidenceRetrievalResultRead]] = defaultdict(list)
+    for result in results:
+        by_source[result.source_id].append(result)
+    diversified: list[EvidenceRetrievalResultRead] = []
+    while by_source:
+        for source_id in list(by_source):
+            candidates = by_source[source_id]
+            if candidates:
+                diversified.append(candidates.pop(0))
+            if not candidates:
+                del by_source[source_id]
+    return diversified
+
+
+def _context_selection_reason(result: EvidenceRetrievalResultRead, prior_source_count: int) -> str:
+    base = result.selection_reason or "Selected for synthesis context."
+    if prior_source_count == 0:
+        return f"{base} Prioritized for source diversity."
+    return base
+
+
 def _quality_report(
     *,
     selected: list[EvidenceRetrievalResultRead],
@@ -691,17 +725,16 @@ def _quality_report(
     reranker_used: bool,
     token_count: int,
 ) -> RetrievalQualityReportRead:
+    """Compute cheap retrieval-quality proxies for evals and trace inspection."""
     source_count = len({result.source_id for result in selected})
     selected_count = len(selected)
     recall_proxy = min(1.0, selected_count / max(candidate_count, 1))
-    precision_proxy = (
-        sum(1 for result in selected if (result.rerank_score or result.score) >= 0.35)
-        / max(selected_count, 1)
-    )
-    citation_coverage_proxy = (
-        sum(1 for result in selected if result.source_id and result.chunk_id)
-        / max(selected_count, 1)
-    )
+    precision_proxy = sum(
+        1 for result in selected if (result.rerank_score or result.score) >= 0.35
+    ) / max(selected_count, 1)
+    citation_coverage_proxy = sum(
+        1 for result in selected if result.source_id and result.chunk_id
+    ) / max(selected_count, 1)
     if source_count >= 3 and selected_count >= 3:
         recall_proxy = max(recall_proxy, 0.75)
     return RetrievalQualityReportRead(

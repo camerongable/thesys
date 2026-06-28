@@ -11983,6 +11983,8 @@ runtime debug feature.
 
 # V1 Sprint 48: External Research and Multimodal Intelligence Hardening
 
+Implementation status: complete on `codex/sprints-41-50-ai-upgrades`.
+
 ## Goal
 
 Make the external research and document-intelligence paths more reliable and
@@ -12028,9 +12030,22 @@ portfolio-worthy without turning the main workflow into a crawler dashboard.
 - Main workflow still shows only source status and evidence health; extraction
   details remain in Evidence provenance panels.
 
+Implemented highlights:
+
+- `source_provenance_service.py` centralizes canonical URL normalization,
+  content hashing, fetch failure classification, prompt-injection marker
+  detection, PDF page lineage, and source quality signals.
+- Evidence ingestion dedupes external sources by canonical URL and content hash.
+- URL, PDF, image, and text ingestion attach inspectable provenance metadata
+  without changing the main workflow UI.
+- `scripts/eval_ai_quality.py` checks source provenance, prompt-injection marker
+  coverage, and multimodal lineage.
+
 ---
 
 # V1 Sprint 49: Codebase Architecture Cleanup
+
+Implementation status: complete on `codex/sprints-41-50-ai-upgrades`.
 
 ## Goal
 
@@ -12085,9 +12100,21 @@ boundaries, and SOLID-style service responsibilities without a risky rewrite.
 - Public API behavior and primary UI workflow remain unchanged.
 - The repository structure is documented after the cleanup in Sprint 50.
 
+Implemented highlights:
+
+- Added `apps/api/app/services/common/` for shared service-layer utilities.
+- Extracted metadata merge behavior into `common/metadata.py`.
+- Extracted deterministic workflow step/run finalization into
+  `common/workflow.py`.
+- Migrated evidence ingestion and retrieval to the shared workflow helper.
+- Added unit tests for shared metadata behavior and retained evidence,
+  retrieval, guide, and agentic research characterization coverage.
+
 ---
 
 # V1 Sprint 50: Developer Documentation and Code Navigation
+
+Implementation status: complete on `codex/sprints-41-50-ai-upgrades`.
 
 ## Goal
 
@@ -12151,3 +12178,12 @@ filling obvious code with noise.
 - README clearly frames the repo as a portfolio project demonstrating AI
   engineering patterns and technologies.
 - Documentation does not claim planned features are implemented.
+
+Implemented highlights:
+
+- Added developer docs under `docs/` for repository navigation, AI architecture,
+  retrieval, governance/MCP, memory, security, and evals.
+- Expanded README AI portfolio sections, feature-by-feature technology map,
+  project navigation, current status, eval commands, and MCP adapter notes.
+- Added concise docstrings to context pack builders, memory manager entrypoints,
+  MCP adapter functions, source provenance helpers, and shared workflow helpers.

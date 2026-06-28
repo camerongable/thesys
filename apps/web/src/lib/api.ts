@@ -1609,6 +1609,9 @@ export type GuideChatResponse = {
   unsupported_or_missing_evidence: string[];
   used_llm: boolean;
   retrieval_diagnostics: Record<string, unknown> | null;
+  context_pack: Record<string, unknown> | null;
+  proposal_invocation_id: string | null;
+  approval_request_id: string | null;
   ai_run_id: string | null;
 };
 
@@ -1707,6 +1710,8 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
 
   try {
+    // Keep all API errors flowing through one typed boundary so feature panels
+    // can show domain-appropriate retry/error states without duplicating fetch logic.
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       headers: {

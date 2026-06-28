@@ -7,9 +7,92 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import ApprovalRequest, AuditEvent, ToolInvocation
+from app.core.security import SecurityValidationError, validate_url_fetch_target, validate_upload
+from app.db.models import ApprovalRequest, AuditEvent, EvidenceSource, ToolInvocation
 from app.services import tool_service
 from app.services.identity_service import ensure_dev_identity
+
+
+def test_url_ingestion_blocks_local_network_targets_and_audits_denial(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = _create_project(client)
+
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/url",
+        json={"url": "http://127.0.0.1:8080/admin"},
+    )
+
+    assert response.status_code == 502
+    source = db_session.scalar(select(EvidenceSource).where(EvidenceSource.url.contains("127.0.0.1")))
+    assert source is not None
+    assert source.ingestion_status == "failed"
+    assert "blocked network address" in (source.ingestion_error or "")
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "evidence_url_fetch_blocked")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.risk_level == "medium"
+    assert audit.event_metadata["reason"].startswith("URL host resolves")
+
+
+def test_security_helper_blocks_private_fetch_targets() -> None:
+    with pytest.raises(SecurityValidationError, match="blocked network address"):
+        validate_url_fetch_target("https://10.0.0.4/internal")
+
+    with pytest.raises(SecurityValidationError, match="embedded credentials"):
+        validate_url_fetch_target("https://user:pass@example.com")
+
+
+def test_file_upload_rejects_unsafe_filename_and_type(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = _create_project(client)
+
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/file",
+        files={"file": ("../secret.txt", b"private notes", "text/plain")},
+    )
+
+    assert response.status_code == 422
+    assert db_session.scalar(select(EvidenceSource)) is None
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "evidence_upload_rejected")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert "path separators" in audit.event_metadata["reason"]
+
+    with pytest.raises(SecurityValidationError, match="supported"):
+        validate_upload(
+            filename="archive.zip",
+            content_type="application/zip",
+            body=b"PK\x03\x04",
+            settings=get_settings(),
+        )
+
+
+def test_extracted_text_limit_fails_closed(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAX_EXTRACTED_TEXT_CHARS", "1000")
+    get_settings.cache_clear()
+    project_id = _create_project(client)
+
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={"title": "Oversized note", "text": "A" * 1001},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Note evidence ingestion failed."
+    get_settings.cache_clear()
 
 
 def test_role_permissions_block_viewer_research_and_admin_delete(

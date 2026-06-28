@@ -1,3 +1,5 @@
+"""Small OpenAI-compatible LiteLLM client used by service-layer AI workflows."""
+
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -12,12 +14,16 @@ ChatRole = Literal["system", "user", "assistant"]
 
 
 class ChatMessage(BaseModel):
+    """Minimal chat-completions message schema used by internal prompts."""
+
     role: ChatRole
     content: str = Field(min_length=1)
 
 
 @dataclass(frozen=True)
 class LLMCompletion:
+    """Normalized completion payload with provider usage and cost metadata."""
+
     content: str
     model_provider: str
     model_name: str
@@ -34,6 +40,8 @@ class LiteLLMClientError(RuntimeError):
 
 
 class LiteLLMClient:
+    """HTTP client for LiteLLM's OpenAI-compatible chat completions endpoint."""
+
     def __init__(self, settings: Settings):
         self.settings = settings
 
@@ -46,6 +54,7 @@ class LiteLLMClient:
         response_format_json: bool = False,
         max_tokens: int | None = None,
     ) -> LLMCompletion:
+        """Call chat completions and normalize the response for observability."""
         payload: dict[str, Any] = {
             "model": model or self.settings.litellm_model,
             "messages": [message.model_dump() for message in messages],

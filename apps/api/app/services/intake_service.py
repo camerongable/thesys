@@ -1,3 +1,11 @@
+"""AI-assisted intake workflows that turn rough ideas into structured product state.
+
+This module owns the first AI touchpoint in the app: a conversational or
+project-bound intake that asks for structured JSON, validates it with Pydantic,
+and persists the resulting thesis, customer segments, and problem hypotheses as
+normal domain records.
+"""
+
 import json
 import uuid
 from dataclasses import dataclass
@@ -45,6 +53,8 @@ from app.services import ai_run_service, project_service
 
 
 class IntakeWorkflowError(RuntimeError):
+    """Raised when the LangGraph-backed intake flow cannot complete safely."""
+
     pass
 
 
@@ -68,6 +78,8 @@ class IntakeFinalizeState(TypedDict, total=False):
 
 @dataclass(frozen=True)
 class IntakeRunResult:
+    """Structured intake output plus the persisted AI run metadata."""
+
     run: AIRun
     step: AIStep
     intake: StructuredProjectIntake
@@ -80,6 +92,8 @@ class IntakeRunResult:
 
 @dataclass(frozen=True)
 class FinalizedIntakeResult:
+    """Domain records written after a user accepts a structured intake."""
+
     run: AIRun
     step: AIStep
     project: Project
@@ -90,6 +104,12 @@ class FinalizedIntakeResult:
 
 @dataclass(frozen=True)
 class ConversationalInvestigationPreviewResult:
+    """Preview returned before a new project exists.
+
+    The preview lets the UI show a thesis draft, assumptions, open questions,
+    and recommended investigation mode without mutating project state.
+    """
+
     run: AIRun
     step: AIStep
     structured_intake: StructuredProjectIntake
@@ -115,6 +135,8 @@ def preview_investigation(
     settings: Settings,
     payload: ConversationalInvestigationPreviewCreate,
 ) -> ConversationalInvestigationPreviewResult:
+    """Create a non-persistent investigation preview from a rough idea."""
+
     answers = [answer.model_dump() for answer in payload.answers]
     input_summary = payload.raw_idea
     if answers:
@@ -265,6 +287,8 @@ def analyze_intake(
     project_id: uuid.UUID,
     payload: StructuredIntakeAnalyzeCreate,
 ) -> IntakeRunResult:
+    """Run the initial structured-intake generation for an existing project."""
+
     project = project_service.get_project(db, auth, project_id)
     return _run_generation_graph(
         db,
@@ -289,6 +313,8 @@ def answer_intake(
     project_id: uuid.UUID,
     payload: StructuredIntakeAnswerCreate,
 ) -> IntakeRunResult:
+    """Regenerate the structured intake after the user answers clarifying questions."""
+
     project = project_service.get_project(db, auth, project_id)
     answers = [answer.model_dump() for answer in payload.answers]
     return _run_generation_graph(
@@ -315,6 +341,8 @@ def finalize_intake(
     project_id: uuid.UUID,
     payload: StructuredIntakeFinalizeCreate,
 ) -> FinalizedIntakeResult:
+    """Persist accepted intake output into durable project-domain records."""
+
     project = project_service.get_project(db, auth, project_id)
     run = ai_run_service.start_run(
         db,
@@ -338,6 +366,9 @@ def finalize_intake(
 
     started = perf_counter()
     try:
+        # LangGraph keeps the finalize path explicit even though this version has
+        # one write node; future approval or enrichment steps can be inserted
+        # without changing the route/service contract.
         graph = StateGraph(IntakeFinalizeState)
         graph.add_node(
             "write_project_fields",
@@ -409,6 +440,8 @@ def _run_generation_graph(
     answers: list[dict[str, str]],
     step_name: str,
 ) -> IntakeRunResult:
+    """Execute the shared two-step LangGraph intake flow."""
+
     run = ai_run_service.start_run(
         db,
         auth,
@@ -498,6 +531,8 @@ def _run_generation_graph(
         completion_holder["completion"] = completion
         return {"intake": intake}
 
+    # The graph separates context loading from model generation so traces show
+    # what project memory was available before the model shaped the idea.
     graph = StateGraph(IntakeGenerationState)
     graph.add_node("load_project_context", load_project_context)
     graph.add_node("generate_structured_intake", generate_intake)
@@ -700,9 +735,7 @@ def _fallback_answer_intake(state: IntakeGenerationState) -> StructuredProjectIn
     intake = StructuredProjectIntake.model_validate(initial)
     answers = state.get("answers", [])
     answer_text = " ".join(
-        str(answer.get("answer", "")).strip()
-        for answer in answers
-        if isinstance(answer, dict)
+        str(answer.get("answer", "")).strip() for answer in answers if isinstance(answer, dict)
     )
     target_users = list(intake.target_users)
     if answer_text and not target_users:
@@ -747,9 +780,7 @@ def _build_investigation_preview(
         modes,
     )
     ready_to_create = (
-        payload.continue_with_assumptions
-        or bool(payload.answers)
-        or not raw_questions
+        payload.continue_with_assumptions or bool(payload.answers) or not raw_questions
     )
     next_label, next_description = _next_action_for_mode(recommended_mode.mode, ready_to_create)
     return {
@@ -878,9 +909,7 @@ def _investigation_mode_options() -> list[InvestigationModeOption]:
         InvestigationModeOption(
             mode="validation_sprint",
             label="Validation Sprint",
-            description=(
-                "Start from the biggest unknown and create a concrete test plan."
-            ),
+            description=("Start from the biggest unknown and create a concrete test plan."),
             why_recommended="Best when the riskiest proof is already visible.",
         ),
     ]
@@ -958,8 +987,7 @@ def _proof_needed(target_user: str, biggest_unknown: str) -> str:
             "trust the output."
         )
     return (
-        f"Talk to 5 {target_user} and look for recent, repeated pain tied to the "
-        "biggest unknown."
+        f"Talk to 5 {target_user} and look for recent, repeated pain tied to the biggest unknown."
     )
 
 

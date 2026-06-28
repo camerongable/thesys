@@ -1,3 +1,5 @@
+"""Portfolio-oriented eval checks for the local AI workflows."""
+
 import json
 import uuid
 from dataclasses import dataclass
@@ -26,15 +28,24 @@ from app.db.models import (
     ExperimentResult,
     ResearchSprint,
     Risk,
+    ToolInvocation,
 )
 from app.schemas.evals import (
+    AIEvalMetricRead,
+    AIEvalRead,
+    GuideEvalMetricRead,
+    GuideEvalRead,
     MvpEvalCheckRead,
     MvpEvalRead,
     ResearchEvalCaseRead,
     V1ResearchEvalMetricRead,
     V1ResearchEvalRead,
 )
-from app.services import langsmith_observability_service, project_service
+from app.services import (
+    ai_accounting_service,
+    langsmith_observability_service,
+    project_service,
+)
 
 REQUIRED_BRIEF_SECTIONS = (
     "Executive Summary",
@@ -68,6 +79,7 @@ class _ResearchMetric:
 
 
 def run_mvp_eval(db: Session, auth: AuthContext, project_id: uuid.UUID) -> MvpEvalRead:
+    """Check that the seeded/demo project demonstrates the MVP workflow."""
     project = project_service.get_project(db, auth, project_id)
     counts = _counts(db, auth, project_id)
     brief = _current_artifact(db, auth, project_id, "opportunity_brief")
@@ -183,6 +195,7 @@ def run_v1_research_eval(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> V1ResearchEvalRead:
+    """Evaluate the agentic research sprint across retrieval, citation, and trace criteria."""
     project_service.get_project(db, auth, project_id)
     counts = _v1_research_counts(db, auth, project_id)
     latest_memo = _latest_research_memo_version(db, auth, project_id)
@@ -421,6 +434,164 @@ def run_v1_research_eval(
         dataset_cases=dataset_cases,
         dataset_case_count=len(dataset_cases),
         demo_ready_case_count=demo_ready_count,
+    )
+
+
+def run_guide_eval(db: Session, auth: AuthContext, project_id: uuid.UUID) -> GuideEvalRead:
+    """Check that Ask Thesys remains retrieval-grounded and proposal-governed."""
+    project_service.get_project(db, auth, project_id)
+    guide_runs = int(
+        db.scalar(
+            select(func.count(AIRun.id)).where(
+                AIRun.workspace_id == auth.workspace_id,
+                AIRun.project_id == project_id,
+                AIRun.workflow_type == "guide_chat",
+            )
+        )
+        or 0
+    )
+    retrieval_steps = int(
+        db.scalar(
+            select(func.count(AIStep.id))
+            .join(AIRun, AIRun.id == AIStep.ai_run_id)
+            .where(
+                AIRun.workspace_id == auth.workspace_id,
+                AIRun.project_id == project_id,
+                AIRun.workflow_type == "guide_chat",
+                AIStep.step_name == "guide_retrieval_context",
+            )
+        )
+        or 0
+    )
+    proposal_invocations = int(
+        db.scalar(
+            select(func.count(ToolInvocation.id)).where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.access_mode == "proposal",
+                ToolInvocation.requested_by == "agent",
+            )
+        )
+        or 0
+    )
+    write_invocations = int(
+        db.scalar(
+            select(func.count(ToolInvocation.id)).where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.access_mode == "write",
+                ToolInvocation.requested_by == "agent",
+            )
+        )
+        or 0
+    )
+    metrics = [
+        _ResearchMetric(
+            "guide_runs",
+            "Guide runs exist",
+            guide_runs >= 1,
+            guide_runs,
+            "at least one guide_chat run",
+        ),
+        _ResearchMetric(
+            "guide_retrieval",
+            "Guide retrieval grounding",
+            retrieval_steps >= 1,
+            retrieval_steps,
+            "at least one guide retrieval context step",
+        ),
+        _ResearchMetric(
+            "proposal_governance",
+            "Proposal governance",
+            proposal_invocations >= 0 and write_invocations == 0,
+            f"{proposal_invocations} proposals, {write_invocations} direct writes",
+            "chat creates proposals only, no direct write tools",
+        ),
+    ]
+    score = sum(1 for metric in metrics if metric.passed)
+    return GuideEvalRead(
+        project_id=project_id,
+        passed=score == len(metrics),
+        score=score,
+        total=len(metrics),
+        metrics=[
+            GuideEvalMetricRead(
+                key=metric.key,
+                label=metric.label,
+                passed=metric.passed,
+                observed=metric.observed,
+                expected=metric.expected,
+            )
+            for metric in metrics
+        ],
+    )
+
+
+def run_ai_eval(
+    db: Session,
+    auth: AuthContext,
+    settings: Any,
+    project_id: uuid.UUID,
+) -> AIEvalRead:
+    """Evaluate project-level AI observability, budget, and provider-circuit state."""
+    report = ai_accounting_service.project_ai_cost_report(db, auth, settings, project_id)
+    metrics = [
+        _ResearchMetric(
+            "ai_runs_recorded",
+            "AI runs recorded",
+            report.run_count >= 1,
+            report.run_count,
+            "at least one AI run",
+        ),
+        _ResearchMetric(
+            "latency_visible",
+            "Step latency visible",
+            report.step_count == 0 or report.average_step_latency_ms >= 0,
+            report.average_step_latency_ms,
+            "average step latency can be computed",
+        ),
+        _ResearchMetric(
+            "budget_status",
+            "Budget status",
+            report.budget_status == "within_budget",
+            report.budget_status,
+            "within configured token/cost budget",
+        ),
+        _ResearchMetric(
+            "provider_circuit",
+            "Provider circuit breaker",
+            report.circuit_breaker_status == "closed",
+            report.circuit_breaker_status,
+            "provider failure threshold not reached",
+        ),
+    ]
+    score = sum(1 for metric in metrics if metric.passed)
+    return AIEvalRead(
+        project_id=project_id,
+        passed=score == len(metrics),
+        score=score,
+        total=len(metrics),
+        metrics=[
+            AIEvalMetricRead(
+                key=metric.key,
+                label=metric.label,
+                passed=metric.passed,
+                observed=metric.observed,
+                expected=metric.expected,
+            )
+            for metric in metrics
+        ],
+        report={
+            "run_count": report.run_count,
+            "step_count": report.step_count,
+            "failed_run_count": report.failed_run_count,
+            "total_tokens": report.total_tokens,
+            "total_cost": str(report.total_cost),
+            "average_step_latency_ms": report.average_step_latency_ms,
+            "budget_status": report.budget_status,
+            "circuit_breaker_status": report.circuit_breaker_status,
+            "workflow_breakdown": report.workflow_breakdown,
+        },
     )
 
 
@@ -785,8 +956,7 @@ REQUIRED_RESEARCH_MEMO_SECTIONS = (
 
 def _contains_research_memo_sections(markdown: str) -> bool:
     return all(
-        section.casefold() in markdown.casefold()
-        for section in REQUIRED_RESEARCH_MEMO_SECTIONS
+        section.casefold() in markdown.casefold() for section in REQUIRED_RESEARCH_MEMO_SECTIONS
     )
 
 

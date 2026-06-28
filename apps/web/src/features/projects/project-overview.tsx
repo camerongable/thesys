@@ -701,6 +701,9 @@ function GuidedOverview({
       overview.key_assumptions.length === 0);
   const contextGaps = decisionContextGaps(overview);
   const missingContextCount = contextGaps.filter((item) => item.status !== "complete").length;
+  // The homepage leads with one current step. The drawer keeps evidence,
+  // research, validation, and audit details nearby without turning the landing
+  // workflow into an operations dashboard.
   const [inspectOpen, setInspectOpen] = useState(false);
 
   return (
@@ -1206,6 +1209,9 @@ function CurrentStepPanel({
   );
 }
 
+// ProjectInspectDrawer is the "details on demand" surface for portfolio-grade
+// AI traceability: users can inspect evidence health, approvals, research
+// history, and validation context without losing the simple main workflow.
 function ProjectInspectDrawer({
   contextGaps,
   missingContextCount,
@@ -2108,6 +2114,8 @@ function WorkbenchAccessPanel<TMode extends string>({
     }
   }, [activeMode]);
 
+  // Advanced workbench modes stay collapsed until selected so feature depth is
+  // available without competing with the recommended next action.
   return (
     <details
       className="border-y border-border py-5"
