@@ -850,8 +850,8 @@ Implemented or demonstrated:
 - provider-backed embeddings, pgvector SQL retrieval, multi-stage retrieval,
   reranking, context assembly, retrieval-quality diagnostics, and re-embedding
 - LLM-grounded Ask Thesys with citations, retrieval diagnostics, bounded recent
-  turns, action-card routing, SSE streaming endpoint, approval-gated proposals,
-  guide evals, and deterministic fallback
+  turns, action-card routing, SSE-shaped response endpoint, approval-gated
+  proposals, guide evals, and deterministic fallback
 - optional Tavily-backed source discovery with provenance
 - multimodal image extraction and low-text PDF fallback through a LiteLLM
   multimodal provider boundary
@@ -865,9 +865,24 @@ Implemented or demonstrated:
 
 Planned future work:
 
+- unified context compiler with workflow profiles, memory integration, context
+  compression, conflict detection, context diffs, and context-quality evals
+- real MCP server transport for external agent clients, beyond the current
+  MCP-shaped HTTP adapter
+- true token/step streaming in Ask Thesys with cancellation and live tool events
+- production security follow-ups: rate limits, workflow concurrency limits,
+  dependency/security audit scripts, production auth, and formal threat modeling
 - stronger retrieval quality with BM25, MMR/diversity, cross-encoder reranking,
   and labeled retrieval evals
-- richer trace/citation drilldowns that remain hidden by default
+- OpenTelemetry-compatible observability, CI eval gates, eval reports, and
+  prompt/schema/context version changelogs
+- semantic caching and cost optimization for embeddings, retrieval, reranking,
+  and guide answers
+- richer source/document intelligence with readability extraction, OCR, table
+  extraction, page snapshots, and live provider QA
+- feature-package backend refactor to split oversized services while preserving
+  the straightforward main workflow
+- richer trace/citation/memory drilldowns that remain hidden by default
 - recurring market monitoring
 - advanced evaluation dashboard and CI integration for eval gates
 - team collaboration

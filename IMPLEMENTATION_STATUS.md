@@ -2,9 +2,8 @@
 
 ## Current Phase
 
-V1 Sprint 50 implementation is complete on the AI upgrade branch. Thesys now
-demonstrates a stronger production-style AI architecture for a portfolio
-project:
+V1 Sprint 50 implementation is complete. Thesys now demonstrates a stronger
+production-style AI architecture for a portfolio project:
 
 - provider-backed embeddings with deterministic local fallback and re-embedding
   support
@@ -13,7 +12,8 @@ project:
   context assembly, citation-preserving result metadata, and retrieval-quality
   diagnostics
 - LLM-grounded Ask Thesys answers with citations, bounded recent-turn context,
-  retrieval diagnostics, action-card routing, and deterministic fallback
+  retrieval diagnostics, action-card routing, approval-gated proposals, guide
+  evals, SSE-shaped response delivery, and deterministic fallback
 - governed external source discovery with deterministic and Tavily providers
 - multimodal evidence extraction for image uploads and low-text PDF fallback
 - URL/upload security guards, source provenance metadata, canonical
@@ -37,8 +37,11 @@ artifact structured content, and eval/check surfaces rather than new main
 dashboard cards. The homepage and main project workflow should remain focused on
 current verdict, next action, evidence health, validation, and decision state.
 
-The completed Sprint 41-50 upgrade track is summarized in the "Recently
-Completed V1 AI Engineering Upgrade Track" section near the end of this file.
+Sprint 41-50 are complete as V1 slices. The follow-up audit and next ordered
+upgrade backlog are captured in `IMPLEMENTATION_BRIEF.md` under
+"Post-Sprint 50 Audit and Future Upgrade Backlog." The audit keeps the completed
+portfolio work visible while moving broader production-grade gaps into Sprints
+51-60.
 
 ## Sprint 0 Scope
 
