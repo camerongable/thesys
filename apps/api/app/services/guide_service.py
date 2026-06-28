@@ -1652,6 +1652,16 @@ def _citation_details_from_search(
             continue
         seen_sources.add(source_id)
         text = str(result.get("text") or "")
+        metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+        source_quality = (
+            metadata.get("source_quality")
+            if isinstance(metadata.get("source_quality"), dict)
+            else {}
+        )
+        snapshot = metadata.get("snapshot") if isinstance(metadata.get("snapshot"), dict) else {}
+        if not snapshot and isinstance(metadata.get("raw_html_snapshot"), dict):
+            snapshot = {"raw_html_snapshot": metadata["raw_html_snapshot"]}
+        extraction = _citation_extraction_metadata(metadata)
         details.append(
             GuideCitationDetailRead(
                 source_id=source_id,
@@ -1664,9 +1674,61 @@ def _citation_details_from_search(
                 verifier_status="supported",
                 context_item_ids=context_item_ids.get(source_id, []),
                 memory_ids=memory_ids,
+                metadata=metadata,
+                provenance=_citation_provenance_metadata(metadata),
+                source_quality=source_quality,
+                extraction=extraction,
+                snapshot=snapshot,
+                page_number=_optional_int(metadata.get("page_number")),
+                section_heading=str(metadata.get("section_heading"))
+                if metadata.get("section_heading")
+                else None,
+                table_id=str(metadata.get("table_id")) if metadata.get("table_id") else None,
+                region=metadata.get("region") if isinstance(metadata.get("region"), dict) else None,
+                quote_offsets=metadata.get("quote_offsets")
+                if isinstance(metadata.get("quote_offsets"), dict)
+                else None,
+                warnings=_citation_warnings(metadata),
             )
         )
     return details
+
+
+def _citation_extraction_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    keys = {
+        "extraction_method",
+        "extraction_provider",
+        "extraction_model",
+        "extraction_confidence",
+        "ocr_confidence",
+        "pdf_text_extraction",
+        "table_extraction",
+        "readability",
+    }
+    return {key: metadata[key] for key in keys if key in metadata and metadata[key] is not None}
+
+
+def _citation_provenance_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    keys = {
+        "source_snapshot_id",
+        "page_number",
+        "section_heading",
+        "table_id",
+        "region",
+        "quote_offsets",
+        "quote_provenance",
+    }
+    return {key: metadata[key] for key in keys if key in metadata and metadata[key] is not None}
+
+
+def _citation_warnings(metadata: dict[str, Any]) -> list[str]:
+    warnings = metadata.get("warnings")
+    if isinstance(warnings, list):
+        return [str(warning) for warning in warnings]
+    source_quality = metadata.get("source_quality")
+    if isinstance(source_quality, dict) and source_quality.get("risk_level") == "high":
+        return ["high_source_quality_risk"]
+    return []
 
 
 def _context_item_ids_by_source(context_pack: dict[str, Any] | None) -> dict[str, list[str]]:
@@ -1718,6 +1780,15 @@ def _optional_float(value: Any) -> float | None:
         return None
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None
 

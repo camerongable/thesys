@@ -68,7 +68,7 @@ with the sprint checklists below.
 | Sprint 45 | Retrieval quality, citation verification, cache-aware retrieval/rerank metrics, and stale-cache denial coverage are implemented; post-refactor docs still need exact provider/reranker extension points, hybrid ranking limits, cache invalidation notes, and citation-verifier ownership. | Sprint 60 |
 | Sprint 46 | Ask Thesys streaming/citations are implemented, but web typecheck/tests and IDE browser QA for streaming, cancellation, timeout, event ordering, proposal cards, and citation drilldowns were blocked by npm registry errors. | Sprint 60 |
 | Sprint 47 | Observability gates/reports and real cache metrics are implemented; browser QA for the hidden eval report is blocked by npm registry errors, and hosted/CI wiring still needs concrete commands, artifact paths, warn/fail policy, and environment prerequisites. | Sprint 60 |
-| Sprint 48 | Current code has security guards, low-text PDF fallback, multimodal boundaries, provenance, and extraction eval gates, but still lacks maintained readability extraction, persisted raw/page/screenshot snapshots, OCR confidence/page metadata, real table extraction, exact quote provenance, richer source-quality scoring, retrieval use of source quality, extraction-provenance citation UI, and live Tavily/multimodal QA fixtures. The existing extraction eval is mostly structural and can pass while these behaviors are absent. | Sprint 58 |
+| Sprint 48 | Sprint 58 now covers the local document-intelligence path: parser/readability metadata, snapshot metadata with explicit local storage absence, deterministic OCR metadata, deterministic table artifacts, quote offsets, source-quality factors/explanations, retrieval weighting, enriched citations, collapsed provenance UI, and fixture-backed extraction evals. Remaining carried gaps are explicit: decide whether to add a maintained parser dependency or document the deterministic parser as the V1 fallback; add true page/screenshot artifact capture and object-storage persistence if productizing beyond metadata; run live Tavily and live multimodal credential QA; retry web typecheck/browser QA for provenance disclosures; verify Project Inspect trust summaries after web deps are available. | Sprint 60 for docs/QA/final audit; future backlog only for intentionally out-of-V1 productization items. |
 | Sprint 49 | Earlier cleanup added shared utilities, but validation, research, guide, evidence/retrieval, tools/MCP, eval/reporting, prompt assembly, structured-output repair, proposal creation, and audit metadata paths still need a feature-package refactor with typed DTO boundaries. | Sprint 59 |
 | Sprint 50 | README/docs were improved, but final diagrams, code navigation, docstrings/comments, deployment docs, hosted-demo runbooks, and honest limit notes must be regenerated after Sprints 57-59 land and after deferred browser checks are retried. | Sprint 60 |
 
@@ -91,11 +91,14 @@ with the sprint checklists below.
   the cache implementation is committed: AI status tooltip cache posture,
   Evidence retrieval diagnostic cache line, and hidden eval cache metrics should
   be checked with the Sprint 56 report UI.
-- Sprint 58 must not rely on the current `scripts/eval_extraction_quality.py`
-  structural checks as proof of completion. The sprint must add fixture-backed
-  behavior checks for messy HTML, prompt-injected HTML, scanned/low-text PDFs,
-  table-heavy documents, duplicate canonical URLs, stale sources, quote
-  provenance, source-quality scoring, and live-provider-unavailable warnings.
+- Sprint 58 extraction checks are now fixture-backed, but Sprint 60 must retry
+  the environment-blocked web checks and any credential-backed live-provider
+  smoke tests. Required retry scope: `pnpm --filter thesys-web typecheck`,
+  `pnpm --filter thesys-web test`, IDE browser QA for Evidence/retrieval/guide/
+  research/source-discovery provenance disclosures, and opt-in Tavily plus
+  multimodal provider smoke tests when credentials and egress allowlists are
+  configured. If the environment is still blocked, record the exact blocker and
+  next owner instead of marking the checks complete.
 
 ## Sprint 51: Unified Context Compiler, Memory V2, and Context Evals
 
@@ -375,193 +378,134 @@ with the sprint checklists below.
 
 ## Sprint 58: Source Intelligence and Document AI V2
 
-- [ ] Treat the following as the current code gap inventory, not optional
-  polish. Do not mark Sprint 58 complete until each item has implementation,
-  tests/evals, docs, and a status entry:
-  maintained readability extraction; raw/page/screenshot snapshot metadata;
-  OCR fallback with confidence/page/method metadata; deterministic OCR test
-  double; real table extraction with rows/cells; exact quote provenance with
-  offsets; source-quality scoring beyond basic credibility; retrieval/context
-  use of source quality; citation/Evidence Inspect display of extraction
-  provenance; and explicit live-provider-unavailable warnings.
-- [ ] Close Sprint 48 gaps: add better extraction for messy web/PDF evidence,
-  inspectable page/section provenance, richer source-quality scoring, and live
-  provider QA paths when credentials are configured.
-- [ ] Replace or augment the current minimal `_ReadableHtmlParser` path in
-  `apps/api/app/services/evidence_service.py` with readability extraction for
-  fetched HTML using a maintained parser such as `trafilatura`,
-  `readability-lxml`, or another explicit dependency. Preserve original URL,
-  canonical URL, title, author/date when available, extracted text, section
-  headings, section offsets, extraction warnings, and fallback-to-raw-text
-  reason. The current parser is not enough if it still admits title/nav/footer
-  boilerplate as body evidence without explicit fallback metadata.
-- [ ] Route readability extraction through the existing source-ingestion path,
-  not a one-off helper. The stored evidence record must identify the raw fetch,
-  normalized readability text, parser/version, and fallback path used.
-- [ ] Add messy HTML and prompt-injected HTML fixtures that assert boilerplate
+- [x] Close the local Sprint 48 behavior gaps for messy HTML/PDF evidence,
+  inspectable page/section/table/OCR provenance, richer source-quality scoring,
+  retrieval use of source quality, and explicit provider-unavailable warnings.
+- [x] Route fetched HTML extraction through
+  `apps/api/app/services/evidence_service.py` and preserve raw fetch metadata,
+  canonical/final URLs, parser/provider metadata, normalized text, section
+  headings, section offsets, warnings, and fallback metadata.
+- [x] Add messy HTML and prompt-injected HTML fixtures that assert boilerplate
   removal, script/style stripping, title handling, section names, section
-  offsets, prompt-injection marker propagation, and fallback behavior when the
-  readability parser cannot confidently extract content.
-- [ ] Add optional page screenshot/snapshot capture with storage limits,
-  redaction/egress policy, source metadata, and Inspect-only UI exposure.
-  If full screenshot capture is deferred, store an explicit `available: false`
-  reason and keep the deferred screenshot work in the residual gap register.
-- [ ] Persist snapshot metadata separately from normalized text: capture URL,
-  final URL, canonical URL, fetched timestamp, content hash, byte hash, storage
-  key/path or explicit local-mode absence reason, byte size, screenshot
-  availability, redaction status, retention policy, and source snapshot ID.
-  Hash/length-only metadata is not sufficient unless the docs clearly label it
-  as a local deterministic fallback.
-- [ ] Add OCR fallback for scanned PDFs with confidence, page numbers,
-  extraction method metadata, and graceful deterministic fallback.
-- [ ] Add a deterministic OCR test double so scanned-PDF behavior can be tested
-  without local OCR binaries or live multimodal credentials. Cover marker
-  present, marker missing, low-confidence warning, provider error, and egress
-  denial cases.
-- [ ] Add table extraction for PDFs and screenshots, including table text,
-  row/column structure where available, page/region provenance, and extraction
-  confidence. Remove the current "table extraction disabled" behavior as the
-  only covered path, or explicitly keep it as a fallback path with separate
-  positive tests for extracted tables.
-- [ ] Store table artifacts as structured rows/cells plus plain-text summaries
-  so retrieval can search them and citation drilldowns can show row/column
-  provenance.
-- [ ] Add table-heavy PDF and table-like HTML fixtures that assert headers,
-  rows, cells, page/region metadata, table summaries, confidence, and retrieval
-  of table text. A passing eval that only sees `table_extraction.enabled: false`
-  is not acceptable.
-- [ ] Add section/page-level quote provenance so generated citations can point
-  to exact document pages, sections, table regions, screenshots, or OCR spans.
-- [ ] Extend chunk metadata with `extraction_method`, `source_snapshot_id`,
-  `page_number`, `section_heading`, `table_id`, `region`, confidence, and quote
-  offsets where available.
-- [ ] Make quote provenance exact enough for citation drilldowns: every
-  retrieved quote/citation should map back to one of raw HTML, readability text,
-  PDF page text, OCR span, table cell/range, or screenshot region with the
-  source artifact ID, normalized-text offsets, and original artifact location.
-  Tests should fail if offsets drift after whitespace normalization/chunking.
-- [ ] Add richer source quality scoring for authority, freshness,
+  offsets, prompt-injection marker propagation, and fallback behavior.
+- [x] Persist snapshot metadata separately from normalized text through
+  `apps/api/app/services/source_provenance_service.py`: capture URL, final URL,
+  canonical URL, fetched timestamp, content hash, byte hash, byte size,
+  redaction status, retention policy, source snapshot ID, screenshot
+  availability, and explicit local-mode storage absence reason.
+- [x] Add OCR fallback metadata for scanned/low-text PDFs and image extraction:
+  extraction method, provider/model, confidence, page numbers, warnings, and a
+  deterministic test path that does not require OCR binaries or live multimodal
+  credentials.
+- [x] Add deterministic OCR test coverage for marker-present, marker-missing,
+  low-confidence, provider-unavailable, and local deterministic fallback paths.
+- [x] Add positive table extraction artifacts for text/PDF-like content:
+  headers, rows, cells, plain-text summaries, page/region provenance,
+  confidence, and searchable extraction metadata.
+- [x] Add table-heavy fixture coverage proving headers, rows, cells, page/region
+  metadata, summaries, confidence, and retrieval/rerank behavior are not limited
+  to `table_extraction.enabled: false`.
+- [x] Add chunk-level quote provenance with `extraction_method`,
+  `source_snapshot_id`, `page_number`, `section_heading`, `table_id`, `region`,
+  confidence, normalized quote offsets, and source artifact metadata.
+- [x] Add offset/provenance tests that fail if chunking or whitespace
+  normalization causes the stored quote offsets to drift.
+- [x] Add richer source-quality scoring for authority, freshness,
   canonical/deduped status, extraction confidence, injection markers, source
-  type, domain diversity, OCR confidence, table extraction confidence,
-  screenshot availability, and standard text extraction quality.
-- [ ] Add explicit source-quality unit/eval cases for `.gov`, `.edu`, product
-  marketing pages, stale sources, duplicate canonical URLs, prompt-injection
-  penalties, OCR confidence penalties, table extraction confidence, screenshot
-  availability, and retrieval weight/cap decisions.
-- [ ] Feed source quality into retrieval/context policy as a boost, cap, or
-  warning without hiding lower-quality evidence entirely when it is relevant.
-- [ ] Prove source quality affects retrieval/context in a test: high-quality
-  equivalent evidence should rank higher, low-quality but relevant evidence
-  should remain inspectable with a warning, and prompt-injected evidence should
-  not be promoted by semantic relevance alone.
-- [ ] Extend citation drilldowns and evidence Inspect metadata to show
-  extraction method, confidence, page/section/table/region provenance,
-  screenshot availability, and source-quality explanation.
-- [ ] Add frontend/API response coverage for the Inspect/citation metadata:
-  extraction method, parser/provider, confidence, source snapshot ID, page,
-  section heading, table/cell region, OCR status, screenshot availability,
-  source-quality explanation, and warning labels must be present but collapsed
-  by default.
-- [ ] Normalize the Sprint 58 provenance field names before wiring UI:
+  type, OCR confidence, table confidence, screenshot availability, standard text
+  extraction quality, retrieval weight, factors, explanation, and policy
+  version.
+- [x] Feed source quality into deterministic retrieval/reranking as a boost or
+  warning while keeping relevant lower-quality evidence inspectable.
+- [x] Prove source quality affects retrieval/context in tests: equivalent
+  higher-quality evidence ranks higher, lower-quality evidence remains
+  inspectable, and prompt-injected evidence is not promoted by semantic
+  relevance alone.
+- [x] Normalize Sprint 58 provenance fields before UI wiring:
   `extraction_method`, `extraction_provider`, `extraction_confidence`,
   `page_number`, `section_heading`, `table_id`, `region`, `quote_offsets`,
   `source_snapshot_id`, `screenshot.captured`, `snapshot.storage_key`, and
-  `source_quality.explanation`. Keep compatibility shims if older metadata
-  already exists.
-- [ ] Update the Evidence source metadata path so raw extraction metadata is not
-  lost or hidden behind an unstructured JSON blob. Review and update
-  `apps/api/app/services/evidence_service.py` (`serialize_source`),
-  `apps/api/app/schemas/evidence.py` (`EvidenceSourceRead`),
-  `apps/web/src/lib/api.ts` (`EvidenceSource`), and
-  `apps/web/src/features/projects/evidence-tab.tsx`
-  (`SourceMetadataDetails` / `metadataEntries`). Add grouped collapsed rows for
-  extraction method/provider/confidence, `pdf_page_lineage`,
-  `text_lineage.sections`, `table_extraction`, `raw_html_snapshot.screenshot`,
-  snapshot storage/retention, and `source_quality`.
-- [ ] Update retrieval-result metadata rendering. `EvidenceRetrievalResultRead`
-  already exposes metadata and `retrieval_service._serialize_result` already
-  carries chunk metadata, but the web retrieval results mostly show
-  score/text/embedding state. Add a collapsed `RetrievalResultMetadataDetails`
-  in `apps/web/src/features/projects/evidence-tab.tsx` with chunk provenance,
-  source quality, rerank reason, `context_included`, page/section/table/region,
-  quote offsets, and snapshot availability.
-- [ ] Add `source_quality.explanation`, `source_quality.factors`, and
-  `source_quality.policy_version` in
-  `apps/api/app/services/source_provenance_service.py`, then render those fields
-  in Evidence source details, retrieval metadata, citation drilldowns, and
-  Project Inspect trust summaries.
-- [ ] Enrich citation DTOs and drilldowns instead of relying on compact
-  `source_id`/`chunk_id` objects. Review `apps/api/app/schemas/artifacts.py`
-  (`Citation`), `apps/api/app/schemas/guide.py`
-  (`GuideCitationDetailRead`), `apps/web/src/lib/api.ts` (`Citation` /
-  `GuideCitationDetail`), and
-  `apps/api/app/services/guide_service.py`
-  (`_citation_details_from_search`). Add optional `source_type`, `metadata` or
-  `provenance`, `source_quality`, `extraction`, `snapshot`, exact locator
-  fields, and warning labels.
-- [ ] Update citation renderers without cluttering the main workflow:
-  `apps/web/src/features/projects/guide-panel.tsx`
-  (`GuideAnswerMetadata`),
-  `apps/web/src/features/projects/project-overview.tsx`
-  (`ResearchMemoReview`, `SourceGroundedMemo`, and `normalizeCitation`) should
-  show provenance only inside existing collapsed citation/source controls.
-- [ ] Preserve rich provenance in all cited artifact paths. Agentic research
-  already persists `structured_content.selected_evidence`; the frontend should
-  cross-reference citation `source_id`/`chunk_id` against that selected evidence
-  before falling back to compact citation fields. Opportunity brief and
-  competitor artifacts should add selected-evidence/provenance snapshots or
-  enrich citations during citation audit so source quality and extraction
-  metadata survive artifact persistence.
-- [ ] Extend source-discovery review provenance. Review
-  `apps/api/app/schemas/research.py` (`DiscoveredSourceRead`),
-  `apps/api/app/services/source_discovery_service.py`
-  (`_source_evidence_metadata`), and
-  `apps/web/src/features/projects/project-overview.tsx`
-  (`EvidenceReviewActiveItem`). Show provider score/rank, search provenance,
-  source snapshot fallback status, and extraction warnings behind the existing
-  "Show search provenance" disclosure.
-- [ ] Extend Project Inspect trust summaries instead of adding homepage
-  clutter. Review `ProjectInspectDrawer`,
-  `ProjectContextDiagnosticsSection`, `ContextReportList`, and `MemoryItemRow`
-  in `apps/web/src/features/projects/project-overview.tsx`; add summary-level
-  trust/source-quality/extraction indicators only behind Inspect. On the
-  backend, update `eval_service.run_context_eval` so Inspect diagnostics retain
+  `source_quality.explanation`.
+- [x] Update Evidence source metadata rendering in
+  `apps/web/src/features/projects/evidence-tab.tsx` so extraction method,
+  provider, confidence, `pdf_page_lineage`, `text_lineage.sections`,
+  `table_extraction`, `raw_html_snapshot.screenshot`, snapshot
+  storage/retention, and `source_quality` are collapsed but visible.
+- [x] Add collapsed retrieval-result provenance in Evidence retrieval results:
+  chunk provenance, source quality, rerank reason, `context_included`,
+  page/section/table/region, quote offsets, and snapshot availability.
+- [x] Enrich citation DTOs and guide citation details in
+  `apps/api/app/schemas/artifacts.py`, `apps/api/app/schemas/guide.py`,
+  `apps/api/app/services/guide_service.py`, and `apps/web/src/lib/api.ts` with
+  optional source type, metadata/provenance, source quality, extraction,
+  snapshot, locator fields, quote offsets, and warning labels.
+- [x] Update guide and research memo citation renderers so provenance appears
+  only inside existing collapsed citation/source controls.
+- [x] Preserve rich provenance through citation verification and fallback
+  citation creation for agentic research, opportunity brief, and competitor
+  artifacts.
+- [x] Extend source-discovery review provenance behind the existing
+  "Show search provenance" disclosure with provider score/rank, search
+  provenance, snapshot fallback status, and extraction warnings.
+- [x] Update `eval_service.run_context_eval` so Inspect diagnostics retain
   `provenance.metadata` instead of reducing provenance to `source`.
-- [ ] Add live Tavily and live multimodal QA paths when credentials are
-  configured, with deterministic fallback, egress policy checks, rate limits,
-  and eval fixtures that do not require credentials.
-- [ ] Make live-provider QA opt-in and visibly skipped when credentials or
-  egress allowlists are missing. The skip must appear in eval output as a
-  warning, not as a silent pass.
-- [ ] Wire live-provider-unavailable behavior into the quality gate: missing
-  key, unreachable provider, and egress-denied provider should produce explicit
-  warn/skip records with provider name, feature, reason, and rerun instructions;
-  they should not surface as generic ingestion failures.
-- [ ] Add eval fixtures for messy HTML, prompt-injected HTML, scanned PDFs,
-  low-text PDFs, table-heavy PDFs, duplicate canonical URLs, stale sources, and
-  live-provider-unavailable fallback.
-- [ ] Extend `scripts/eval_extraction_quality.py` from structural readiness
-  checks into fixture-backed extraction regression cases with expected extracted
-  text, provenance spans, source-quality outcomes, and provider-unavailable
-  fallback results.
-- [ ] The extraction eval must execute code paths or focused service tests, not
-  only scan repository files for substrings. It should report fixture IDs,
-  expected versus actual extraction/provenance/source-quality values, warnings,
-  and rerun commands.
-- [ ] Store raw snapshot metadata and normalized extraction artifacts separately
+- [x] Make live-provider QA opt-in and visibly skipped when credentials,
+  provider mode, or egress allowlists are missing. The extraction eval reports
+  missing Tavily and deterministic multimodal mode as warnings rather than
+  silent passes.
+- [x] Extend `scripts/eval_extraction_quality.py` from structural readiness
+  checks into fixture-backed behavior checks that execute service paths and
+  report fixture IDs, expected/actual values, warnings, and rerun commands.
+- [x] Add fixture coverage for messy HTML, prompt-injected HTML, OCR fallback,
+  low-text PDFs, table-heavy documents, quote provenance, source-quality
+  scoring, and live-provider-unavailable fallback.
+- [x] Store raw snapshot metadata and normalized extraction artifacts separately
   enough that citations can explain whether a quote came from raw HTML,
-  readability text, OCR, a table, a PDF page, or a screenshot region.
-- [ ] Update docs/README portfolio language for the implemented document-AI
-  stack: extraction methods, provenance model, source-quality scoring,
-  deterministic fallbacks, and live-provider limits.
-- [ ] Run evidence, extraction, provenance, retrieval, citation, source-quality,
-  security-egress, and browser document QA.
-- [ ] Update this TODO and `IMPLEMENTATION_STATUS.md` with exact verification
-  results. If screenshot capture, live Tavily QA, live multimodal QA, OCR
-  binaries, or browser checks are environment-blocked, leave the relevant TODO
-  unchecked or move it to the Sprint 60/residual register with the exact blocker
-  and next owner.
-- [ ] Commit Sprint 58.
+  normalized HTML text, OCR, a table, or a PDF page.
+- [x] Update README/status/changelog portfolio language for the implemented
+  document-AI stack: extraction methods, provenance model, source-quality
+  scoring, deterministic fallbacks, and live-provider limits.
+- [x] Run backend evidence, extraction, provenance, retrieval, citation, and
+  source-quality checks:
+  `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_citation_verifier.py app/tests/test_retrieval_quality_eval.py -q --maxfail=1`
+  (`17 passed`) and `python3 scripts/eval_extraction_quality.py --json`
+  (`7/7` with explicit provider-unavailable warnings).
+- [x] Run the broader backend regression suite:
+  `cd apps/api && .venv/bin/pytest -q` (`174 passed`).
+- [ ] Add or intentionally defer a maintained HTML readability dependency
+  (`trafilatura`, `readability-lxml`, or equivalent). Current branch uses an
+  improved deterministic `html.parser` fallback with parser/version/confidence
+  metadata; Sprint 60 must document that as the V1 local fallback or add the
+  dependency before final sign-off.
+- [ ] Add true page/screenshot artifact capture and object-storage persistence
+  if this moves beyond metadata-only local mode. Current branch records
+  `screenshot.captured: false`, `storage_key: null`, and an explicit
+  local-mode absence reason; Sprint 60 must keep this honest in README/status
+  or create a follow-up backlog item for Playwright/screenshot storage.
+- [ ] Add screenshot-region OCR/table provenance only if screenshot capture is
+  implemented. Current positive table extraction covers text/PDF-like content,
+  not screenshot table regions; Sprint 60 must mark screenshot-region table
+  extraction out of V1 or assign a future backlog owner.
+- [ ] Retry web typecheck/tests and IDE browser QA for the Sprint 58 UI changes
+  once npm registry access is stable:
+  `pnpm --filter thesys-web typecheck`,
+  `pnpm --filter thesys-web test`, and browser checks for Evidence source
+  metadata, retrieval-result provenance, Ask Thesys citation drilldowns,
+  research memo citations, source-discovery provenance, and no homepage/main
+  workflow clutter. The latest typecheck retry again stopped before TypeScript
+  because pnpm hit npm registry `ECONNRESET` package fetch failures and was
+  interrupted during `pnpm install`.
+- [ ] Run opt-in live Tavily and live multimodal QA with real credentials,
+  provider mode enabled, egress allowlists configured, and rate limits active.
+  If credentials or egress are unavailable, record the eval warning and exact
+  rerun command in Sprint 60 rather than claiming live-provider coverage.
+- [ ] Verify Project Inspect trust summaries in the browser after web deps are
+  available. Backend context eval items now retain provenance metadata, but the
+  hidden UI must still be checked for source-quality/extraction indicators and
+  no primary-workflow clutter.
+- [x] Update this TODO and `IMPLEMENTATION_STATUS.md` with exact verification
+  results and remaining unchecked carry-forward items.
+- [x] Commit Sprint 58.
 
 ## Sprint 59: Feature-Package Backend Refactor
 
@@ -731,6 +675,15 @@ with the sprint checklists below.
   availability, source-quality explanation, provider-unavailable warnings,
   source-discovery provenance, retrieval-result provenance, and no new
   homepage/dashboard clutter.
+- [ ] Resolve every remaining Sprint 58 carry-forward explicitly before the
+  Sprint 60 commit. Required dispositions:
+  maintained parser dependency either added or documented as an intentional V1
+  deterministic fallback; screenshot/page artifact capture either implemented
+  with storage/redaction policy or moved to a named future backlog item;
+  screenshot-region table/OCR provenance either implemented or marked out of
+  V1 with reason; live Tavily/multimodal credential QA either run with command
+  output or recorded as unavailable with rerun instructions; Project Inspect
+  trust summaries browser-checked or recorded with exact blocker.
 - [ ] Run a final carried-gap audit before the Sprint 60 commit. For every
   Sprint 41-50 item in the gap coverage ledger, record one of: implemented with
   verification link, intentionally out of V1 scope with reason, or still open

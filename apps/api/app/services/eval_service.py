@@ -708,6 +708,8 @@ def run_context_eval(
                     "type": item.type,
                     "title": item.title,
                     "source": item.provenance.source,
+                    "provenance": item.provenance.model_dump(mode="json"),
+                    "metadata": item.provenance.metadata,
                     "untrusted": item.untrusted,
                 }
                 for item in pack.items

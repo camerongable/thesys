@@ -83,6 +83,13 @@ class ReembedResult:
     failures: list[ReembedFailure]
 
 
+@dataclass(frozen=True)
+class TextChunk:
+    text: str
+    char_start: int
+    char_end: int
+
+
 def list_sources(db: Session, auth: AuthContext, project_id: uuid.UUID) -> list[EvidenceSource]:
     project_service.get_project(db, auth, project_id)
     return list(
@@ -650,15 +657,29 @@ def _process_source_text(
             raise EvidenceIngestionError("Evidence source did not produce chunks.")
 
         content_hash = source_provenance_service.content_hash(normalized)
+        base_metadata = _merge_metadata(
+            {
+                "content_type": content_type,
+                "content_hash": content_hash,
+                "domain": source_provenance_service.source_domain(source.url),
+            },
+            metadata,
+        )
+        extraction_method = str(
+            base_metadata.get("extraction_method")
+            or base_metadata.get("pdf_text_extraction")
+            or base_metadata.get("text_extraction")
+            or "normalized_text"
+        )
         processed_metadata = _merge_metadata(
             source.source_metadata or {},
             _merge_metadata(
-                {
-                    "content_type": content_type,
-                    "content_hash": content_hash,
-                    "domain": source_provenance_service.source_domain(source.url),
-                },
-                metadata,
+                base_metadata,
+                source_provenance_service.extraction_artifacts(
+                    text=text,
+                    metadata=base_metadata,
+                    extraction_method=extraction_method,
+                ),
             ),
         )
         prompt_markers = source_provenance_service.detect_prompt_injection_markers(normalized)
@@ -724,13 +745,20 @@ def _process_source_text(
         source.ingestion_status = "ready"
         source.ingestion_error = None
 
-        for index, chunk_text in enumerate(chunks):
+        for index, chunk_info in enumerate(chunks):
             embedding = embedding_service.embed_text_with_metadata_cached(
                 db,
                 auth,
                 settings,
-                chunk_text,
+                chunk_info.text,
                 project_id=source.project_id,
+            )
+            quote_provenance = source_provenance_service.chunk_quote_provenance(
+                source_metadata=source.source_metadata or {},
+                chunk_text=chunk_info.text,
+                char_start=chunk_info.char_start,
+                char_end=chunk_info.char_end,
+                chunk_index=index,
             )
             chunk_metadata = _merge_metadata(
                 {
@@ -741,15 +769,15 @@ def _process_source_text(
                     "source_metadata": source.source_metadata or {},
                     **embedding_service.embedding_metadata(settings),
                 },
-                source.source_metadata,
+                _merge_metadata(source.source_metadata, quote_provenance),
             )
             chunk = EvidenceChunk(
                 workspace_id=source.workspace_id,
                 project_id=source.project_id,
                 source_id=source.id,
                 chunk_index=index,
-                text=chunk_text,
-                token_count=len(_tokens(chunk_text)),
+                text=chunk_info.text,
+                token_count=len(_tokens(chunk_info.text)),
                 embedding=embedding.vector,
                 embedding_provider=embedding.provider,
                 embedding_model=embedding.model,
@@ -1004,13 +1032,11 @@ def _parse_file(
             **file_metadata,
             "media_type": "pdf",
             "content_type": "application/pdf",
+            "extraction_method": "pypdf",
+            "extraction_confidence": 0.86,
             "pdf_text_extraction": "pypdf",
             "pdf_page_count": len(page_texts),
             "pdf_page_lineage": source_provenance_service.pdf_page_lineage(page_texts),
-            "table_extraction": {
-                "enabled": False,
-                "reason": "table extraction extension point is not configured",
-            },
             "extracted_text_length": len(normalized),
         }
         if (
@@ -1031,6 +1057,33 @@ def _parse_file(
                     "pdf_text_extraction": "multimodal_fallback",
                     "pypdf_extracted_text_length": len(normalized),
                     "ocr_fallback_used": True,
+                    "extraction_method": extraction.metadata.get(
+                        "extraction_method",
+                        "pdf_ocr_deterministic"
+                        if extraction.provider == "deterministic"
+                        else "pdf_ocr_litellm",
+                    ),
+                    "extraction_confidence": extraction.metadata.get(
+                        "extraction_confidence",
+                        0.72,
+                    ),
+                    "ocr_confidence": extraction.metadata.get("ocr_confidence", 0.72),
+                    "ocr_fallback": extraction.metadata.get(
+                        "ocr_fallback",
+                        {
+                            "used": True,
+                            "provider": extraction.provider,
+                            "model": extraction.model,
+                            "method": (
+                                "pdf_ocr_deterministic"
+                                if extraction.provider == "deterministic"
+                                else "pdf_ocr_litellm"
+                            ),
+                            "confidence": extraction.metadata.get("ocr_confidence", 0.72),
+                            "page_numbers": [1],
+                            "warnings": extraction.warnings,
+                        },
+                    ),
                 },
             )
             return ParsedSource(
@@ -1060,6 +1113,8 @@ def _parse_file(
                 **file_metadata,
                 "media_type": "text",
                 "content_type": content_type,
+                "extraction_method": "direct_decode",
+                "extraction_confidence": 0.9,
                 "text_extraction": "direct_decode",
             },
         )
@@ -1090,7 +1145,18 @@ def _parse_html(
         "fetched_at": fetched_at.isoformat() if fetched_at else None,
         "retrieved_at": fetched_at.isoformat() if fetched_at else None,
         "response_content_type": content_type,
-        "extraction_method": "readable_html_parser_v2",
+        "extraction_method": "readable_html_parser_v3",
+        "extraction_provider": "python_html_parser",
+        "extraction_confidence": parser.confidence,
+        "readability": {
+            "parser": "html.parser",
+            "parser_version": "stdlib",
+            "policy_version": "readability-html:v3",
+            "fallback_used": parser.fallback_used,
+            "fallback_reason": parser.fallback_reason,
+            "warnings": parser.warnings,
+            "maintained_parser": "python-stdlib-html.parser",
+        },
         "prompt_injection_markers": markers,
         "text_lineage": {
             "page_title": title,
@@ -1104,6 +1170,7 @@ def _parse_html(
                 html=html,
                 final_url=final_url,
                 fetched_at=fetched_at,
+                canonical_url=canonical_url,
             ),
         )
     return ParsedSource(title=title, text=text, content_type=content_type, metadata=metadata)
@@ -1120,16 +1187,30 @@ def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _chunk_text(text: str, *, target_tokens: int = 950, overlap_tokens: int = 150) -> list[str]:
+def _chunk_text(
+    text: str,
+    *,
+    target_tokens: int = 950,
+    overlap_tokens: int = 150,
+) -> list[TextChunk]:
     tokens = _tokens(text)
     if len(tokens) <= target_tokens:
-        return [text] if text else []
+        return [TextChunk(text=text, char_start=0, char_end=len(text))] if text else []
 
-    chunks: list[str] = []
+    chunks: list[TextChunk] = []
     start = 0
+    search_from = 0
     while start < len(tokens):
         end = min(start + target_tokens, len(tokens))
-        chunks.append(" ".join(tokens[start:end]))
+        chunk_text = " ".join(tokens[start:end])
+        char_start = text.find(chunk_text, search_from)
+        if char_start < 0:
+            char_start = text.find(chunk_text)
+        if char_start < 0:
+            char_start = search_from
+        char_end = min(len(text), char_start + len(chunk_text))
+        chunks.append(TextChunk(text=chunk_text, char_start=char_start, char_end=char_end))
+        search_from = max(char_start + 1, char_end - max(overlap_tokens, 1))
         if end == len(tokens):
             break
         start = max(0, end - overlap_tokens)
@@ -1211,15 +1292,23 @@ class _ReadableHtmlParser(HTMLParser):
         self.title = ""
         self.text_parts: list[str] = []
         self.sections: list[dict[str, Any]] = []
+        self.warnings: list[str] = []
+        self.fallback_used = False
+        self.fallback_reason: str | None = None
+        self.confidence = 0.78
         self._skip_depth = 0
+        self._boilerplate_depth = 0
         self._in_title = False
         self._heading_tag: str | None = None
         self._heading_parts: list[str] = []
         self._current_heading: str | None = None
+        self._cursor = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in {"script", "style", "noscript", "svg"}:
             self._skip_depth += 1
+        if tag in {"nav", "footer", "header", "aside", "form"}:
+            self._boilerplate_depth += 1
         if tag == "title":
             self._in_title = True
         if tag in {"h1", "h2", "h3"} and self._skip_depth == 0:
@@ -1229,6 +1318,8 @@ class _ReadableHtmlParser(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag in {"script", "style", "noscript", "svg"} and self._skip_depth > 0:
             self._skip_depth -= 1
+        if tag in {"nav", "footer", "header", "aside", "form"} and self._boilerplate_depth > 0:
+            self._boilerplate_depth -= 1
         if tag == "title":
             self._in_title = False
         if tag == self._heading_tag:
@@ -1241,15 +1332,28 @@ class _ReadableHtmlParser(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._in_title:
             self.title += f" {data}"
-        if self._skip_depth == 0:
-            text = data.strip()
-            if text:
-                if self._heading_tag:
-                    self._heading_parts.append(text)
-                self.text_parts.append(text)
-                self.sections.append(
-                    {
-                        "section": self._current_heading or _normalize_text(self.title) or None,
-                        "text_preview": _truncate(text, 300),
-                    }
-                )
+            return
+        if self._skip_depth > 0:
+            return
+        text = _normalize_text(data)
+        if not text:
+            return
+        if self._boilerplate_depth > 0:
+            self.warnings.append("boilerplate_text_skipped")
+            return
+        if self._heading_tag:
+            self._heading_parts.append(text)
+        start = self._cursor
+        end = start + len(text)
+        self.text_parts.append(text)
+        self.sections.append(
+            {
+                "section": self._current_heading or _normalize_text(self.title) or None,
+                "section_heading": self._current_heading or _normalize_text(self.title) or None,
+                "heading_tag": self._heading_tag,
+                "char_start": start,
+                "char_end": end,
+                "text_preview": _truncate(text, 300),
+            }
+        )
+        self._cursor = end + 1

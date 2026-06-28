@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import AIRun, AIStep, EvidenceChunk, EvidenceSource
-from app.schemas.evidence import EvidenceRetrievalResultRead
+from app.schemas.evidence import EvidenceRetrievalResultRead, RetrievalQueryPlanRead
 from app.services import evidence_service, multimodal_extraction_service, retrieval_service
 
 
@@ -312,9 +312,25 @@ def test_url_ingestion_canonicalizes_and_records_page_provenance(
     assert body["metadata"]["domain"] == "example.com"
     assert body["metadata"]["prompt_injection_markers"]
     assert body["metadata"]["source_quality"]["risk_level"] == "high"
+    assert body["metadata"]["source_quality"]["policy_version"] == "source-quality:v2"
+    assert body["metadata"]["source_quality"]["explanation"]
+    assert body["metadata"]["source_quality"]["factors"]
+    assert body["metadata"]["source_quality"]["retrieval_weight"] < 0.8
+    assert body["metadata"]["readability"]["parser"] == "html.parser"
+    assert body["metadata"]["extraction_method"] == "readable_html_parser_v3"
+    assert body["metadata"]["extraction_confidence"] > 0
     assert body["metadata"]["text_lineage"]["page_title"] == "Pricing"
     assert body["metadata"]["text_lineage"]["sections"]
+    assert body["metadata"]["text_lineage"]["sections"][0]["char_start"] >= 0
+    assert body["metadata"]["source_snapshot_id"].startswith("html:")
+    assert (
+        body["metadata"]["snapshot"]["source_snapshot_id"]
+        == body["metadata"]["source_snapshot_id"]
+    )
+    assert body["metadata"]["snapshot"]["screenshot"]["available"] is False
+    assert body["metadata"]["snapshot"]["retention_policy"]
     assert body["metadata"]["raw_html_snapshot"]["content_hash"]
+    assert body["metadata"]["raw_html_snapshot"]["screenshot"]["available"] is False
 
     source = db_session.scalar(
         select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(body["id"]))
@@ -322,6 +338,10 @@ def test_url_ingestion_canonicalizes_and_records_page_provenance(
     assert source is not None
     chunk = source.chunks[0]
     assert chunk.chunk_metadata["source_metadata"]["source_quality"]["risk_level"] == "high"
+    assert chunk.chunk_metadata["extraction_method"] == "readable_html_parser_v3"
+    assert chunk.chunk_metadata["source_snapshot_id"] == body["metadata"]["source_snapshot_id"]
+    assert chunk.chunk_metadata["quote_offsets"]["normalized_char_start"] == 0
+    assert chunk.chunk_metadata["quote_provenance"]["artifact_type"] == "readability_text"
 
 
 def test_url_ingestion_dedupes_external_sources_by_content_hash(
@@ -458,6 +478,22 @@ def test_text_pdf_uses_pypdf_without_multimodal_fallback(
         raise AssertionError("Text-native PDFs should not use multimodal extraction.")
 
     monkeypatch.setattr(multimodal_extraction_service, "extract_file", fail_extract)
+
+    class FakePage:
+        def extract_text(self) -> str:
+            return (
+                "Coaches compare pricing tiers.\n"
+                "| Plan | Price | Buyer |\n"
+                "| --- | --- | --- |\n"
+                "| Starter | $29 | Solo coach |\n"
+                "| Pro | $99 | Studio |\n"
+            )
+
+    class FakePdfReader:
+        def __init__(self, body) -> None:
+            self.pages = [FakePage()]
+
+    monkeypatch.setattr(evidence_service, "PdfReader", FakePdfReader)
     create_response = client.post("/api/projects", json={"name": "PDF evidence"})
     project_id = create_response.json()["id"]
 
@@ -480,7 +516,15 @@ def test_text_pdf_uses_pypdf_without_multimodal_fallback(
     assert body["metadata"]["extracted_text_length"] >= 20
     assert body["metadata"]["pdf_page_count"] == 1
     assert body["metadata"]["pdf_page_lineage"][0]["page_number"] == 1
-    assert body["metadata"]["table_extraction"]["enabled"] is False
+    assert body["metadata"]["table_extraction"]["enabled"] is True
+    assert body["metadata"]["table_extraction"]["table_count"] == 1
+    assert body["metadata"]["table_extraction"]["tables"][0]["headers"] == [
+        "Plan",
+        "Price",
+        "Buyer",
+    ]
+    assert body["metadata"]["table_extraction"]["tables"][0]["cells"][0]["text"] == "Starter"
+    assert body["metadata"]["source_quality"]["table_extraction_confidence"] > 0
     assert "extraction_provider" not in body["metadata"]
 
 
@@ -553,6 +597,43 @@ def test_low_text_pdf_routes_to_multimodal_fallback_when_enabled(
     assert body["metadata"]["pdf_text_extraction"] == "multimodal_fallback"
     assert body["metadata"]["pypdf_extracted_text_length"] == 0
     assert body["metadata"]["extraction_provider"] == "deterministic"
+    assert body["metadata"]["ocr_fallback"]["used"] is True
+    assert body["metadata"]["ocr_confidence"] > 0
+    assert body["metadata"]["source_quality"]["extraction_confidence"] > 0
+
+
+def test_source_quality_weight_affects_deterministic_rerank() -> None:
+    plan = RetrievalQueryPlanRead(
+        intent="pricing",
+        needed_evidence_types=["pricing"],
+        subqueries=["pricing proof"],
+    )
+    source_a = uuid.uuid4()
+    source_b = uuid.uuid4()
+    weak = _retrieval_result(
+        source_a,
+        "pricing proof for coaches",
+        score=0.7,
+        metadata={"source_quality_retrieval_weight": 0.2},
+    )
+    strong = _retrieval_result(
+        source_b,
+        "pricing proof for coaches",
+        score=0.7,
+        metadata={"source_quality_retrieval_weight": 0.95},
+    )
+
+    reranked = retrieval_service._deterministic_rerank(  # noqa: SLF001
+        "pricing proof for coaches",
+        plan,
+        [weak, strong],
+        ordered_ids=None,
+    )
+
+    assert reranked[0].source_id == source_b
+    assert reranked[0].rerank_score is not None
+    assert reranked[1].rerank_score is not None
+    assert reranked[0].rerank_score > reranked[1].rerank_score
 
 
 def test_reembed_evidence_dry_run_and_project_update(
@@ -646,6 +727,7 @@ def _retrieval_result(
     text: str,
     *,
     score: float,
+    metadata: dict[str, object] | None = None,
 ) -> EvidenceRetrievalResultRead:
     return EvidenceRetrievalResultRead(
         source_id=source_id,
@@ -658,7 +740,7 @@ def _retrieval_result(
         score=score,
         semantic_score=score,
         keyword_score=score,
-        metadata={},
+        metadata=metadata or {},
         rerank_score=score,
         created_at=datetime.now(UTC),
     )

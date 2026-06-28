@@ -696,16 +696,7 @@ def _fallback_citations(retrieval_results) -> list[Citation]:
         if key in seen:
             continue
         seen.add(key)
-        citations.append(
-            Citation(
-                source_id=result.source_id,
-                chunk_id=result.chunk_id,
-                title=result.title,
-                url=result.url,
-                quote=quote,
-                relevance_score=result.score,
-            )
-        )
+        citations.append(citation_verifier_service.citation_from_evidence(result))
     return citations[:3]
 
 

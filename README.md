@@ -213,10 +213,10 @@ Thesys is built to show the difference between a thin LLM wrapper and a durable 
 | Human-in-the-loop agents | AI workflows can propose research plans, memory updates, validation plans, and decisions, but important strategic state changes require user approval. | Tool registry, approval requests, Temporal signals, role-based project permissions |
 | Prompt-injection and ingestion safety | Retrieved content is treated as untrusted evidence, URL fetches are SSRF-guarded, uploads are validated, fetched-page injection markers are recorded, and secrets are redacted from traces. | Shared prompt rules, SSRF guards, upload validation, cited synthesis prompts, secret redaction utilities |
 | External research connectors | Source discovery can use deterministic local results or live Tavily search. Approved ingestion preserves canonical URLs, content hashes, provider/query/rank provenance, fetch timestamps, and source quality signals. | Tavily API, httpx, source discovery service, source provenance service |
-| Multimodal evidence extraction | Image uploads and low-text PDF fallback can be extracted through a multimodal model boundary. PDFs record page lineage and table-extraction extension metadata, while local deterministic fixture extraction keeps tests stable. | LiteLLM multimodal chat, pypdf, file upload pipeline, source provenance metadata |
+| Source and document intelligence | URL, PDF, text, image, and discovered-source evidence preserve parser/provider metadata, source snapshots, page/section/table/OCR quote provenance, source-quality factors, and collapsed citation drilldowns. Local deterministic OCR/table fixtures keep evals credential-free while live providers remain egress-gated. | Python `html.parser`, pypdf, LiteLLM multimodal chat, source provenance service, citation verifier, Next.js Inspect surfaces |
 | Durable orchestration | Long-running research sprints can survive retries, approval waits, and worker restarts through a durable workflow layer. | Temporal, Temporal Python SDK, FastAPI service layer |
 | AI observability | AI runs and steps track model, prompt version, latency, token usage, cost, trace IDs, failures, retrieval diagnostics, and generated artifact provenance. | LangSmith, AI run/step tables, LiteLLM cost headers, workflow trace UI |
-| Evaluation | Research, guide, AI, and context evals check citation coverage, unsupported claims, agentic traceability, gap detection, retrieval quality, search provenance, cost visibility, context inclusion, stale-memory exclusion, poisoned-instruction isolation, dropped-context explanations, prompt-injection markers, and secret redaction. | Custom eval scripts, JSON eval cases, pytest-compatible service checks |
+| Evaluation | Research, guide, AI, context, retrieval, cache, and extraction evals check citation coverage, unsupported claims, agentic traceability, gap detection, retrieval quality, source/document provenance, OCR/table fixtures, live-provider-unavailable warnings, cost visibility, context inclusion, stale-memory exclusion, poisoned-instruction isolation, dropped-context explanations, prompt-injection markers, and secret redaction. | Custom eval scripts, JSON eval cases, pytest-compatible service checks |
 | AI product UX | The UI exposes verdicts, next actions, evidence, unsupported gaps, assumptions, validation missions, decisions, citations, and traces while keeping implementation details hidden by default. | Next.js, React, TanStack Query, project guide service |
 
 ### Feature-by-Feature AI Engineering Map
@@ -863,7 +863,7 @@ The core workflow is designed to prevent premature building by identifying the m
 This is a V1 portfolio proof-of-concept. Sprint 41-50 established the first AI
 engineering upgrade baseline; they are not treated as fully complete
 production-grade work. Sprints 51-60 are the explicit gap-closure track, and the
-current branch has implemented Sprints 51-57.
+current branch has implemented Sprints 51-58.
 
 Implemented or demonstrated:
 
@@ -887,9 +887,10 @@ Implemented or demonstrated:
   evals, and deterministic fallback
 - optional Tavily-backed source discovery with provenance
 - multimodal image extraction and low-text PDF fallback through a LiteLLM
-  multimodal provider boundary
+  multimodal provider boundary, with deterministic OCR fallback metadata
 - URL/upload security guards, fetched-page prompt-injection markers, source
-  quality signals, canonical URL/content-hash dedupe, and PDF page lineage
+  quality factors/explanations, canonical URL/content-hash dedupe, page/section
+  quote provenance, snapshot metadata, PDF page lineage, and table extraction
 - JWT/API-key production-auth shape, dev-auth isolation, expensive-workflow
   rate/concurrency limits, pre-call AI budget enforcement, live-provider egress
   allowlists, dependency/security check scripts, and a formal threat model
@@ -902,8 +903,8 @@ Implemented or demonstrated:
   invalidation, stale-cache denials, and saved token/cost/latency metrics
 - AI cost accounting, provider-failure circuit checks, OpenTelemetry-compatible
   local metrics, aggregate quality gates, file-backed eval reports/trends,
-  cache-quality gates, extraction readiness checks, redacted optional LangSmith
-  eval export, and hidden Inspect quality reporting
+  cache-quality gates, fixture-backed extraction quality checks, redacted
+  optional LangSmith eval export, and hidden Inspect quality reporting
 - shared service utilities, source provenance utilities, developer docs, and
   code navigation guides
 
@@ -933,12 +934,17 @@ unfinished Sprint 41-50 item. The list below is the reader-friendly summary.
   optimization for embeddings, retrieval plans, reranking, and optional
   non-streaming guide answers with strict project/workspace isolation, versioned
   invalidation, stale-cache denial records, and saved-token/cost/latency metrics.
-- Sprint 58 is still pending and must close the document-intelligence gap with
-  maintained readability extraction, raw/page/screenshot snapshot metadata, OCR
-  confidence/page metadata, table extraction, exact quote provenance, richer
-  source quality, citation drilldown metadata, retrieval/context quality
-  signals, fixture-backed extraction evals, and credential-gated live-provider
-  QA warnings.
+- Sprint 58 is implemented on this branch: source ingestion now records
+  readability/parser metadata, raw/page/screenshot snapshot metadata, OCR
+  confidence/page metadata, deterministic table artifacts, normalized quote
+  provenance, source-quality explanations/factors, retrieval quality weighting,
+  enriched citation DTOs, collapsed Evidence/retrieval/guide/research
+  provenance surfaces, and fixture-backed extraction evals with explicit
+  live-provider-unavailable warnings. Remaining carry-forwards are tracked in
+  `SPRINT_51_60_TODO.md`: maintained parser dependency versus deterministic
+  fallback, true screenshot/page artifact storage, screenshot-region OCR/table
+  provenance, live-provider credential QA, web/browser provenance QA, and
+  Project Inspect trust-summary QA.
 - Sprint 59 is still pending and must close the architecture cleanup gap by
   splitting oversized services into feature packages, adding characterization
   tests, enforcing dependency rules, adding typed DTO boundaries, removing

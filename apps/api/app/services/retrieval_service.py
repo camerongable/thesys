@@ -751,6 +751,12 @@ def _deterministic_rerank(
         credibility = _metadata_float(result.metadata, "source_credibility_score") or 0.5
         freshness = _freshness_boost(result)
         match_count = _metadata_float(result.metadata, "retrieval_match_count") or 1.0
+        quality_weight = _metadata_float(result.metadata, "source_quality_retrieval_weight")
+        if quality_weight is None:
+            quality = result.metadata.get("source_quality")
+            if isinstance(quality, dict):
+                quality_weight = _metadata_float(quality, "retrieval_weight")
+        quality_weight = quality_weight if quality_weight is not None else credibility
         provider_rank_boost = 0.0
         if result.chunk_id in explicit_rank:
             provider_rank_boost = max(0.0, 0.25 - (explicit_rank[result.chunk_id] * 0.01))
@@ -758,7 +764,7 @@ def _deterministic_rerank(
             result.score * 0.55
             + overlap * 0.18
             + type_overlap * 0.08
-            + min(credibility, 1.0) * 0.08
+            + min(quality_weight, 1.0) * 0.08
             + freshness * 0.06
             + min(match_count / 4.0, 1.0) * 0.05
             + provider_rank_boost
@@ -1261,6 +1267,14 @@ def _serialize_result(
     keyword_score: float,
 ) -> EvidenceRetrievalResultRead:
     metadata = dict(chunk.chunk_metadata or {})
+    source_quality = metadata.get("source_quality")
+    if not isinstance(source_quality, dict):
+        source_metadata = metadata.get("source_metadata")
+        if isinstance(source_metadata, dict) and isinstance(
+            source_metadata.get("source_quality"),
+            dict,
+        ):
+            source_quality = source_metadata["source_quality"]
     reference_date = source.source_date or source.ingested_at or source.created_at
     metadata.update(
         {
@@ -1272,6 +1286,15 @@ def _serialize_result(
             "source_ingested_at": source.ingested_at.isoformat() if source.ingested_at else None,
             "domain": _domain_from_url(source.url),
             "freshness_score": _freshness_score(reference_date),
+            "source_quality": source_quality if isinstance(source_quality, dict) else None,
+            "source_quality_retrieval_weight": (
+                source_quality.get("retrieval_weight")
+                if isinstance(source_quality, dict)
+                else None
+            ),
+            "source_quality_explanation": (
+                source_quality.get("explanation") if isinstance(source_quality, dict) else None
+            ),
         }
     )
     return EvidenceRetrievalResultRead(

@@ -12267,7 +12267,7 @@ Sprint 41-50 audit:
 | Sprint 45 | Retrieval/citation quality, cache-aware retrieval/rerank metrics, and stale-cache denial coverage exist; post-refactor docs still need exact provider/reranker extension points, hybrid ranking limits, cache invalidation notes, and citation-verifier ownership. | Sprint 60 |
 | Sprint 46 | Ask Thesys streaming/citations exist, but web typecheck/tests and browser QA for streaming, cancellation, timeout, event ordering, proposal cards, and citation drilldowns remain blocked until npm registry access is stable. | Sprint 60 |
 | Sprint 47 | Observability gates/reports and real cache metrics exist; browser QA for the hidden report surface and hosted/CI docs still need concrete commands, artifact paths, warn/fail policy, and environment prerequisites. | Sprint 60 |
-| Sprint 48 | Current extraction work covers guards, low-text PDF fallback, multimodal boundaries, provenance, and eval gates, but maintained readability extraction, raw/page/screenshot snapshot persistence, OCR confidence/page metadata, positive table extraction, exact quote offsets, richer source-quality scoring, retrieval use of source quality, extraction-provenance citation UI, and live Tavily/multimodal QA fixtures remain. The current extraction eval is mostly structural and must become fixture-backed behavior coverage. | Sprint 58 |
+| Sprint 48 | Sprint 58 closes the local deterministic document-intelligence path with parser/readability metadata, explicit snapshot metadata, OCR confidence/page metadata, table artifacts, quote offsets, source-quality factors/explanations, retrieval weighting, enriched citation metadata, collapsed provenance UI, and fixture-backed extraction evals. Remaining gaps are intentionally explicit: decide whether to add a maintained parser dependency or document the deterministic parser as the V1 fallback; add true page/screenshot object-storage capture if productizing beyond metadata; run live Tavily/multimodal credential QA; retry web/browser provenance QA; and verify hidden Project Inspect trust summaries. | Sprint 60 for final docs/QA/audit; future backlog only for productization items intentionally left outside V1. |
 | Sprint 49 | Shared utilities were added, but validation, research, guide, evidence/retrieval, tool/MCP, eval/reporting, prompt assembly, structured-output repair, proposal creation, and audit metadata paths still need a real feature-package refactor with typed DTO boundaries. | Sprint 59 |
 | Sprint 50 | README/docs improved, but final diagrams, code navigation, docstrings/comments, deployment docs, hosted-demo runbooks, and honest limits must be regenerated after Sprints 57-59 land and deferred browser checks are retried. | Sprint 60 |
 
@@ -12787,6 +12787,25 @@ provenance.
 - Citation and evidence Inspect surfaces expose extraction method, confidence,
   and page/section/table/region provenance without adding homepage complexity.
 
+## Branch Implementation Note
+
+The `codex/v1-sprints-51-60` branch implements the local Sprint 58 path with
+source snapshot IDs, explicit local snapshot metadata, parser/readability
+metadata, deterministic OCR confidence/page metadata, deterministic table
+artifacts, chunk-level quote offsets, source-quality factors/explanations,
+retrieval weighting, enriched citation DTOs, collapsed provenance UI surfaces,
+and fixture-backed extraction evals.
+
+Carry these items into Sprint 60 rather than hiding them under the Sprint 58
+title: the branch uses a deterministic `html.parser` fallback rather than a new
+maintained readability dependency; full page/screenshot artifact capture and
+object-storage persistence are metadata-only in local mode; screenshot-region
+OCR/table provenance is not implemented unless screenshot capture is added; live
+Tavily and live multimodal provider QA require credentials, provider mode, and
+egress allowlists; web typecheck/browser QA for the new provenance disclosures
+must be retried after npm registry access is stable; Project Inspect trust
+summaries must be verified in the browser.
+
 ---
 
 # V1 Sprint 59: Feature-Package Backend Refactor
@@ -12947,6 +12966,14 @@ interviewers to understand without overwhelming the core workflow.
   confidence, source snapshot ID, page, section heading, table/cell region, OCR
   status, screenshot availability, source-quality explanation,
   provider-unavailable warnings, and no new homepage/dashboard clutter.
+- Resolve Sprint 58 carry-forward items one by one before final sign-off:
+  decide whether to add `trafilatura`/`readability-lxml` or document the
+  deterministic parser as the V1 fallback; implement page/screenshot object
+  storage or record it as a future productization backlog item; implement or
+  explicitly defer screenshot-region table/OCR provenance; run live
+  Tavily/multimodal smoke tests when credentials and egress allowlists exist, or
+  record the exact unavailable warning and rerun command; verify Project Inspect
+  trust summaries in the browser once frontend dependencies are available.
 - Add workspace/team collaboration flows if product direction requires it.
 - Add multi-project portfolio views only after single-project workflow remains
   simple.

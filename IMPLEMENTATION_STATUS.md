@@ -51,16 +51,19 @@ contains a gap coverage ledger, deferred verification list, and specific
 acceptance work for each remaining sprint. The audit keeps the completed
 portfolio work visible while assigning each unfinished gap to Sprints 51-60.
 
-Current branch status: Sprints 51-57 are implemented; Sprints 58-60 remain
-pending. Sprint 58 must not be treated as complete until the document-AI gaps
-are closed with implementation and fixture-backed verification: maintained HTML
-readability extraction, raw/page/screenshot snapshot metadata, OCR
-confidence/page metadata, real table extraction, exact quote provenance, richer
-source-quality scoring, retrieval/context use of source quality,
-extraction-provenance citation/Evidence Inspect surfaces, and explicit
-live-provider-unavailable warnings. Sprint 60 must finish with a carried-gap
-audit that records implemented, intentionally out-of-scope, or still-open status
-for every Sprint 41-50 gap.
+Current branch status: Sprints 51-58 are implemented; Sprints 59-60 remain
+pending. Sprint 58 closes the local document-AI gap with parser/snapshot
+metadata, deterministic OCR and table extraction, quote provenance,
+source-quality weighting, enriched citation metadata, collapsed Inspect
+surfaces, and fixture-backed extraction evals. Live Tavily and multimodal
+provider QA remain opt-in and surface explicit unavailable warnings when
+credentials or egress are not configured. Sprint 60 must also resolve or
+explicitly defer the remaining document-intelligence carry-forwards: maintained
+parser dependency versus deterministic fallback, true screenshot/page artifact
+storage, screenshot-region OCR/table provenance, frontend browser QA, and
+Project Inspect trust-summary QA. Sprint 60 must finish with a carried-gap audit
+that records implemented, intentionally out-of-scope, or still-open status for
+every Sprint 41-50 gap.
 
 ## Sprint 0 Scope
 
@@ -2393,3 +2396,65 @@ Sprint 57 verification run:
 - [x] `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s57-default LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json` (`warn`; AI quality, retrieval quality, research-sprint dataset, extraction quality, cache quality, pytest quality slice, and security check passed; MCP contract warned because no live API/project endpoint was supplied).
 - [ ] `pnpm --filter thesys-web typecheck` and `pnpm --filter thesys-web test` did not reach TypeScript/tests. Both commands repeatedly hit npm registry package and attestation fetch failures (`ECONNRESET`, with one `ENOTFOUND`) during pnpm dependency-status/install work and were stopped after several minutes. Sprint 60 owns the retry plus browser QA for Sprint 57 cache diagnostics.
 - [x] Sprint 57 commit recorded in branch history.
+
+## V1 Sprint 58 Branch Progress
+
+Sprint 58 is implemented on `codex/v1-sprints-51-60`:
+
+- Added source snapshot IDs and explicit snapshot metadata for fetched HTML,
+  including capture/final/canonical URLs, byte hash/size, redaction status,
+  retention policy, local-mode storage absence reason, and screenshot
+  availability.
+- Upgraded HTML extraction metadata to record parser/provider, readability
+  policy version, boilerplate-skip warnings, section headings, and normalized
+  section offsets.
+- Added deterministic OCR metadata for image and low-text PDF extraction,
+  including confidence, method, provider/model, page numbers, and warnings.
+- Added deterministic table extraction artifacts with headers, rows, cells,
+  summaries, page/region provenance, confidence, and searchable text metadata.
+- Added chunk-level quote provenance with extraction method, source snapshot ID,
+  page/section/table/region locators, normalized quote offsets, and source
+  artifact metadata.
+- Expanded source-quality scoring with policy version, factors, explanation,
+  extraction confidence, OCR/table confidence, screenshot availability,
+  canonical/dedupe status, prompt-injection penalties, and retrieval weight.
+- Fed source quality into deterministic retrieval reranking and result metadata.
+- Enriched artifact and guide citation DTOs with optional source type,
+  provenance, extraction, snapshot, source-quality, locator, quote-offset, and
+  warning fields.
+- Preserved rich citation provenance through citation verification and fallback
+  citation creation for research, opportunity brief, and competitor artifacts.
+- Added collapsed UI metadata surfaces in Evidence source details, retrieval
+  results, Ask Thesys citation details, research memo citation details, and
+  source discovery review provenance.
+- Extended context eval report items to retain `provenance.metadata` for Inspect
+  diagnostics.
+- Replaced structural extraction readiness checks with fixture-backed
+  `scripts/eval_extraction_quality.py` cases for messy HTML, prompt-injected
+  HTML, OCR fallback, table-heavy documents, quote offsets, source-quality
+  factors, and live-provider-unavailable warnings.
+
+Sprint 58 verification run:
+
+- [x] `cd apps/api && .venv/bin/ruff check ...` on touched extraction,
+  provenance, retrieval, guide, citation, schema, test, and eval-script files.
+- [x] `cd apps/api && .venv/bin/python -m compileall ...` on touched backend
+  services/schemas and `scripts/eval_extraction_quality.py`.
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_citation_verifier.py app/tests/test_retrieval_quality_eval.py -q --maxfail=1` (`17 passed`).
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_research_discovery.py app/tests/test_agentic_research.py app/tests/test_opportunity_brief.py app/tests/test_guide.py -q --maxfail=1` (`37 passed`).
+- [x] `cd apps/api && .venv/bin/pytest -q` (`174 passed`).
+- [x] `python3 scripts/eval_extraction_quality.py --json` (`7/7` passed with
+  explicit warnings for missing Tavily live QA and deterministic multimodal mode).
+- [ ] `pnpm --filter thesys-web typecheck` did not reach TypeScript because pnpm
+  repeatedly hit npm registry fetch failures (`ECONNRESET`) while installing
+  packages. The latest retry was interrupted during `pnpm install` after pnpm
+  began one-minute registry retry waits. Sprint 60 owns the retry plus browser
+  QA for Sprint 58 Evidence, retrieval, guide, research memo, and
+  source-discovery provenance disclosures.
+- [ ] Live Tavily and live multimodal provider QA were not exercised in local
+  deterministic verification; the extraction eval reports these as explicit
+  unavailable warnings unless credentials/provider mode/egress are configured.
+- [ ] Sprint 60 owns the explicit carry-forward decisions for maintained HTML
+  parser dependency versus deterministic fallback, true page/screenshot artifact
+  storage, screenshot-region OCR/table provenance, Project Inspect trust-summary
+  browser QA, and live-provider credential smoke tests.

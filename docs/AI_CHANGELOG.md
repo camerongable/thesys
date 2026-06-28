@@ -4,6 +4,37 @@ This changelog tracks AI-facing behavior changes that can affect prompts,
 schemas, context, memory, retrieval, tools, providers, evals, or governance.
 Each entry names the evals that should catch regressions.
 
+## Sprint 58: Source Intelligence and Document AI V2
+
+- Added normalized source/document provenance metadata for HTML, PDFs, images,
+  tables, OCR fallback, source snapshots, and citation quote offsets.
+  - Expected impact: retrieved evidence and generated citations can explain
+    whether support came from readability text, PDF page text, OCR text, a table
+    region, or a local snapshot record.
+  - Regression coverage: `app/tests/test_evidence.py`,
+    `python3 scripts/eval_extraction_quality.py --json`.
+- Expanded source-quality scoring with policy version, factors, explanations,
+  extraction confidence, OCR/table confidence, screenshot availability,
+  canonical/dedupe status, prompt-injection penalties, and retrieval weight.
+  - Expected impact: retrieval can prefer higher-quality equivalent evidence
+    while keeping relevant lower-quality evidence inspectable with warnings.
+  - Regression coverage: `app/tests/test_evidence.py`,
+    `app/tests/test_retrieval_quality_eval.py`.
+- Enriched guide and artifact citations with optional provenance, extraction,
+  snapshot, source-quality, locator, quote-offset, and warning fields.
+  - Expected impact: Ask Thesys, research memos, opportunity briefs, and
+    competitor artifacts retain source trust metadata instead of reducing
+    citations to source/chunk IDs.
+  - Regression coverage: `app/tests/test_citation_verifier.py`,
+    `app/tests/test_guide.py`.
+- Replaced structural extraction readiness checks with fixture-backed
+  extraction eval cases and explicit live-provider-unavailable warnings.
+  - Expected impact: local evals prove behavior for messy HTML, injected HTML,
+    OCR fallback, table extraction, quote provenance, source quality, and
+    missing provider credentials.
+  - Regression coverage: `python3 scripts/eval_extraction_quality.py --json`,
+    `python3 scripts/eval_quality_gate.py --json`.
+
 ## Sprint 57: Semantic Caching and Cost Optimization
 
 - Added DB-backed `ai_cache_entries` and `ai_cache_events` records with

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,6 +31,18 @@ class Citation(BaseModel):
     quote: str | None = None
     retrieved_at: datetime | None = None
     relevance_score: float | None = Field(default=None, ge=0)
+    source_type: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    source_quality: dict[str, Any] = Field(default_factory=dict)
+    extraction: dict[str, Any] = Field(default_factory=dict)
+    snapshot: dict[str, Any] = Field(default_factory=dict)
+    page_number: int | None = None
+    section_heading: str | None = None
+    table_id: str | None = None
+    region: dict[str, Any] | None = None
+    quote_offsets: dict[str, Any] | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ClaimDraft(BaseModel):

@@ -4642,6 +4642,7 @@ function EvidenceReviewActiveItem({
 
   if (activeItem.kind === "source") {
     const source = activeItem.source;
+    const provenanceEntries = discoveredSourceProvenanceEntries(source);
     return (
       <article className="min-w-0 border-t border-border pt-4 lg:border-t-0 lg:pt-0">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -4703,36 +4704,18 @@ function EvidenceReviewActiveItem({
             Research question: {clarifyWorkspaceTerm(source.associated_research_question)}
           </p>
         ) : null}
-        {source.search_provider || source.search_query || source.retrieved_at ? (
+        {provenanceEntries.length > 0 ? (
           <details className="mt-3 border-t border-border pt-3">
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
               Show search provenance
             </summary>
             <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-[140px_minmax(0,1fr)]">
-              {source.search_provider ? (
-                <>
-                  <span className="font-medium text-foreground">Provider</span>
-                  <span>{source.search_provider}</span>
-                </>
-              ) : null}
-              {source.search_query ? (
-                <>
-                  <span className="font-medium text-foreground">Query</span>
-                  <span className="break-words">{clarifyWorkspaceTerm(source.search_query)}</span>
-                </>
-              ) : null}
-              {source.search_result_rank ? (
-                <>
-                  <span className="font-medium text-foreground">Rank</span>
-                  <span>{source.search_result_rank}</span>
-                </>
-              ) : null}
-              {source.retrieved_at ? (
-                <>
-                  <span className="font-medium text-foreground">Retrieved</span>
-                  <span>{formatDateTime(source.retrieved_at)}</span>
-                </>
-              ) : null}
+              {provenanceEntries.map(([label, value]) => (
+                <div className="contents" key={label}>
+                  <span className="font-medium text-foreground">{label}</span>
+                  <span className="break-words">{value}</span>
+                </div>
+              ))}
             </div>
           </details>
         ) : null}
@@ -5041,6 +5024,29 @@ function evidenceReviewItemSignal(item: EvidenceReviewQueueItem) {
   return `Version ${item.version.version} · approve or reject updates`;
 }
 
+function discoveredSourceProvenanceEntries(source: DiscoveredSource) {
+  const entries: Array<readonly [string, string]> = [];
+  addCitationMetadataEntry(entries, "Provider", source.search_provider);
+  addCitationMetadataEntry(entries, "Query", source.search_query);
+  addCitationMetadataEntry(entries, "Rank", source.search_result_rank);
+  addCitationMetadataEntry(
+    entries,
+    "Retrieved",
+    source.retrieved_at ? formatDateTime(source.retrieved_at) : null,
+  );
+  const provenance = source.provenance_metadata ?? {};
+  addCitationMetadataEntry(entries, "Provider score", provenance.provider_score);
+  addCitationMetadataEntry(entries, "Provider rank", provenance.provider_rank);
+  addCitationMetadataEntry(entries, "Snapshot fallback", provenance.snapshot_fallback_status);
+  addCitationMetadataEntry(entries, "Extraction warning", provenance.extraction_warning);
+  addCitationMetadataEntry(entries, "Canonical URL", provenance.canonical_url);
+  addCitationMetadataEntry(entries, "Source snapshot", provenance.source_snapshot_id);
+  if (Object.keys(provenance).length > 0) {
+    addCitationMetadataEntry(entries, "Raw provenance", provenance);
+  }
+  return entries;
+}
+
 function ResearchMemoReview({
   artifact,
   approvalPending,
@@ -5272,6 +5278,7 @@ function ResearchMemoReview({
                         ? truncate(citation.quote, 180)
                         : `Source ${citation.source_id}`}
                     </p>
+                    <CitationProvenanceDetails citation={citation} />
                   </div>
                 ))
               )}
@@ -5357,6 +5364,7 @@ function SourceGroundedMemo({
                       {truncate(citation.quote, 180)}
                     </p>
                   ) : null}
+                  <CitationProvenanceDetails citation={citation} />
                 </div>
               ))
             )}
@@ -6641,6 +6649,64 @@ function LifecycleStatusBadge({ status }: { status: LifecycleStatus }) {
   );
 }
 
+function CitationProvenanceDetails({ citation }: { citation: Citation }) {
+  const entries = citationProvenanceEntries(citation);
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <details className="mt-2 text-xs text-muted-foreground">
+      <summary className="cursor-pointer">Provenance</summary>
+      <dl className="mt-2 grid gap-1 border-t border-border pt-2">
+        {entries.map(([label, value]) => (
+          <div key={label} className="grid gap-1 sm:grid-cols-[130px_minmax(0,1fr)]">
+            <dt className="font-medium text-foreground">{label}</dt>
+            <dd className="min-w-0 break-words">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
+function citationProvenanceEntries(citation: Citation) {
+  const entries: Array<readonly [string, string]> = [];
+  addCitationMetadataEntry(entries, "Source type", citation.source_type);
+  addCitationMetadataEntry(entries, "Extraction", citation.extraction?.extraction_method);
+  addCitationMetadataEntry(entries, "Confidence", citation.extraction?.extraction_confidence);
+  addCitationMetadataEntry(entries, "Source quality", citation.source_quality?.explanation);
+  addCitationMetadataEntry(entries, "Quality risk", citation.source_quality?.risk_level);
+  addCitationMetadataEntry(entries, "Snapshot", citation.provenance?.source_snapshot_id);
+  addCitationMetadataEntry(entries, "Page", citation.page_number);
+  addCitationMetadataEntry(entries, "Section", citation.section_heading);
+  addCitationMetadataEntry(entries, "Table", citation.table_id);
+  addCitationMetadataEntry(entries, "Region", citation.region);
+  addCitationMetadataEntry(entries, "Quote offsets", citation.quote_offsets);
+  addCitationMetadataEntry(entries, "Warnings", citation.warnings);
+  return entries;
+}
+
+function addCitationMetadataEntry(
+  entries: Array<readonly [string, string]>,
+  label: string,
+  value: unknown,
+) {
+  if (value === undefined || value === null || value === "") {
+    return;
+  }
+  entries.push([label, formatCitationMetadataValue(value)] as const);
+}
+
+function formatCitationMetadataValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.join(", ") : "None";
+  }
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
 function extractMemoSections(markdown: string) {
   const lines = markdown.split(/\r?\n/);
   const sections: Array<{ title: string; body: string }> = [];
@@ -6878,6 +6944,20 @@ function normalizeCitation(value: unknown): Citation | null {
     retrieved_at: nullableString(citation.retrieved_at),
     relevance_score:
       typeof citation.relevance_score === "number" ? citation.relevance_score : null,
+    source_type: nullableString(citation.source_type),
+    metadata: asRecord(citation.metadata) ?? {},
+    provenance: asRecord(citation.provenance) ?? {},
+    source_quality: asRecord(citation.source_quality) ?? {},
+    extraction: asRecord(citation.extraction) ?? {},
+    snapshot: asRecord(citation.snapshot) ?? {},
+    page_number: typeof citation.page_number === "number" ? citation.page_number : null,
+    section_heading: nullableString(citation.section_heading),
+    table_id: nullableString(citation.table_id),
+    region: asRecord(citation.region),
+    quote_offsets: asRecord(citation.quote_offsets),
+    warnings: Array.isArray(citation.warnings)
+      ? citation.warnings.filter((item): item is string => typeof item === "string")
+      : [],
   };
 }
 

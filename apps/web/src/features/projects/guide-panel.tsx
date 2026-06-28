@@ -20,6 +20,7 @@ import {
   getGuideRecommendation,
   getProjectNudges,
   GuideAction,
+  GuideCitationDetail,
   GuideChatResponse,
   GuideChatTurn,
   GuideStreamEventName,
@@ -464,6 +465,7 @@ function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
                   <span>{citation.context_item_ids.length} context item(s)</span>
                   <span>{citation.memory_ids.length} memory item(s)</span>
                 </div>
+                <GuideCitationProvenance citation={citation} />
               </div>
             ))}
           </div>
@@ -485,6 +487,26 @@ function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
         </details>
       ) : null}
     </div>
+  );
+}
+
+function GuideCitationProvenance({ citation }: { citation: GuideCitationDetail }) {
+  const entries = guideCitationMetadataEntries(citation);
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <details className="mt-2 border-t border-border pt-2">
+      <summary className="cursor-pointer select-none">Provenance</summary>
+      <dl className="mt-2 grid gap-1">
+        {entries.map(([label, value]) => (
+          <div key={label} className="grid gap-1 sm:grid-cols-[120px_minmax(0,1fr)]">
+            <dt className="font-medium text-foreground">{label}</dt>
+            <dd className="min-w-0 break-words">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }
 
@@ -540,6 +562,43 @@ function eventPayloadSummary({
 
 function shortId(value: string) {
   return value.slice(0, 8);
+}
+
+function guideCitationMetadataEntries(citation: GuideCitationDetail) {
+  const entries: Array<readonly [string, string]> = [];
+  addGuideMetadataEntry(entries, "Extraction", citation.extraction.extraction_method);
+  addGuideMetadataEntry(entries, "Confidence", citation.extraction.extraction_confidence);
+  addGuideMetadataEntry(entries, "Source quality", citation.source_quality.explanation);
+  addGuideMetadataEntry(entries, "Quality risk", citation.source_quality.risk_level);
+  addGuideMetadataEntry(entries, "Snapshot", citation.provenance.source_snapshot_id);
+  addGuideMetadataEntry(entries, "Page", citation.page_number);
+  addGuideMetadataEntry(entries, "Section", citation.section_heading);
+  addGuideMetadataEntry(entries, "Table", citation.table_id);
+  addGuideMetadataEntry(entries, "Region", citation.region);
+  addGuideMetadataEntry(entries, "Quote offsets", citation.quote_offsets);
+  addGuideMetadataEntry(entries, "Warnings", citation.warnings);
+  return entries;
+}
+
+function addGuideMetadataEntry(
+  entries: Array<readonly [string, string]>,
+  label: string,
+  value: unknown,
+) {
+  if (value === undefined || value === null || value === "") {
+    return;
+  }
+  entries.push([label, formatGuideMetadataValue(value)] as const);
+}
+
+function formatGuideMetadataValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.join(", ") : "None";
+  }
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value);
+  }
+  return String(value);
 }
 
 function GuideNudgeCard({

@@ -849,6 +849,18 @@ export type Citation = {
   quote: string | null;
   retrieved_at: string | null;
   relevance_score: number | null;
+  source_type?: string | null;
+  metadata?: Record<string, unknown>;
+  provenance?: Record<string, unknown>;
+  source_quality?: Record<string, unknown>;
+  extraction?: Record<string, unknown>;
+  snapshot?: Record<string, unknown>;
+  page_number?: number | null;
+  section_heading?: string | null;
+  table_id?: string | null;
+  region?: Record<string, unknown> | null;
+  quote_offsets?: Record<string, unknown> | null;
+  warnings?: string[];
 };
 
 export type OpportunityBriefGenerateResult = {
@@ -1723,6 +1735,17 @@ export type GuideCitationDetail = {
   verifier_status: "supported" | "weak" | "missing" | "filtered";
   context_item_ids: string[];
   memory_ids: string[];
+  metadata: Record<string, unknown>;
+  provenance: Record<string, unknown>;
+  source_quality: Record<string, unknown>;
+  extraction: Record<string, unknown>;
+  snapshot: Record<string, unknown>;
+  page_number: number | null;
+  section_heading: string | null;
+  table_id: string | null;
+  region: Record<string, unknown> | null;
+  quote_offsets: Record<string, unknown> | null;
+  warnings: string[];
 };
 
 export type GuideChatResponse = {

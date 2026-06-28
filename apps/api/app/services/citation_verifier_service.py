@@ -2,7 +2,7 @@
 
 import uuid
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from app.schemas.artifacts import Citation, ClaimDraft
 from app.schemas.evidence import EvidenceRetrievalResultRead
@@ -78,6 +78,23 @@ def audited_claim_outcome_records(claims: list[ClaimDraft]) -> list[dict[str, ob
     ]
 
 
+def citation_from_evidence(
+    evidence: EvidenceRetrievalResultRead,
+    *,
+    quote_limit: int = 260,
+) -> Citation:
+    """Create a provenance-rich citation from a retrieved evidence chunk."""
+    citation = Citation(
+        source_id=evidence.source_id,
+        chunk_id=evidence.chunk_id,
+        title=evidence.title,
+        url=evidence.url,
+        quote=evidence.text[:quote_limit],
+        relevance_score=evidence.score,
+    )
+    return _enrich_citation(citation, evidence)
+
+
 def citation_is_supported(
     citation: Citation,
     claim_text: str,
@@ -95,9 +112,10 @@ def citation_is_supported(
             reason="citation_id_not_retrieved",
             status="source_missing",
         )
+    enriched_citation = _enrich_citation(citation, evidence)
     if _is_filtered_as_unsafe(evidence):
         return CitationVerification(
-            citation=citation,
+            citation=enriched_citation,
             valid_id=True,
             text_overlap=0.0,
             quote_overlap=0.0,
@@ -113,7 +131,7 @@ def citation_is_supported(
         supported = False
         status = "stale_source"
     return CitationVerification(
-        citation=citation,
+        citation=enriched_citation,
         valid_id=True,
         text_overlap=round(claim_overlap, 3),
         quote_overlap=round(quote_overlap, 3),
@@ -165,6 +183,87 @@ def _evidence_for_citation(
     if citation.chunk_id is not None:
         return by_chunk.get(citation.chunk_id)
     return by_source.get(citation.source_id)
+
+
+def _enrich_citation(
+    citation: Citation,
+    evidence: EvidenceRetrievalResultRead,
+) -> Citation:
+    metadata = dict(evidence.metadata or {})
+    source_quality = (
+        metadata.get("source_quality") if isinstance(metadata.get("source_quality"), dict) else {}
+    )
+    snapshot = metadata.get("snapshot") if isinstance(metadata.get("snapshot"), dict) else {}
+    if not snapshot and isinstance(metadata.get("raw_html_snapshot"), dict):
+        snapshot = {"raw_html_snapshot": metadata["raw_html_snapshot"]}
+    extraction = _metadata_subset(
+        metadata,
+        {
+            "extraction_method",
+            "extraction_provider",
+            "extraction_model",
+            "extraction_confidence",
+            "ocr_confidence",
+            "pdf_text_extraction",
+            "table_extraction",
+            "readability",
+        },
+    )
+    provenance = _metadata_subset(
+        metadata,
+        {
+            "source_snapshot_id",
+            "page_number",
+            "section_heading",
+            "table_id",
+            "region",
+            "quote_offsets",
+            "quote_provenance",
+        },
+    )
+    warnings = metadata.get("warnings")
+    warning_list = [str(item) for item in warnings] if isinstance(warnings, list) else []
+    if isinstance(source_quality, dict) and source_quality.get("risk_level") == "high":
+        warning_list.append("high_source_quality_risk")
+    return citation.model_copy(
+        update={
+            "title": citation.title or evidence.title,
+            "url": citation.url or evidence.url,
+            "quote": citation.quote or evidence.text[:260],
+            "relevance_score": (
+                citation.relevance_score
+                if citation.relevance_score is not None
+                else evidence.score
+            ),
+            "source_type": evidence.source_type,
+            "metadata": metadata,
+            "provenance": provenance,
+            "source_quality": source_quality,
+            "extraction": extraction,
+            "snapshot": snapshot,
+            "page_number": _optional_int(metadata.get("page_number")),
+            "section_heading": metadata.get("section_heading"),
+            "table_id": metadata.get("table_id"),
+            "region": metadata.get("region") if isinstance(metadata.get("region"), dict) else None,
+            "quote_offsets": metadata.get("quote_offsets")
+            if isinstance(metadata.get("quote_offsets"), dict)
+            else None,
+            "warnings": list(dict.fromkeys(warning_list)),
+        }
+    )
+
+
+def _metadata_subset(metadata: dict[str, Any], keys: set[str]) -> dict[str, Any]:
+    return {key: metadata[key] for key in keys if key in metadata and metadata[key] is not None}
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _overlap(left: str, right: str) -> float:

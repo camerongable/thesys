@@ -105,6 +105,17 @@ class GuideCitationDetailRead(BaseModel):
     verifier_status: GuideCitationVerifierStatus = "supported"
     context_item_ids: list[str] = Field(default_factory=list)
     memory_ids: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    source_quality: dict[str, Any] = Field(default_factory=dict)
+    extraction: dict[str, Any] = Field(default_factory=dict)
+    snapshot: dict[str, Any] = Field(default_factory=dict)
+    page_number: int | None = None
+    section_heading: str | None = None
+    table_id: str | None = None
+    region: dict[str, Any] | None = None
+    quote_offsets: dict[str, Any] | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class GuideChatResponseRead(BaseModel):

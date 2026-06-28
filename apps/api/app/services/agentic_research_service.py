@@ -2434,14 +2434,8 @@ def _fallback_citations(results: list[EvidenceRetrievalResultRead]) -> list[Cita
     citations: list[Citation] = []
     for result in results[:5]:
         citations.append(
-            Citation(
-                source_id=result.source_id,
-                chunk_id=result.chunk_id,
-                title=result.title,
-                url=result.url,
-                quote=result.text[:260],
-                retrieved_at=datetime.now(UTC),
-                relevance_score=result.score,
+            citation_verifier_service.citation_from_evidence(result).model_copy(
+                update={"retrieved_at": datetime.now(UTC)}
             )
         )
     return _dedupe_citations(citations)
@@ -2469,6 +2463,7 @@ def _evidence_bundles(results: list[EvidenceRetrievalResultRead]) -> list[dict[s
             "source_type": result.source_type,
             "text": result.text[:EVIDENCE_TEXT_LIMIT],
             "score": result.score,
+            "metadata": result.metadata,
         }
         for result in results
     ]
