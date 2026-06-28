@@ -1,9 +1,11 @@
+"""AI workflow cost, latency, and circuit-breaker accounting."""
+
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
@@ -14,6 +16,8 @@ from app.services import project_service
 
 @dataclass(frozen=True)
 class AICostReport:
+    """Aggregated AI usage and budget status for one project."""
+
     run_count: int
     step_count: int
     failed_run_count: int
@@ -31,6 +35,7 @@ def project_ai_cost_report(
     settings: Settings,
     project_id: uuid.UUID,
 ) -> AICostReport:
+    """Summarize persisted AI run/step usage against configured budgets."""
     project_service.get_project(db, auth, project_id)
     runs = list(
         db.scalars(
@@ -41,11 +46,7 @@ def project_ai_cost_report(
         )
     )
     run_ids = [run.id for run in runs]
-    steps = (
-        list(db.scalars(select(AIStep).where(AIStep.ai_run_id.in_(run_ids))))
-        if run_ids
-        else []
-    )
+    steps = list(db.scalars(select(AIStep).where(AIStep.ai_run_id.in_(run_ids)))) if run_ids else []
     total_tokens = sum(run.total_tokens or 0 for run in runs)
     total_cost = sum((run.total_cost or Decimal("0")) for run in runs)
     latencies = [step.latency_ms for step in steps if step.latency_ms is not None]

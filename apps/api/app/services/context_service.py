@@ -1,3 +1,10 @@
+"""Context engineering helpers for bounded LLM prompts.
+
+Context packs make prompt assembly inspectable: each item has a source,
+priority, provenance, token estimate, and untrusted-content flag so workflows
+can stay inside budget while preserving citation and safety boundaries.
+"""
+
 import json
 import uuid
 from typing import Any
@@ -191,6 +198,8 @@ def _pack(
     expected_schema: str,
     metadata: dict[str, Any],
 ) -> ContextPack:
+    """Apply token and item budgets, recording what was dropped and why."""
+
     selected: list[ContextItem] = []
     dropped: list[DroppedContextItem] = []
     token_count = 0

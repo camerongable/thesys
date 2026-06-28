@@ -1,3 +1,5 @@
+"""Evidence ingestion, extraction, chunking, embedding, and source serialization."""
+
 import re
 import uuid
 from dataclasses import dataclass
@@ -45,6 +47,8 @@ class EvidenceSecurityError(EvidenceIngestionError):
 
 @dataclass(frozen=True)
 class ParsedSource:
+    """Normalized extraction result passed into the chunking/embedding pipeline."""
+
     title: str | None
     text: str
     content_type: str | None = None
@@ -151,6 +155,7 @@ def add_url_source(
     project_id: uuid.UUID,
     payload: EvidenceUrlCreate,
 ) -> EvidenceSource:
+    """Fetch, validate, dedupe, and ingest a user-provided URL source."""
     project_service.get_project(db, auth, project_id)
     canonical_url = source_provenance_service.canonicalize_url(str(payload.url))
     existing = _find_ready_url_source(db, auth, project_id, canonical_url)
@@ -362,6 +367,7 @@ def add_file_source(
     project_id: uuid.UUID,
     upload: UploadFile,
 ) -> EvidenceSource:
+    """Validate and ingest an uploaded evidence file."""
     project_service.get_project(db, auth, project_id)
     body = upload.file.read()
     try:
@@ -396,8 +402,7 @@ def add_file_source(
     filename = upload_validation.filename
     content_type = upload_validation.content_type
     storage_key = (
-        f"workspaces/{auth.workspace_id}/projects/{project_id}/evidence/"
-        f"{uuid.uuid4()}-{filename}"
+        f"workspaces/{auth.workspace_id}/projects/{project_id}/evidence/{uuid.uuid4()}-{filename}"
     )
     object_storage_service.put_object(
         settings,
@@ -491,6 +496,7 @@ def reembed_evidence(
     force: bool,
     scope: str,
 ) -> ReembedResult:
+    """Refresh embeddings when provider/model/dimension/version settings change."""
     project_service.get_project(db, auth, project_id)
     stmt = select(EvidenceChunk).where(EvidenceChunk.workspace_id == auth.workspace_id)
     if scope == "project":
@@ -591,6 +597,12 @@ def _process_source_text(
     content_type: str | None,
     metadata: dict[str, Any] | None = None,
 ) -> EvidenceSource:
+    """Normalize extracted text, build chunks, embed, and persist provenance.
+
+    This is the single path for notes, URLs, files, discovery snapshots, and
+    multimodal extraction so chunk metadata stays consistent across source
+    types.
+    """
     run = ai_run_service.start_run(
         db,
         auth,
@@ -847,6 +859,7 @@ def _merge_metadata(
 
 
 def _fetch_url(settings: Settings, url: str) -> ParsedSource:
+    """Fetch a URL with redirect revalidation and response-size limits."""
     _validate_fetch_target(url)
     fetched_at = datetime.now(UTC)
 
@@ -873,9 +886,7 @@ def _fetch_url(settings: Settings, url: str) -> ParsedSource:
             if response is None:
                 raise EvidenceIngestionError("URL did not return a response.")
     except httpx.HTTPStatusError as exc:
-        raise EvidenceIngestionError(
-            f"URL returned HTTP {exc.response.status_code}."
-        ) from exc
+        raise EvidenceIngestionError(f"URL returned HTTP {exc.response.status_code}.") from exc
     except httpx.HTTPError as exc:
         raise EvidenceIngestionError(f"Could not fetch URL: {exc}") from exc
 
@@ -926,6 +937,7 @@ def _parse_file(
     content_type: str,
     body: bytes,
 ) -> ParsedSource:
+    """Route supported uploads through text, PDF, image, or multimodal extraction."""
     lowered = filename.casefold()
     file_metadata = {
         "filename": filename,
@@ -1043,6 +1055,7 @@ def _parse_html(
     final_url: str | None = None,
     fetched_at: datetime | None = None,
 ) -> ParsedSource:
+    """Extract readable page text plus snapshot and section-lineage metadata."""
     parser = _ReadableHtmlParser()
     parser.feed(html)
     title = _normalize_text(parser.title) or None

@@ -1710,6 +1710,8 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
 
   try {
+    // Keep all API errors flowing through one typed boundary so feature panels
+    // can show domain-appropriate retry/error states without duplicating fetch logic.
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       headers: {

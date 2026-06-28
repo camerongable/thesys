@@ -301,6 +301,9 @@ export function GuidePanel({
   );
 }
 
+// The guide keeps the default surface short, but this metadata block exposes
+// grounding, approvals, and context-pack budgeting when an interviewer or
+// developer wants to inspect how an answer was formed.
 function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
   const contextSummary = contextPackSummary(response.context_pack);
   const hasGrounding =
@@ -351,6 +354,8 @@ function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
   );
 }
 
+// Context packs are returned as generic JSON so the UI can remain decoupled
+// from backend context-engineering internals while still showing budget health.
 function contextPackSummary(contextPack: Record<string, unknown> | null) {
   if (!contextPack) {
     return null;

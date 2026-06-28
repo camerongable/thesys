@@ -22,6 +22,8 @@ from app.db.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class EvidenceSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Source-level evidence record before and after extraction/chunking."""
+
     __tablename__ = "evidence_sources"
     __table_args__ = (
         CheckConstraint(
@@ -73,6 +75,8 @@ class EvidenceSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class EvidenceChunk(UUIDPrimaryKeyMixin, Base):
+    """Retrievable evidence unit with embedding and provenance metadata."""
+
     __tablename__ = "evidence_chunks"
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(

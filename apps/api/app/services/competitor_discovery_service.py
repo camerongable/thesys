@@ -1,3 +1,10 @@
+"""Discover competitor candidates during governed research sprints.
+
+This service keeps autonomous discovery bounded: the model proposes candidates
+from the approved research plan and discovered sources, while users explicitly
+approve candidates before they become durable competitor records.
+"""
+
 import json
 import uuid
 from dataclasses import dataclass
@@ -44,6 +51,8 @@ from app.services import (
 
 @dataclass(frozen=True)
 class CompetitorDiscoveryResult:
+    """Candidate generation output and the AI run step that produced it."""
+
     run: AIRun
     step: AIStep
     generated_count: int
@@ -57,6 +66,8 @@ def list_competitor_candidates(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> list[CompetitorCandidate]:
+    """List candidate competitors proposed for a research sprint."""
+
     _get_sprint(db, auth, project_id, sprint_id)
     return _list_candidates(db, auth, project_id, sprint_id)
 
@@ -68,6 +79,8 @@ def discover_competitors(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> CompetitorDiscoveryResult:
+    """Generate competitor and substitute candidates from an approved sprint plan."""
+
     require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
     sprint = _get_sprint(db, auth, project_id, sprint_id)
@@ -117,6 +130,8 @@ def discover_competitors(
     )
     started = perf_counter()
     try:
+        # Discovery stops at candidates; conversion into project memory happens
+        # only after a user approves an individual candidate.
         draft, completion = _generate_competitor_draft(settings, sprint, sources, messages)
         specs = _candidate_specs_from_draft(draft, {str(source.id) for source in sources})
         generated_count = len(specs)
@@ -226,6 +241,8 @@ def update_competitor_candidate(
     candidate_id: uuid.UUID,
     payload: CompetitorCandidateUpdate,
 ) -> CompetitorCandidate:
+    """Allow users to edit a proposed competitor before merging it."""
+
     require_permission(auth, "run_research")
     candidate = _get_candidate(db, auth, project_id, sprint_id, candidate_id)
     if candidate.status != "candidate":
@@ -258,6 +275,8 @@ def approve_competitor_candidate(
     sprint_id: uuid.UUID,
     candidate_id: uuid.UUID,
 ) -> CompetitorCandidate:
+    """Merge an approved candidate into competitors and ingest its evidence snapshot."""
+
     require_permission(auth, "run_research")
     candidate = _get_candidate(db, auth, project_id, sprint_id, candidate_id)
     if candidate.status != "candidate":
@@ -308,6 +327,8 @@ def reject_competitor_candidate(
     sprint_id: uuid.UUID,
     candidate_id: uuid.UUID,
 ) -> CompetitorCandidate:
+    """Reject a candidate while preserving the sprint history."""
+
     require_permission(auth, "run_research")
     candidate = _get_candidate(db, auth, project_id, sprint_id, candidate_id)
     if candidate.status not in {"candidate", "approved"}:

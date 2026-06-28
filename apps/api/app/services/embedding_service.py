@@ -1,3 +1,5 @@
+"""Embedding provider boundary for deterministic and LiteLLM-backed vectors."""
+
 import hashlib
 import math
 import re
@@ -19,6 +21,8 @@ class EmbeddingProviderError(RuntimeError):
 
 @dataclass(frozen=True)
 class EmbeddingResult:
+    """Embedding vector plus version metadata stored on each evidence chunk."""
+
     vector: list[float]
     provider: str
     model: str
@@ -32,6 +36,7 @@ def embed_text(settings: Settings, text: str) -> list[float]:
 
 
 def embed_text_with_metadata(settings: Settings, text: str) -> EmbeddingResult:
+    """Embed text and return provider/model/version metadata for auditability."""
     if settings.embedding_provider == "deterministic":
         vector = deterministic_hash_embedding(settings.embedding_dimension, text)
         return _result(settings, vector, provider="deterministic")
@@ -91,8 +96,7 @@ def _embed_with_litellm(settings: Settings, text: str) -> list[float]:
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text[:500]
             last_error = EmbeddingProviderError(
-                f"LiteLLM embedding request failed with status "
-                f"{exc.response.status_code}: {detail}"
+                f"LiteLLM embedding request failed with status {exc.response.status_code}: {detail}"
             )
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
             last_error = EmbeddingProviderError(f"LiteLLM embedding request failed: {exc}")
@@ -121,6 +125,7 @@ def _result(settings: Settings, vector: list[float], *, provider: str) -> Embedd
 
 
 def embedding_metadata(settings: Settings) -> dict[str, Any]:
+    """Return embedding settings suitable for chunk metadata and diagnostics."""
     return {
         "embedding_provider": settings.embedding_provider,
         "embedding_model": settings.embedding_model,
@@ -130,6 +135,7 @@ def embedding_metadata(settings: Settings) -> dict[str, Any]:
 
 
 def cosine_similarity(left: list[float] | None, right: list[float] | None) -> float:
+    """Compute cosine similarity while tolerating missing vectors."""
     if left is None or right is None:
         return 0.0
     left_values = list(left)

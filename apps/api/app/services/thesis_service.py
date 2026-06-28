@@ -1,3 +1,10 @@
+"""Thesis canvas and idea-story services.
+
+The thesis canvas is durable project memory: it keeps the current idea, wedge,
+unknowns, proofs, and rejected directions in structured fields while recording
+the evolution events that explain how the thesis changed over time.
+"""
+
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -32,6 +39,8 @@ from app.services import project_service
 
 @dataclass(frozen=True)
 class _CanvasSeed:
+    """Initial canvas values derived from project intake and related records."""
+
     original_idea: str
     current_thesis: str
     target_user: str
@@ -50,6 +59,8 @@ def get_thesis_canvas(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> ThesisCanvasDetailRead:
+    """Load or create the thesis canvas and include its evolution timeline."""
+
     canvas = _ensure_canvas(db, auth, project_id)
     return ThesisCanvasDetailRead(
         canvas=ThesisCanvasRead.model_validate(canvas),
@@ -62,6 +73,8 @@ def get_idea_story(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> IdeaStoryRead:
+    """Return a compact narrative of what changed and what proof is next."""
+
     detail = get_thesis_canvas(db, auth, project_id)
     canvas = detail.canvas
     latest_change = _latest_story_event(detail.evolution)
@@ -98,6 +111,8 @@ def update_thesis_canvas(
     project_id: uuid.UUID,
     payload: ThesisCanvasUpdate,
 ) -> ThesisCanvasDetailRead:
+    """Apply user edits to the canvas and version the thesis when it changes."""
+
     require_permission(auth, "write_project")
     canvas = _ensure_canvas(db, auth, project_id)
     project = project_service.get_project(db, auth, project_id)
@@ -139,8 +154,7 @@ def update_thesis_canvas(
             change_summary=(
                 f"Updated {', '.join(_change_label(field) for field in changed_fields)}."
             ),
-            reason=payload.change_reason
-            or "The user refined the working thesis canvas.",
+            reason=payload.change_reason or "The user refined the working thesis canvas.",
             source_entity_type="thesis_canvas",
             source_entity_id=canvas.id,
             origin="user",
@@ -156,6 +170,8 @@ def list_thesis_evolution(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> list[ThesisEvolutionEventRead]:
+    """Return persisted and derived thesis-evolution events in timeline order."""
+
     project_service.get_project(db, auth, project_id)
     persisted = list(
         db.scalars(
@@ -173,6 +189,8 @@ def list_thesis_evolution(
 
 
 def _ensure_canvas(db: Session, auth: AuthContext, project_id: uuid.UUID) -> ThesisCanvas:
+    """Create the canvas from current project state when one does not exist yet."""
+
     project = project_service.get_project(db, auth, project_id)
     canvas = db.scalar(
         select(ThesisCanvas).where(
@@ -228,8 +246,7 @@ def _seed_from_project(db: Session, auth: AuthContext, project: Project) -> _Can
     current_thesis = (
         thesis.thesis_text
         if thesis
-        else project.short_description
-        or "The current thesis has not been structured yet."
+        else project.short_description or "The current thesis has not been structured yet."
     )
     target_user = _first_nonempty(
         latest_intake.target_users[0] if latest_intake and latest_intake.target_users else None,

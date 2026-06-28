@@ -12,6 +12,8 @@ from app.db.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class ProjectMemoryItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Typed durable memory item selected by AI workflows as project context."""
+
     __tablename__ = "project_memory_items"
     __table_args__ = (
         CheckConstraint(
@@ -68,4 +70,6 @@ class ProjectMemoryItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
 
-    superseded_by: Mapped["ProjectMemoryItem | None"] = relationship(remote_side="ProjectMemoryItem.id")
+    superseded_by: Mapped["ProjectMemoryItem | None"] = relationship(
+        remote_side="ProjectMemoryItem.id"
+    )

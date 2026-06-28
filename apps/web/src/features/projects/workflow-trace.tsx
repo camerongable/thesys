@@ -32,6 +32,8 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
 
     latestStatusRef.current = null;
     let closedCleanly = false;
+    // Workflow traces stream from the backend so long-running AI runs can show
+    // step, token, cost, and error metadata without polling the whole page.
     const source = new EventSource(getWorkflowEventsUrl(runId));
     source.onmessage = (event) => {
       const nextRun = JSON.parse(event.data) as WorkflowRun;
@@ -76,6 +78,8 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
       output_json: null,
     }));
 
+  // The trace is collapsed by default: the main workflow stays clean, while
+  // model/provider/cost/retrieval diagnostics are one disclosure away.
   return (
     <details className="rounded-lg border border-border bg-card p-4">
       <summary className="cursor-pointer list-none">
@@ -208,6 +212,8 @@ function RetrievalTraceSummary({ output }: { output: Record<string, unknown> | n
   );
 }
 
+// Different workflow steps serialize diagnostics under slightly different keys.
+// These helpers normalize them into a compact summary instead of exposing raw JSON.
 function retrievalSummaries(output: Record<string, unknown> | null) {
   if (!output) {
     return [];

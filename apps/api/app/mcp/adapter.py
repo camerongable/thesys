@@ -1,3 +1,10 @@
+"""MCP-shaped adapter over Thesys governed tool calls.
+
+The adapter exposes the same read/proposal tools used by agents and the UI.
+It does not bypass authorization, approvals, audit logging, or redaction; MCP
+clients get a standard integration surface while policy stays centralized.
+"""
+
 import uuid
 from dataclasses import dataclass
 from time import perf_counter
@@ -19,6 +26,8 @@ READ_TOOL_LIMIT = 100
 
 @dataclass(frozen=True)
 class MCPCallContext:
+    """Minimal metadata captured for one MCP tool call."""
+
     client_id: str
     duration_ms: int
 
@@ -105,6 +114,8 @@ def _attach_mcp_metadata(
     client_id: str,
     duration_ms: int,
 ) -> None:
+    """Annotate the tool invocation and audit log with MCP client metadata."""
+
     mcp_metadata = {
         "client_id": client_id,
         "adapter_version": ADAPTER_VERSION,

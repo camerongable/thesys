@@ -1,3 +1,5 @@
+"""External search provider boundary for source discovery."""
+
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -16,6 +18,8 @@ class ExternalSearchError(RuntimeError):
 
 @dataclass(frozen=True)
 class ExternalSearchResult:
+    """One provider search result with query/rank provenance."""
+
     provider: str
     query: str
     rank: int
@@ -40,6 +44,7 @@ class ExternalSearchBatch:
 
 
 def search_many(settings: Settings, queries: list[str]) -> ExternalSearchBatch:
+    """Run bounded external search with deterministic fallback for local demos."""
     cleaned_queries = _clean_queries(queries)[: settings.external_search_max_queries_per_sprint]
     if not settings.external_search_enabled:
         return ExternalSearchBatch(
@@ -84,6 +89,7 @@ def search_many(settings: Settings, queries: list[str]) -> ExternalSearchBatch:
 
 
 def diagnostics(batch: ExternalSearchBatch) -> dict[str, Any]:
+    """Return compact search diagnostics safe for traces and evals."""
     return {
         "enabled": batch.enabled,
         "provider": batch.provider,

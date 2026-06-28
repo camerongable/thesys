@@ -1,3 +1,11 @@
+"""Structured-output gateway for model calls.
+
+Feature services use this module when model output must become durable domain
+state. The helper keeps schema instructions, Pydantic validation, and repair
+attempt accounting in one place instead of scattering JSON parsing across
+workflows.
+"""
+
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -15,6 +23,8 @@ StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
 
 @dataclass(frozen=True)
 class StructuredOutputResult:
+    """Validated model payload plus usage/cost metadata from all attempts."""
+
     parsed: BaseModel
     completion: LLMCompletion
 
@@ -32,6 +42,12 @@ def generate_structured_output(
     temperature: float = 0.0,
     max_tokens: int | None = None,
 ) -> StructuredOutputResult:
+    """Generate and validate JSON against a Pydantic schema.
+
+    The first request asks the model for schema-compatible JSON. If validation
+    fails, bounded repair prompts are attempted and token/cost metadata is
+    merged so observability still reflects the full work performed.
+    """
     if settings.should_use_llm_stub:
         return _stub_structured_output(output_schema, messages, model or settings.litellm_model)
 
@@ -163,6 +179,7 @@ def _validate_structured_content(
     output_schema: type[StructuredModel],
     content: str,
 ) -> StructuredModel:
+    """Validate raw model JSON, including common wrapper-object variants."""
     try:
         return output_schema.model_validate_json(content)
     except ValidationError as original_error:
@@ -223,8 +240,7 @@ def _normalize_payload_keys(value: Any) -> Any:
         return [_normalize_payload_keys(item) for item in value]
     if isinstance(value, dict):
         return {
-            _to_snake_case(str(key)): _normalize_payload_keys(item)
-            for key, item in value.items()
+            _to_snake_case(str(key)): _normalize_payload_keys(item) for key, item in value.items()
         }
     return value
 
@@ -481,8 +497,7 @@ def _fake_opportunity_brief(subject: str) -> dict[str, Any]:
         "assumptions": [
             {
                 "text": (
-                    "The target user experiences the problem frequently enough to seek a "
-                    "new tool."
+                    "The target user experiences the problem frequently enough to seek a new tool."
                 ),
                 "category": "problem_urgency",
                 "importance": "critical",
@@ -699,8 +714,7 @@ def _fake_assumption_extraction(subject: str) -> dict[str, Any]:
         "assumptions": [
             {
                 "text": (
-                    "Target users have a frequent and urgent problem around "
-                    f"{primary_problem}."
+                    f"Target users have a frequent and urgent problem around {primary_problem}."
                 ),
                 "category": "problem_urgency",
                 "importance": "critical",
@@ -877,9 +891,7 @@ def _fake_research_plan(subject: str) -> dict[str, Any]:
         or "the current idea"
     ).strip()
     target_users = [
-        str(user).strip()
-        for user in project_context.get("target_users", [])
-        if str(user).strip()
+        str(user).strip() for user in project_context.get("target_users", []) if str(user).strip()
     ]
     primary_user = target_users[0] if target_users else "the first target customer segment"
 

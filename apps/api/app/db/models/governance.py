@@ -11,6 +11,8 @@ from app.db.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class AuditEvent(UUIDPrimaryKeyMixin, Base):
+    """Immutable record of security, approval, tool, and workflow activity."""
+
     __tablename__ = "audit_events"
     __table_args__ = (
         CheckConstraint(
@@ -59,6 +61,8 @@ class AuditEvent(UUIDPrimaryKeyMixin, Base):
 
 
 class ApprovalRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Human-in-the-loop gate for proposed strategic state changes."""
+
     __tablename__ = "approval_requests"
     __table_args__ = (
         CheckConstraint(

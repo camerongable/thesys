@@ -1,3 +1,10 @@
+"""Typed project-memory management for AI workflows.
+
+Memory is modeled as inspectable domain data rather than chat transcript text.
+Items can be semantic, episodic, procedural, preference, working, or project
+memory, and each workflow selects only the memory types it is allowed to use.
+"""
+
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -47,9 +54,7 @@ def list_memory(
             ),
         )
     return list(
-        db.scalars(
-            stmt.order_by(ProjectMemoryItem.updated_at.desc()).limit(min(limit, 100))
-        )
+        db.scalars(stmt.order_by(ProjectMemoryItem.updated_at.desc()).limit(min(limit, 100)))
     )
 
 
@@ -201,6 +206,8 @@ def upsert_from_assumption(
     source_entity_type: str,
     source_entity_id: uuid.UUID,
 ) -> ProjectMemoryItem:
+    """Mirror an assumption into semantic memory with approval provenance."""
+
     return upsert_memory_item(
         db,
         auth,
@@ -239,6 +246,8 @@ def upsert_from_risk(
     source_entity_type: str,
     source_entity_id: uuid.UUID,
 ) -> ProjectMemoryItem:
+    """Mirror a risk into semantic memory with approval provenance."""
+
     return upsert_memory_item(
         db,
         auth,

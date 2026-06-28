@@ -1,3 +1,5 @@
+"""Security validators for user-controlled ingestion inputs."""
+
 import ipaddress
 import re
 import socket
@@ -32,6 +34,7 @@ _ALLOWED_UPLOADS: dict[str, tuple[str, set[str], set[str]]] = {
 
 
 def validate_url_fetch_target(url: str) -> None:
+    """Reject URL fetch targets that could reach local or private infrastructure."""
     parsed = urlparse(url.strip())
     if parsed.scheme.casefold() not in {"http", "https"}:
         raise SecurityValidationError("Only http and https URLs can be fetched.")
@@ -41,6 +44,8 @@ def validate_url_fetch_target(url: str) -> None:
         raise SecurityValidationError("URLs with embedded credentials are not allowed.")
 
     host = parsed.hostname.strip("[]")
+    # Resolve before fetching so DNS names that point at private/link-local
+    # addresses cannot bypass the scheme/hostname checks.
     for ip_address in _resolve_host_addresses(host):
         if _is_blocked_address(ip_address):
             raise SecurityValidationError(
@@ -55,6 +60,7 @@ def validate_upload(
     body: bytes,
     settings: Settings,
 ) -> UploadValidationResult:
+    """Validate uploads before storage or parser/model processing."""
     max_bytes = settings.max_upload_mb * 1024 * 1024
     if len(body) > max_bytes:
         raise SecurityValidationError(f"File exceeds {settings.max_upload_mb} MB upload limit.")
@@ -138,6 +144,7 @@ def _extension(filename: str) -> str:
 
 
 def _validate_magic_bytes(media_type: str, body: bytes) -> None:
+    """Use lightweight signatures to catch mislabeled binary uploads early."""
     if media_type == "pdf" and not body.startswith(b"%PDF"):
         raise SecurityValidationError("PDF upload did not start with a PDF signature.")
     if media_type == "png" and not body.startswith(b"\x89PNG\r\n"):

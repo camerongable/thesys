@@ -1,3 +1,10 @@
+"""Ask Thesys guide service.
+
+The guide is a bounded project copilot: it can retrieve evidence, explain the
+next action, and create approval-gated proposals, but it does not silently
+mutate strategic project state from chat.
+"""
+
 import json
 import uuid
 from dataclasses import dataclass
@@ -73,8 +80,7 @@ _STAGE_GUIDE_COPY: dict[str, _StageGuideCopy] = {
             "to make a strategic recommendation."
         ),
         summary=(
-            "This idea is still rough. Start by clarifying who it is for and what must "
-            "be true."
+            "This idea is still rough. Start by clarifying who it is for and what must be true."
         ),
     ),
     "structured_intake": _StageGuideCopy(
@@ -159,6 +165,7 @@ def get_guide_context(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> GuideContextRead:
+    """Build the project state snapshot used by guide recommendations and chat."""
     overview = project_overview_service.get_project_overview(db, auth, project_id)
     return _guide_context_from_overview(db, auth, overview)
 
@@ -168,6 +175,7 @@ def recommend(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> GuideResponseRead:
+    """Return deterministic next-action guidance for the current project stage."""
     context = get_guide_context(db, auth, project_id)
     stage_copy = _STAGE_GUIDE_COPY.get(context.stage, _fallback_stage_copy(context.stage))
     recommended_action = context.available_actions[0]
@@ -206,6 +214,7 @@ def chat(
     message: str,
     recent_turns: list[GuideChatTurnRead] | None = None,
 ) -> GuideChatResponseRead:
+    """Answer a bounded project question with retrieval grounding when needed."""
     settings = get_settings()
     context = get_guide_context(db, auth, project_id)
     normalized = message.strip().lower()
@@ -249,6 +258,9 @@ def chat(
             cost=Decimal("0"),
         )
 
+        # State-changing guide intents are routed to proposal tools. The chat
+        # response can surface an approval request, but it cannot write memory,
+        # validation plans, or decisions directly.
         proposal_tool = _proposal_tool_for_message(normalized)
         if not in_scope:
             response = _out_of_scope_chat_response(context)
@@ -452,11 +464,7 @@ def _deterministic_chat_response(
         story = thesis_service.get_idea_story(db, auth, project_id)
         wedges = wedge_service.list_wedge_options(db, auth, project_id)
         recommended = next(
-            (
-                wedge
-                for wedge in wedges.wedges
-                if str(wedge.id) == str(wedges.recommended_wedge_id)
-            ),
+            (wedge for wedge in wedges.wedges if str(wedge.id) == str(wedges.recommended_wedge_id)),
             None,
         )
         if recommended:
@@ -502,8 +510,7 @@ def _deterministic_chat_response(
         )
 
     if any(
-        term in normalized
-        for term in ("build", "decision", "proceed", "pivot", "pause", "kill")
+        term in normalized for term in ("build", "decision", "proceed", "pivot", "pause", "kill")
     ):
         coach = validation_service.chat_decision_coach(db, auth, project_id, message)
         return GuideChatResponseRead(
@@ -837,14 +844,10 @@ def _grounded_guide_messages(
     context_pack,
 ) -> list[ChatMessage]:
     trusted_items = [
-        item.model_dump(mode="json")
-        for item in context_pack.items
-        if not item.untrusted
+        item.model_dump(mode="json") for item in context_pack.items if not item.untrusted
     ]
     untrusted_items = [
-        item.model_dump(mode="json")
-        for item in context_pack.items
-        if item.untrusted
+        item.model_dump(mode="json") for item in context_pack.items if item.untrusted
     ]
     return [
         ChatMessage(
@@ -981,10 +984,7 @@ def _grounded_confidence(context: GuideContextRead, has_citations: bool) -> str:
 
 
 def _bounded_recent_turns(recent_turns: list[GuideChatTurnRead]) -> list[dict[str, str]]:
-    return [
-        {"role": turn.role, "content": turn.content[:500]}
-        for turn in recent_turns[-6:]
-    ]
+    return [{"role": turn.role, "content": turn.content[:500]} for turn in recent_turns[-6:]]
 
 
 def _unique_strings(values) -> list[str]:
@@ -1164,9 +1164,7 @@ def _support_actions_for_overview(overview: ProjectOverviewRead) -> list[GuideAc
             type="navigate",
             label="Show project history",
             description="Open the idea evolution timeline and decision trail.",
-            why_it_matters=(
-                "The idea is easier to trust when you can see what changed and why."
-            ),
+            why_it_matters=("The idea is easier to trust when you can see what changed and why."),
             target_route=f"/projects/{project_id}#history",
             risk_level="low",
             requires_confirmation=False,
@@ -1644,8 +1642,7 @@ def _fallback_stage_copy(stage: str) -> _StageGuideCopy:
 def _after_that_for_action(context: GuideContextRead, action: GuideActionRead) -> str:
     if action.type == "open_form" or "thesis" in action.id:
         return (
-            "I will use the sharper thesis to route you toward research, wedge choice, "
-            "or a proof."
+            "I will use the sharper thesis to route you toward research, wedge choice, or a proof."
         )
     if action.type == "compare_wedges" or "wedge" in action.id:
         return "The selected wedge becomes the basis for the current thesis and validation mission."
@@ -1661,8 +1658,7 @@ def _after_that_for_action(context: GuideContextRead, action: GuideActionRead) -
     if context.stage == "decision_ready":
         return "I will help translate the current proof into a decision record."
     return (
-        "I will route you to the next focused step and keep the project history tied "
-        "to the action."
+        "I will route you to the next focused step and keep the project history tied to the action."
     )
 
 

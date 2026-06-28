@@ -813,6 +813,8 @@ function SourceDetailPanel({ source }: { source: EvidenceSource | null }) {
   );
 }
 
+// Provenance stays behind a disclosure because most users need the source
+// summary first; extraction/search metadata is still available for audit.
 function SourceMetadataDetails({ metadata }: { metadata: Record<string, unknown> }) {
   const entries = metadataEntries(metadata);
   if (entries.length === 0) {
@@ -995,6 +997,8 @@ function truncate(value: string, maxLength: number) {
 }
 
 function metadataEntries(metadata: Record<string, unknown>) {
+  // Show AI/retrieval provenance first so extraction providers, source ranks,
+  // and safety flags do not get buried behind arbitrary metadata ordering.
   const preferred = [
     "search_provider",
     "search_query",

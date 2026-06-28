@@ -1,3 +1,5 @@
+"""HTTP routes exposing the governed MCP tool adapter."""
+
 import uuid
 from typing import Annotated
 
@@ -15,6 +17,8 @@ DbDep = Annotated[Session, Depends(get_db)]
 
 @router.get("/tools", response_model=MCPToolListRead)
 def list_mcp_tools(include_proposals: bool = True) -> MCPToolListRead:
+    """Return the MCP-shaped tool registry."""
+
     return MCPToolListRead(tools=adapter.list_tools(include_proposals=include_proposals))
 
 
@@ -27,6 +31,8 @@ def call_mcp_tool(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> MCPToolCallRead:
+    """Invoke a governed MCP tool for one project."""
+
     try:
         return adapter.call_tool(
             db,

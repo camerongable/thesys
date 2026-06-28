@@ -1,3 +1,10 @@
+"""Generate and manage wedge options for narrowing a project thesis.
+
+Wedges are deterministic recommendations derived from the thesis canvas,
+competitor pressure, evidence strength, and assumptions. Selecting one updates
+the thesis canvas so downstream validation stays focused.
+"""
+
 import uuid
 from dataclasses import dataclass
 
@@ -20,11 +27,15 @@ from app.services import project_service, thesis_service
 
 
 class WedgeOptionNotFoundError(ValueError):
+    """Raised when a wedge id cannot be found for the current project."""
+
     pass
 
 
 @dataclass(frozen=True)
 class _WedgeSpec:
+    """Candidate wedge fields before they are persisted as options."""
+
     name: str
     description: str
     target_user: str
@@ -43,6 +54,8 @@ def list_wedge_options(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> WedgeOptionListRead:
+    """List persisted wedge options and the current recommendation."""
+
     project_service.get_project(db, auth, project_id)
     wedges = _query_wedges(db, auth, project_id)
     return _list_read(wedges)
@@ -53,6 +66,8 @@ def generate_wedge_options(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> WedgeOptionListRead:
+    """Derive wedge options from current project evidence and thesis memory."""
+
     require_permission(auth, "write_project")
     project = project_service.get_project(db, auth, project_id)
     canvas = thesis_service._ensure_canvas(db, auth, project_id)  # noqa: SLF001
@@ -109,6 +124,8 @@ def select_wedge(
     project_id: uuid.UUID,
     wedge_id: uuid.UUID,
 ) -> WedgeActionRead:
+    """Select a wedge and apply it to the thesis canvas."""
+
     require_permission(auth, "write_project")
     project = project_service.get_project(db, auth, project_id)
     option = _get_wedge(db, auth, project_id, wedge_id)
@@ -140,6 +157,8 @@ def reject_wedge(
     project_id: uuid.UUID,
     wedge_id: uuid.UUID,
 ) -> WedgeActionRead:
+    """Reject a wedge while preserving the direction in thesis history."""
+
     require_permission(auth, "write_project")
     project = project_service.get_project(db, auth, project_id)
     option = _get_wedge(db, auth, project_id, wedge_id)
@@ -172,6 +191,8 @@ def test_wedge(
     project_id: uuid.UUID,
     wedge_id: uuid.UUID,
 ) -> WedgeActionRead:
+    """Move a wedge into test mode and update the canvas proof focus."""
+
     require_permission(auth, "write_project")
     project = project_service.get_project(db, auth, project_id)
     option = _get_wedge(db, auth, project_id, wedge_id)
@@ -205,6 +226,8 @@ def mark_research_later(
     project_id: uuid.UUID,
     wedge_id: uuid.UUID,
 ) -> WedgeActionRead:
+    """Keep a wedge available while marking it as deferred."""
+
     require_permission(auth, "write_project")
     project_service.get_project(db, auth, project_id)
     option = _get_wedge(db, auth, project_id, wedge_id)
@@ -292,10 +315,7 @@ def _get_wedge(
 def _list_read(wedges: list[WedgeOption]) -> WedgeOptionListRead:
     recommended = next((wedge for wedge in wedges if wedge.recommendation == "recommended"), None)
     if recommended:
-        summary = (
-            f"Recommended wedge: {recommended.name}. "
-            f"Why: {recommended.why_it_might_work}"
-        )
+        summary = f"Recommended wedge: {recommended.name}. Why: {recommended.why_it_might_work}"
     elif wedges:
         summary = "Review the wedge options and choose the narrowest path worth testing first."
     else:

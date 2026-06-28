@@ -1,3 +1,5 @@
+"""Persistence helpers for local AI run and step observability."""
+
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -21,6 +23,7 @@ def start_run(
     model_provider: str | None = None,
     model_name: str | None = None,
 ) -> AIRun:
+    """Create the top-level trace row for an AI or workflow operation."""
     run = AIRun(
         workspace_id=auth.workspace_id,
         project_id=project_id,
@@ -46,6 +49,7 @@ def start_step(
     step_name: str,
     input_json: dict[str, Any] | None = None,
 ) -> AIStep:
+    """Create a child step row with redacted inputs."""
     step = AIStep(
         ai_run_id=run.id,
         step_name=step_name,
@@ -67,6 +71,7 @@ def complete_step(
     tokens: int | None,
     cost: Decimal | None,
 ) -> AIStep:
+    """Mark a child step succeeded and store redacted outputs/usage."""
     step.status = "succeeded"
     step.output_json = redact_payload(output_json, redact_emails=True)
     step.latency_ms = latency_ms
@@ -120,6 +125,7 @@ def wait_for_human(
     model_provider: str,
     model_name: str,
 ) -> AIRun:
+    """Mark a workflow as paused on a user approval gate."""
     run.status = "waiting_for_human"
     run.output_summary = redact_text(output_summary, redact_emails=True)
     run.total_tokens = total_tokens

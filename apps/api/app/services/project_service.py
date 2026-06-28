@@ -1,3 +1,5 @@
+"""Workspace-scoped project CRUD helpers shared by feature services."""
+
 import uuid
 
 from fastapi import HTTPException, status
@@ -10,6 +12,8 @@ from app.schemas.projects import ProjectCreate, ProjectUpdate
 
 
 def list_projects(db: Session, auth: AuthContext) -> list[Project]:
+    """List projects visible to the current workspace."""
+
     return list(
         db.scalars(
             select(Project)
@@ -25,6 +29,8 @@ def list_projects(db: Session, auth: AuthContext) -> list[Project]:
 
 
 def get_project(db: Session, auth: AuthContext, project_id: uuid.UUID) -> Project:
+    """Load a project and key relationships within the current workspace."""
+
     project = db.scalar(
         select(Project)
         .where(Project.id == project_id, Project.workspace_id == auth.workspace_id)
@@ -40,6 +46,8 @@ def get_project(db: Session, auth: AuthContext, project_id: uuid.UUID) -> Projec
 
 
 def create_project(db: Session, auth: AuthContext, payload: ProjectCreate) -> Project:
+    """Create a project and optional initial thesis version."""
+
     require_permission(auth, "write_project")
     project = Project(
         workspace_id=auth.workspace_id,
@@ -73,6 +81,8 @@ def update_project(
     project_id: uuid.UUID,
     payload: ProjectUpdate,
 ) -> Project:
+    """Update basic project metadata and status."""
+
     require_permission(auth, "write_project")
     project = get_project(db, auth, project_id)
     update_data = payload.model_dump(exclude_unset=True)
@@ -89,6 +99,8 @@ def update_project(
 
 
 def delete_project(db: Session, auth: AuthContext, project_id: uuid.UUID) -> None:
+    """Delete a project after permission and workspace checks."""
+
     require_permission(auth, "delete_project")
     project = get_project(db, auth, project_id)
     db.delete(project)
@@ -96,6 +108,8 @@ def delete_project(db: Session, auth: AuthContext, project_id: uuid.UUID) -> Non
 
 
 def current_thesis(project: Project) -> ProjectThesis | None:
+    """Return the loaded thesis currently marked active on a project."""
+
     if project.current_thesis_id is None:
         return None
     return next(

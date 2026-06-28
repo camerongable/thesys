@@ -1,3 +1,5 @@
+"""Workflow run lookup services for AI observability screens."""
+
 import uuid
 
 from fastapi import HTTPException, status
@@ -10,6 +12,8 @@ from app.services import project_service
 
 
 def get_run(db: Session, auth: AuthContext, run_id: uuid.UUID) -> AIRun:
+    """Load one AI run with its recorded steps for trace inspection."""
+
     run = db.scalar(
         select(AIRun)
         .where(AIRun.id == run_id, AIRun.workspace_id == auth.workspace_id)
@@ -26,6 +30,8 @@ def list_project_runs(
     project_id: uuid.UUID,
     limit: int,
 ) -> list[AIRun]:
+    """List recent AI runs for a project, including step-level traces."""
+
     project_service.get_project(db, auth, project_id)
     return list(
         db.scalars(

@@ -1,3 +1,10 @@
+"""Research sprint planning, approval, and lifecycle coordination.
+
+Planning is model-assisted but governed: the LLM proposes a typed plan, the app
+persists it as a draft, and only an explicit approval starts the execution path
+or resolves pending tool proposals.
+"""
+
 import json
 import uuid
 from dataclasses import dataclass
@@ -50,6 +57,8 @@ from app.services import (
 
 
 class ResearchSprintWorkflowError(RuntimeError):
+    """Raised when the sprint planning graph fails outside expected model errors."""
+
     pass
 
 
@@ -62,6 +71,8 @@ class ResearchPlanState(TypedDict, total=False):
 
 @dataclass(frozen=True)
 class ResearchPlanRunResult:
+    """Generated research plan plus model/run metadata for traceability."""
+
     run: AIRun
     step: AIStep
     sprint: ResearchSprint
@@ -77,6 +88,8 @@ def list_research_sprints(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> list[ResearchSprint]:
+    """List project research sprints newest-first with plans loaded."""
+
     project_service.get_project(db, auth, project_id)
     return list(
         db.scalars(
@@ -98,6 +111,8 @@ def start_research_sprint_plan(
     project_id: uuid.UUID,
     payload: ResearchSprintPlanCreate,
 ) -> ResearchPlanRunResult:
+    """Generate a draft research plan using project context and structured output."""
+
     require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
     input_summary = payload.objective or _default_objective(project)
@@ -242,6 +257,8 @@ def start_research_sprint_plan(
     graph.add_edge("generate_research_plan", "persist_research_plan")
     graph.add_edge("persist_research_plan", END)
 
+    # The graph makes planning phases observable: context loading, model
+    # generation, then durable draft persistence for human approval.
     try:
         state = graph.compile().invoke({"objective": payload.objective})
     except (StructuredOutputError, RuntimeError) as exc:
@@ -313,6 +330,8 @@ def update_research_plan(
     plan_id: uuid.UUID,
     payload: ResearchPlanUpdate,
 ) -> ResearchPlan:
+    """Update an unapproved draft plan before execution begins."""
+
     require_permission(auth, "run_research")
     plan = _get_plan(db, auth, project_id, plan_id)
     if plan.status != "draft":
@@ -334,6 +353,8 @@ def approve_research_sprint(
     sprint_id: uuid.UUID,
     payload: ResearchPlanUpdate,
 ) -> ResearchSprint:
+    """Approve a draft research plan and optionally signal Temporal execution."""
+
     require_permission(auth, "approve_memory_updates")
     sprint = _get_sprint(db, auth, sprint_id, project_id)
     if (
@@ -424,6 +445,8 @@ def reject_research_sprint(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> ResearchSprint:
+    """Reject a draft research plan and resolve its pending proposals."""
+
     require_permission(auth, "approve_memory_updates")
     sprint = _get_sprint(db, auth, sprint_id, project_id)
     if (
@@ -652,9 +675,7 @@ def _fallback_research_plan(
 ) -> ResearchPlanDraft:
     project_name = str(project_context.get("name") or "the opportunity").strip()
     target_users = [
-        str(user).strip()
-        for user in project_context.get("target_users", [])
-        if str(user).strip()
+        str(user).strip() for user in project_context.get("target_users", []) if str(user).strip()
     ]
     primary_user = target_users[0] if target_users else "the first target customer segment"
     plan_objective = objective or (

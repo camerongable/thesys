@@ -1,3 +1,5 @@
+"""Portfolio-oriented eval checks for the local AI workflows."""
+
 import json
 import uuid
 from dataclasses import dataclass
@@ -31,15 +33,19 @@ from app.db.models import (
 from app.schemas.evals import (
     AIEvalMetricRead,
     AIEvalRead,
-    MvpEvalCheckRead,
-    MvpEvalRead,
     GuideEvalMetricRead,
     GuideEvalRead,
+    MvpEvalCheckRead,
+    MvpEvalRead,
     ResearchEvalCaseRead,
     V1ResearchEvalMetricRead,
     V1ResearchEvalRead,
 )
-from app.services import ai_accounting_service, langsmith_observability_service, project_service
+from app.services import (
+    ai_accounting_service,
+    langsmith_observability_service,
+    project_service,
+)
 
 REQUIRED_BRIEF_SECTIONS = (
     "Executive Summary",
@@ -73,6 +79,7 @@ class _ResearchMetric:
 
 
 def run_mvp_eval(db: Session, auth: AuthContext, project_id: uuid.UUID) -> MvpEvalRead:
+    """Check that the seeded/demo project demonstrates the MVP workflow."""
     project = project_service.get_project(db, auth, project_id)
     counts = _counts(db, auth, project_id)
     brief = _current_artifact(db, auth, project_id, "opportunity_brief")
@@ -188,6 +195,7 @@ def run_v1_research_eval(
     auth: AuthContext,
     project_id: uuid.UUID,
 ) -> V1ResearchEvalRead:
+    """Evaluate the agentic research sprint across retrieval, citation, and trace criteria."""
     project_service.get_project(db, auth, project_id)
     counts = _v1_research_counts(db, auth, project_id)
     latest_memo = _latest_research_memo_version(db, auth, project_id)
@@ -430,6 +438,7 @@ def run_v1_research_eval(
 
 
 def run_guide_eval(db: Session, auth: AuthContext, project_id: uuid.UUID) -> GuideEvalRead:
+    """Check that Ask Thesys remains retrieval-grounded and proposal-governed."""
     project_service.get_project(db, auth, project_id)
     guide_runs = int(
         db.scalar(
@@ -524,6 +533,7 @@ def run_ai_eval(
     settings: Any,
     project_id: uuid.UUID,
 ) -> AIEvalRead:
+    """Evaluate project-level AI observability, budget, and provider-circuit state."""
     report = ai_accounting_service.project_ai_cost_report(db, auth, settings, project_id)
     metrics = [
         _ResearchMetric(
@@ -946,8 +956,7 @@ REQUIRED_RESEARCH_MEMO_SECTIONS = (
 
 def _contains_research_memo_sections(markdown: str) -> bool:
     return all(
-        section.casefold() in markdown.casefold()
-        for section in REQUIRED_RESEARCH_MEMO_SECTIONS
+        section.casefold() in markdown.casefold() for section in REQUIRED_RESEARCH_MEMO_SECTIONS
     )
 
 

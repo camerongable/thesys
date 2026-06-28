@@ -1,3 +1,5 @@
+"""Source discovery workflow for research sprints."""
+
 import json
 import uuid
 from dataclasses import dataclass
@@ -36,6 +38,8 @@ from app.services import (
 
 @dataclass(frozen=True)
 class SourceDiscoveryResult:
+    """Generated source candidates plus persisted run/step metadata."""
+
     run: AIRun
     step: AIStep
     generated_count: int
@@ -61,6 +65,7 @@ def discover_sources(
     project_id: uuid.UUID,
     sprint_id: uuid.UUID,
 ) -> SourceDiscoveryResult:
+    """Generate source candidates from the approved research plan."""
     require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
     sprint = _get_sprint(db, auth, project_id, sprint_id)
@@ -253,6 +258,7 @@ def ingest_source_candidate(
     sprint_id: uuid.UUID,
     source_id: uuid.UUID,
 ) -> DiscoveredSource:
+    """Ingest an approved candidate while preserving discovery provenance."""
     require_permission(auth, "run_research")
     sprint = _get_sprint(db, auth, project_id, sprint_id)
     source = _get_source(db, auth, project_id, sprint_id, source_id)
@@ -377,7 +383,7 @@ def _get_source(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Discovered source not found.",
-    )
+        )
     return source
 
 

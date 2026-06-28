@@ -1,3 +1,5 @@
+"""Citation quality checks shared by generated artifacts and agentic research."""
+
 import uuid
 from dataclasses import dataclass
 
@@ -7,6 +9,8 @@ from app.schemas.evidence import EvidenceRetrievalResultRead
 
 @dataclass(frozen=True)
 class CitationVerification:
+    """Support check for one citation against the retrieved evidence set."""
+
     citation: Citation
     valid_id: bool
     text_overlap: float
@@ -27,6 +31,7 @@ def verify_claims(
     claims: list[ClaimDraft],
     selected_evidence: list[EvidenceRetrievalResultRead],
 ) -> list[ClaimVerification]:
+    """Verify every generated claim against the evidence selected for synthesis."""
     return [_verify_claim(claim, selected_evidence) for claim in claims]
 
 
@@ -35,6 +40,7 @@ def citation_is_supported(
     claim_text: str,
     selected_evidence: list[EvidenceRetrievalResultRead],
 ) -> CitationVerification:
+    """Check citation IDs and rough text/quote overlap against retrieved evidence."""
     evidence = _evidence_for_citation(citation, selected_evidence)
     if evidence is None:
         return CitationVerification(

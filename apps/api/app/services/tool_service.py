@@ -1,3 +1,5 @@
+"""Governed project tool registry used by agents, guide chat, and MCP clients."""
+
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -38,6 +40,8 @@ MAX_TOOL_ARRAY_LENGTH = 100
 
 @dataclass(frozen=True)
 class ToolDefinition:
+    """Static contract for one app-defined agent tool."""
+
     name: str
     title: str
     description: str
@@ -294,6 +298,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
 
 
 def list_tool_definitions() -> list[ToolDefinition]:
+    """Return the stable tool registry exposed to UI, agents, and MCP clients."""
     return list(TOOL_REGISTRY.values())
 
 
@@ -312,9 +317,7 @@ def list_tool_invocations(
     )
     if research_sprint_id is not None:
         stmt = stmt.where(ToolInvocation.research_sprint_id == research_sprint_id)
-    return list(
-        db.scalars(stmt.order_by(ToolInvocation.created_at.desc()).limit(min(limit, 100)))
-    )
+    return list(db.scalars(stmt.order_by(ToolInvocation.created_at.desc()).limit(min(limit, 100))))
 
 
 def execute_tool(
@@ -328,6 +331,7 @@ def execute_tool(
     research_sprint_id: uuid.UUID | None = None,
     requested_by: RequestedBy = "agent",
 ) -> ToolExecutionResult:
+    """Execute a read/write tool after schema, role, scope, and output guards."""
     definition = _definition(tool_name)
     project_service.get_project(db, auth, project_id)
     _authorize_tool_invocation(db, auth, project_id, definition)
@@ -444,6 +448,7 @@ def create_proposal(
     requested_by: RequestedBy = "agent",
     input_json: dict[str, Any] | None = None,
 ) -> ToolInvocation:
+    """Create an approval-gated proposal tool invocation without mutating state."""
     definition = _definition(tool_name)
     if definition.access_mode != "proposal":
         raise ValueError(f"{tool_name} is not a proposal tool.")
@@ -508,6 +513,7 @@ def approve_tool_invocation(
     project_id: uuid.UUID,
     invocation_id: uuid.UUID,
 ) -> ToolInvocation:
+    """Approve a pending tool proposal and resolve its associated approval record."""
     invocation = _get_invocation(db, auth, project_id, invocation_id)
     if invocation.access_mode == "read":
         raise HTTPException(
@@ -557,6 +563,7 @@ def reject_tool_invocation(
     project_id: uuid.UUID,
     invocation_id: uuid.UUID,
 ) -> ToolInvocation:
+    """Reject a pending tool proposal and preserve the denial in audit history."""
     invocation = _get_invocation(db, auth, project_id, invocation_id)
     if invocation.access_mode == "read":
         raise HTTPException(
@@ -1038,6 +1045,7 @@ def _guard_tool_input(
     research_sprint_id: uuid.UUID | None,
     requested_by: RequestedBy,
 ) -> dict[str, Any]:
+    """Validate model/client input before any tool logic sees it."""
     _guard_requested_by(requested_by)
     guarded = _validate_schema_payload(
         definition.input_schema,
@@ -1252,6 +1260,7 @@ def _authorize_tool_invocation(
     project_id: uuid.UUID,
     definition: ToolDefinition,
 ) -> None:
+    """Enforce role and risk policy independently of caller type."""
     role = normalized_role(auth.role)
     if role not in definition.allowed_project_roles:
         _audit_tool_denial(db, auth, project_id, definition, "role_not_allowed")
@@ -1407,4 +1416,4 @@ def _decimal_to_float(value: Decimal | None) -> float | None:
 def _truncate(value: str | None, limit: int) -> str | None:
     if value is None:
         return None
-    return value if len(value) <= limit else f"{value[:limit - 1]}..."
+    return value if len(value) <= limit else f"{value[: limit - 1]}..."
