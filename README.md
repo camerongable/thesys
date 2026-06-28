@@ -836,8 +836,10 @@ The core workflow is designed to prevent premature building by identifying the m
 
 ## Current Status
 
-This is a V1 proof-of-concept with the Sprint 50 AI engineering upgrade track
-implemented.
+This is a V1 portfolio proof-of-concept. Sprint 41-50 established the first AI
+engineering upgrade baseline; they are not treated as fully complete
+production-grade work. Sprints 51-60 are the explicit gap-closure track, and the
+current branch has implemented Sprint 51 and Sprint 52.
 
 Implemented or demonstrated:
 
@@ -869,32 +871,34 @@ Implemented or demonstrated:
 - shared service utilities, source provenance utilities, developer docs, and
   code navigation guides
 
-Planned future work:
+Gap-closure roadmap:
 
-- deeper context compression and visual diffing for older guide turns, long
-  evidence sets, and historical research traces
-- production hardening for remote MCP deployment, client authentication, and
-  hosted integration settings
-- true token/step streaming in Ask Thesys with cancellation and live tool events
-- production security follow-ups: rate limits, workflow concurrency limits,
-  dependency/security audit scripts, production auth, and formal threat modeling
-- stronger retrieval quality with BM25, MMR/diversity, cross-encoder reranking,
-  and labeled retrieval evals
-- OpenTelemetry-compatible observability, CI eval gates, eval reports, and
-  prompt/schema/context version changelogs
-- semantic caching and cost optimization for embeddings, retrieval, reranking,
-  and guide answers
-- richer source/document intelligence with readability extraction, OCR, table
-  extraction, page snapshots, and live provider QA
-- feature-package backend refactor to split oversized services while preserving
-  the straightforward main workflow
-- richer trace/citation/memory drilldowns that remain hidden by default
-- recurring market monitoring
-- advanced evaluation dashboard and CI integration for eval gates
-- team collaboration
-- multi-project portfolio dashboard
-- integrations
-- consultant / product discovery / investor workflow packs
+- Sprint 53 closes the Ask Thesys streaming gap with true incremental answer
+  deltas/provider tokens, live retrieval/tool/proposal events, cancellation,
+  timeouts, and collapsed citation drilldowns.
+- Sprint 54 closes the security gap with rate limits, workflow concurrency
+  limits, pre-call token/cost budget enforcement, dependency audit commands,
+  production auth, SSRF hardening, provider-egress controls, and threat
+  modeling.
+- Sprint 55 closes the retrieval/citation gap with Postgres full-text search,
+  BM25-like ranking documentation, diversity controls, swappable reranking,
+  golden retrieval evals, and artifact-wide citation verification.
+- Sprint 56 closes the observability gap with OpenTelemetry-compatible metrics,
+  CI-ready eval gates, trend reports, prompt/schema/context changelogs, and a
+  hidden-by-default quality dashboard.
+- Sprint 57 adds semantic caching and cost optimization for embeddings,
+  retrieval plans, reranking, and guide answers with strict project/workspace
+  isolation.
+- Sprint 58 closes the document intelligence gap with readability extraction,
+  snapshots, OCR, table extraction, page/section quote provenance, richer source
+  quality, and credential-gated live provider QA.
+- Sprint 59 closes the architecture cleanup gap by splitting oversized services
+  into feature packages, adding typed DTO boundaries, removing duplication, and
+  preserving public API behavior.
+- Sprint 60 closes the documentation/readiness gap with architecture diagrams,
+  post-refactor navigation, targeted docstrings/comments, deployment docs,
+  object-storage backup guidance, advanced integration settings, and hosted-demo
+  smoke tests.
 
 ---
 

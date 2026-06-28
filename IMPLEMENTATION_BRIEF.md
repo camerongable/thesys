@@ -12192,11 +12192,11 @@ Implemented highlights:
 
 # Post-Sprint 50 Audit and Future Upgrade Backlog
 
-Sprint 41-50 are complete as V1 implementation slices. This audit records where
-the implementation fully satisfies the sprint intent and where the original goal
-was broader than the current implementation. The future backlog turns those
-partials, plus the next highest-value AI engineering upgrades, into ordered
-sprints.
+Sprint 41-50 landed valuable V1 implementation slices, but they should not be
+treated as fully complete against the broader production-grade intent. This
+audit records what landed, what remains unfinished, and exactly which future
+sprint owns each gap. The future backlog turns those partials, plus the next
+highest-value AI engineering upgrades, into ordered sprints.
 
 ## Sprint 41-50 Audit
 
@@ -12234,6 +12234,24 @@ Every incomplete Sprint 41-50 gap should be owned by one of the future sprints:
 | Sprint 48 readability extraction, screenshots/snapshots, OCR, tables, source-quality scoring, and live-provider QA | Sprint 58 |
 | Sprint 49 feature-package refactor, oversized-service splits, typed DTOs, characterization coverage, and layout docs | Sprint 59 |
 | Sprint 50 architecture diagrams, expanded developer navigation, code docs after refactors, and production/security posture docs | Sprint 60 |
+
+## Gap Closure Acceptance Map
+
+The sprints below should not be considered complete unless these carried-over
+gaps are explicitly implemented, tested, and documented:
+
+| Future sprint | Prior incomplete gap being closed | Specific completion requirements |
+|---|---|---|
+| Sprint 51 | Sprint 42 context engineering and Sprint 43 memory management | One shared context compiler is used by all major LLM workflows; workflow profiles define memory, retrieval, safety, freshness, compression, and conflict policies; durable memory compaction is approval-gated; preference memory can be captured and managed; conflicts can be detected and resolved through audited actions; Inspect surfaces explain selected, dropped, stale, compressed, and conflicting context. |
+| Sprint 52 | Sprint 44 MCP adapter | A real MCP-compatible JSON-RPC lifecycle exists for initialize/list/call/error cases; local stdio bridge and streamable HTTP/SSE path are documented where practical; external client configs are tested; every MCP call still uses RBAC, risk classification, approval gates, audit logs, redaction, and project/workspace scoping. |
+| Sprint 53 | Sprint 46 Ask Thesys streaming and guide evals | Ask Thesys streams incremental answer deltas or provider tokens before the final response; live events expose context compilation, retrieval, tool calls, proposal creation, cancellation, timeout, metadata, and final state; streamed and non-streamed final payloads converge; citation drilldowns include source/excerpt/verifier/context/memory details; guide evals cover action routing, weak evidence, no direct mutation, citation validity, cancellation, timeout, event ordering, and deterministic fallback parity. |
+| Sprint 54 | Sprint 41 security hardening and Sprint 47 pre-call budget enforcement | Expensive workflows have per-user/per-workspace rate limits; research/search/extraction/MCP paths have concurrency limits; token/cost budgets are checked before provider calls; dependency audit commands and a CI-friendly security checklist exist; production auth has JWT/OIDC, workspace membership, API key, service-account, rotation/revocation, and dev-auth isolation behavior; SSRF and provider-egress policies are tested; threat model docs cover concrete app attack surfaces. |
+| Sprint 55 | Sprint 45 retrieval quality and citation verification | Postgres full-text search participates in hybrid retrieval; BM25-like limitations are documented if exact BM25 is not implemented; MMR or equivalent source/domain diversity is applied; reranking is behind a swappable adapter; labeled golden retrieval evals exist; every generated artifact path runs citation verification; unsupported or weak claims are blocked, downgraded, or visibly labeled before persistence. |
+| Sprint 56 | Sprint 47 observability and CI gates | OpenTelemetry-compatible metrics/traces cover workflow/model/retrieval/tool/approval/token/cost/cache/timeout behavior; one local command runs structured output, context, retrieval, guide, redaction, security, cost, citation, MCP, and extraction evals; reports include failing-case links and version metadata; eval summaries are persisted for trend comparison; prompt/schema/context/retrieval/memory/tool changes have a changelog; any UI is hidden behind Inspect/developer surfaces. |
+| Sprint 57 | Cost/latency upgrade not covered by Sprint 41-50 | Embedding, retrieval-plan, rerank-result, and optional guide-answer caches are keyed by project/workspace plus evidence, memory, thesis, prompt, schema, retrieval, and context-pack versions; invalidation is tested for stale evidence/memory/decision/provider changes; cache metrics report saved token/cost/latency; tests prove cache data never crosses project or workspace boundaries. |
+| Sprint 58 | Sprint 48 source/document intelligence | HTML readability extraction, optional page snapshots, OCR fallback, table extraction, section/page/region quote provenance, and richer source-quality scoring exist with deterministic fallbacks; live Tavily and multimodal QA paths are guarded by credentials, egress policy, rate limits, and eval fixtures. |
+| Sprint 59 | Sprint 49 code cleanup | Characterization tests are added before code movement; oversized validation, research, guide, evidence, retrieval, tool, MCP, and eval services are split into cohesive feature packages; typed DTOs replace large untyped cross-service dicts; duplication in prompt assembly, structured-output repair, retrieval shaping, audit metadata, and proposal creation is removed; public API behavior and persisted schemas remain unchanged. |
+| Sprint 60 | Sprint 50 developer docs and production readiness | Diagrams reflect the implemented post-refactor system; README/developer docs explain where to add workflows, memory types, context profiles, MCP tools, retrieval providers, rerankers, and eval cases; public service entrypoints and DTOs have useful docstrings; comments document security, approval, Temporal, and prompt-injection invariants; deployment, object-storage, backup/restore, hosted-demo smoke, and advanced integration settings are documented without cluttering the primary workflow. |
 
 ---
 

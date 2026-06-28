@@ -2,8 +2,14 @@
 
 ## Current Phase
 
-V1 Sprint 50 implementation is complete. Thesys now demonstrates a stronger
-production-style AI architecture for a portfolio project:
+V1 Sprint 50 established the baseline AI engineering portfolio upgrade, and
+Sprints 51-60 are now the ordered gap-closure track. Sprint 41-50 should be read
+as partially complete implementation slices, not as fully complete against their
+original production-grade goals. The remaining gaps are explicitly owned by
+Sprints 51-60 in `IMPLEMENTATION_BRIEF.md` and `SPRINT_51_60_TODO.md`.
+
+Thesys now demonstrates a stronger production-style AI architecture for a
+portfolio project:
 
 - provider-backed embeddings with deterministic local fallback and re-embedding
   support
@@ -37,11 +43,11 @@ artifact structured content, and eval/check surfaces rather than new main
 dashboard cards. The homepage and main project workflow should remain focused on
 current verdict, next action, evidence health, validation, and decision state.
 
-Sprint 41-50 are complete as V1 slices. The follow-up audit and next ordered
-upgrade backlog are captured in `IMPLEMENTATION_BRIEF.md` under
-"Post-Sprint 50 Audit and Future Upgrade Backlog." The audit keeps the completed
-portfolio work visible while moving broader production-grade gaps into Sprints
-51-60.
+Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
+The follow-up audit and next ordered upgrade backlog are captured in
+`IMPLEMENTATION_BRIEF.md` under "Post-Sprint 50 Audit and Future Upgrade
+Backlog." The audit keeps the completed portfolio work visible while assigning
+each unfinished gap to Sprints 51-60.
 
 ## Sprint 0 Scope
 
@@ -2049,7 +2055,9 @@ Manual environment note:
 
 ## Recently Completed V1 AI Engineering Upgrade Track
 
-Sprints 41-50 are implemented on the AI upgrade branch:
+Sprints 41-50 landed the following baseline capabilities on the AI upgrade
+branch. Each item also has remaining production-grade work tracked in Sprints
+51-60:
 
 1. V1 Sprint 41: Security, AI Safety, and Abuse Hardening
    - Added SSRF-resistant URL validation, redirect re-checks, response-size
@@ -2088,6 +2096,21 @@ The main homepage and primary project workflow remain straightforward. Advanced
 diagnostics, trace details, memory internals, security findings, and retrieval
 explanations stay hidden by default and are available through metadata,
 inspection surfaces, eval output, or developer docs.
+
+Unfinished Sprint 41-50 gaps are tracked as follows:
+
+| Prior sprint gap | Owning follow-up sprint |
+|---|---|
+| Sprint 41 rate limits, workflow concurrency, dependency audits, live-provider egress, production auth, and threat model | Sprint 54, with eval/report gates in Sprint 56 |
+| Sprint 42 central context compiler, workflow profiles, memory-aware context, compression, conflict detection, and context evals | Sprint 51 |
+| Sprint 43 memory compaction, preference capture, conflict resolution, memory browser, write-review workflow, and context-pack integration | Sprint 51 |
+| Sprint 44 real MCP JSON-RPC transport, stdio/SSE, client configs, and external harnesses | Sprint 52 |
+| Sprint 45 Postgres text search/BM25 semantics, MMR/diversity, cross-encoder-compatible reranking, golden retrieval evals, and artifact-wide citation verification | Sprint 55 |
+| Sprint 46 true Ask Thesys streaming, cancellation, live retrieval/tool events, citation drilldowns, and stronger guide evals | Sprint 53 |
+| Sprint 47 OpenTelemetry, CI gates, eval trend reports, prompt/schema changelog, and pre-call budget enforcement | Sprint 54 and Sprint 56 |
+| Sprint 48 readability extraction, screenshots, OCR, table extraction, richer source quality, and live provider QA | Sprint 58 |
+| Sprint 49 feature-package refactor, service splits, typed DTOs, characterization coverage, and layout docs | Sprint 59 |
+| Sprint 50 architecture diagrams, post-refactor developer navigation, targeted code docs, and production/deployment posture | Sprint 60 |
 
 ## V1 Sprint 51 Branch Progress
 
