@@ -7,6 +7,7 @@ from app.schemas.guide import GuideChatResponseRead
 
 
 def retrieval_started_events(message: str) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Emit retrieval and read-tool start events for the guide stream."""
     payload = {"query": message[:500], "mode": "hybrid", "top_k": 5}
     yield ("retrieval_started", payload)
     yield (
@@ -23,6 +24,7 @@ def retrieval_started_events(message: str) -> Iterator[tuple[str, dict[str, Any]
 def retrieval_completed_events(
     response: GuideChatResponseRead,
 ) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Emit read-tool completion, citation, diagnostics, and context events."""
     diagnostics = response.retrieval_diagnostics or {}
     result_count = retrieval_result_count(response)
     yield (
@@ -65,6 +67,7 @@ def retrieval_completed_events(
 
 
 def retrieval_result_count(response: GuideChatResponseRead) -> int:
+    """Return the best available selected-result count for stream diagnostics."""
     diagnostics = response.retrieval_diagnostics or {}
     context_diagnostics = diagnostics.get("context") if isinstance(diagnostics, dict) else None
     if isinstance(context_diagnostics, dict):
@@ -75,6 +78,7 @@ def retrieval_result_count(response: GuideChatResponseRead) -> int:
 
 
 def answer_delta_chunks(answer: str, *, max_chars: int = 96) -> list[str]:
+    """Split deterministic fallback answers into stable UI-sized deltas."""
     words = answer.split()
     if not words:
         return [answer]
@@ -93,6 +97,7 @@ def answer_delta_chunks(answer: str, *, max_chars: int = 96) -> list[str]:
 
 
 def final_stream_metadata(response: GuideChatResponseRead) -> dict[str, Any]:
+    """Return final run/citation/proposal metadata before the final payload."""
     context_pack = response.context_pack or {}
     return {
         "ai_run_id": str(response.ai_run_id) if response.ai_run_id else None,
@@ -111,6 +116,7 @@ def final_stream_metadata(response: GuideChatResponseRead) -> dict[str, Any]:
 
 
 def partial_answer_from_json(raw_content: str) -> str:
+    """Extract a partial answer string from a streamed JSON object buffer."""
     key_index = raw_content.find('"answer"')
     if key_index < 0:
         return ""
@@ -137,6 +143,7 @@ def partial_answer_from_json(raw_content: str) -> str:
 
 
 def json_escape_character(character: str) -> str:
+    """Decode the small JSON escape subset used by partial answer extraction."""
     escapes = {
         '"': '"',
         "\\": "\\",

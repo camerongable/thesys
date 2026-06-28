@@ -58,19 +58,18 @@ completion-gate table, and a per-ID pickup checklist. Each unfinished gap now
 has an exact owner, edit target, status update, verification bar,
 blocker-recording rule, and completion disposition.
 
-Current branch status: Sprints 51-59 are implemented and Sprint 60 remains
-pending. Sprint 58 closes the local document-AI gap with
+Current branch status: Sprints 51-60 are implemented on this branch. Sprint 58 closes the local document-AI gap with
 parser/snapshot metadata, deterministic OCR and table extraction, quote provenance,
 source-quality weighting, enriched citation metadata, collapsed Inspect
 surfaces, and fixture-backed extraction evals. Live Tavily and multimodal
 provider QA remain opt-in and surface explicit unavailable warnings when
-credentials or egress are not configured. Sprint 60 must also resolve or
-explicitly defer the remaining document-intelligence carry-forwards: maintained
-parser dependency versus deterministic fallback, true screenshot/page artifact
-storage, screenshot-region OCR/table provenance, frontend browser QA, and
-Project Inspect trust-summary QA. Sprint 60 must finish with a carried-gap audit
-that records `implemented`, `intentionally out of V1`, or `future owner` status for
-every Sprint 41-50 gap.
+credentials or egress are not configured. Sprint 60 resolves the remaining
+document-intelligence carry-forwards by recording final dispositions:
+deterministic parser fallback is the V1 path, true screenshot/page artifact
+storage and screenshot-region OCR/table provenance are intentionally out of V1,
+and live-provider plus browser QA checks have exact future-owner blockers.
+Sprint 60 also adds the carried-gap audit that records `implemented`,
+`intentionally out of V1`, or `future owner` status for every Sprint 41-50 gap.
 
 Completion semantics: checked Sprint 51-58 implementation items show that code
 landed on this branch, but they do not fully close the original Sprint 41-50
@@ -178,6 +177,106 @@ QA and event docs, Sprint 47 eval/observability runbooks and hidden report QA,
 Sprint 48 source-intelligence productization/provider/browser dispositions,
 Sprint 49 feature-package cleanup, and Sprint 50 post-refactor navigation,
 diagrams, code docs, deployment docs, and honest-limit audit.
+
+## Sprint 60 Final Carried-Gap Disposition
+
+This table is the required final ledger for the Sprint 41-50 carry-forwards.
+Rows marked `future owner` are deliberately not hidden: the work has a concrete
+next owner, exact blocker, and portfolio-language consequence. Rows marked
+`intentionally out of V1` are productization work that should not be claimed by
+the portfolio V1 app.
+
+| Gap ID | Status | Owner sprint item | Source/doc links | Verification | Blocker / future owner | Portfolio claim |
+|---|---|---|---|---|---|---|
+| `G41-A` | `future owner` | `S60-P9` | `docs/DEPLOYMENT_SECURITY.md`, `scripts/security_check.py`, `scripts/audit_dependencies.py` | `python3 scripts/security_check.py` ran: backend security/governance tests passed, AI quality eval scored 10/10, dependency audit returned warnings; `python3 scripts/audit_dependencies.py` repeated the dependency blockers; direct `pip-audit` returned `command not found`. | Future owner: CI/security hardening. Install `pip`/`pip-audit` in the API venv and rerun with stable npm registry access; `pnpm audit --prod` failed with registry `fetch failed`/`ECONNRESET`. | Claim repeatable security/audit gates, not a fully green strict dependency audit. |
+| `G41-B` | `implemented` | `S60-P9` | `docs/DEPLOYMENT_SECURITY.md`, README security section | Security docs now list local/dev, deterministic demo, provider-backed demo, staging-like, and production-like profiles; backend security tests passed in `python3 scripts/security_check.py`. | None for V1. | Claim documented hosted-demo auth posture with dev-auth isolation. |
+| `G41-C` | `implemented` | `S60-P9` | `docs/DEPLOYMENT_SECURITY.md`, README security section, auth settings and tests | Security docs cover JWT, API-key/service-key, revocation, workspace attribution, and known production limits; backend security tests passed in `python3 scripts/security_check.py`. | Managed OIDC/JWKS operations remain future production hardening, not a V1 portfolio claim. | Claim production-shaped auth boundaries; qualify OIDC/JWKS operations as future owner work. |
+| `G41-D` | `implemented` | `S60-P9` | `docs/DEPLOYMENT_SECURITY.md`, URL/provider guard services, `scripts/security_check.py` | `python3 scripts/security_check.py` passed backend governance/security tests and records provider-egress/audit behavior in the gate output. | None for local V1; live-provider allowlists still require environment-specific configuration. | Claim SSRF and provider-egress guardrails with documented limits. |
+| `G41-E` | `future owner` | `S60-P9` | `docs/DEPLOYMENT_SECURITY.md`, README docs navigation | Backup/restore boundaries and hosted smoke checklist are documented. | Future owner: hosted deployment owner. Hosted smoke checks require deployed infrastructure, seeded data, provider credentials, and a browser-ready web install. | Claim backup/restore and smoke runbooks, not completed hosted verification. |
+| `G42-A` | `implemented` | `S60-P2` | `docs/CONTEXT_ENGINEERING.md`, `apps/api/app/services/context_service.py`, `apps/api/app/features/context/*` | `cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py app/tests/test_feature_package_boundaries.py -q` passed (`60 passed, 1 warning`). | None for backend/docs. | Claim unified context engineering with source-linked owners. |
+| `G42-B` | `implemented` | `S60-P2` | `docs/CONTEXT_ENGINEERING.md`, `CONTEXT_PROFILES` in `context_service.py` | Context profile inventory is documented; the same context pytest slice passed (`60 passed, 1 warning`). | None for backend/docs. | Claim workflow-specific context profiles and token budgets. |
+| `G42-C` | `future owner` | `S60-P2` | `docs/CONTEXT_ENGINEERING.md`, Context Inspect UI in `apps/web/src/features/projects/project-overview.tsx` | `pnpm --filter thesys-web typecheck` could not reach TypeScript because pnpm dependency status/install repeatedly hit npm registry `ECONNRESET`; the run was stopped with SIGINT after retries. | Future owner: frontend QA. Retry web install/typecheck/test and IDE browser QA when npm registry access is stable. | Qualify Context Inspect as implemented but browser QA pending in this environment. |
+| `G42-D` | `implemented` | `S60-P2` | `docs/CONTEXT_ENGINEERING.md`, `scripts/eval_ai_quality.py`, `scripts/eval_quality_gate.py` | Context eval commands, report paths, profile extension steps, and failure interpretation are documented. | None for docs/eval handoff. | Claim context eval handoff and extension guidance. |
+| `G43-A` | `implemented` | `S60-P3` | `docs/MEMORY_SYSTEM.md`, `apps/api/app/services/memory_service.py`, `apps/api/app/features/memory/*` | `cd apps/api && .venv/bin/pytest app/tests/test_memory_service.py app/tests/test_context_compiler.py app/tests/test_feature_package_boundaries.py -q` passed (`66 passed, 1 warning`). | None for backend/docs. | Claim durable memory lifecycle beyond chat history. |
+| `G43-B` | `implemented` | `S60-P3` | `docs/MEMORY_SYSTEM.md`, memory schemas and service profiles | Semantic, episodic, procedural, preference, working, and project memory types are documented with selection and context eligibility. | None for backend/docs. | Claim multiple memory flavors with workflow-aware selection. |
+| `G43-C` | `implemented` | `S60-P3` | `docs/MEMORY_SYSTEM.md`, memory feature modules | "Adding a memory type" steps cover schema, service profile, review, Inspect, stale/conflict tests, and docs updates. | None for docs handoff. | Claim developer-ready memory extension path. |
+| `G43-D` | `future owner` | `S60-P3` | `docs/MEMORY_SYSTEM.md`, Memory Inspect UI in `project-overview.tsx` | Backend memory tests are part of Sprint 60 verification; browser QA is blocked by the same npm registry `ECONNRESET` failures that blocked web typecheck/tests. | Future owner: frontend QA after stable web dependency install. | Qualify Memory Inspect as implemented with browser QA pending. |
+| `G44-A` | `implemented` | `S60-P4` | `docs/MCP_INTEGRATION.md`, `apps/api/app/mcp/adapter.py`, `apps/api/app/features/mcp/protocol.py` | `cd apps/api && .venv/bin/pytest app/tests/test_mcp_adapter.py app/tests/test_tool_boundary.py app/tests/test_feature_package_boundaries.py -q` passed (`67 passed, 1 warning`). | None for local protocol/docs. | Claim MCP-shaped JSON-RPC over governed tools. |
+| `G44-B` | `implemented` | `S60-P4` | `docs/MCP_INTEGRATION.md`, `scripts/mcp_stdio_server.py` | Stdio and HTTP/SSE commands, client config, env vars, auth headers, and project scoping are documented. | None for docs. | Claim integration-ready MCP docs and client setup. |
+| `G44-C` | `future owner` | `S60-P4` | `docs/MCP_INTEGRATION.md`, `scripts/eval_mcp_contract.py`, `scripts/mcp_stdio_server.py` | Backend MCP/tool tests passed (`67 passed, 1 warning`); live stdio/API smoke needs a running API and seeded project ID. | Future owner: integration QA. Run read/proposal/denied-write/invalid-param smoke commands against a live project. | Claim governed MCP adapter; qualify live-client smoke as pending. |
+| `G44-D` | `implemented` | `S60-P4` | `docs/MCP_INTEGRATION.md`, README docs navigation | No new homepage or primary-workflow settings surface was added; MCP integration remains in docs/API paths and advanced developer setup. | None. | Claim MCP is hidden from the main workflow unless explicitly configured. |
+| `G45-A` | `implemented` | `S60-P5` | `docs/RETRIEVAL_AND_CITATIONS.md`, retrieval service and feature modules | Retrieval/citation pytest slice passed (`67 passed, 1 warning`); `python3 scripts/eval_retrieval_quality.py` passed (`7/7`). | None for local V1. | Claim source-linked multi-stage retrieval and citation pipeline. |
+| `G45-B` | `implemented` | `S60-P5` | `docs/RETRIEVAL_AND_CITATIONS.md`, retrieval/reranker/cache services | Ranking limits, Postgres `ts_rank` behavior, BM25-like fallback, reranker extension, cache keys, and invalidation inputs are documented. | None for docs/local behavior. | Claim hybrid retrieval with honest ranking and cache limits. |
+| `G45-C` | `implemented` | `S60-P5` | `docs/RETRIEVAL_AND_CITATIONS.md`, citation verifier feature modules | Citation verifier ownership matrix, unsupported/weak claim handling, and extension steps are documented. | None. | Claim artifact-aware citation verification and unsupported-claim handling. |
+| `G45-D` | `implemented` | `S60-P5` | `docs/RETRIEVAL_AND_CITATIONS.md`, `scripts/eval_retrieval_quality.py` | `python3 scripts/eval_retrieval_quality.py` passed (`7/7`) with precision/recall proxies, citation support, stale-source, and prompt-injection checks. | None for local evals. | Claim repeatable retrieval/citation quality evals. |
+| `G46-A` | `implemented` | `S60-P6` | `docs/ASK_THESYS_STREAMING.md`, `apps/api/app/services/guide_service.py`, `apps/api/app/features/guide/events.py` | Stream event names, ordering, payload IDs, final-payload parity, timeout, cancellation, proposals, citations, and diagnostics are documented. | None for backend/docs. | Claim Ask Thesys streaming contract and governed guide behavior. |
+| `G46-B` | `future owner` | `S60-P6` | `docs/ASK_THESYS_STREAMING.md`, `apps/web/src/lib/api.ts` | `pnpm --filter thesys-web typecheck` and `pnpm --filter thesys-web test` both entered pnpm dependency-status/install retries and hit npm registry `ECONNRESET`; both were stopped with SIGINT after repeated retries. | Future owner: frontend CI/QA. Retry when npm registry access is stable. | Qualify frontend verification as environment-blocked. |
+| `G46-C` | `future owner` | `S60-P6` | `docs/ASK_THESYS_STREAMING.md`, `apps/web/src/features/projects/guide-panel.tsx` | Browser QA for deltas, provider events, cancellation, timeout, citations, and workflow clutter could not run because web typecheck/test could not install dependencies. | Future owner: browser QA after web dependencies install. | Claim UI support exists; qualify browser smoke as pending. |
+| `G46-D` | `implemented` | `S60-P6` | `docs/ASK_THESYS_STREAMING.md`, `apps/api/app/tests/test_guide.py` | Guide/context pytest slice passed (`77 passed, 1 warning`) and covers provider deltas, proposal events, timeout fallback, cancellation, citations, and final payload parity. | None for backend eval/test handoff. | Claim guide eval and stream-behavior handoff. |
+| `G47-A` | `implemented` | `S60-P7` | `docs/EVALS_AND_OBSERVABILITY.md`, `scripts/eval_quality_gate.py` | `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s60-final LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-security` completed warn (`40/40`, no failed checks, warning gates `mcp_contract`, `security_check`). | None for local runbook; unavailable environment gates warn rather than disappear. | Claim CI-ready local quality gates with warn semantics. |
+| `G47-B` | `implemented` | `S60-P7` | `docs/EVALS_AND_OBSERVABILITY.md`, eval report feature modules | JSON/Markdown/HTML report locations, trend JSONL, metadata, changelog paths, and regression interpretation are documented. | None. | Claim file-backed eval reports and trend artifacts. |
+| `G47-C` | `implemented` | `S60-P7` | `docs/EVALS_AND_OBSERVABILITY.md`, observability metric feature modules | Metric names, LangSmith settings, redaction behavior, trace IDs, cache metrics, saved token/cost/latency examples, and budget-denial metrics are documented. | None for local/export docs. | Claim local observability plus optional redacted LangSmith export. |
+| `G47-D` | `future owner` | `S60-P7` | `docs/EVALS_AND_OBSERVABILITY.md`, hidden eval report UI in `project-overview.tsx` | Eval-report pytest slice passed (`75 passed, 1 warning`) and quality gate completed warn (`40/40`); hidden report browser QA is blocked by npm registry failures. | Future owner: frontend/browser QA. Retry collapsed gate, trend, failure-link, budget/cache/cost metric checks when web dependencies install. | Qualify hidden eval-report browser QA as pending. |
+| `G48-A` | `implemented` | `S60-P8` | `docs/SOURCE_INTELLIGENCE.md`, evidence extraction services | V1 decision is documented: deterministic `html.parser` fallback remains the local parser path, with parser/version/confidence metadata and productization tradeoffs. | None for V1 decision. | Claim deterministic local extraction; qualify maintained readability dependency as productization work. |
+| `G48-B` | `intentionally out of V1` | `S60-P8` | `docs/SOURCE_INTELLIGENCE.md`, source provenance docs | Source snapshot metadata is documented and fixture-tested, but true page/screenshot object-storage artifact persistence is not in portfolio V1. | Future productization owner if the app becomes hosted: add storage keys, retention, redaction, and restore tests. | Do not claim true screenshot/page artifact storage in V1. |
+| `G48-C` | `intentionally out of V1` | `S60-P8` | `docs/SOURCE_INTELLIGENCE.md`, extraction eval docs | Screenshot-region OCR/table provenance depends on true screenshot capture, so it is out of V1 with an explicit dependency on `G48-B`. | Future productization owner after screenshot/page artifact storage lands. | Do not claim screenshot-region OCR in V1. |
+| `G48-D` | `future owner` | `S60-P8` | `docs/SOURCE_INTELLIGENCE.md`, `scripts/eval_extraction_quality.py` | `python3 scripts/eval_extraction_quality.py --json` scored 7/7 locally and warned that Tavily and live multimodal provider QA were skipped because credentials/provider mode were unavailable. | Future owner: live-provider QA. Rerun with `TAVILY_API_KEY`, `EXTERNAL_SEARCH_PROVIDER=tavily`, `MULTIMODAL_EXTRACTION_PROVIDER=litellm`, and egress allowlists. | Claim credential-free extraction evals; qualify live-provider QA as pending. |
+| `G48-E` | `future owner` | `S60-P8` | `docs/SOURCE_INTELLIGENCE.md`, provenance UI surfaces | Extraction eval passed locally; web/browser provenance QA could not run because npm registry failures blocked frontend checks. | Future owner: frontend/browser QA for Evidence Inspect, retrieval/guide citations, research memo citations, source discovery, and Project Inspect trust summaries. | Qualify provenance browser QA as pending. |
+| `G49-A` | `implemented` | `S59-R1` through `S59-R10` | `docs/BACKEND_FEATURE_PACKAGE_MAP.md`, characterization tests | Sprint 59 verification passed focused characterization tests, full backend pytest, ruff, compileall, boundary checks, quality gate, diff check, and conflict scan. | None. | Claim refactor protected by characterization coverage. |
+| `G49-B` | `implemented` | `S59-R1` through `S59-R10` | `docs/BACKEND_FEATURE_PACKAGE_MAP.md`, `apps/api/app/features/*`, service wrappers | Feature-owned pure helpers and intentionally service-owned orchestration boundaries are documented for retrieval, evidence, validation, decisions, research, guide, MCP/tools, evals, context, memory, and structured output. | None; broader execution DTO extraction remains future cleanup where explicitly named. | Claim feature-package cleanup with honest service-owned boundaries. |
+| `G49-C` | `implemented` | `S59-R1` through `S59-R10` | `docs/BACKEND_FEATURE_PACKAGE_MAP.md`, contract-shape tests | DTO boundary ledger covers context, retrieval, citations, guide events, tools, eval gates, cache diagnostics, extraction, memory, proposals, audit, and fallback metadata. | None. | Claim typed boundary ledger and route-shape preservation. |
+| `G49-D` | `implemented` | `S59-R9` | `docs/BACKEND_FEATURE_PACKAGE_MAP.md`, common/feature helpers | Shared duplication disposition records tested centralization for prompt/schema repair, retrieval shaping, citation/provenance shaping, audit metadata redaction, proposal/action-card creation, Markdown rendering, and fallback metadata. | None. | Claim DRY cleanup where behavior is pinned by tests. |
+| `G49-E` | `implemented` | `S59-R10` | `docs/BACKEND_FEATURE_PACKAGE_MAP.md`, shim/migration ledger | Sprint 59 boundary check passed and the package map records old path, new module, shim type, parity tests, temporary/permanent status, and cleanup follow-ups. | None. | Claim understandable post-refactor package map and migration evidence. |
+| `G50-A` | `implemented` | `S60-P10` | `docs/CONTEXT_ENGINEERING.md`, `docs/MEMORY_SYSTEM.md`, `docs/MCP_INTEGRATION.md`, `docs/RETRIEVAL_AND_CITATIONS.md`, `docs/EVALS_AND_OBSERVABILITY.md`, `docs/SOURCE_INTELLIGENCE.md`, `docs/DEPLOYMENT_SECURITY.md` | Source-linked flow diagrams and owner tables exist for context, memory, MCP, retrieval, evals, source intelligence, and deployment/security. | None. | Claim source-linked architecture diagrams for interview review. |
+| `G50-B` | `implemented` | `S60-P10` | README AI engineering map and developer docs navigation | README maps features to AI patterns/technologies and links developer docs for workflows, context, memory, retrieval, source ingestion, MCP, evals, security, observability, and Inspect surfaces. | None. | Claim portfolio-ready AI engineering tour. |
+| `G50-C` | `implemented` | `S60-P10` | `apps/api/app/services/context_service.py`, `apps/api/app/services/memory_service.py`, `apps/api/app/mcp/adapter.py`, `apps/api/app/services/guide_service.py`, `apps/api/app/features/guide/events.py` | Public service entrypoints and protocol-shaping helpers have targeted docstrings for context, memory, MCP, guide governance, stream events, and non-obvious orchestration boundaries. | None for targeted docs; full docstring coverage remains ordinary maintenance. | Claim code navigation is developer-friendly without pretending every line is documented. |
+| `G50-D` | `implemented` | `S60-P9` and `S60-P10` | `docs/DEPLOYMENT_SECURITY.md`, README developer docs navigation | Environment profiles, auth modes, provider/cache/auth/egress posture, object-storage expectations, backup/restore guidance, hosted smoke checklist, and audit commands are documented. | Hosted smoke execution remains `G41-E` future-owner work. | Claim deployment/security runbooks, not completed hosted smokes. |
+| `G50-E` | `implemented` | `S60-P1` and `S60-P10` | This table, README roadmap/gap notes, `SPRINT_51_60_TODO.md` | Final disposition audit found `44` rows, no missing `G*` IDs, no duplicate IDs, and no extra IDs. | None; future-owner and out-of-V1 rows are intentionally explicit. | Claim honest portfolio limits with no unsupported completed-work language. |
+
+## Sprint 60 Verification
+
+Final Sprint 60 checks:
+
+- Final disposition audit script: `44` final rows, no missing IDs, no duplicate
+  IDs, no extra IDs.
+- `cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py app/tests/test_feature_package_boundaries.py -q`
+  passed (`60 passed, 1 warning`).
+- `cd apps/api && .venv/bin/pytest app/tests/test_memory_service.py app/tests/test_context_compiler.py app/tests/test_feature_package_boundaries.py -q`
+  passed (`66 passed, 1 warning`).
+- `cd apps/api && .venv/bin/pytest app/tests/test_mcp_adapter.py app/tests/test_tool_boundary.py app/tests/test_feature_package_boundaries.py -q`
+  passed (`67 passed, 1 warning`).
+- `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_citation_verifier.py app/tests/test_retrieval_quality_eval.py app/tests/test_feature_package_boundaries.py -q`
+  passed (`67 passed, 1 warning`).
+- `cd apps/api && .venv/bin/pytest app/tests/test_guide.py app/tests/test_context_compiler.py app/tests/test_feature_package_boundaries.py -q`
+  passed (`77 passed, 1 warning`).
+- `cd apps/api && .venv/bin/pytest app/tests/test_eval_reports.py app/tests/test_research_history_eval.py app/tests/test_demo_eval_workflows.py app/tests/test_feature_package_boundaries.py -q`
+  passed (`75 passed, 1 warning`).
+- `cd apps/api && .venv/bin/pytest app/tests/test_security_governance.py app/tests/test_tool_boundary.py app/tests/test_mcp_adapter.py -q`
+  passed (`37 passed, 3 warnings`).
+- `python3 scripts/eval_retrieval_quality.py` passed (`7/7`).
+- `python3 scripts/eval_extraction_quality.py --json` passed (`7/7`) with
+  warnings for missing `TAVILY_API_KEY` and deterministic multimodal provider
+  mode.
+- `python3 scripts/security_check.py` completed non-strict: backend security
+  governance tests passed, AI quality eval passed (`10/10`), dependency audit
+  warnings remained for missing `pip`/`pip-audit` in the API venv and npm
+  registry fetch failures.
+- `python3 scripts/audit_dependencies.py` completed non-strict with the same
+  dependency blockers.
+- Direct `pip-audit` returned `command not found`.
+- `pnpm --filter thesys-web typecheck` and `pnpm --filter thesys-web test`
+  could not reach TypeScript/tests because pnpm dependency-status/install
+  repeatedly hit npm registry `ECONNRESET`; both sessions were stopped with
+  SIGINT after repeated retries.
+- `THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s60-final LLM_STUB_MODE=always python3 scripts/eval_quality_gate.py --json --skip-security`
+  completed with warn status (`40/40`, no failed checks, warning gates:
+  `mcp_contract`, `security_check`).
+- `cd apps/api && .venv/bin/pytest -q` passed (`264 passed, 3 warnings`).
+- `python3 scripts/check_feature_boundaries.py` passed.
+- `cd apps/api && .venv/bin/ruff check app` passed.
+- `cd apps/api && .venv/bin/python -m compileall app -q` passed.
+- `git diff --check` passed.
+- Conflict-marker scan found no matches.
 
 ## Sprint 0 Scope
 

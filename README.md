@@ -459,7 +459,7 @@ the domain workflow, then follow the AI services behind each step.
 | Area | Path | What to look for |
 |---|---|---|
 | API entrypoints | `apps/api/app/routers/` | FastAPI routes for projects, evidence, research sprints, guide chat, tools, workflows, evals, and governance. |
-| Feature packages | `apps/api/app/features/` | Sprint 59 feature-owned modules. Evidence extraction/provenance/citations, retrieval planning/reranking/context selection, validation generation/result interpretation, research planning/memo rendering/prompting/citation-audit/source-discovery shaping, guide routing/streaming/citations/context projection/prompt assembly, memory context-pack/Inspect serialization, decision recommendation shaping, governed tool guards, MCP protocol serialization, eval report file readers/writers/summary/failure-payload shaping, research eval case loading/scoring, shared eval metric-record helpers, and eval observability metric assembly have moved here behind compatibility shims. Remaining Sprint 59 feature-package gaps are tracked in `SPRINT_51_60_TODO.md`. |
+| Feature packages | `apps/api/app/features/` | Sprint 59 feature-owned modules. Evidence extraction/provenance/citations, retrieval planning/reranking/context selection, validation generation/result interpretation, research planning/memo rendering/prompting/citation-audit/source-discovery shaping, guide routing/streaming/citations/context projection/prompt assembly, memory context-pack/Inspect serialization, decision recommendation shaping, governed tool guards, MCP protocol serialization, eval report file readers/writers/summary/failure-payload shaping, research eval case loading/scoring, shared eval metric-record helpers, and eval observability metric assembly live here behind compatibility shims. |
 | Shared backend utilities | `apps/api/app/common/` | Cross-feature helpers that are not owned by the service layer, such as metadata merging. |
 | AI service layer | `apps/api/app/services/` | The main AI/product behavior: retrieval, embeddings, source discovery, agentic research, guide chat, validation, governance, and observability. |
 | LLM helpers | `apps/api/app/ai/` | LiteLLM client, structured-output validation/repair, prompt versions, fallback policy, deterministic fallback completion metadata, and shared prompt-safety rules. |
@@ -519,6 +519,14 @@ Developer docs:
 
 - [Repository navigation](docs/REPOSITORY_NAVIGATION.md)
 - [AI architecture](docs/AI_ARCHITECTURE.md)
+- [Context engineering](docs/CONTEXT_ENGINEERING.md)
+- [Memory system](docs/MEMORY_SYSTEM.md)
+- [MCP integration](docs/MCP_INTEGRATION.md)
+- [Retrieval and citations](docs/RETRIEVAL_AND_CITATIONS.md)
+- [Ask Thesys streaming](docs/ASK_THESYS_STREAMING.md)
+- [Evals and observability](docs/EVALS_AND_OBSERVABILITY.md)
+- [Source intelligence](docs/SOURCE_INTELLIGENCE.md)
+- [Deployment and security](docs/DEPLOYMENT_SECURITY.md)
 - [Retrieval pipeline](docs/RETRIEVAL_PIPELINE.md)
 - [Governance and MCP](docs/GOVERNANCE_AND_MCP.md)
 - [Memory model](docs/MEMORY_MODEL.md)
@@ -892,7 +900,9 @@ The core workflow is designed to prevent premature building by identifying the m
 This is a V1 portfolio proof-of-concept. Sprint 41-50 established the first AI
 engineering upgrade baseline; they are not treated as fully complete
 production-grade work. Sprints 51-60 are the explicit gap-closure track, and the
-current branch has implemented Sprints 51-58.
+current branch has implemented Sprints 51-60. Sprint 60 closes the carried-gap
+ledger by documenting implemented work, exact verification blockers, future
+owners, and V1 out-of-scope decisions for every `G41-*` through `G50-*` item.
 
 Implemented or demonstrated:
 
@@ -1091,15 +1101,15 @@ final status dispositions also exist.
   metadata, text upload metadata, PDF parser metadata, and OCR fallback
   metadata in `app.features.evidence.extraction`, while fetch/storage/parser/
   provider/embedding/audit/transaction orchestration remains service-owned.
-- Sprint 60 is still pending and must close the documentation/readiness gap with
-  architecture diagrams, post-refactor navigation, targeted
-  docstrings/comments, deployment docs, object-storage backup guidance, advanced
-  integration settings, deferred browser QA retry, Sprint 58 extraction UI QA,
-  hosted-demo smoke tests, a final carried-gap audit, and honest
-  remaining-limit notes. The TODO now orders this work as `S60-P1` through
-  `S60-P10`, covering final gap disposition, context, memory, MCP, retrieval,
-  Ask Thesys streaming, evals/observability, source intelligence,
-  security/deployment, and post-refactor developer navigation.
+- Sprint 60 is implemented on this branch: it closes the documentation/readiness
+  gap with source-linked architecture docs, post-refactor navigation, targeted
+  guide-stream docstrings, deployment/security docs, object-storage and
+  backup/restore guidance, advanced integration documentation, explicit
+  provider/browser/audit blockers, a final carried-gap disposition table, and
+  honest portfolio limits. Deferred work is not hidden: hosted smokes, live
+  MCP client smokes, strict dependency audits, browser QA, live Tavily/multimodal
+  QA, and screenshot/page artifact productization are marked as future-owner or
+  out-of-V1 rows in `IMPLEMENTATION_STATUS.md`.
 
 ---
 
