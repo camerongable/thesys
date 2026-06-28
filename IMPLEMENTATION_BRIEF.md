@@ -12503,6 +12503,15 @@ system.
   content and eval output.
 - Retrieval regressions fail locally without provider credentials.
 
+## Branch Implementation Note
+
+The `codex/v1-sprints-51-60` branch implements this sprint with Postgres
+`ts_rank_cd(websearch_to_tsquery(...))` text-rank signals, BM25-like local
+fallback scoring, MMR diversity ordering, source/domain/source-type/competitor
+caps, a no-op/deterministic/LiteLLM reranker adapter, richer citation outcome
+labels, and `scripts/eval_retrieval_quality.py`. Postgres ranking is documented
+as a practical text-rank approximation rather than literal BM25.
+
 ---
 
 # V1 Sprint 56: Observability V2, CI Gates, and Eval Reports

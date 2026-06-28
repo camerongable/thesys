@@ -2256,3 +2256,47 @@ Sprint 54 verification run:
   registry `ECONNRESET` / `fetch failed`. The non-strict security check reported
   those issues and exited successfully after security tests and AI-quality evals
   passed.
+
+## V1 Sprint 55 Branch Progress
+
+Sprint 55 is implemented on `codex/v1-sprints-51-60`:
+
+- Added retrieval policy settings for Postgres text search, hybrid text weight,
+  MMR, max chunks per domain, max chunks per source type, max chunks per
+  competitor, and no-op/deterministic/LiteLLM reranker providers.
+- Added Postgres text-rank signals with
+  `ts_rank_cd(websearch_to_tsquery(...))` combined with pgvector similarity for
+  hybrid SQL retrieval.
+- Added BM25-like local keyword scoring for deterministic SQLite/fallback
+  retrieval.
+- Added `retrieval_reranker_service.py` with no-op, deterministic, and
+  LiteLLM cross-encoder-compatible adapters behind one interface.
+- Added MMR source-diversity ordering plus source, domain, source-type, and
+  competitor caps during context assembly.
+- Expanded retrieval diagnostics with reranker adapter, MMR/cap settings,
+  recall@k, precision@k, MRR, nDCG proxy, citation support rate, and
+  unsupported-claim rate.
+- Added richer citation verification outcomes: `supported`,
+  `weakly_supported`, `unsupported`, `source_missing`, `stale_source`, and
+  `filtered_as_unsafe`.
+- Added claim-level citation outcome metadata to opportunity briefs, competitor
+  analyses, and agentic research memos. Validation-plan artifacts explicitly
+  mark citation verification as not applicable when no cited claims are
+  generated.
+- Added `retrieval_quality_eval_service.py` and
+  `scripts/eval_retrieval_quality.py` for credential-free golden retrieval
+  regression checks covering positive/negative evidence, duplicate removal,
+  competitor/source coverage, prompt-injection filtering, stale-source handling,
+  and citation support metrics.
+- Updated `docs/RETRIEVAL_PIPELINE.md` and README portfolio language with the
+  Sprint 55 retrieval and citation patterns.
+
+Sprint 55 verification run:
+
+- [x] `cd apps/api && .venv/bin/ruff check ...` on touched retrieval/citation files and eval script
+- [x] `python3 -m compileall -q` on touched retrieval/citation modules and eval script
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_citation_verifier.py app/tests/test_retrieval_quality_eval.py -q --maxfail=1` (`16 passed`)
+- [x] `python3 scripts/eval_retrieval_quality.py` (`7/7` golden metrics passed)
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_citation_verifier.py app/tests/test_retrieval_quality_eval.py app/tests/test_opportunity_brief.py app/tests/test_competitors.py app/tests/test_agentic_research.py app/tests/test_guide.py app/tests/test_validation.py app/tests/test_demo_eval_workflows.py app/tests/test_research_history_eval.py -q --maxfail=1` (`68 passed`)
+- [x] `cd apps/api && .venv/bin/pytest -q` (`164 passed`)
+- [x] `python3 scripts/eval_ai_quality.py --json` (`10/10`)

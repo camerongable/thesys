@@ -54,6 +54,7 @@ from app.schemas.competitors import (
 from app.schemas.evidence import EvidenceRetrieveCreate, EvidenceUrlCreate
 from app.services import (
     ai_run_service,
+    citation_verifier_service,
     context_service,
     evidence_service,
     memory_service,
@@ -567,6 +568,9 @@ def _citation_audit_step(
     )
     started = perf_counter()
     audited = _audit_citations(draft, retrieval_results)
+    citation_outcomes = citation_verifier_service.claim_outcome_records(
+        citation_verifier_service.verify_claims(draft.claims, retrieval_results)
+    )
     ai_run_service.complete_step(
         db,
         step,
@@ -574,6 +578,7 @@ def _citation_audit_step(
             "claim_count": len(audited.claims),
             "citation_count": len(audited.citations),
             "unsupported_claim_count": len(audited.unsupported_claims),
+            "citation_outcomes": citation_outcomes,
         },
         latency_ms=int((perf_counter() - started) * 1000),
         tokens=None,
@@ -611,7 +616,12 @@ def _write_analysis_step(
         artifact_id=artifact.id,
         version=version_number,
         markdown_content=_render_markdown_landscape(project, draft),
-        structured_content=draft.model_dump(mode="json"),
+        structured_content={
+            **draft.model_dump(mode="json"),
+            "citation_outcomes": citation_verifier_service.audited_claim_outcome_records(
+                draft.claims
+            ),
+        },
         generated_by_ai_run_id=run.id,
         created_by=auth.user_id,
     )
@@ -1112,8 +1122,6 @@ def _audit_citations(
     draft: CompetitorAnalysisDraft,
     retrieval_results,
 ) -> CompetitorAnalysisDraft:
-    valid_by_chunk = {result.chunk_id: result for result in retrieval_results}
-    valid_by_source = {result.source_id: result for result in retrieval_results}
     unsupported_claims = list(dict.fromkeys(draft.unsupported_claims))
     audited_claims: list[ClaimDraft] = []
     global_citations: list[Citation] = []
@@ -1123,28 +1131,40 @@ def _audit_citations(
         valid_profile_citations = [
             citation
             for citation in profile.citations
-            if _citation_is_valid(citation, valid_by_chunk, valid_by_source)
+            if citation_verifier_service.citation_is_supported(
+                citation,
+                _profile_support_text(profile),
+                retrieval_results,
+            ).supported
         ]
         audited_profiles.append(profile.model_copy(update={"citations": valid_profile_citations}))
         global_citations.extend(valid_profile_citations)
 
-    for claim in draft.claims:
-        valid_citations = [
-            citation
-            for citation in claim.citations
-            if _citation_is_valid(citation, valid_by_chunk, valid_by_source)
-        ]
-        if claim.support_level == "supported" and not valid_citations:
-            unsupported_claims.append(claim.text)
+    for verification in citation_verifier_service.verify_claims(draft.claims, retrieval_results):
+        claim = verification.claim
+        if verification.unsupported_reason:
+            unsupported_claims.append(f"{claim.text} ({verification.outcome})")
             audited_claims.append(
                 claim.model_copy(update={"support_level": "unsupported", "citations": []})
             )
             continue
-        audited_claims.append(claim.model_copy(update={"citations": valid_citations}))
-        global_citations.extend(valid_citations)
+        support_level = "partial" if verification.outcome != "supported" else claim.support_level
+        audited_claims.append(
+            claim.model_copy(
+                update={
+                    "support_level": support_level,
+                    "citations": verification.verified_citations,
+                }
+            )
+        )
+        global_citations.extend(verification.verified_citations)
 
     for citation in draft.citations:
-        if _citation_is_valid(citation, valid_by_chunk, valid_by_source):
+        if citation_verifier_service.citation_is_supported(
+            citation,
+            citation.quote or citation.title or "",
+            retrieval_results,
+        ).supported:
             global_citations.append(citation)
 
     return draft.model_copy(
@@ -1155,6 +1175,20 @@ def _audit_citations(
             "unsupported_claims": list(dict.fromkeys(unsupported_claims)),
         }
     )
+
+
+def _profile_support_text(profile: CompetitorProfileDraft) -> str:
+    parts = [
+        profile.name,
+        profile.target_user or "",
+        profile.positioning or "",
+        profile.pricing_summary or "",
+        " ".join(profile.key_features),
+        " ".join(profile.strengths),
+        " ".join(profile.weaknesses),
+        profile.differentiation_notes or "",
+    ]
+    return " ".join(part for part in parts if part).strip()
 
 
 def _citation_is_valid(

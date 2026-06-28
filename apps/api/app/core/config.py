@@ -208,9 +208,29 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="RETRIEVAL_RERANKING_ENABLED",
     )
-    retrieval_reranker_provider: Literal["deterministic", "litellm"] = Field(
+    retrieval_reranker_provider: Literal["none", "deterministic", "litellm"] = Field(
         default="deterministic",
         validation_alias="RETRIEVAL_RERANKER_PROVIDER",
+    )
+    retrieval_text_search_enabled: bool = Field(
+        default=True,
+        validation_alias="RETRIEVAL_TEXT_SEARCH_ENABLED",
+    )
+    retrieval_text_search_weight: float = Field(
+        default=0.35,
+        ge=0.0,
+        le=1.0,
+        validation_alias="RETRIEVAL_TEXT_SEARCH_WEIGHT",
+    )
+    retrieval_mmr_enabled: bool = Field(
+        default=True,
+        validation_alias="RETRIEVAL_MMR_ENABLED",
+    )
+    retrieval_mmr_lambda: float = Field(
+        default=0.72,
+        ge=0.0,
+        le=1.0,
+        validation_alias="RETRIEVAL_MMR_LAMBDA",
     )
     retrieval_context_token_budget: int = Field(
         default=3500,
@@ -223,6 +243,24 @@ class Settings(BaseSettings):
         ge=1,
         le=10,
         validation_alias="RETRIEVAL_MAX_CHUNKS_PER_SOURCE",
+    )
+    retrieval_max_chunks_per_domain: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        validation_alias="RETRIEVAL_MAX_CHUNKS_PER_DOMAIN",
+    )
+    retrieval_max_chunks_per_source_type: int = Field(
+        default=5,
+        ge=1,
+        le=25,
+        validation_alias="RETRIEVAL_MAX_CHUNKS_PER_SOURCE_TYPE",
+    )
+    retrieval_max_chunks_per_competitor: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        validation_alias="RETRIEVAL_MAX_CHUNKS_PER_COMPETITOR",
     )
     retrieval_min_context_score: float = Field(
         default=0.15,

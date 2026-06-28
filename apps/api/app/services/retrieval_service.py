@@ -8,12 +8,13 @@ answers can be debugged without exposing those details in the main workflow UI.
 import json
 import re
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
+from urllib.parse import urlparse
 
-from sqlalchemy import Select, cast, func, or_, select, text
+from sqlalchemy import Select, cast, desc, func, literal, or_, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
@@ -32,7 +33,12 @@ from app.schemas.evidence import (
     RetrievalQueryPlanRead,
     RetrievalRerankerDiagnosticsRead,
 )
-from app.services import ai_run_service, embedding_service, project_service
+from app.services import (
+    ai_run_service,
+    embedding_service,
+    project_service,
+    retrieval_reranker_service,
+)
 from app.services.common import workflow as workflow_utils
 
 SQL_VECTOR_CANDIDATE_MULTIPLIER = 4
@@ -277,6 +283,7 @@ def _retrieve_single_query_search(
             results, candidate_count = _retrieve_with_sql_vector_search(
                 db,
                 auth,
+                settings,
                 project_id,
                 payload,
                 query_embedding,
@@ -330,6 +337,7 @@ def _retrieve_single_query_search(
 def _retrieve_with_sql_vector_search(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
     payload: EvidenceRetrieveCreate,
     query_embedding: list[float],
@@ -341,25 +349,55 @@ def _retrieve_with_sql_vector_search(
         return [], 0
 
     distance = EvidenceChunk.embedding.cosine_distance(query_embedding).label("distance")
+    text_rank = (
+        _postgres_text_rank(payload.query)
+        if settings.retrieval_text_search_enabled
+        else literal(0.0)
+    )
+    text_rank = text_rank.label("text_rank")
+    semantic_rank = 1.0 - distance
+    combined_rank = (
+        semantic_rank * (1.0 - settings.retrieval_text_search_weight)
+        + text_rank * settings.retrieval_text_search_weight
+    ).label("combined_rank")
     candidate_limit = max(payload.top_k, payload.top_k * SQL_VECTOR_CANDIDATE_MULTIPLIER)
     stmt = (
-        select(EvidenceChunk, EvidenceSource, distance)
+        select(EvidenceChunk, EvidenceSource, distance, text_rank, combined_rank)
         .join(EvidenceSource, EvidenceSource.id == EvidenceChunk.source_id)
         .where(*conditions, EvidenceChunk.embedding.is_not(None))
-        .order_by(distance)
         .limit(candidate_limit)
     )
+    if payload.mode == "hybrid" and settings.retrieval_text_search_enabled:
+        stmt = stmt.order_by(desc(combined_rank), distance)
+    else:
+        stmt = stmt.order_by(distance)
     rows = db.execute(stmt).all()
     query_terms = _term_set(payload.query)
     scored: list[EvidenceRetrievalResultRead] = []
-    for chunk, source, raw_distance in rows:
+    for chunk, source, raw_distance, raw_text_rank, raw_combined_rank in rows:
         distance_value = float(raw_distance or 0)
         semantic_score = max(0.0, 1.0 - distance_value)
-        keyword_score = _keyword_score(query_terms, chunk.text)
-        score = _combined_score(payload.mode, semantic_score, keyword_score)
+        keyword_score = max(
+            _keyword_score(query_terms, chunk.text),
+            min(float(raw_text_rank or 0), 1.0),
+        )
+        score = (
+            min(float(raw_combined_rank or 0), 1.0)
+            if payload.mode == "hybrid" and settings.retrieval_text_search_enabled
+            else _combined_score(payload.mode, semantic_score, keyword_score, settings)
+        )
         if score <= 0:
             continue
-        scored.append(_serialize_result(chunk, source, score, semantic_score, keyword_score))
+        result = _serialize_result(chunk, source, score, semantic_score, keyword_score)
+        metadata = dict(result.metadata)
+        metadata.update(
+            {
+                "postgres_text_rank": round(float(raw_text_rank or 0), 6),
+                "postgres_combined_rank": round(float(raw_combined_rank or 0), 6),
+                "text_search_ranker": "ts_rank_cd(websearch_to_tsquery)",
+            }
+        )
+        scored.append(result.model_copy(update={"metadata": metadata}))
 
     scored.sort(key=lambda result: (result.score, result.created_at), reverse=True)
     return scored[: payload.top_k], filtered_count
@@ -379,6 +417,7 @@ def _retrieve_with_python_scoring(
     candidates = _load_candidates(db, auth, project_id, payload)
     return (
         _score_candidates(
+            settings=settings,
             query=payload.query,
             query_embedding=query_embedding,
             candidates=candidates,
@@ -495,36 +534,14 @@ def _rerank_results(
     results: list[EvidenceRetrievalResultRead],
 ) -> tuple[list[EvidenceRetrievalResultRead], RetrievalRerankerDiagnosticsRead]:
     """Apply optional provider reranking with deterministic fallback visibility."""
-    if not settings.retrieval_reranking_enabled:
-        ranked = [
-            result.model_copy(
-                update={
-                    "rerank_score": result.score,
-                    "final_rank": index + 1,
-                    "selection_reason": "Reranking disabled; original retrieval score used.",
-                }
-            )
-            for index, result in enumerate(results)
-        ]
-        return ranked, RetrievalRerankerDiagnosticsRead(
-            enabled=False,
-            provider=settings.retrieval_reranker_provider,
-        )
-
-    fallback_reason: str | None = None
-    ordered_ids: list[uuid.UUID] | None = None
-    if settings.retrieval_reranker_provider == "litellm" and not settings.should_use_llm_stub:
-        try:
-            ordered_ids = _litellm_rerank_order(settings, query, plan, results)
-        except Exception as exc:
-            fallback_reason = f"LiteLLM reranker failed: {exc}"
-
-    ranked = _deterministic_rerank(query, plan, results, ordered_ids=ordered_ids)
-    return ranked, RetrievalRerankerDiagnosticsRead(
-        enabled=True,
+    reranked = retrieval_reranker_service.rerank_results(settings, query, plan, results)
+    return reranked.results, RetrievalRerankerDiagnosticsRead(
+        enabled=settings.retrieval_reranking_enabled
+        and settings.retrieval_reranker_provider != "none",
         provider=settings.retrieval_reranker_provider,
-        fallback_used=fallback_reason is not None,
-        fallback_reason=fallback_reason,
+        adapter=reranked.adapter,
+        fallback_used=reranked.fallback_used,
+        fallback_reason=reranked.fallback_reason,
     )
 
 
@@ -645,17 +662,35 @@ def assemble_context_results(
     """Select final prompt context under token, diversity, and dedupe constraints."""
     selected: list[EvidenceRetrievalResultRead] = []
     per_source: defaultdict[uuid.UUID, int] = defaultdict(int)
+    per_domain: defaultdict[str, int] = defaultdict(int)
+    per_source_type: defaultdict[str, int] = defaultdict(int)
+    per_competitor: defaultdict[str, int] = defaultdict(int)
     token_count = 0
     deduped_count = 0
     dropped_count = 0
     max_results = top_k or len(results)
     signatures: list[set[str]] = []
-    for result in _diversify_context_candidates(results):
+    for result in _diversify_context_candidates(settings, results):
         score = result.rerank_score if result.rerank_score is not None else result.score
         if score < settings.retrieval_min_context_score:
             dropped_count += 1
             continue
         if per_source[result.source_id] >= settings.retrieval_max_chunks_per_source:
+            dropped_count += 1
+            continue
+        domain = _result_domain(result)
+        if domain and per_domain[domain] >= settings.retrieval_max_chunks_per_domain:
+            dropped_count += 1
+            continue
+        source_type = result.source_type
+        if per_source_type[source_type] >= settings.retrieval_max_chunks_per_source_type:
+            dropped_count += 1
+            continue
+        competitor_id = _result_competitor_id(result)
+        if (
+            competitor_id
+            and per_competitor[competitor_id] >= settings.retrieval_max_chunks_per_competitor
+        ):
             dropped_count += 1
             continue
         terms = _signature_terms(result.text)
@@ -678,6 +713,11 @@ def assemble_context_results(
         )
         signatures.append(terms)
         per_source[result.source_id] += 1
+        if domain:
+            per_domain[domain] += 1
+        per_source_type[source_type] += 1
+        if competitor_id:
+            per_competitor[competitor_id] += 1
         token_count += estimated_tokens
         if len(selected) >= max_results:
             break
@@ -688,14 +728,23 @@ def assemble_context_results(
         dropped_count=dropped_count,
         deduped_count=deduped_count,
         max_chunks_per_source=settings.retrieval_max_chunks_per_source,
+        max_chunks_per_domain=settings.retrieval_max_chunks_per_domain,
+        max_chunks_per_source_type=settings.retrieval_max_chunks_per_source_type,
+        max_chunks_per_competitor=settings.retrieval_max_chunks_per_competitor,
+        mmr_enabled=settings.retrieval_mmr_enabled,
+        mmr_lambda=settings.retrieval_mmr_lambda,
         min_context_score=settings.retrieval_min_context_score,
     )
     return selected, context
 
 
 def _diversify_context_candidates(
+    settings: Settings,
     results: list[EvidenceRetrievalResultRead],
 ) -> list[EvidenceRetrievalResultRead]:
+    if settings.retrieval_mmr_enabled:
+        return _mmr_order(results, lambda_weight=settings.retrieval_mmr_lambda)
+
     by_source: dict[uuid.UUID, list[EvidenceRetrievalResultRead]] = defaultdict(list)
     for result in results:
         by_source[result.source_id].append(result)
@@ -708,6 +757,40 @@ def _diversify_context_candidates(
             if not candidates:
                 del by_source[source_id]
     return diversified
+
+
+def _mmr_order(
+    results: list[EvidenceRetrievalResultRead],
+    *,
+    lambda_weight: float,
+) -> list[EvidenceRetrievalResultRead]:
+    """Order candidates with maximal marginal relevance for diverse context."""
+    remaining = list(results)
+    selected: list[EvidenceRetrievalResultRead] = []
+    while remaining:
+        best_index = 0
+        best_score = float("-inf")
+        for index, candidate in enumerate(remaining):
+            relevance = (
+                candidate.rerank_score
+                if candidate.rerank_score is not None
+                else candidate.score
+            )
+            similarity = max(
+                (
+                    _text_similarity(candidate.text, selected_item.text)
+                    for selected_item in selected
+                ),
+                default=0.0,
+            )
+            if any(selected_item.source_id == candidate.source_id for selected_item in selected):
+                similarity = max(similarity, 1.0)
+            mmr_score = (lambda_weight * relevance) - ((1.0 - lambda_weight) * similarity)
+            if mmr_score > best_score:
+                best_index = index
+                best_score = mmr_score
+        selected.append(remaining.pop(best_index))
+    return selected
 
 
 def _context_selection_reason(result: EvidenceRetrievalResultRead, prior_source_count: int) -> str:
@@ -732,6 +815,17 @@ def _quality_report(
     precision_proxy = sum(
         1 for result in selected if (result.rerank_score or result.score) >= 0.35
     ) / max(selected_count, 1)
+    relevance_by_rank = [
+        min(1.0, max(result.rerank_score if result.rerank_score is not None else result.score, 0.0))
+        for result in selected
+    ]
+    relevant_flags = [score >= 0.35 for score in relevance_by_rank]
+    first_relevant = next(
+        (index + 1 for index, relevant in enumerate(relevant_flags) if relevant),
+        0,
+    )
+    mrr = 1 / first_relevant if first_relevant else 0.0
+    ndcg = _ndcg_proxy(relevance_by_rank)
     citation_coverage_proxy = sum(
         1 for result in selected if result.source_id and result.chunk_id
     ) / max(selected_count, 1)
@@ -740,12 +834,33 @@ def _quality_report(
     return RetrievalQualityReportRead(
         recall_proxy=round(recall_proxy, 3),
         precision_proxy=round(precision_proxy, 3),
+        recall_at_k=round(recall_proxy, 3),
+        precision_at_k=round(precision_proxy, 3),
+        mrr=round(mrr, 3),
+        ndcg_proxy=round(ndcg, 3),
         citation_coverage_proxy=round(citation_coverage_proxy, 3),
+        citation_support_rate=round(citation_coverage_proxy, 3),
         unsupported_claim_count=0,
+        unsupported_claim_rate=0.0,
         average_retrieval_latency_ms=total_latency_ms,
         reranker_used=reranker_used,
         context_token_count=token_count,
     )
+
+
+def _ndcg_proxy(relevance_scores: list[float]) -> float:
+    if not relevance_scores:
+        return 0.0
+    dcg = sum(score / _log2(index + 2) for index, score in enumerate(relevance_scores))
+    ideal = sorted(relevance_scores, reverse=True)
+    idcg = sum(score / _log2(index + 2) for index, score in enumerate(ideal))
+    return dcg / max(idcg, 0.0001)
+
+
+def _log2(value: int) -> float:
+    # Avoid a new dependency/import for this tiny ranking proxy.
+    lookup = {2: 1.0, 3: 1.585, 4: 2.0, 5: 2.322, 6: 2.585, 7: 2.807, 8: 3.0}
+    return lookup.get(value, 3.0)
 
 
 def _combine_fallback_reasons(diagnostics: list[RetrievalDiagnosticsRead]) -> str | None:
@@ -769,6 +884,14 @@ def _freshness_boost(result: EvidenceRetrievalResultRead) -> float:
     created_at = result.created_at
     if created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=UTC)
+    return _freshness_score(created_at)
+
+
+def _freshness_score(created_at: datetime | None) -> float:
+    if created_at is None:
+        return 0.5
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
     age_days = max((datetime.now(UTC) - created_at).days, 0)
     if age_days <= 30:
         return 1.0
@@ -777,6 +900,13 @@ def _freshness_boost(result: EvidenceRetrievalResultRead) -> float:
     if age_days <= 730:
         return 0.3
     return 0.1
+
+
+def _domain_from_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    parsed = urlparse(url)
+    return parsed.hostname.casefold() if parsed.hostname else None
 
 
 def _selection_reason(result: EvidenceRetrievalResultRead, rerank_score: float) -> str:
@@ -801,6 +931,31 @@ def _jaccard(left: set[str], right: set[str]) -> float:
     if not left or not right:
         return 0.0
     return len(left & right) / len(left | right)
+
+
+def _text_similarity(left: str, right: str) -> float:
+    return _jaccard(_signature_terms(left), _signature_terms(right))
+
+
+def _result_domain(result: EvidenceRetrievalResultRead) -> str | None:
+    metadata_domain = result.metadata.get("domain")
+    if isinstance(metadata_domain, str) and metadata_domain.strip():
+        return metadata_domain.strip().casefold()
+    if not result.url:
+        return None
+    parsed = urlparse(result.url)
+    return parsed.hostname.casefold() if parsed.hostname else None
+
+
+def _result_competitor_id(result: EvidenceRetrievalResultRead) -> str | None:
+    metadata = result.metadata
+    value = metadata.get("competitor_id")
+    if value:
+        return str(value)
+    values = metadata.get("competitor_ids")
+    if isinstance(values, list) and values:
+        return str(values[0])
+    return None
 
 
 def _estimate_tokens(text_value: str) -> int:
@@ -855,6 +1010,12 @@ def _postgres_metadata_id_condition(prefix: str, item_id: uuid.UUID):
         metadata.contains({f"{prefix}_id": expected}),
         metadata.contains({f"{prefix}_ids": [expected]}),
     )
+
+
+def _postgres_text_rank(query: str):
+    ts_query = func.websearch_to_tsquery("english", query)
+    ts_vector = func.to_tsvector("english", func.coalesce(EvidenceChunk.text, ""))
+    return func.ts_rank_cd(ts_vector, ts_query)
 
 
 def _filtered_count(db: Session, conditions: list[object]) -> int:
@@ -931,6 +1092,7 @@ def _matches_freshness(source: EvidenceSource, freshness_days: int | None) -> bo
 
 def _score_candidates(
     *,
+    settings: Settings,
     query: str,
     query_embedding: list[float] | None,
     candidates: list[RetrievalCandidate],
@@ -938,6 +1100,7 @@ def _score_candidates(
     top_k: int,
 ) -> list[EvidenceRetrievalResultRead]:
     query_terms = _term_set(query)
+    keyword_scores = _bm25_keyword_scores(query_terms, candidates)
     scored: list[EvidenceRetrievalResultRead] = []
     for candidate in candidates:
         semantic_score = 0.0
@@ -946,8 +1109,8 @@ def _score_candidates(
                 query_embedding,
                 candidate.chunk.embedding,
             )
-        keyword_score = _keyword_score(query_terms, candidate.chunk.text)
-        score = _combined_score(mode, semantic_score, keyword_score)
+        keyword_score = keyword_scores.get(candidate.chunk.id, 0.0)
+        score = _combined_score(mode, semantic_score, keyword_score, settings)
         if score <= 0:
             continue
         scored.append(
@@ -972,6 +1135,7 @@ def _serialize_result(
     keyword_score: float,
 ) -> EvidenceRetrievalResultRead:
     metadata = dict(chunk.chunk_metadata or {})
+    reference_date = source.source_date or source.ingested_at or source.created_at
     metadata.update(
         {
             "source_classification": source.classification,
@@ -980,6 +1144,8 @@ def _serialize_result(
             else None,
             "source_date": source.source_date.isoformat() if source.source_date else None,
             "source_ingested_at": source.ingested_at.isoformat() if source.ingested_at else None,
+            "domain": _domain_from_url(source.url),
+            "freshness_score": _freshness_score(reference_date),
         }
     )
     return EvidenceRetrievalResultRead(
@@ -1003,12 +1169,22 @@ def _serialize_result(
     )
 
 
-def _combined_score(mode: RetrievalMode, semantic_score: float, keyword_score: float) -> float:
+def _combined_score(
+    mode: RetrievalMode,
+    semantic_score: float,
+    keyword_score: float,
+    settings: Settings,
+) -> float:
     if mode == "semantic":
         return semantic_score
     if mode == "keyword":
         return keyword_score
-    return (semantic_score * 0.65) + (keyword_score * 0.35)
+    text_weight = (
+        settings.retrieval_text_search_weight
+        if settings.retrieval_text_search_enabled
+        else 0.35
+    )
+    return (semantic_score * (1.0 - text_weight)) + (keyword_score * text_weight)
 
 
 def _keyword_score(query_terms: set[str], text: str) -> float:
@@ -1023,16 +1199,59 @@ def _keyword_score(query_terms: set[str], text: str) -> float:
     return len(overlap) / len(query_terms)
 
 
+def _bm25_keyword_scores(
+    query_terms: set[str],
+    candidates: list[RetrievalCandidate],
+) -> dict[uuid.UUID, float]:
+    if not query_terms or not candidates:
+        return {}
+    docs = {candidate.chunk.id: _term_list(candidate.chunk.text) for candidate in candidates}
+    doc_count = len(docs)
+    avgdl = sum(len(terms) for terms in docs.values()) / max(doc_count, 1)
+    doc_freq: Counter[str] = Counter()
+    for terms in docs.values():
+        doc_freq.update(set(terms))
+
+    raw_scores: dict[uuid.UUID, float] = {}
+    k1 = 1.5
+    b = 0.75
+    for chunk_id, terms in docs.items():
+        frequencies = Counter(terms)
+        score = 0.0
+        doc_len = len(terms)
+        for term in query_terms:
+            if frequencies[term] == 0:
+                continue
+            idf = max(0.0, ((doc_count - doc_freq[term] + 0.5) / (doc_freq[term] + 0.5)))
+            tf = frequencies[term]
+            denominator = tf + k1 * (1 - b + b * (doc_len / max(avgdl, 1.0)))
+            score += idf * ((tf * (k1 + 1)) / max(denominator, 0.0001))
+        raw_scores[chunk_id] = score
+
+    max_score = max(raw_scores.values(), default=0.0)
+    if max_score <= 0:
+        return {chunk_id: 0.0 for chunk_id in raw_scores}
+    return {chunk_id: round(score / max_score, 6) for chunk_id, score in raw_scores.items()}
+
+
 def _term_set(text: str) -> set[str]:
     return {term for term in _raw_term_set(text) if term not in STOPWORDS}
 
 
+def _term_list(text: str) -> list[str]:
+    return [term for term in _raw_terms(text) if term not in STOPWORDS]
+
+
 def _raw_term_set(text: str) -> set[str]:
-    return {
+    return set(_raw_terms(text))
+
+
+def _raw_terms(text: str) -> list[str]:
+    return [
         term
         for term in (part.strip(".,:;!?()[]{}\"'").casefold() for part in text.split())
         if len(term) > 2
-    }
+    ]
 
 
 def _should_use_sql_vector_search(db: Session, settings: Settings) -> bool:

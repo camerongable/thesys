@@ -202,7 +202,7 @@ Thesys is built to show the difference between a thin LLM wrapper and a durable 
 | AI concept | How it is demonstrated in this repo | Technologies and libraries |
 |---|---|---|
 | Agentic RAG | Autonomous research sprints plan work, call bounded tools, retrieve evidence, detect gaps, run follow-up retrieval, synthesize a memo, critique citations, and wait for human approval before updating project memory. | LangGraph, FastAPI, SQLAlchemy, Temporal, internal tool registry |
-| Multi-stage retrieval | Project-scoped retrieval plans broad strategic questions, decomposes subqueries, fuses results, reranks candidates, assembles a bounded context pack, and returns quality diagnostics. | PostgreSQL, pgvector, deterministic and LiteLLM rerankers, custom retrieval service |
+| Multi-stage retrieval | Project-scoped retrieval plans broad strategic questions, decomposes subqueries, fuses results, combines semantic and text ranking, reranks candidates, applies MMR diversity controls, assembles a bounded context pack, and returns quality diagnostics. | PostgreSQL, pgvector, Postgres `ts_rank_cd`, BM25-like local scoring, deterministic/LiteLLM/no-op reranker adapters, custom retrieval service |
 | Production embeddings | Evidence chunks record provider, model, dimension, version, timestamp, and errors. Local deterministic embeddings stay available for tests, while LiteLLM-backed embeddings support live mode and re-embedding after model changes. | LiteLLM-compatible embeddings API, pgvector, PostgreSQL, Alembic |
 | Retrieval-grounded generation | Opportunity briefs, competitor analysis, research memos, Ask Thesys answers, assumptions, and validation plans are generated from project state and retrieved evidence rather than model memory alone. | Retrieval service, Pydantic schemas, LiteLLM, SQLAlchemy |
 | Structured LLM outputs | LLM responses are requested as JSON, validated against typed schemas, repaired when possible, and persisted as structured project objects. | Pydantic v2, LiteLLM-compatible chat completions, structured output helper |
@@ -849,7 +849,8 @@ The core workflow is designed to prevent premature building by identifying the m
 This is a V1 portfolio proof-of-concept. Sprint 41-50 established the first AI
 engineering upgrade baseline; they are not treated as fully complete
 production-grade work. Sprints 51-60 are the explicit gap-closure track, and the
-current branch has implemented Sprint 51, Sprint 52, Sprint 53, and Sprint 54.
+current branch has implemented Sprint 51, Sprint 52, Sprint 53, Sprint 54, and
+Sprint 55.
 
 Implemented or demonstrated:
 
@@ -864,7 +865,9 @@ Implemented or demonstrated:
 - decision recommendation
 - guided UI around next best action
 - provider-backed embeddings, pgvector SQL retrieval, multi-stage retrieval,
-  reranking, context assembly, retrieval-quality diagnostics, and re-embedding
+  Postgres text-search ranking, BM25-like local fallback scoring, swappable
+  reranking, MMR diversity selection, retrieval-quality diagnostics, golden
+  retrieval evals, and re-embedding
 - LLM-grounded Ask Thesys with citations, retrieval diagnostics, bounded recent
   turns, action-card routing, true streaming events, provider answer deltas when
   supported, timeout/cancellation handling, approval-gated proposals, guide
@@ -894,9 +897,10 @@ Gap-closure roadmap:
   limits, pre-call token/cost budget enforcement, dependency audit commands,
   JWT/API-key production auth, SSRF hardening, provider-egress controls, and
   threat modeling are in place.
-- Sprint 55 closes the retrieval/citation gap with Postgres full-text search,
-  BM25-like ranking documentation, diversity controls, swappable reranking,
-  golden retrieval evals, and artifact-wide citation verification.
+- Sprint 55 is implemented on this branch: retrieval now includes Postgres text
+  rank signals, BM25-like local scoring, MMR/source-domain-type-competitor caps,
+  a no-op/deterministic/LiteLLM reranker adapter, claim-level citation outcomes,
+  and a credential-free golden retrieval eval command.
 - Sprint 56 closes the observability gap with OpenTelemetry-compatible metrics,
   CI-ready eval gates, trend reports, prompt/schema/context changelogs, and a
   hidden-by-default quality dashboard.

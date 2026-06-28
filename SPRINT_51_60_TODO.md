@@ -173,37 +173,38 @@ sprint must end with a focused commit before the next sprint begins.
 
 ## Sprint 55: Retrieval Quality V2 and Golden Evals
 
-- [ ] Close Sprint 45 gaps: add real text-search ranking, diversity controls,
+- [x] Close Sprint 45 gaps: add real text-search ranking, diversity controls,
   swappable reranking, labeled retrieval evals, and consistent citation support
   verification across generated artifacts.
-- [ ] Add Postgres full-text search with `tsvector`, phrase/entity matching,
+- [x] Add Postgres full-text search with `tsvector`, phrase/entity matching,
   and ranking combined with vector similarity.
-- [ ] Add BM25-like ranking semantics or document the exact Postgres ranking
+- [x] Add BM25-like ranking semantics or document the exact Postgres ranking
   approximation and limitations.
-- [ ] Add MMR or equivalent diversity selection with source, domain, source
+- [x] Add MMR or equivalent diversity selection with source, domain, source
   type, competitor, and recency caps so one source cannot dominate context.
-- [ ] Add cross-encoder-compatible reranker adapter with deterministic local,
+- [x] Add cross-encoder-compatible reranker adapter with deterministic local,
   LiteLLM/provider, and no-op fallback implementations behind one interface.
-- [ ] Add labeled retrieval golden set with positive, negative,
+- [x] Add labeled retrieval golden set with positive, negative,
   prompt-injection, stale-source, weak-evidence, competitor/source coverage,
   entity/phrase, and multi-hop project-state cases.
-- [ ] Apply citation verification across opportunity briefs, competitor
+- [x] Apply citation verification across opportunity briefs, competitor
   analyses, source discovery summaries, agentic research memos, validation
   plans, validation result interpretations, decision recommendations, and Ask
-  Thesys answers.
-- [ ] Add claim-level citation outcomes to structured artifacts:
+  Thesys answers. Current V1 applies full claim verification where cited claims
+  exist, and marks non-cited validation artifacts as not applicable.
+- [x] Add claim-level citation outcomes to structured artifacts:
   supported, weakly supported, unsupported, source missing, stale source, or
   filtered as unsafe.
-- [ ] Block, downgrade, or explicitly label unsupported evidence-backed claims
+- [x] Block, downgrade, or explicitly label unsupported evidence-backed claims
   before persistence and before showing them as recommendations.
-- [ ] Add retrieval metrics for recall@k, precision@k, MRR/nDCG proxy,
+- [x] Add retrieval metrics for recall@k, precision@k, MRR/nDCG proxy,
   citation support rate, unsupported-claim rate, latency, and cost by retrieval
   mode/provider.
-- [ ] Add CI-ready retrieval regression command that runs without provider
+- [x] Add CI-ready retrieval regression command that runs without provider
   credentials and can optionally compare provider-backed reranking when keys are
   configured.
-- [ ] Run retrieval, citation, artifact, and eval tests.
-- [ ] Commit Sprint 55.
+- [x] Run retrieval, citation, artifact, and eval tests.
+- [x] Commit Sprint 55.
 
 ## Sprint 56: Observability V2, CI Gates, and Eval Reports
 

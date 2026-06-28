@@ -89,9 +89,13 @@ def test_note_ingestion_chunks_embeds_and_retrieves(
     assert retrieval_step.output_json["diagnostics"]["fallback_path_used"] is True
     assert retrieval_step.output_json["diagnostics"]["query_plan"]["subqueries"]
     assert retrieval_step.output_json["diagnostics"]["reranker"]["provider"] == "deterministic"
+    assert retrieval_step.output_json["diagnostics"]["reranker"]["adapter"] == "deterministic"
     assert retrieval_step.output_json["diagnostics"]["context"]["selected_count"] == 1
+    assert retrieval_step.output_json["diagnostics"]["context"]["mmr_enabled"] is True
     quality = retrieval_step.output_json["diagnostics"]["quality_report"]
     assert quality["citation_coverage_proxy"] == 1
+    assert quality["precision_at_k"] is not None
+    assert quality["mrr"] is not None
 
 
 def test_broad_evidence_retrieval_plans_reranks_and_assembles_context(
@@ -158,7 +162,10 @@ def test_broad_evidence_retrieval_plans_reranks_and_assembles_context(
     assert diagnostics["context"]["selected_count"] >= 1
     assert diagnostics["context"]["token_count"] <= diagnostics["context"]["token_budget"]
     assert diagnostics["context"]["deduped_count"] >= 1
+    assert diagnostics["context"]["max_chunks_per_domain"] >= 1
+    assert diagnostics["context"]["max_chunks_per_source_type"] >= 1
     assert diagnostics["quality_report"]["citation_coverage_proxy"] == 1
+    assert diagnostics["quality_report"]["ndcg_proxy"] is not None
     assert diagnostics["quality_report"]["context_token_count"] == (
         diagnostics["context"]["token_count"]
     )

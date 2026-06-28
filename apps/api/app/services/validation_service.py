@@ -2482,7 +2482,11 @@ def _write_validation_plan_artifact(
         artifact_id=artifact.id,
         version=_next_artifact_version(db, artifact.id),
         markdown_content=_render_validation_plan_markdown(project, draft),
-        structured_content=draft.model_dump(mode="json"),
+        structured_content={
+            **draft.model_dump(mode="json"),
+            "citation_outcomes": [],
+            "citation_verification_status": "not_applicable_no_claim_citations",
+        },
         generated_by_ai_run_id=run.id,
         langsmith_trace_id=trace.trace_id,
         langsmith_trace_url=trace.trace_url,

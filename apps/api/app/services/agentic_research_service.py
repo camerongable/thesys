@@ -1775,6 +1775,9 @@ def _write_research_memo_step(
                 "selected_evidence": [
                     result.model_dump(mode="json") for result in selected_evidence
                 ],
+                "citation_outcomes": citation_verifier_service.claim_outcome_records(
+                    citation_verifier_service.verify_claims(memo.claims, selected_evidence)
+                ),
                 "evidence_gaps": gaps,
                 "critic": critic,
                 "memory_update_status": "pending_human_approval",
