@@ -12522,32 +12522,51 @@ Make AI quality, cost, and safety checks repeatable engineering gates.
 
 ## Scope
 
-- Add OpenTelemetry-compatible metrics/traces for workflow latency, model
-  latency, retrieval latency, tool denials, approval wait time, token usage, and
-  cost usage.
-- Add CI commands for structured output smoke tests, context evals, retrieval
-  golden evals, guide evals, redaction evals, and security evals.
-- Add local HTML or Markdown eval reports with failing-case links.
-- Persist local eval run summaries so quality, cost, latency, citation coverage,
-  and safety scores can be compared over time.
-- Add eval trend reports that show pass/fail changes by sprint, prompt version,
-  schema version, retrieval version, and model/provider mode.
+- Add one CI-ready quality gate command that runs, or explicitly marks
+  unavailable, the structured-output smoke test, context-quality evals,
+  retrieval golden evals, guide behavior evals, citation verification evals,
+  redaction/secret checks, security checks, budget/cost checks, MCP contract
+  evals, and source/document extraction evals.
+- Add OpenTelemetry-compatible metrics/traces for workflow latency, workflow
+  failure/cancellation, model latency, provider/model/prompt version, retrieval
+  latency and mode, reranker behavior, tool denials, approval wait time, token
+  usage, cost usage, budget denials, cache hit/miss/stale denial, timeouts,
+  cancellation, and provider-egress allow/deny decisions.
+- Add local HTML and Markdown eval reports generated from a shared JSON source.
+  Reports should include failing-case links or fixture IDs, expected versus
+  actual summaries, prompt/schema/context/retrieval/memory versions,
+  model/provider mode, cost, latency, trace IDs, and rerun instructions.
+- Persist local eval run summaries, preferably as JSONL plus latest JSON, so
+  quality, cost, latency, citation coverage, safety scores, and gate status can
+  be compared over time without an external service.
+- Add eval trend reports that show pass/fail changes by sprint, git commit,
+  prompt version, schema version, context profile/version, retrieval version,
+  memory policy version, and model/provider mode.
 - Add a lightweight dashboard/report surface for AI quality gates:
   - hidden from the primary workflow by default
   - accessible from developer/Inspect surfaces
   - shows current gate status, recent regressions, cost budget status, and links
     to failing cases
-- Add prompt, schema, and context-pack version changelog.
-- Add optional LangSmith upload for eval runs.
+- Add a prompt, schema, context-pack, retrieval-policy, memory-policy,
+  reranker/provider, and tool-schema changelog that records expected behavior
+  impact and the evals intended to catch regressions.
+- Add optional LangSmith export/upload for eval runs, disabled by default, with
+  redaction applied before external egress.
+- Add tests for report generation, trend persistence, unavailable-gate warnings,
+  metric payload shape, redaction before export, and access control for any
+  developer-only report surface.
 
 ## Acceptance Criteria
 
-- A reviewer can run one command and see AI quality, safety, retrieval, and cost
-  status.
+- A reviewer can run one command and see AI quality, safety, retrieval, MCP,
+  source-extraction, citation, and cost status.
 - Eval output includes actionable failing cases.
 - Eval reports show current results and trend deltas against previous runs.
 - Dashboard/report output is available without cluttering the homepage.
-- Prompt, schema, and context changes are versioned and traceable.
+- Prompt, schema, context, retrieval, memory, provider, reranker, and tool
+  changes are versioned and traceable.
+- Environment-limited checks such as strict dependency audit failures are
+  surfaced as explicit warn/fail states rather than silently omitted.
 
 ---
 
@@ -12560,19 +12579,41 @@ opaque.
 
 ## Scope
 
-- Add embedding cache keyed by provider/model/version/text hash.
-- Add retrieval-plan and rerank-result cache for deterministic repeat queries.
-- Add optional semantic cache for Ask Thesys answers with strict project,
-  evidence, memory, and context-pack version keys.
+- Design cache storage and invalidation before implementation. Document which
+  caches are DB-backed, file-backed, or in-memory, and which modes are safe for
+  deterministic demo versus production-like deployments.
+- Add embedding cache keyed by workspace, provider, model, embedding dimension,
+  embedding version, normalization/chunking version, and text hash.
+- Add retrieval-plan cache keyed by workspace, project, query hash, context
+  profile, retrieval settings, evidence corpus version, memory version, thesis
+  version, assumption/decision versions, and source-quality policy version.
+- Add rerank-result cache keyed by candidate chunk IDs, query hash, reranker
+  provider/model/version, retrieval policy version, and score normalization
+  version.
+- Add optional semantic cache for Ask Thesys answers with strict workspace,
+  project, evidence, memory, thesis, prompt, schema, retrieval, provider, and
+  context-pack version keys.
 - Add cache invalidation when evidence, memory, thesis, assumptions, decisions,
-  or prompt/context versions change.
-- Add cache-hit metrics to AI runs/evals.
+  source quality, retrieval settings, tool outputs, provider settings, or
+  prompt/context/schema versions change.
+- Add stale-cache denial behavior that records why a near-hit was rejected and
+  recomputed.
+- Keep semantic answer caching disabled by default in live-provider mode until
+  correctness evals pass; allow embedding/retrieval/rerank caches to be enabled
+  independently.
+- Add cache-hit, cache-miss, stale-cache-denial, saved-token, saved-cost, and
+  latency metrics to AI runs/evals.
+- Add eval cases that prove cached and uncached answers match when context is
+  unchanged and diverge correctly after evidence, memory, or thesis changes.
 
 ## Acceptance Criteria
 
 - Repeated local workflows avoid unnecessary embedding/reranking work.
-- Cached guide answers never cross project or stale-context boundaries.
+- Cached guide answers never cross workspace/project boundaries and never serve
+  after stale-context changes.
 - Cost/latency reports show cache hit rates.
+- Tests prove invalidation for evidence, memory, thesis, prompt, schema,
+  retrieval, provider, and source-quality changes.
 
 ---
 
@@ -12585,22 +12626,44 @@ provenance.
 
 ## Scope
 
-- Add readability extraction for fetched HTML pages.
-- Add optional page screenshot/snapshot capture for inspected sources.
-- Add OCR fallback for scanned PDFs.
-- Add table extraction extension for PDFs and screenshots.
-- Add section/page-level quote provenance for extracted snippets.
+- Add readability extraction for fetched HTML pages using an explicit maintained
+  parser such as `trafilatura`, `readability-lxml`, or an equivalent dependency.
+  Preserve canonical URL, title, author/date when available, warnings, and
+  fallback-to-raw-text reason.
+- Add optional page screenshot/snapshot capture for inspected sources with
+  storage limits, redaction/egress policy, source metadata, and Inspect-only UI
+  exposure.
+- Add OCR fallback for scanned PDFs with confidence, page numbers, extraction
+  method metadata, and deterministic fallback behavior for tests.
+- Add table extraction extension for PDFs and screenshots, including table text,
+  row/column structure when available, page/region provenance, and extraction
+  confidence.
+- Add section/page/region-level quote provenance for extracted snippets so
+  citations can point to exact document pages, sections, table regions,
+  screenshots, or OCR spans.
 - Add richer source quality scoring and source-type/domain diversity controls:
   authority, freshness, canonical/deduped status, extraction confidence,
   prompt-injection markers, source type, domain/source diversity, and whether
   the content came from OCR, table extraction, or standard text extraction.
-- Add live Tavily and live multimodal QA paths when credentials are configured.
+- Feed source quality into retrieval/context policy as a boost, cap, or warning
+  while still allowing relevant low-quality evidence to remain inspectable.
+- Extend citation drilldowns and Evidence/Inspect metadata with extraction
+  method, confidence, page/section/table/region provenance, screenshot
+  availability, and source-quality explanation.
+- Add live Tavily and live multimodal QA paths when credentials are configured,
+  guarded by egress policy, rate limits, and deterministic no-credential eval
+  fixtures.
+- Add fixtures for messy HTML, prompt-injected HTML, scanned PDFs, low-text
+  PDFs, table-heavy PDFs, duplicate canonical URLs, stale sources, and
+  live-provider-unavailable fallback.
 
 ## Acceptance Criteria
 
 - Users can inspect where extracted document evidence came from.
 - Scanned or table-heavy documents degrade gracefully.
 - Source quality signals can influence retrieval and context compilation.
+- Extraction improvements are covered by deterministic evals and do not require
+  live provider credentials to verify the local path.
 
 ---
 
@@ -12613,15 +12676,25 @@ and extend.
 
 ## Scope
 
+- Add characterization tests around each workflow before moving code: evidence
+  ingestion/retrieval, guide chat, research sprint, opportunity brief,
+  competitor analysis, validation planning/result interpretation, decision
+  recommendation, memory management, MCP tools, and eval endpoints.
+- Create a target package map before moving files. Expected direction:
+  feature packages for `evidence`, `retrieval`, `research`, `guide`,
+  `validation`, `decisions`, `memory`, `governance/tools`, `mcp`, and `evals`,
+  plus shared packages only for `common/ai`, `common/db`, `common/security`,
+  `common/observability`, and `common/types`.
+- Define dependency rules: routers call feature service entrypoints; feature
+  packages depend on common packages; cross-feature behavior uses explicit DTOs
+  or orchestration services; feature packages should not import each other
+  through module-level side effects.
 - Split oversized services into cohesive modules: validation planning/result
   interpretation/decisions, agentic research graph/synthesis/citation
   audit/memory proposals, guide routing/grounded generation/proposal routing,
-  evidence ingestion/parsing/chunking/retrieval, and tool
-  definitions/guards/execution/proposal application.
-- Move toward feature packages where practical: `features/evidence`,
-  `features/research`, `features/guide`, `features/validation`,
-  `features/governance`, plus shared `common/ai`, `common/retrieval`,
-  `common/security`, and `common/db`.
+  evidence ingestion/parsing/chunking/retrieval/source quality, tool
+  definitions/guards/execution/proposal application, MCP schemas/transports, and
+  eval case/report/trend execution.
 - Add typed internal transfer objects to replace large ad hoc dict payloads.
 - Establish explicit module ownership boundaries and dependency rules so feature
   packages do not import across each other through hidden side effects.
@@ -12636,7 +12709,11 @@ and extend.
 - Keep Python idiomatic and SOLID: small cohesive services, typed DTOs for
   cross-module boundaries, dependency injection at service edges, and shared
   utilities only for genuinely shared behavior.
-- Add characterization tests around every moved workflow.
+- Keep migration/model ownership clear. If DB models remain centralized,
+  document that choice; if model modules move, preserve Alembic imports and
+  avoid circular model imports.
+- Run import-cycle checks or an equivalent static inspection after package
+  movement.
 
 ## Acceptance Criteria
 
@@ -12674,7 +12751,15 @@ interviewers to understand without overwhelming the core workflow.
   - where to add a new memory type or context profile
   - where to add an MCP tool
   - where to add a retrieval provider or reranker
+  - where to add a source extractor
+  - where to add a security policy check
   - where to add eval cases and interpret failures
+- Update README project navigation so an interviewer or new developer can find
+  AI workflow entrypoints, context profiles, memory manager, retrieval pipeline,
+  source ingestion/extraction, MCP tools, eval gates/reports, security/auth
+  policy, observability, and frontend Inspect surfaces.
+- Build diagrams from implemented code paths and include source file references
+  near diagrams so maintainers can verify them.
 - Add targeted code documentation after refactors:
   - docstrings for public service entrypoints and DTOs
   - comments for non-obvious invariants, security boundaries, approval gates,
@@ -12682,12 +12767,19 @@ interviewers to understand without overwhelming the core workflow.
   - no comments that merely restate obvious assignments
 - Add deployment documentation and environment profiles.
 - Add production object-storage guidance and backup/restore notes.
+- Retry deferred web/browser checks from Sprints 51 and 53: memory/context
+  Inspect, Ask Thesys streaming, cancellation/timeout UI, citation drilldowns,
+  and advanced report/settings surfaces.
 - Add workspace/team collaboration flows if product direction requires it.
 - Add multi-project portfolio views only after single-project workflow remains
   simple.
 - Add integration settings for MCP/API clients, search providers, and model
   providers behind developer/advanced settings.
 - Add smoke tests for seeded hosted demo data.
+- Document remaining honest limits after Sprints 51-60, including any
+  provider-only features not exercised in deterministic local mode, OIDC/JWKS
+  auth gaps, live Tavily/multimodal credential requirements, and deployment
+  assumptions.
 
 ## Acceptance Criteria
 
@@ -12701,3 +12793,5 @@ interviewers to understand without overwhelming the core workflow.
   behavior is non-obvious.
 - Deployment and environment setup are reproducible.
 - Advanced integration settings do not clutter the homepage or main workflow.
+- Deferred web/browser and strict-audit verification items are either completed
+  or explicitly recorded with reason and next owner.

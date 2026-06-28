@@ -46,8 +46,10 @@ current verdict, next action, evidence health, validation, and decision state.
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
 `IMPLEMENTATION_BRIEF.md` under "Post-Sprint 50 Audit and Future Upgrade
-Backlog." The audit keeps the completed portfolio work visible while assigning
-each unfinished gap to Sprints 51-60.
+Backlog." The execution-level handoff is `SPRINT_51_60_TODO.md`, which now
+contains a gap coverage ledger, deferred verification list, and specific
+acceptance work for each remaining sprint. The audit keeps the completed
+portfolio work visible while assigning each unfinished gap to Sprints 51-60.
 
 ## Sprint 0 Scope
 
@@ -2097,7 +2099,9 @@ diagnostics, trace details, memory internals, security findings, and retrieval
 explanations stay hidden by default and are available through metadata,
 inspection surfaces, eval output, or developer docs.
 
-Unfinished Sprint 41-50 gaps are tracked as follows:
+Unfinished Sprint 41-50 gaps are tracked as follows. The concise table below is
+the status summary; the concrete implementation tasks, tests, and deferred
+verification items live in the `SPRINT_51_60_TODO.md` gap coverage ledger.
 
 | Prior sprint gap | Owning follow-up sprint |
 |---|---|

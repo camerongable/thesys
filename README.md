@@ -890,6 +890,9 @@ Implemented or demonstrated:
 
 Gap-closure roadmap:
 
+`SPRINT_51_60_TODO.md` now contains the execution-level gap ledger for every
+unfinished Sprint 41-50 item. The list below is the reader-friendly summary.
+
 - Sprint 53 is implemented on this branch: Ask Thesys now has incremental
   answer deltas/provider streaming support, live retrieval/tool/proposal events,
   cancellation persistence, timeouts, and collapsed citation drilldowns.
@@ -901,22 +904,27 @@ Gap-closure roadmap:
   rank signals, BM25-like local scoring, MMR/source-domain-type-competitor caps,
   a no-op/deterministic/LiteLLM reranker adapter, claim-level citation outcomes,
   and a credential-free golden retrieval eval command.
-- Sprint 56 closes the observability gap with OpenTelemetry-compatible metrics,
-  CI-ready eval gates, trend reports, prompt/schema/context changelogs, and a
-  hidden-by-default quality dashboard.
+- Sprint 56 closes the observability gap with OpenTelemetry-compatible workflow,
+  model, retrieval, tool, approval, cost, cache, timeout, and egress metrics;
+  one CI-ready quality-gate command; Markdown/HTML eval reports; local trend
+  persistence; prompt/schema/context/retrieval/memory/tool changelogs; optional
+  redacted LangSmith export; and a hidden-by-default quality report surface.
 - Sprint 57 adds semantic caching and cost optimization for embeddings,
-  retrieval plans, reranking, and guide answers with strict project/workspace
-  isolation.
+  retrieval plans, reranking, and optional guide answers with strict
+  project/workspace isolation, versioned invalidation, stale-cache denial
+  records, and saved-token/cost/latency metrics.
 - Sprint 58 closes the document intelligence gap with readability extraction,
-  snapshots, OCR, table extraction, page/section quote provenance, richer source
-  quality, and credential-gated live provider QA.
+  snapshots, OCR, table extraction, page/section/table/region quote provenance,
+  richer source quality, citation drilldown metadata, retrieval/context quality
+  signals, and credential-gated live provider QA.
 - Sprint 59 closes the architecture cleanup gap by splitting oversized services
-  into feature packages, adding typed DTO boundaries, removing duplication, and
-  preserving public API behavior.
+  into feature packages, adding characterization tests, enforcing dependency
+  rules, adding typed DTO boundaries, removing duplication, checking import
+  cycles, and preserving public API behavior.
 - Sprint 60 closes the documentation/readiness gap with architecture diagrams,
   post-refactor navigation, targeted docstrings/comments, deployment docs,
-  object-storage backup guidance, advanced integration settings, and hosted-demo
-  smoke tests.
+  object-storage backup guidance, advanced integration settings, deferred
+  browser QA retry, hosted-demo smoke tests, and honest remaining-limit notes.
 
 ---
 
