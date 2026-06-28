@@ -7,16 +7,17 @@ mutate strategic project state from chat.
 
 import json
 import uuid
+from collections.abc import Generator, Iterator
 from dataclasses import dataclass
 from decimal import Decimal
 from time import perf_counter
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.ai.litellm_client import ChatMessage
+from app.ai.litellm_client import ChatMessage, LiteLLMClient
 from app.ai.prompts import GUIDE_CHAT_PROMPT_VERSION, UNTRUSTED_RETRIEVED_CONTENT_RULE
 from app.ai.structured_output import generate_structured_output
 from app.core.auth import AuthContext
@@ -26,6 +27,7 @@ from app.schemas.guide import (
     GuideActionRead,
     GuideChatResponseRead,
     GuideChatTurnRead,
+    GuideCitationDetailRead,
     GuideContextRead,
     GuideEvidenceSummaryRead,
     GuideRelatedEntityRead,
@@ -319,6 +321,563 @@ def chat(
     except Exception as exc:
         ai_run_service.fail_run(db, run, error=str(exc))
         raise
+
+
+def stream_chat_events(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    message: str,
+    recent_turns: list[GuideChatTurnRead] | None = None,
+    *,
+    timeout_seconds: float | None = None,
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Yield Ask Thesys SSE events while preserving the normal guide contract."""
+    settings = get_settings()
+    context = get_guide_context(db, auth, project_id)
+    normalized = message.strip().lower()
+    bounded_recent_turns = _bounded_recent_turns(recent_turns or [])
+    model_provider = "stub" if settings.should_use_llm_stub else "litellm"
+    model_name = settings.litellm_model
+    timeout = (
+        timeout_seconds
+        if timeout_seconds is not None
+        else settings.guide_chat_stream_timeout_seconds
+    )
+    started_at = perf_counter()
+    run = ai_run_service.start_run(
+        db,
+        auth,
+        workflow_type="guide_chat",
+        prompt_version=GUIDE_CHAT_PROMPT_VERSION,
+        input_summary=message[:500],
+        project_id=project_id,
+        model_provider=model_provider,
+        model_name=model_name,
+    )
+    total_tokens: int | None = None
+    total_cost: Decimal | None = Decimal("0")
+    answer_streamed = False
+
+    try:
+        yield (
+            "message_started",
+            {
+                "ai_run_id": str(run.id),
+                "project_id": str(project_id),
+                "stage": context.stage,
+                "model_provider": model_provider,
+                "model_name": model_name,
+            },
+        )
+        if _stream_timed_out(started_at, timeout):
+            yield from _timeout_stream_events(db, run, context, timeout)
+            return
+
+        intent_step = ai_run_service.start_step(
+            db,
+            run,
+            step_name="guide_intent_guardrail",
+            input_json={
+                "message": message[:1000],
+                "stage": context.stage,
+                "recent_turn_count": len(bounded_recent_turns),
+                "streaming": True,
+            },
+        )
+        in_scope = _is_in_scope(normalized)
+        ai_run_service.complete_step(
+            db,
+            intent_step,
+            output_json={
+                "in_scope": in_scope,
+                "used_llm": not settings.should_use_llm_stub and in_scope,
+            },
+            latency_ms=0,
+            tokens=None,
+            cost=Decimal("0"),
+        )
+        yield (
+            "metadata",
+            {
+                "phase": "intent_guardrail",
+                "in_scope": in_scope,
+                "recent_turn_count": len(bounded_recent_turns),
+            },
+        )
+        if _stream_timed_out(started_at, timeout):
+            yield from _timeout_stream_events(db, run, context, timeout)
+            return
+
+        proposal_tool = _proposal_tool_for_message(normalized)
+        if not in_scope:
+            response = _out_of_scope_chat_response(context)
+        elif proposal_tool is not None:
+            yield (
+                "tool_call_started",
+                {
+                    "tool_name": proposal_tool,
+                    "access_mode": "proposal",
+                    "risk_level": "medium",
+                },
+            )
+            response = _proposal_chat_response(
+                db,
+                auth,
+                project_id,
+                message,
+                context,
+                proposal_tool,
+            )
+            yield (
+                "proposal_created",
+                {
+                    "tool_name": proposal_tool,
+                    "tool_invocation_id": str(response.proposal_invocation_id)
+                    if response.proposal_invocation_id
+                    else None,
+                    "approval_request_id": str(response.approval_request_id)
+                    if response.approval_request_id
+                    else None,
+                },
+            )
+            yield (
+                "tool_call_completed",
+                {
+                    "tool_name": proposal_tool,
+                    "status": "proposal_created",
+                    "tool_invocation_id": str(response.proposal_invocation_id)
+                    if response.proposal_invocation_id
+                    else None,
+                },
+            )
+        elif settings.should_use_llm_stub:
+            response = _deterministic_chat_response(db, auth, project_id, message, context)
+            yield from _retrieval_started_events(message)
+            response = _attach_grounding_metadata(
+                db,
+                auth,
+                settings,
+                project_id,
+                run,
+                message,
+                response,
+                context,
+                used_llm=False,
+            )
+            yield from _retrieval_completed_events(response)
+        else:
+            (
+                response,
+                total_tokens,
+                total_cost,
+                model_provider,
+                model_name,
+                answer_streamed,
+            ) = yield from _stream_grounded_chat_response(
+                db,
+                auth,
+                settings,
+                project_id,
+                message,
+                context,
+                run,
+                bounded_recent_turns,
+            )
+
+        response.ai_run_id = run.id
+        if _stream_timed_out(started_at, timeout):
+            yield from _timeout_stream_events(db, run, context, timeout)
+            return
+
+        if not answer_streamed:
+            for index, chunk in enumerate(_answer_delta_chunks(response.answer)):
+                yield ("answer_delta", {"index": index, "text": chunk})
+
+        ai_run_service.complete_run(
+            db,
+            run,
+            output_summary=response.answer[:500],
+            total_tokens=total_tokens,
+            total_cost=total_cost,
+            model_provider=model_provider,
+            model_name=model_name,
+        )
+        yield ("metadata", _final_stream_metadata(response))
+        yield ("final", response.model_dump(mode="json"))
+    except GeneratorExit:
+        if getattr(run, "status", None) == "running":
+            ai_run_service.cancel_run(db, run, output_summary="Guide stream cancelled by client.")
+        raise
+    except Exception as exc:
+        ai_run_service.fail_run(db, run, error=str(exc))
+        yield (
+            "error",
+            {
+                "ai_run_id": str(run.id),
+                "message": "Ask Thesys could not finish the streamed answer.",
+            },
+        )
+
+
+def _stream_timed_out(started_at: float, timeout_seconds: float) -> bool:
+    return perf_counter() - started_at >= timeout_seconds
+
+
+def _timeout_stream_events(
+    db: Session,
+    run,
+    context: GuideContextRead,
+    timeout_seconds: float,
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    response = _timeout_chat_response(context, run.id, timeout_seconds)
+    ai_run_service.fail_run(
+        db,
+        run,
+        error=f"Guide stream timed out after {timeout_seconds:.1f} seconds.",
+    )
+    yield (
+        "timeout",
+        {
+            "ai_run_id": str(run.id),
+            "timeout_seconds": timeout_seconds,
+            "message": "Ask Thesys timed out before it could safely finish.",
+        },
+    )
+    for index, chunk in enumerate(_answer_delta_chunks(response.answer)):
+        yield ("answer_delta", {"index": index, "text": chunk})
+    yield ("metadata", _final_stream_metadata(response))
+    yield ("final", response.model_dump(mode="json"))
+
+
+def _timeout_chat_response(
+    context: GuideContextRead,
+    run_id: uuid.UUID,
+    timeout_seconds: float,
+) -> GuideChatResponseRead:
+    return GuideChatResponseRead(
+        answer=(
+            "Ask Thesys took too long to finish. No project state was changed. "
+            "Try a narrower question or use the recommended next action."
+        ),
+        recommended_action=context.available_actions[0] if context.available_actions else None,
+        action_cards=context.available_actions[:3],
+        related_entities=_related_entities(context),
+        confidence_level="unknown",
+        unsupported_or_missing_evidence=[
+            f"The streamed guide response exceeded the {timeout_seconds:.1f}s timeout."
+        ],
+        ai_run_id=run_id,
+    )
+
+
+def _retrieval_started_events(message: str) -> Iterator[tuple[str, dict[str, Any]]]:
+    payload = {"query": message[:500], "mode": "hybrid", "top_k": 5}
+    yield ("retrieval_started", payload)
+    yield (
+        "tool_call_started",
+        {
+            "tool_name": "search_project_evidence",
+            "access_mode": "read",
+            "risk_level": "low",
+            "input": payload,
+        },
+    )
+
+
+def _retrieval_completed_events(
+    response: GuideChatResponseRead,
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    diagnostics = response.retrieval_diagnostics or {}
+    result_count = _retrieval_result_count(response)
+    yield (
+        "tool_call_completed",
+        {
+            "tool_name": "search_project_evidence",
+            "status": "succeeded",
+            "result_count": result_count,
+            "cited_evidence_ids": response.cited_evidence_ids,
+        },
+    )
+    yield (
+        "retrieval_result",
+        {
+            "result_count": result_count,
+            "cited_evidence_ids": response.cited_evidence_ids,
+            "citation_details": [
+                detail.model_dump(mode="json") for detail in response.citation_details
+            ],
+            "diagnostics": diagnostics,
+        },
+    )
+    if response.context_pack:
+        yield (
+            "context_compiled",
+            {
+                "context_pack_id": response.context_pack.get("id"),
+                "workflow_type": response.context_pack.get("workflow_type"),
+                "item_count": len(response.context_pack.get("items") or []),
+                "dropped_count": len(response.context_pack.get("dropped_items") or []),
+                "available_citation_ids": response.context_pack.get("available_citation_ids")
+                or [],
+                "selected_memory_ids": (
+                    response.context_pack.get("metadata", {}).get("selected_memory_ids", [])
+                    if isinstance(response.context_pack.get("metadata"), dict)
+                    else []
+                ),
+            },
+        )
+
+
+def _retrieval_result_count(response: GuideChatResponseRead) -> int:
+    diagnostics = response.retrieval_diagnostics or {}
+    context_diagnostics = diagnostics.get("context") if isinstance(diagnostics, dict) else None
+    if isinstance(context_diagnostics, dict):
+        selected_count = context_diagnostics.get("selected_count")
+        if isinstance(selected_count, int):
+            return selected_count
+    return len(response.cited_evidence_ids)
+
+
+def _answer_delta_chunks(answer: str, *, max_chars: int = 96) -> list[str]:
+    words = answer.split()
+    if not words:
+        return [answer]
+    chunks: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if current and len(candidate) > max_chars:
+            chunks.append(current + " ")
+            current = word
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _final_stream_metadata(response: GuideChatResponseRead) -> dict[str, Any]:
+    context_pack = response.context_pack or {}
+    return {
+        "ai_run_id": str(response.ai_run_id) if response.ai_run_id else None,
+        "used_llm": response.used_llm,
+        "confidence_level": response.confidence_level,
+        "cited_evidence_ids": response.cited_evidence_ids,
+        "citation_count": len(response.citation_details),
+        "proposal_invocation_id": str(response.proposal_invocation_id)
+        if response.proposal_invocation_id
+        else None,
+        "approval_request_id": str(response.approval_request_id)
+        if response.approval_request_id
+        else None,
+        "context_pack_id": context_pack.get("id") if isinstance(context_pack, dict) else None,
+    }
+
+
+def _stream_grounded_chat_response(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    message: str,
+    context: GuideContextRead,
+    run,
+    recent_turns: list[dict[str, str]],
+) -> Generator[
+    tuple[str, dict[str, Any]],
+    None,
+    tuple[GuideChatResponseRead, int | None, Decimal | None, str, str, bool],
+]:
+    yield from _retrieval_started_events(message)
+    search = _search_guide_evidence(db, auth, settings, project_id, run, message)
+    memory_selection = memory_service.select_memory_for_context(
+        db,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+        limit=12,
+    )
+    context_pack = context_service.build_guide_context_pack(
+        settings,
+        project_id=project_id,
+        message=message,
+        guide_context=context,
+        evidence_output=search.output,
+        recent_turns=recent_turns,
+        prompt_version=GUIDE_CHAT_PROMPT_VERSION,
+        expected_schema=_GroundedGuideAnswerDraft.__name__,
+        memory_selection=memory_selection,
+    )
+    retrieval_response = GuideChatResponseRead(
+        answer="",
+        related_entities=_related_entities_with_evidence(context, search.cited_evidence_ids),
+        cited_evidence_ids=search.cited_evidence_ids,
+        citation_details=_citation_details_from_search(
+            search.output,
+            context_pack.model_dump(mode="json"),
+            search.cited_evidence_ids,
+        ),
+        confidence_level=_grounded_confidence(context, bool(search.cited_evidence_ids)),
+        retrieval_diagnostics=search.retrieval_diagnostics,
+        context_pack=context_pack.model_dump(mode="json"),
+    )
+    yield from _retrieval_completed_events(retrieval_response)
+
+    generation_step = ai_run_service.start_step(
+        db,
+        run,
+        step_name="guide_grounded_answer_generation",
+        input_json={
+            "message": message[:1000],
+            "stage": context.stage,
+            "retrieved_source_ids": search.cited_evidence_ids,
+            "available_action_ids": [action.id for action in context.available_actions],
+            "recent_turn_count": len(recent_turns),
+            "context_pack": context_pack.prompt_metadata(),
+            "streaming": True,
+        },
+    )
+    started = perf_counter()
+    raw_content = ""
+    emitted_answer_chars = 0
+    delta_index = 0
+    answer_streamed = False
+    try:
+        messages = [
+            _schema_instruction_for_stream(_GroundedGuideAnswerDraft),
+            *_grounded_guide_messages(message, context_pack),
+        ]
+        for delta in LiteLLMClient(settings).stream_complete(
+            messages,
+            temperature=0.1,
+            response_format_json=True,
+            max_tokens=900,
+        ):
+            raw_content += delta
+            partial_answer = _partial_answer_from_json(raw_content)
+            if len(partial_answer) <= emitted_answer_chars:
+                continue
+            new_text = partial_answer[emitted_answer_chars:]
+            emitted_answer_chars = len(partial_answer)
+            answer_streamed = True
+            yield (
+                "answer_delta",
+                {"index": delta_index, "text": new_text, "source": "provider"},
+            )
+            delta_index += 1
+
+        draft = _GroundedGuideAnswerDraft.model_validate_json(raw_content)
+        response = _response_from_grounded_draft(context, draft, search, run.id)
+        response.context_pack = context_pack.model_dump(mode="json")
+        response.citation_details = _citation_details_from_search(
+            search.output,
+            response.context_pack,
+            response.cited_evidence_ids,
+        )
+        if answer_streamed and emitted_answer_chars < len(response.answer):
+            for chunk in _answer_delta_chunks(response.answer[emitted_answer_chars:]):
+                yield (
+                    "answer_delta",
+                    {"index": delta_index, "text": chunk, "source": "validated_final"},
+                )
+                delta_index += 1
+        ai_run_service.complete_step(
+            db,
+            generation_step,
+            output_json=response.model_dump(mode="json"),
+            latency_ms=int((perf_counter() - started) * 1000),
+            tokens=None,
+            cost=None,
+        )
+        return response, None, None, "litellm", settings.litellm_model, answer_streamed
+    except Exception as exc:
+        fallback = _deterministic_chat_response(db, auth, project_id, message, context)
+        fallback.used_llm = False
+        fallback.cited_evidence_ids = search.cited_evidence_ids
+        fallback.retrieval_diagnostics = search.retrieval_diagnostics
+        fallback.context_pack = context_pack.model_dump(mode="json")
+        fallback.citation_details = _citation_details_from_search(
+            search.output,
+            fallback.context_pack,
+            fallback.cited_evidence_ids,
+        )
+        fallback.confidence_level = _grounded_confidence(
+            context,
+            bool(search.cited_evidence_ids),
+        )
+        fallback.related_entities = _related_entities_with_evidence(
+            context,
+            search.cited_evidence_ids,
+        )
+        fallback.unsupported_or_missing_evidence = [
+            *fallback.unsupported_or_missing_evidence,
+            "Provider streaming could not be safely used, so the deterministic guide answered.",
+        ][:4]
+        ai_run_service.complete_step(
+            db,
+            generation_step,
+            output_json={
+                "fallback_used": True,
+                "reason": str(exc),
+                "response": fallback.model_dump(mode="json"),
+            },
+            latency_ms=int((perf_counter() - started) * 1000),
+            tokens=None,
+            cost=Decimal("0"),
+        )
+        return fallback, None, Decimal("0"), "local-fallback", settings.litellm_model, False
+
+
+def _schema_instruction_for_stream(output_schema: type[BaseModel]) -> ChatMessage:
+    return ChatMessage(
+        role="system",
+        content=(
+            "Return only valid JSON. The JSON must match the required fields exactly and "
+            "validate against this JSON Schema: "
+            f"{json.dumps(output_schema.model_json_schema(), separators=(',', ':'))}"
+        ),
+    )
+
+
+def _partial_answer_from_json(raw_content: str) -> str:
+    key_index = raw_content.find('"answer"')
+    if key_index < 0:
+        return ""
+    colon_index = raw_content.find(":", key_index)
+    if colon_index < 0:
+        return ""
+    quote_index = raw_content.find('"', colon_index)
+    if quote_index < 0:
+        return ""
+    chars: list[str] = []
+    escaped = False
+    for character in raw_content[quote_index + 1 :]:
+        if escaped:
+            chars.append(_json_escape_character(character))
+            escaped = False
+            continue
+        if character == "\\":
+            escaped = True
+            continue
+        if character == '"':
+            break
+        chars.append(character)
+    return "".join(chars)
+
+
+def _json_escape_character(character: str) -> str:
+    escapes = {
+        '"': '"',
+        "\\": "\\",
+        "/": "/",
+        "b": "\b",
+        "f": "\f",
+        "n": "\n",
+        "r": "\r",
+        "t": "\t",
+    }
+    return escapes.get(character, character)
 
 
 def _deterministic_chat_response(
@@ -683,6 +1242,11 @@ def _attach_grounding_metadata(
     response.cited_evidence_ids = search.cited_evidence_ids
     response.retrieval_diagnostics = search.retrieval_diagnostics
     response.context_pack = context_pack.model_dump(mode="json")
+    response.citation_details = _citation_details_from_search(
+        search.output,
+        context_pack.model_dump(mode="json"),
+        response.cited_evidence_ids,
+    )
     response.confidence_level = _grounded_confidence(context, bool(search.cited_evidence_ids))
     response.related_entities = _related_entities_with_evidence(context, search.cited_evidence_ids)
     if not search.cited_evidence_ids and not response.unsupported_or_missing_evidence:
@@ -746,6 +1310,11 @@ def _grounded_chat_response(
         draft = _GroundedGuideAnswerDraft.model_validate(result.parsed)
         response = _response_from_grounded_draft(context, draft, search, run.id)
         response.context_pack = context_pack.model_dump(mode="json")
+        response.citation_details = _citation_details_from_search(
+            search.output,
+            response.context_pack,
+            response.cited_evidence_ids,
+        )
         completion = result.completion
         ai_run_service.complete_step(
             db,
@@ -780,6 +1349,11 @@ def _grounded_chat_response(
             "LLM guide output could not be safely used, so the deterministic guide answered.",
         ][:4]
         fallback.context_pack = context_pack.model_dump(mode="json")
+        fallback.citation_details = _citation_details_from_search(
+            search.output,
+            fallback.context_pack,
+            fallback.cited_evidence_ids,
+        )
         ai_run_service.complete_step(
             db,
             generation_step,
@@ -998,6 +1572,97 @@ def _grounded_confidence(context: GuideContextRead, has_citations: bool) -> str:
     if not has_citations:
         return "low" if context.confidence_level != "unknown" else "unknown"
     return context.confidence_level if context.confidence_level != "unknown" else "medium"
+
+
+def _citation_details_from_search(
+    search_output: dict[str, Any],
+    context_pack: dict[str, Any] | None,
+    cited_evidence_ids: list[str],
+) -> list[GuideCitationDetailRead]:
+    results = search_output.get("results")
+    if not isinstance(results, list):
+        return []
+    cited = set(cited_evidence_ids)
+    context_item_ids = _context_item_ids_by_source(context_pack)
+    memory_ids = _memory_ids_from_context_pack(context_pack)
+    details: list[GuideCitationDetailRead] = []
+    seen_sources: set[str] = set()
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        source_id = str(result.get("source_id") or "")
+        if not source_id or source_id not in cited or source_id in seen_sources:
+            continue
+        seen_sources.add(source_id)
+        text = str(result.get("text") or "")
+        details.append(
+            GuideCitationDetailRead(
+                source_id=source_id,
+                chunk_id=str(result.get("chunk_id")) if result.get("chunk_id") else None,
+                title=str(result.get("title")) if result.get("title") else None,
+                url=str(result.get("url")) if result.get("url") else None,
+                source_type=str(result.get("source_type")) if result.get("source_type") else None,
+                excerpt=text[:600] if text else None,
+                score=_optional_float(result.get("rerank_score") or result.get("score")),
+                verifier_status="supported",
+                context_item_ids=context_item_ids.get(source_id, []),
+                memory_ids=memory_ids,
+            )
+        )
+    return details
+
+
+def _context_item_ids_by_source(context_pack: dict[str, Any] | None) -> dict[str, list[str]]:
+    if not context_pack:
+        return {}
+    items = context_pack.get("items")
+    if not isinstance(items, list):
+        return {}
+    result: dict[str, list[str]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        provenance = item.get("provenance")
+        if not isinstance(provenance, dict):
+            continue
+        metadata = provenance.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        source_id = str(metadata.get("source_id") or "")
+        item_id = str(item.get("id") or "")
+        if source_id and item_id:
+            result.setdefault(source_id, []).append(item_id)
+    return result
+
+
+def _memory_ids_from_context_pack(context_pack: dict[str, Any] | None) -> list[str]:
+    if not context_pack:
+        return []
+    metadata = context_pack.get("metadata")
+    if isinstance(metadata, dict):
+        selected_ids = metadata.get("selected_memory_ids")
+        if isinstance(selected_ids, list):
+            return _unique_strings(str(item) for item in selected_ids if item)
+    items = context_pack.get("items")
+    if not isinstance(items, list):
+        return []
+    memory_ids: list[str] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "memory":
+            continue
+        provenance = item.get("provenance")
+        if isinstance(provenance, dict) and provenance.get("entity_id"):
+            memory_ids.append(str(provenance["entity_id"]))
+    return _unique_strings(memory_ids)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _bounded_recent_turns(recent_turns: list[GuideChatTurnRead]) -> list[dict[str, str]]:

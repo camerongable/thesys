@@ -1,6 +1,7 @@
 """Small OpenAI-compatible LiteLLM client used by service-layer AI workflows."""
 
-from collections.abc import Sequence
+import json
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
@@ -103,6 +104,58 @@ class LiteLLMClient:
             raw_response=body,
             used_stub=False,
         )
+
+    def stream_complete(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        model: str | None = None,
+        temperature: float = 0.0,
+        response_format_json: bool = False,
+        max_tokens: int | None = None,
+    ) -> Iterator[str]:
+        """Yield OpenAI-compatible streaming content deltas from LiteLLM."""
+        payload: dict[str, Any] = {
+            "model": model or self.settings.litellm_model,
+            "messages": [message.model_dump() for message in messages],
+            "temperature": temperature,
+            "stream": True,
+        }
+        if response_format_json:
+            payload["response_format"] = {"type": "json_object"}
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+
+        url = f"{self.settings.litellm_base_url.rstrip('/')}/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.settings.litellm_api_key}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            with httpx.Client(timeout=self.settings.litellm_timeout_seconds) as client:
+                with client.stream("POST", url, headers=headers, json=payload) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        payload_text = line.removeprefix("data:").strip()
+                        if payload_text == "[DONE]":
+                            break
+                        try:
+                            body = json.loads(payload_text)
+                            delta = body["choices"][0].get("delta", {}).get("content")
+                        except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+                            continue
+                        if delta:
+                            yield str(delta)
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text[:500]
+            raise LiteLLMClientError(
+                f"LiteLLM stream failed with status {exc.response.status_code}: {detail}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise LiteLLMClientError(f"LiteLLM stream failed: {exc}") from exc
 
 
 def _parse_cost_header(value: str | None) -> Decimal | None:

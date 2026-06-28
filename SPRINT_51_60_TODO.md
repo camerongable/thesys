@@ -88,39 +88,44 @@ sprint must end with a focused commit before the next sprint begins.
 
 ## Sprint 53: True Ask Thesys Streaming and Live Tool Events
 
-- [ ] Close Sprint 46 gaps: make Ask Thesys streaming incremental, expose live
+- [x] Close Sprint 46 gaps: make Ask Thesys streaming incremental, expose live
   retrieval/tool/proposal progress, support cancellation/timeouts, add citation
   drilldowns, and expand guide evals beyond the current SSE-shaped response.
-- [ ] Stream provider tokens when the configured provider supports streaming;
+- [x] Stream provider tokens when the configured provider supports streaming;
   otherwise stream deterministic answer deltas from the generated answer before
   emitting the final event so local/dev behavior still proves the UI contract.
-- [ ] Emit a stable event protocol with at least:
+- [x] Emit a stable event protocol with at least:
   `message_started`, `context_compiled`, `retrieval_started`,
   `retrieval_result`, `tool_call_started`, `tool_call_completed`,
   `proposal_created`, `answer_delta`, `metadata`, `timeout`, `cancelled`,
   `error`, and `final`.
-- [ ] Include event payload IDs that let the UI correlate retrieval hits,
+- [x] Include event payload IDs that let the UI correlate retrieval hits,
   context-pack items, tool invocations, approval requests, memory IDs,
   citation IDs, AI run IDs, and trace IDs.
-- [ ] Add backend cancellation behavior that stops provider work when the client
+- [x] Add backend cancellation behavior that stops provider work when the client
   disconnects where practical, records a cancelled AI run/step, and emits or
   persists cancellation metadata without committing state-changing proposals.
-- [ ] Add backend timeout behavior with configurable timeout limits, a timeout
+- [x] Add backend timeout behavior with configurable timeout limits, a timeout
   event, a safe fallback message, and no partial strategic writes.
-- [ ] Add UI support for progressive answers while keeping the main Ask Thesys
+- [x] Add UI support for progressive answers while keeping the main Ask Thesys
   flow simple: compact status line, streamed answer body, final action cards,
   and all trace details collapsed by default.
-- [ ] Add collapsed citation drilldowns for source title, URL/file/page,
+- [x] Add collapsed citation drilldowns for source title, URL/file/page,
   source type, quality signal, retrieved excerpt, verifier status, context item
   IDs, memory IDs, and whether any support was weak/missing/filtered.
-- [ ] Make streamed and non-streamed responses converge to the same final
+- [x] Make streamed and non-streamed responses converge to the same final
   response shape so existing guide consumers do not need separate parsing.
-- [ ] Expand guide behavior evals for action routing, weak-evidence behavior,
+- [x] Expand guide behavior evals for action routing, weak-evidence behavior,
   no direct mutation, citation validity, cancellation, timeout, event ordering,
   malformed-event fallback, and deterministic fallback parity.
-- [ ] Run guide tests, web tests, typecheck, and guide evals.
-- [ ] Run IDE browser QA for streaming and citation drilldowns.
-- [ ] Commit Sprint 53.
+- [x] Run backend guide tests, full API tests, compile checks, and AI quality
+  evals.
+- [ ] Run web tests, web typecheck, and IDE browser QA for streaming and
+  citation drilldowns. Blocked in this environment because
+  `pnpm --filter thesys-web typecheck` repeatedly failed before TypeScript while
+  fetching registry packages and npm attestation metadata (`ECONNRESET`); the
+  retrying process was stopped after several minutes.
+- [x] Commit Sprint 53.
 
 ## Sprint 54: Security, Abuse, and Production Auth Hardening
 

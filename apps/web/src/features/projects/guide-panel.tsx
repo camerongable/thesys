@@ -15,7 +15,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import {
-  askProjectGuide,
   dismissProjectNudge,
   executeGuideAction,
   getGuideRecommendation,
@@ -23,7 +22,9 @@ import {
   GuideAction,
   GuideChatResponse,
   GuideChatTurn,
+  GuideStreamEventName,
   ProjectNudge,
+  streamProjectGuide,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -39,6 +40,13 @@ export function GuidePanel({
   const [message, setMessage] = useState("");
   const [chatResponse, setChatResponse] = useState<GuideChatResponse | null>(null);
   const [recentTurns, setRecentTurns] = useState<GuideChatTurn[]>([]);
+  const [streamedAnswer, setStreamedAnswer] = useState("");
+  const [streamEvents, setStreamEvents] = useState<
+    { event: GuideStreamEventName; payload: Record<string, unknown> }[]
+  >([]);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [activeController, setActiveController] = useState<AbortController | null>(null);
   const queryClient = useQueryClient();
   const guideQuery = useQuery({
     queryKey: ["projects", projectId, "guide", "recommendation"],
@@ -58,17 +66,52 @@ export function GuidePanel({
       await queryClient.invalidateQueries({ queryKey: ["projects", projectId, "nudges"] });
     },
   });
-  const chatMutation = useMutation({
-    mutationFn: (question: string) => askProjectGuide(projectId, question, recentTurns),
-    onSuccess: (response, question) => {
+  async function askGuide(question: string) {
+    const controller = new AbortController();
+    setActiveController(controller);
+    setChatResponse(null);
+    setStreamedAnswer("");
+    setStreamEvents([]);
+    setStreamError(null);
+    setIsStreaming(true);
+    try {
+      const response = await streamProjectGuide(
+        projectId,
+        question,
+        recentTurns,
+        {
+          onEvent: (event, payload) => {
+            setStreamEvents((events) => [...events, { event, payload }].slice(-16));
+          },
+          onDelta: (text) => setStreamedAnswer((answer) => `${answer}${text}`),
+          onFinal: (response) => setChatResponse(response),
+          onError: (payload) => {
+            const detail =
+              typeof payload.message === "string"
+                ? payload.message
+                : "Ask Thesys could not finish the streamed answer.";
+            setStreamError(detail);
+          },
+        },
+        controller.signal,
+      );
       setChatResponse(response);
       const newTurns: GuideChatTurn[] = [
         { role: "user", content: question },
         { role: "assistant", content: response.answer },
       ];
       setRecentTurns((turns) => [...turns, ...newTurns].slice(-6));
-    },
-  });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setStreamError("Guide request cancelled.");
+      } else {
+        setStreamError(error instanceof Error ? error.message : "Guide request failed.");
+      }
+    } finally {
+      setIsStreaming(false);
+      setActiveController(null);
+    }
+  }
 
   function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -76,13 +119,21 @@ export function GuidePanel({
     if (!question) {
       return;
     }
-    chatMutation.mutate(question);
+    void askGuide(question);
     setMessage("");
   }
 
   function askSuggestedQuestion(question: string) {
     setMessage("");
-    chatMutation.mutate(question);
+    void askGuide(question);
+  }
+
+  function cancelGuideStream() {
+    setStreamEvents((events) => [
+      ...events,
+      { event: "cancelled", payload: { reason: "client_cancelled" } },
+    ]);
+    activeController?.abort();
   }
 
   return (
@@ -221,7 +272,7 @@ export function GuidePanel({
               />
               <Button
                 aria-label="Ask guide"
-                disabled={chatMutation.isPending || !message.trim()}
+                disabled={isStreaming || !message.trim()}
                 size="icon"
                 type="submit"
               >
@@ -233,7 +284,7 @@ export function GuidePanel({
               {guideQuery.data.suggested_questions.slice(0, 6).map((question) => (
                 <button
                   className="rounded-md border border-border px-2 py-1 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                  disabled={chatMutation.isPending}
+                  disabled={isStreaming}
                   key={question}
                   onClick={() => askSuggestedQuestion(question)}
                   type="button"
@@ -244,19 +295,33 @@ export function GuidePanel({
             </div>
           </section>
 
-          {chatMutation.isPending ? (
-            <div className="rounded-md border border-border bg-background p-3">
-              <p className="text-sm text-muted-foreground">Thinking through this project...</p>
-            </div>
-          ) : chatResponse ? (
+          {isStreaming || streamedAnswer || chatResponse || streamError ? (
             <section className="rounded-md border border-border bg-background p-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
-                <p className="text-xs font-medium text-muted-foreground">Guide answer</p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
+                  <p className="text-xs font-medium text-muted-foreground">Guide answer</p>
+                </div>
+                {isStreaming ? (
+                  <button
+                    aria-label="Cancel guide response"
+                    className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                    onClick={cancelGuideStream}
+                    type="button"
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                ) : null}
               </div>
-              <p className="mt-2 text-sm leading-6">{chatResponse.answer}</p>
-              <GuideAnswerMetadata response={chatResponse} />
-              {chatResponse.recommended_action ? (
+              {streamError ? (
+                <p className="mt-2 text-xs leading-5 text-danger-foreground">{streamError}</p>
+              ) : null}
+              <p className="mt-2 min-h-6 text-sm leading-6">
+                {streamedAnswer || chatResponse?.answer || "Thinking through this project..."}
+              </p>
+              {streamEvents.length > 0 ? <GuideStreamEvents events={streamEvents} /> : null}
+              {chatResponse ? <GuideAnswerMetadata response={chatResponse} /> : null}
+              {chatResponse?.recommended_action ? (
                 <div className="mt-3 rounded-md border border-primary/30 bg-primary/10 p-3">
                   <p className="text-xs font-medium text-primary">Recommended action</p>
                   <GuideActionButton
@@ -266,7 +331,7 @@ export function GuidePanel({
                   />
                 </div>
               ) : null}
-              {chatResponse.action_cards.length > 0 ? (
+              {chatResponse && chatResponse.action_cards.length > 0 ? (
                 <div className="mt-3 grid gap-2">
                   {chatResponse.action_cards
                     .filter((action) => action.id !== chatResponse.recommended_action?.id)
@@ -281,7 +346,7 @@ export function GuidePanel({
                     ))}
                 </div>
               ) : null}
-              {chatResponse.related_entities.length > 0 ? (
+              {chatResponse && chatResponse.related_entities.length > 0 ? (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {chatResponse.related_entities.map((entity) => (
                     <span
@@ -301,6 +366,29 @@ export function GuidePanel({
   );
 }
 
+function GuideStreamEvents({
+  events,
+}: {
+  events: { event: GuideStreamEventName; payload: Record<string, unknown> }[];
+}) {
+  const latest = events[events.length - 1];
+  return (
+    <details className="mt-2 rounded-md border border-border bg-muted/30 p-2 text-xs text-muted-foreground">
+      <summary className="cursor-pointer select-none">
+        {latest ? formatGuideLabel(latest.event) : "Progress"}
+      </summary>
+      <ol className="mt-2 space-y-1">
+        {events.slice(-8).map((item, index) => (
+          <li className="flex items-center justify-between gap-3" key={`${item.event}:${index}`}>
+            <span>{formatGuideLabel(item.event)}</span>
+            <span className="truncate text-right text-foreground">{eventPayloadSummary(item)}</span>
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
 // The guide keeps the default surface short, but this metadata block exposes
 // grounding, approvals, and context-pack budgeting when an interviewer or
 // developer wants to inspect how an answer was formed.
@@ -309,6 +397,7 @@ function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
   const hasGrounding =
     response.used_llm ||
     response.cited_evidence_ids.length > 0 ||
+    response.citation_details.length > 0 ||
     response.unsupported_or_missing_evidence.length > 0 ||
     contextSummary !== null ||
     response.approval_request_id !== null ||
@@ -334,6 +423,51 @@ function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
             <li key={item}>Missing: {item}</li>
           ))}
         </ul>
+      ) : null}
+      {response.citation_details.length > 0 ? (
+        <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none">Citations</summary>
+          <div className="mt-2 space-y-2">
+            {response.citation_details.slice(0, 4).map((citation) => (
+              <div className="rounded-md border border-border bg-background p-2" key={citation.source_id}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-foreground">
+                      {citation.title || "Retrieved evidence"}
+                    </p>
+                    <p className="mt-0.5 text-muted-foreground">
+                      {formatGuideLabel(citation.source_type || "source")} /{" "}
+                      {formatGuideLabel(citation.verifier_status)}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-muted-foreground">
+                    {shortId(citation.source_id)}
+                  </span>
+                </div>
+                {citation.url ? (
+                  <a
+                    className="mt-1 block truncate text-primary hover:underline"
+                    href={citation.url}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {citation.url}
+                  </a>
+                ) : null}
+                {citation.excerpt ? (
+                  <p className="mt-2 line-clamp-3 leading-5 text-muted-foreground">
+                    {citation.excerpt}
+                  </p>
+                ) : null}
+                <div className="mt-2 flex flex-wrap gap-2 text-muted-foreground">
+                  {citation.chunk_id ? <span>Chunk {shortId(citation.chunk_id)}</span> : null}
+                  <span>{citation.context_item_ids.length} context item(s)</span>
+                  <span>{citation.memory_ids.length} memory item(s)</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
       ) : null}
       {contextSummary ? (
         <details className="mt-2 text-xs text-muted-foreground">
@@ -374,6 +508,38 @@ function contextPackSummary(contextPack: Record<string, unknown> | null) {
     tokenCount: Number(contextPack.token_count ?? 0),
     tokenBudget: Number(policy.token_budget ?? 0),
   };
+}
+
+function eventPayloadSummary({
+  event,
+  payload,
+}: {
+  event: GuideStreamEventName;
+  payload: Record<string, unknown>;
+}) {
+  if (event === "answer_delta" && typeof payload.text === "string") {
+    return payload.text.slice(0, 32);
+  }
+  if (typeof payload.tool_name === "string") {
+    return payload.tool_name;
+  }
+  if (typeof payload.phase === "string") {
+    return payload.phase;
+  }
+  if (typeof payload.result_count === "number") {
+    return `${payload.result_count} result(s)`;
+  }
+  if (typeof payload.context_pack_id === "string") {
+    return shortId(payload.context_pack_id);
+  }
+  if (typeof payload.ai_run_id === "string") {
+    return shortId(payload.ai_run_id);
+  }
+  return "";
+}
+
+function shortId(value: string) {
+  return value.slice(0, 8);
 }
 
 function GuideNudgeCard({

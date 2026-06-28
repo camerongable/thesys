@@ -315,11 +315,15 @@ def stream_project_guide_chat(
     db: DbDep,
     auth: AuthContextDep,
 ) -> StreamingResponse:
-    response = guide_service.chat(db, auth, project_id, payload.message, payload.recent_turns)
-
     def events():
-        yield _sse("delta", {"text": response.answer})
-        yield _sse("final", response.model_dump(mode="json"))
+        for event, event_payload in guide_service.stream_chat_events(
+            db,
+            auth,
+            project_id,
+            payload.message,
+            payload.recent_turns,
+        ):
+            yield _sse(event, event_payload)
 
     return StreamingResponse(events(), media_type="text/event-stream")
 

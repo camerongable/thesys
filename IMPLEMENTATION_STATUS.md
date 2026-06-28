@@ -2168,3 +2168,40 @@ Sprint 52 verification run:
 
 - [x] `python3 -m compileall -q apps/api/app/mcp/adapter.py apps/api/app/routers/mcp.py apps/api/app/schemas/mcp.py scripts/mcp_stdio_server.py scripts/eval_mcp_contract.py`
 - [x] `cd apps/api && .venv/bin/pytest app/tests/test_mcp_adapter.py app/tests/test_tool_boundary.py app/tests/test_security_governance.py -q --maxfail=1`
+- [x] `cd apps/api && .venv/bin/pytest -q`
+- [x] `python3 scripts/eval_ai_quality.py --json`
+
+## V1 Sprint 53 Branch Progress
+
+Sprint 53 is implemented on `codex/v1-sprints-51-60`:
+
+- Replaced the Ask Thesys stream route that previously emitted one post-hoc
+  delta with a service-owned SSE event generator.
+- Added a stable guide event protocol for `message_started`, `metadata`,
+  `retrieval_started`, `tool_call_started`, `tool_call_completed`,
+  `retrieval_result`, `context_compiled`, `proposal_created`, `answer_delta`,
+  `timeout`, `cancelled`, `error`, and `final`.
+- Added OpenAI-compatible LiteLLM streaming support and live-mode guide
+  streaming that extracts answer deltas from the provider's structured JSON
+  while still validating the final schema before persistence.
+- Added timeout handling with a safe final response and no project-state writes.
+- Added cancellation persistence when the backend stream generator is closed;
+  the UI also records a local `cancelled` event when the user aborts the stream.
+- Added normalized citation drilldown metadata to guide responses, including
+  source IDs, chunk IDs, title, URL, source type, excerpt, support status,
+  context item IDs, and memory IDs.
+- Updated the Ask Thesys panel to render progressive answer text, a compact
+  cancel control, collapsed progress metadata, final action cards, and collapsed
+  citation/context drilldowns.
+
+Sprint 53 verification run:
+
+- [x] `python3 -m compileall -q apps/api/app/ai/litellm_client.py apps/api/app/services/guide_service.py apps/api/app/routers/projects.py apps/api/app/schemas/guide.py apps/api/app/core/config.py`
+- [x] `cd apps/api && .venv/bin/pytest app/tests/test_guide.py -q --maxfail=1`
+- [x] `cd apps/api && .venv/bin/pytest -q`
+- [x] `python3 scripts/eval_ai_quality.py --json`
+- [ ] `pnpm --filter thesys-web typecheck` could not complete in this
+  environment because pnpm failed before TypeScript while fetching registry
+  packages and npm attestation metadata (`ECONNRESET`). The retrying process was
+  stopped after several minutes, so web tests and IDE browser QA remain blocked
+  until registry access is stable.

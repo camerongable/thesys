@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     litellm_api_key: str = Field(default="sk-local-dev", validation_alias="LITELLM_API_KEY")
     litellm_model: str = Field(default="dev-gpt-4o-mini", validation_alias="LITELLM_MODEL")
     litellm_timeout_seconds: float = Field(default=60.0, validation_alias="LITELLM_TIMEOUT_SECONDS")
+    guide_chat_stream_timeout_seconds: float = Field(
+        default=75.0,
+        ge=1.0,
+        le=300.0,
+        validation_alias="GUIDE_CHAT_STREAM_TIMEOUT_SECONDS",
+    )
     llm_stub_mode: Literal["auto", "always", "never"] = Field(
         default="auto",
         validation_alias="LLM_STUB_MODE",

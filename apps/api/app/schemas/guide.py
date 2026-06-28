@@ -24,6 +24,7 @@ GuideRelatedEntityType = Literal[
     "research",
     "thesis",
 ]
+GuideCitationVerifierStatus = Literal["supported", "weak", "missing", "filtered"]
 
 
 class GuideActionRead(BaseModel):
@@ -93,12 +94,26 @@ class GuideRelatedEntityRead(BaseModel):
     label: str
 
 
+class GuideCitationDetailRead(BaseModel):
+    source_id: str
+    chunk_id: str | None = None
+    title: str | None = None
+    url: str | None = None
+    source_type: str | None = None
+    excerpt: str | None = None
+    score: float | None = None
+    verifier_status: GuideCitationVerifierStatus = "supported"
+    context_item_ids: list[str] = Field(default_factory=list)
+    memory_ids: list[str] = Field(default_factory=list)
+
+
 class GuideChatResponseRead(BaseModel):
     answer: str
     recommended_action: GuideActionRead | None = None
     action_cards: list[GuideActionRead] = Field(default_factory=list)
     related_entities: list[GuideRelatedEntityRead] = Field(default_factory=list)
     cited_evidence_ids: list[str] = Field(default_factory=list)
+    citation_details: list[GuideCitationDetailRead] = Field(default_factory=list)
     assumption_ids: list[str] = Field(default_factory=list)
     confidence_level: GuideConfidenceLevel = "unknown"
     unsupported_or_missing_evidence: list[str] = Field(default_factory=list)

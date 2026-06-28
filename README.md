@@ -839,7 +839,7 @@ The core workflow is designed to prevent premature building by identifying the m
 This is a V1 portfolio proof-of-concept. Sprint 41-50 established the first AI
 engineering upgrade baseline; they are not treated as fully complete
 production-grade work. Sprints 51-60 are the explicit gap-closure track, and the
-current branch has implemented Sprint 51 and Sprint 52.
+current branch has implemented Sprint 51, Sprint 52, and Sprint 53.
 
 Implemented or demonstrated:
 
@@ -856,8 +856,9 @@ Implemented or demonstrated:
 - provider-backed embeddings, pgvector SQL retrieval, multi-stage retrieval,
   reranking, context assembly, retrieval-quality diagnostics, and re-embedding
 - LLM-grounded Ask Thesys with citations, retrieval diagnostics, bounded recent
-  turns, action-card routing, SSE-shaped response endpoint, approval-gated
-  proposals, guide evals, and deterministic fallback
+  turns, action-card routing, true streaming events, provider answer deltas when
+  supported, timeout/cancellation handling, approval-gated proposals, guide
+  evals, and deterministic fallback
 - optional Tavily-backed source discovery with provenance
 - multimodal image extraction and low-text PDF fallback through a LiteLLM
   multimodal provider boundary
@@ -873,9 +874,9 @@ Implemented or demonstrated:
 
 Gap-closure roadmap:
 
-- Sprint 53 closes the Ask Thesys streaming gap with true incremental answer
-  deltas/provider tokens, live retrieval/tool/proposal events, cancellation,
-  timeouts, and collapsed citation drilldowns.
+- Sprint 53 is implemented on this branch: Ask Thesys now has incremental
+  answer deltas/provider streaming support, live retrieval/tool/proposal events,
+  cancellation persistence, timeouts, and collapsed citation drilldowns.
 - Sprint 54 closes the security gap with rate limits, workflow concurrency
   limits, pre-call token/cost budget enforcement, dependency audit commands,
   production auth, SSRF hardening, provider-egress controls, and threat

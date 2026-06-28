@@ -1,3 +1,4 @@
+import json
 import uuid
 from decimal import Decimal
 
@@ -10,6 +11,7 @@ from app.ai.structured_output import StructuredOutputResult
 from app.core.config import get_settings
 from app.db.models import AIRun, AIStep, ApprovalRequest, ToolInvocation
 from app.services import guide_service
+from app.services.identity_service import ensure_dev_identity
 
 
 def test_guide_context_and_recommendation_are_stage_aware(client: TestClient) -> None:
@@ -340,7 +342,7 @@ def test_guide_chat_research_plan_prompts_route_to_existing_action(
     assert body["approval_request_id"]
 
 
-def test_guide_chat_stream_emits_delta_and_final_metadata(client: TestClient) -> None:
+def test_guide_chat_stream_emits_live_events_and_final_metadata(client: TestClient) -> None:
     project_id = client.post(
         "/api/projects",
         json={"name": "Guide stream idea"},
@@ -354,9 +356,200 @@ def test_guide_chat_stream_emits_delta_and_final_metadata(client: TestClient) ->
         body = "".join(response.iter_text())
 
     assert response.status_code == 200
-    assert "event: delta" in body
-    assert "event: final" in body
-    assert "recommended_action" in body
+    events = _sse_events(body)
+    event_names = [event for event, _payload in events]
+    assert event_names[:2] == ["message_started", "metadata"]
+    assert "retrieval_started" in event_names
+    assert "tool_call_started" in event_names
+    assert "tool_call_completed" in event_names
+    assert "retrieval_result" in event_names
+    assert "context_compiled" in event_names
+    assert "answer_delta" in event_names
+    assert event_names[-1] == "final"
+    final_payload = events[-1][1]
+    assert final_payload["recommended_action"]
+    assert final_payload["ai_run_id"]
+
+
+def test_guide_chat_stream_includes_citation_drilldowns(client: TestClient) -> None:
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Guide stream citation idea"},
+    ).json()["id"]
+    source_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={
+            "title": "Citation stream evidence",
+            "text": "Product discovery teams need cited weekly evidence review workflows.",
+        },
+    )
+    assert source_response.status_code == 201
+
+    with client.stream(
+        "POST",
+        f"/api/projects/{project_id}/guide/chat/stream",
+        json={"message": "What evidence supports weekly evidence review?"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    events = _sse_events(body)
+    retrieval_payload = next(payload for event, payload in events if event == "retrieval_result")
+    assert retrieval_payload["cited_evidence_ids"] == [source_response.json()["id"]]
+    assert retrieval_payload["citation_details"][0]["title"] == "Citation stream evidence"
+    assert retrieval_payload["citation_details"][0]["excerpt"]
+    assert retrieval_payload["citation_details"][0]["context_item_ids"]
+    final_payload = events[-1][1]
+    assert final_payload["citation_details"][0]["verifier_status"] == "supported"
+
+
+def test_guide_chat_stream_live_mode_streams_provider_answer_deltas(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    get_settings.cache_clear()
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Guide live stream idea"},
+    ).json()["id"]
+    source_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={
+            "title": "Live stream evidence",
+            "text": "Coach check-in triage has strong evidence from weekly review interviews.",
+        },
+    )
+    assert source_response.status_code == 201
+    source_id = source_response.json()["id"]
+
+    def fake_stream_complete(self, messages, **kwargs):
+        content = json.dumps(
+            {
+                "answer": "Provider streamed the supported answer.",
+                "cited_evidence_ids": [source_id],
+                "assumption_ids": [],
+                "confidence_level": "medium",
+                "unsupported_or_missing_evidence": [],
+                "suggested_action_ids": ["show_blocker_evidence"],
+            }
+        )
+        for index in range(0, len(content), 18):
+            yield content[index : index + 18]
+
+    monkeypatch.setattr(guide_service.LiteLLMClient, "stream_complete", fake_stream_complete)
+
+    with client.stream(
+        "POST",
+        f"/api/projects/{project_id}/guide/chat/stream",
+        json={"message": "What evidence supports coach check-in triage weekly review interviews?"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    events = _sse_events(body)
+    deltas = [payload["text"] for event, payload in events if event == "answer_delta"]
+    assert "Provider streamed the supported answer." in "".join(deltas)
+    assert any(
+        payload.get("source") == "provider"
+        for event, payload in events
+        if event == "answer_delta"
+    )
+    final_payload = events[-1][1]
+    assert final_payload["used_llm"] is True
+    assert final_payload["cited_evidence_ids"] == [source_id]
+
+
+def test_guide_chat_stream_proposal_events_do_not_mutate_project_state(
+    client: TestClient,
+) -> None:
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Guide stream proposal idea"},
+    ).json()["id"]
+
+    with client.stream(
+        "POST",
+        f"/api/projects/{project_id}/guide/chat/stream",
+        json={"message": "Create a validation plan and apply it to the project."},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    events = _sse_events(body)
+    event_names = [event for event, _payload in events]
+    assert "proposal_created" in event_names
+    proposal_payload = next(payload for event, payload in events if event == "proposal_created")
+    assert proposal_payload["tool_name"] == "propose_validation_plan"
+    assert proposal_payload["tool_invocation_id"]
+    assert proposal_payload["approval_request_id"]
+    final_payload = events[-1][1]
+    assert final_payload["proposal_invocation_id"] == proposal_payload["tool_invocation_id"]
+    assert final_payload["approval_request_id"] == proposal_payload["approval_request_id"]
+
+
+def test_guide_chat_stream_timeout_returns_safe_final_response(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Guide stream timeout idea"},
+    ).json()["id"]
+    auth = ensure_dev_identity(
+        db_session,
+        email="dev@thesys.local",
+        display_name="Dev User",
+    )
+
+    events = list(
+        guide_service.stream_chat_events(
+            db_session,
+            auth,
+            uuid.UUID(project_id),
+            "What should I do next?",
+            timeout_seconds=0,
+        )
+    )
+
+    event_names = [event for event, _payload in events]
+    assert event_names[0] == "message_started"
+    assert "timeout" in event_names
+    assert "answer_delta" in event_names
+    assert event_names[-1] == "final"
+    assert event_names.index("timeout") < event_names.index("final")
+    final_payload = events[-1][1]
+    assert "No project state was changed" in final_payload["answer"]
+    assert final_payload["ai_run_id"]
+
+
+def test_guide_chat_stream_close_marks_run_cancelled(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Guide stream cancel idea"},
+    ).json()["id"]
+    auth = ensure_dev_identity(
+        db_session,
+        email="dev@thesys.local",
+        display_name="Dev User",
+    )
+    events = guide_service.stream_chat_events(
+        db_session,
+        auth,
+        uuid.UUID(project_id),
+        "What should I do next?",
+    )
+
+    first_event, first_payload = next(events)
+    assert first_event == "message_started"
+    events.close()
+
+    run = db_session.scalar(select(AIRun).where(AIRun.id == uuid.UUID(first_payload["ai_run_id"])))
+    assert run is not None
+    assert run.status == "cancelled"
 
 
 def test_guide_eval_reports_grounding_and_proposal_governance(
@@ -473,6 +666,21 @@ def _guide_recommend(client: TestClient, project_id: str) -> dict:
     response = client.post(f"/api/projects/{project_id}/guide/recommend")
     assert response.status_code == 200
     return response.json()
+
+
+def _sse_events(body: str) -> list[tuple[str, dict]]:
+    events: list[tuple[str, dict]] = []
+    for frame in body.strip().split("\n\n"):
+        event_name: str | None = None
+        data_lines: list[str] = []
+        for line in frame.splitlines():
+            if line.startswith("event:"):
+                event_name = line.removeprefix("event:").strip()
+            elif line.startswith("data:"):
+                data_lines.append(line.removeprefix("data:").strip())
+        if event_name is not None and data_lines:
+            events.append((event_name, json.loads("\n".join(data_lines))))
+    return events
 
 
 def _project_with_story(client: TestClient) -> str:
