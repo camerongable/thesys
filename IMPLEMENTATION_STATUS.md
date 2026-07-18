@@ -329,8 +329,11 @@ current verdict, next action, evidence health, validation, and decision state.
   worker startup, and require LangSmith deployments to attest that the external
   project retention exactly matches the configured trace-retention policy before
   tracing can be enabled.
-- [ ] Add the separately authorized unscoped pre-authentication-event cleanup
-  path and extend classification routing to non-chat providers.
+- [x] Purge expired unscoped pre-authentication failures through a migration
+  role-owned, worker-only PostgreSQL `SECURITY DEFINER` function. The scheduled
+  retention workflow invokes it separately from tenant-bound cleanup, and it
+  cannot delete active session-revocation controls.
+- [ ] Extend classification routing to non-chat providers.
 
 ## Sprint 63 Verification
 

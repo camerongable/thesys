@@ -343,6 +343,26 @@ def _run_workspace_retention_cleanup_sync(payload: Payload) -> Payload:
             raise
 
 
+@activity.defn(name="purge_unscoped_authentication_events_activity")
+async def purge_unscoped_authentication_events_activity() -> Payload:
+    """Purge expired credential-validation failures via the worker-only DB path."""
+    return await asyncio.to_thread(_purge_unscoped_authentication_events_sync)
+
+
+def _purge_unscoped_authentication_events_sync() -> Payload:
+    settings = get_settings()
+    with SessionLocal() as db:
+        try:
+            return {
+                "unscoped_authentication_events_deleted": (
+                    retention_service.purge_expired_unscoped_authentication_events(db, settings)
+                )
+            }
+        except Exception:
+            db.rollback()
+            raise
+
+
 @activity.defn(name="list_workspace_retention_cleanup_payloads_activity")
 async def list_workspace_retention_cleanup_payloads_activity() -> list[Payload]:
     """Return active tenant principals for a worker-owned retention sweep."""

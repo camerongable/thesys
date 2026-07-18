@@ -82,6 +82,11 @@ class RetentionCleanupWorkflow:
 
     @workflow.run
     async def run(self) -> dict[str, int]:
+        unscoped_result = await workflow.execute_activity(
+            "purge_unscoped_authentication_events_activity",
+            start_to_close_timeout=DEFAULT_ACTIVITY_TIMEOUT,
+            retry_policy=_retry_policy(),
+        )
         payloads = await workflow.execute_activity(
             "list_workspace_retention_cleanup_payloads_activity",
             start_to_close_timeout=DEFAULT_ACTIVITY_TIMEOUT,
@@ -89,7 +94,12 @@ class RetentionCleanupWorkflow:
         )
         for payload in payloads:
             await _activity("run_workspace_retention_cleanup_activity", payload)
-        return {"workspaces_processed": len(payloads)}
+        return {
+            "workspaces_processed": len(payloads),
+            "unscoped_authentication_events_deleted": int(
+                unscoped_result["unscoped_authentication_events_deleted"]
+            ),
+        }
 
 
 async def _activity(

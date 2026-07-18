@@ -29,8 +29,11 @@ RLS remains in force for every destructive operation. It retains run status,
 timing, token, and cost fields while removing expired prompts, outputs, errors,
 local LangSmith references, and workspace-attributable audit/security events.
 Active session revocations and unscoped pre-authentication failures are
-intentionally excluded: the former remain authentication controls, and the
-latter require a separately authorized platform-maintenance path.
+handled differently: session revocations remain authentication controls, while
+the scheduled worker purges expired unscoped failures through a PostgreSQL
+`SECURITY DEFINER` function. That function is owned by the migration role,
+matches only rows without a workspace or user, and grants execution only to
+`thesys_worker`.
 
 Temporal namespace history is reconciled to `RETENTION_TEMPORAL_HISTORY_DAYS`
 when `TEMPORAL_NAMESPACE_RETENTION_RECONCILE_ENABLED=true`; the worker fails

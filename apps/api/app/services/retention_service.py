@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
@@ -298,6 +298,35 @@ def purge_expired_local_records(
         audit_events_deleted=_affected_rows(audit_result),
         security_events_deleted=_affected_rows(security_result),
     )
+
+
+def purge_expired_unscoped_authentication_events(
+    db: Session,
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+) -> int:
+    """Delete expired pre-authentication events through the worker-only path."""
+    if settings.database_runtime_role != "worker":
+        raise RuntimeError("Unscoped authentication-event cleanup requires the worker role.")
+    current_time = now or datetime.now(UTC)
+    cutoff = _retention_cutoff(settings, RetentionAsset.SECURITY_EVENT, current_time)
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        deleted = db.scalar(select(func.purge_expired_pre_authentication_events(cutoff)))
+        db.commit()
+        return int(deleted or 0)
+
+    result = db.execute(
+        delete(AuthenticationEvent)
+        .where(
+            AuthenticationEvent.workspace_id.is_(None),
+            AuthenticationEvent.user_id.is_(None),
+            AuthenticationEvent.created_at <= cutoff,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    db.commit()
+    return _affected_rows(result)
 
 
 def _expired_source(source: EvidenceSource, now: datetime) -> bool:

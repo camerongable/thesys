@@ -1,12 +1,13 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.db.models import (
     AIRun,
     AIStep,
@@ -247,6 +248,42 @@ def test_local_retention_cleanup_removes_expired_payloads_but_keeps_run_accounti
     assert db_session.get(AuditEvent, expired_audit_id) is None
     assert db_session.get(AuthenticationEvent, expired_security_id) is None
     assert db_session.get(SessionRevocation, session_revocation_id) is not None
+
+
+def test_worker_only_cleanup_purges_expired_unscoped_authentication_events(
+    db_session: Session,
+) -> None:
+    expired_event = AuthenticationEvent(
+        event_type="token_validation_failure",
+        authentication_method="oidc",
+        reason_code="token_rejected",
+        created_at=datetime.now(UTC) - timedelta(days=800),
+    )
+    current_event = AuthenticationEvent(
+        event_type="login_failure",
+        authentication_method="oidc",
+        reason_code="credentials_missing",
+    )
+    db_session.add_all((expired_event, current_event))
+    db_session.commit()
+    expired_event_id = expired_event.id
+    current_event_id = current_event.id
+
+    with pytest.raises(RuntimeError, match="worker role"):
+        retention_service.purge_expired_unscoped_authentication_events(
+            db_session,
+            Settings(database_runtime_role="api"),
+        )
+
+    assert (
+        retention_service.purge_expired_unscoped_authentication_events(
+            db_session,
+            Settings(database_runtime_role="worker"),
+        )
+        == 1
+    )
+    assert db_session.get(AuthenticationEvent, expired_event_id) is None
+    assert db_session.get(AuthenticationEvent, current_event_id) is not None
 
 
 def _owner_auth_context(db: Session, source: EvidenceSource) -> AuthContext:
