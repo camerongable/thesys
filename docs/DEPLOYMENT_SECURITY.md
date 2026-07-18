@@ -58,6 +58,13 @@ for the affected membership. Requests for a member outside the caller's
 workspace return the same 404 as an unknown member while recording a
 tenant-scoped `cross_tenant_access_attempt` without the target identifier.
 
+All project-scoped services resolve the project through the shared workspace
+filter. A failed project lookup returns `404 Project not found` and emits a
+tenant-attributable `cross_tenant_access_attempt` with reason
+`project_scope_denied`. Forced RLS intentionally makes unknown and
+other-workspace UUIDs indistinguishable, so the event contains neither the
+requested identifier nor a claim that it belongs to another tenant.
+
 ## Database Roles And RLS
 
 | Role | Runtime use | Privileges |

@@ -309,15 +309,13 @@ def _record_cross_tenant_member_attempt(
     )
     if exists_outside_workspace is None:
         return
-    auth_audit_service.record_authentication_event(
+    from app.core.auth import record_cross_tenant_access_attempt
+
+    record_cross_tenant_access_attempt(
         db,
-        event_type="cross_tenant_access_attempt",
-        authentication_method=auth.principal.authentication_method,
+        auth,
         reason_code="workspace_member_outside_scope",
-        workspace_id=auth.workspace_id,
-        user_id=auth.user_id,
     )
-    db.commit()
 
 
 def _normalize_role(role: str | None) -> str | None:

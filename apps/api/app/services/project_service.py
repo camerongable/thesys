@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.auth import AuthContext, require_permission
+from app.core.auth import AuthContext, record_cross_tenant_access_attempt, require_permission
 from app.core.config import Settings
 from app.db.models import EvidenceSource, Project, ProjectThesis
 from app.schemas.projects import ProjectCreate, ProjectUpdate
@@ -43,6 +43,8 @@ def get_project(db: Session, auth: AuthContext, project_id: uuid.UUID) -> Projec
         )
     )
     if project is None:
+        # RLS intentionally makes unknown and out-of-workspace IDs indistinguishable.
+        record_cross_tenant_access_attempt(db, auth, reason_code="project_scope_denied")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
     return project
 

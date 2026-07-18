@@ -227,6 +227,24 @@ def require_workspace_owner(auth: AuthContext) -> None:
     )
 
 
+def record_cross_tenant_access_attempt(
+    db: Session,
+    auth: AuthContext,
+    *,
+    reason_code: str,
+) -> None:
+    """Persist an attributed, credential-free scope-denial event."""
+
+    _persist_authentication_event(
+        db,
+        event_type="cross_tenant_access_attempt",
+        authentication_method=auth.principal.authentication_method,
+        reason_code=reason_code,
+        workspace_id=auth.workspace_id,
+        user_id=auth.user_id,
+    )
+
+
 def _record_authentication_failure(
     db: Session,
     *,
