@@ -474,9 +474,15 @@ current verdict, next action, evidence health, validation, and decision state.
   weakly related citations are withheld and surfaced as missing support. Mere
   retrieval drilldowns are explicitly `weak`, and the guide prompt/cache version
   is bumped to prevent legacy source-ID-only outputs from being replayed.
+- [x] Make the prompt-attack detector runtime posture explicit with a central
+  `GUARDRAIL_ATTACK_DETECTOR` selector for the deterministic baseline or one
+  opt-in Prompt Guard, NeMo Guardrails, or Llama Guard adapter. An unavailable
+  selected adapter cannot silently allow side effects: it disables tools and
+  memory writes, records redacted detector-only metadata, and emits
+  `guardrail_service_unavailable` before the guide can invoke proposals or
+  retrieval.
 - [ ] Complete the remaining Sprint 64 acceptance audit, including the explicit
-  embedding-provider scope, optional classifier adapter runtime posture, and
-  documented detector-unavailability behavior before claiming the full gateway.
+  embedding-provider scope before claiming the full gateway.
 
 ## Sprint 64 Verification
 
@@ -509,11 +515,13 @@ current verdict, next action, evidence health, validation, and decision state.
   xfailed, 12 warnings`), including exact source/chunk/quote verification for
   normal and streamed guide responses, plus rejected unrelated or missing-chunk
   citations.
+- [x] Detector-unavailability checkpoint passed: the selected optional adapter
+  restricts tools and memory writes, guide proposal/retrieval is withheld, and
+  `guardrail_service_unavailable` is recorded without request content.
 
 ## Next Sprint
 
-Continue Sprint 64 with an acceptance audit of embedding-provider scope,
-optional classifier adapters, and detector-failure behavior.
+Continue Sprint 64 with an acceptance audit of embedding-provider scope.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

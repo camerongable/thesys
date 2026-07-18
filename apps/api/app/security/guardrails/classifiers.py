@@ -66,10 +66,15 @@ class DetectionResult:
     detector_version: str
     reasons: tuple[str, ...]
     normalized_text: str
+    detector_unavailable: bool = False
 
 
 class PromptAttackDetector(Protocol):
     def classify(self, text: str, context: DetectionContext) -> DetectionResult: ...
+
+
+class GuardrailDetectorUnavailableError(RuntimeError):
+    """Raised when a configured optional prompt-attack detector cannot run."""
 
 
 class DeterministicHeuristicDetector:
@@ -137,3 +142,23 @@ def _action_for_score(score: float, source: str) -> GuardrailAction:
     if score >= 0.4:
         return "allow_with_restrictions"
     return "allow"
+
+
+def unavailable_detection(
+    text: str,
+    context: DetectionContext,
+    *,
+    detector: str,
+    reason: str = "guardrail_detector_unavailable",
+) -> DetectionResult:
+    """Restrict side effects when detector availability cannot be established."""
+    return DetectionResult(
+        category="benign",
+        score=1.0,
+        action="allow_with_restrictions",
+        detector=detector,
+        detector_version="unavailable",
+        reasons=(reason,),
+        normalized_text=inspect_text(text).normalized_text,
+        detector_unavailable=True,
+    )

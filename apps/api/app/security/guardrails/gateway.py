@@ -12,7 +12,9 @@ from app.security.guardrails.classifiers import (
     DetectionContext,
     DetectionResult,
     DeterministicHeuristicDetector,
+    GuardrailDetectorUnavailableError,
     PromptAttackDetector,
+    unavailable_detection,
 )
 from app.security.guardrails.output_checks import OutputEvaluation, sanitize_markdown
 from app.security.guardrails.policies import GUARDRAIL_SYSTEM_INSTRUCTION, GuardrailDecision, decide
@@ -38,7 +40,7 @@ class GuardrailGateway:
         detector: PromptAttackDetector | None = None,
     ) -> None:
         self._settings = settings
-        self._detector = detector or DeterministicHeuristicDetector()
+        self._detector = detector or _configured_detector(settings.guardrail_attack_detector)
 
     def evaluate_user_input(self, text: str, *, workflow: str = "model_call") -> GuardrailDecision:
         return self._evaluate(text, DetectionContext(source="user_input", workflow=workflow))
@@ -120,7 +122,39 @@ class GuardrailGateway:
         return sanitize_markdown(markdown, allow_http=_allow_http(self._settings))
 
     def _evaluate(self, text: str, context: DetectionContext) -> GuardrailDecision:
-        return decide(self._detector.classify(text, context))
+        try:
+            detection = self._detector.classify(text, context)
+        except GuardrailDetectorUnavailableError:
+            detection = unavailable_detection(
+                text,
+                context,
+                detector=getattr(self._detector, "name", type(self._detector).__name__),
+            )
+        except Exception:
+            detection = unavailable_detection(
+                text,
+                context,
+                detector=getattr(self._detector, "name", type(self._detector).__name__),
+            )
+        return decide(detection)
+
+
+def _configured_detector(name: str) -> PromptAttackDetector:
+    if name == "deterministic":
+        return DeterministicHeuristicDetector()
+    if name == "prompt_guard":
+        from app.security.guardrails.providers.prompt_guard import PromptGuardDetector
+
+        return PromptGuardDetector()
+    if name == "nemo_guardrails":
+        from app.security.guardrails.providers.nemo_guardrails import NeMoGuardrailsAdapter
+
+        return NeMoGuardrailsAdapter()
+    if name == "llama_guard":
+        from app.security.guardrails.providers.llama_guard import LlamaGuardAdapter
+
+        return LlamaGuardAdapter()
+    raise ValueError(f"Unsupported guardrail detector: {name}")
 
 
 def _blocked_detail(detection: DetectionResult) -> str:

@@ -6,6 +6,7 @@ from app.ai import litellm_client
 from app.ai.litellm_client import ChatMessage, LiteLLMClient, LiteLLMClientError
 from app.core.config import Settings
 from app.security.guardrails import GuardrailBlockedError, GuardrailGateway
+from app.security.guardrails.events import security_event_type
 
 
 def test_gateway_distinguishes_direct_and_indirect_injection() -> None:
@@ -88,6 +89,20 @@ def test_gateway_accepts_only_retrieved_citations() -> None:
         retrieved_source_ids={"source-1"},
         retrieved_chunk_ids={"chunk-1"},
     )
+
+
+def test_gateway_restricts_side_effects_when_configured_detector_is_unavailable() -> None:
+    gateway = GuardrailGateway(Settings(guardrail_attack_detector="prompt_guard"))
+
+    decision = gateway.evaluate_user_input("Create a validation plan for this project.")
+
+    assert decision.should_block is False
+    assert decision.tools_allowed is False
+    assert decision.memory_writes_allowed is False
+    assert decision.detection.detector == "prompt_guard"
+    assert decision.detection.detector_unavailable is True
+    assert decision.detection.reasons == ("guardrail_detector_unavailable",)
+    assert security_event_type(decision.detection) == "guardrail_service_unavailable"
 
 
 def test_litellm_client_blocks_attack_before_creating_http_client(

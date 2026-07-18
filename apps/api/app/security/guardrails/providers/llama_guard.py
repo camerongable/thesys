@@ -3,10 +3,13 @@
 from app.security.guardrails.classifiers import (
     DetectionContext,
     DetectionResult,
+    GuardrailDetectorUnavailableError,
     PromptAttackDetector,
 )
 
 
 class LlamaGuardAdapter(PromptAttackDetector):
+    name = "llama_guard"
+
     def classify(self, text: str, context: DetectionContext) -> DetectionResult:
-        raise RuntimeError("Llama Guard adapter is not configured.")
+        raise GuardrailDetectorUnavailableError("Llama Guard adapter is not configured.")

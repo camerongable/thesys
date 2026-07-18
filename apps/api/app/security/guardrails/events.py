@@ -22,6 +22,8 @@ _EVENT_BY_CATEGORY = {
 
 def security_event_type(detection: DetectionResult) -> str | None:
     """Return the event name only for actionable, non-benign detections."""
+    if detection.detector_unavailable:
+        return "guardrail_service_unavailable"
     return _EVENT_BY_CATEGORY.get(detection.category)
 
 
@@ -42,6 +44,7 @@ def detection_result_metadata(detection: DetectionResult) -> dict[str, Any]:
         "action": detection.action,
         "detector": detection.detector,
         "detector_version": detection.detector_version,
+        "detector_unavailable": detection.detector_unavailable,
         "reasons": list(detection.reasons),
     }
 

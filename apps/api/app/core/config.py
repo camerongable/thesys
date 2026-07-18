@@ -160,6 +160,15 @@ class Settings(BaseSettings):
         default="emergency",
         validation_alias="LLM_FALLBACK_POLICY",
     )
+    guardrail_attack_detector: Literal[
+        "deterministic",
+        "prompt_guard",
+        "nemo_guardrails",
+        "llama_guard",
+    ] = Field(
+        default="deterministic",
+        validation_alias="GUARDRAIL_ATTACK_DETECTOR",
+    )
     ai_workflow_max_tokens: int = Field(
         default=100_000,
         ge=1_000,

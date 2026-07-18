@@ -3,10 +3,13 @@
 from app.security.guardrails.classifiers import (
     DetectionContext,
     DetectionResult,
+    GuardrailDetectorUnavailableError,
     PromptAttackDetector,
 )
 
 
 class NeMoGuardrailsAdapter(PromptAttackDetector):
+    name = "nemo_guardrails"
+
     def classify(self, text: str, context: DetectionContext) -> DetectionResult:
-        raise RuntimeError("NeMo Guardrails adapter is not configured.")
+        raise GuardrailDetectorUnavailableError("NeMo Guardrails adapter is not configured.")

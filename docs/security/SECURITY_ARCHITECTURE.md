@@ -47,6 +47,15 @@ central gates in this target flow.
 
 - Unknown identity, workspace, role, tool, provider, model, data class, or policy
   results in denial.
+- The guardrail detector is centrally selected with `GUARDRAIL_ATTACK_DETECTOR`.
+  The default `deterministic` detector is dependency-free; `prompt_guard`,
+  `nemo_guardrails`, and `llama_guard` are opt-in adapter modes. If a selected
+  optional detector is not configured or fails at runtime, the gateway does not
+  treat the request as benign: it preserves a non-blocking response path but
+  disables tools and durable-memory writes, emits a redacted
+  `guardrail_service_unavailable` audit event, and records only detector
+  metadata. A deployment must wire and monitor exactly one optional adapter
+  before relying on it as an additional classifier.
 - Unclassified sources remain quarantined and non-retrievable.
 - Model output failing schema, citation, or DLP validation is rejected or safely
   regenerated; it is never executed as policy.

@@ -353,6 +353,40 @@ def test_guide_guardrail_blocks_tools_and_records_injection_audit_event(
     assert audit.event_metadata["category"] == "direct_prompt_injection"
 
 
+def test_guide_disables_tools_and_records_detector_unavailability(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("GUARDRAIL_ATTACK_DETECTOR", "prompt_guard")
+    get_settings.cache_clear()
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Guide detector outage idea"},
+    ).json()["id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/guide/chat",
+        json={"message": "Create a validation plan and apply it to the project."},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "cannot process that request" in body["answer"]
+    assert body["proposal_invocation_id"] is None
+    assert db_session.scalar(select(ToolInvocation)) is None
+    step = db_session.scalar(select(AIStep).where(AIStep.step_name == "guide_intent_guardrail"))
+    assert step is not None
+    assert step.output_json["guardrail"]["detector_unavailable"] is True
+    assert step.output_json["guardrail"]["tools_allowed"] is False
+    audit = db_session.scalar(
+        select(AuditEvent).where(AuditEvent.event_type == "guardrail_service_unavailable")
+    )
+    assert audit is not None
+    assert audit.event_metadata["detector"] == "prompt_guard"
+    assert "Create a validation plan" not in str(audit.event_metadata)
+
+
 def test_guide_stream_guardrail_blocks_tools_before_proposal_or_retrieval(
     client: TestClient,
     db_session: Session,
