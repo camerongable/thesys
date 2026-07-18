@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.models import AIRun, AIStep, EvidenceChunk, EvidenceSource
 from app.schemas.evidence import EvidenceRetrievalResultRead, RetrievalQueryPlanRead
-from app.services import evidence_service, multimodal_extraction_service, retrieval_service
+from app.services import (
+    evidence_service,
+    multimodal_extraction_service,
+    retrieval_service,
+    secure_file_parser_service,
+)
 
 
 def _ingestion_states(source: EvidenceSource) -> list[str]:
@@ -521,23 +526,19 @@ def test_text_pdf_uses_pypdf_without_multimodal_fallback(
 
     monkeypatch.setattr(multimodal_extraction_service, "extract_file", fail_extract)
 
-    class FakePage:
-        def extract_text(self) -> str:
-            return (
+    monkeypatch.setattr(
+        secure_file_parser_service,
+        "extract_pdf",
+        lambda _settings, *, body: secure_file_parser_service.PDFExtraction(
+            page_texts=[
                 "Coaches compare pricing tiers.\n"
                 "| Plan | Price | Buyer |\n"
                 "| --- | --- | --- |\n"
                 "| Starter | $29 | Solo coach |\n"
                 "| Pro | $99 | Studio |\n"
-            )
-
-    class FakePdfReader:
-        def __init__(self, body, **_kwargs) -> None:
-            self.pages = [FakePage()]
-            self.is_encrypted = False
-            self.trailer = {}
-
-    monkeypatch.setattr(evidence_service, "PdfReader", FakePdfReader)
+            ]
+        ),
+    )
     create_response = client.post("/api/projects", json={"name": "PDF evidence"})
     project_id = create_response.json()["id"]
 
@@ -581,16 +582,6 @@ def test_low_text_pdf_routes_to_multimodal_fallback_when_enabled(
     get_settings.cache_clear()
     calls: list[dict[str, str]] = []
 
-    class FakePage:
-        def extract_text(self) -> str:
-            return ""
-
-    class FakePdfReader:
-        def __init__(self, body, **_kwargs) -> None:
-            self.pages = [FakePage()]
-            self.is_encrypted = False
-            self.trailer = {}
-
     def fake_extract(settings, *, filename: str, content_type: str, body: bytes, media_type: str):
         calls.append(
             {
@@ -620,7 +611,11 @@ def test_low_text_pdf_routes_to_multimodal_fallback_when_enabled(
             total_cost=Decimal("0"),
         )
 
-    monkeypatch.setattr(evidence_service, "PdfReader", FakePdfReader)
+    monkeypatch.setattr(
+        secure_file_parser_service,
+        "extract_pdf",
+        lambda _settings, *, body: secure_file_parser_service.PDFExtraction(page_texts=[""]),
+    )
     monkeypatch.setattr(multimodal_extraction_service, "extract_file", fake_extract)
     create_response = client.post("/api/projects", json={"name": "Scanned PDF evidence"})
     project_id = create_response.json()["id"]

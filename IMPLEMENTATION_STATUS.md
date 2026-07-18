@@ -324,9 +324,16 @@ current verdict, next action, evidence health, validation, and decision state.
   extraction, classification, optional PII review, embedding, and retrieval.
   The history preserves reprocessing attempts and records terminal quarantined
   or failed outcomes; invalid terminal transitions are rejected.
-- [ ] Complete the remaining file parser/content resource controls: extraction
-  timeout and memory bounds, decompression-ratio limits, unsupported-archive
-  rejection, and image metadata stripping where appropriate.
+- [x] Parse PDFs in a spawned, isolated worker before object storage. The worker
+  enforces configured timeout, page, extracted-character, and Linux address-space
+  limits; malformed, resource-limited, encrypted, or active-content PDFs fail
+  closed before persistence. macOS development workers retain the timeout and
+  character bounds because its Python address-space reservation is incompatible
+  with `RLIMIT_AS`.
+- [x] Reject ZIP and other unsupported archive content before malware scanning,
+  storage, or parsing through the strict upload extension/MIME allowlist.
+- [ ] Complete the remaining file parser/content controls: decompression-ratio
+  limits and image metadata stripping where appropriate.
 - [x] Require extension, declared MIME, and independently detected content MIME
   to agree before any upload reaches malware scanning, storage, or parsing.
   `python-magic` is the primary detector; an unavailable binding falls back to
@@ -404,11 +411,14 @@ current verdict, next action, evidence health, validation, and decision state.
   xfailed, 9 warnings`), covering complete source histories, reprocessing,
   failed URL ingestion, scanner quarantine, PDF preflight, and rejected invalid
   terminal transitions.
+- [x] Bounded PDF parser checkpoint passed (`152 passed, 1 skipped, 2 xfailed,
+  10 warnings`), covering isolated valid parsing, resource-limit rejection before
+  storage, PDF security preflight, ingestion, and broader security boundaries.
 
 ## Next Sprint
 
-Continue V1 Sprint 63 with the remaining file parser/content resource controls,
-then begin Sprint 64's central policy guardrail work.
+Continue V1 Sprint 63 with decompression-ratio limits and image metadata
+stripping, then begin Sprint 64's central policy guardrail work.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

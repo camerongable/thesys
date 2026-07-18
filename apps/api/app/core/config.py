@@ -377,6 +377,18 @@ class Settings(BaseSettings):
         le=10_000,
         validation_alias="MAX_PDF_PAGES",
     )
+    pdf_extraction_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        validation_alias="PDF_EXTRACTION_TIMEOUT_SECONDS",
+    )
+    pdf_extraction_memory_mb: int = Field(
+        default=256,
+        ge=64,
+        le=4096,
+        validation_alias="PDF_EXTRACTION_MEMORY_MB",
+    )
     embedding_model: str = Field(
         default="deterministic-hash-embedding-1536",
         validation_alias="EMBEDDING_MODEL",

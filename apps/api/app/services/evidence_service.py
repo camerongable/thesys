@@ -3,13 +3,11 @@
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from io import BytesIO
 from time import perf_counter
 from typing import Any
 
 import httpx
 from fastapi import HTTPException, UploadFile, status
-from pypdf import PdfReader
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
@@ -46,6 +44,7 @@ from app.services import (
     project_service,
     pseudonymization_service,
     retention_service,
+    secure_file_parser_service,
     secure_ingestion_state_service,
     source_provenance_service,
 )
@@ -447,7 +446,7 @@ def add_file_source(
         raise EvidenceIngestionError("File evidence ingestion failed.")
 
     try:
-        _preflight_file_content(settings, content_type=content_type, body=body)
+        pdf_extraction = _preflight_file_content(settings, content_type=content_type, body=body)
     except EvidenceSecurityError as exc:
         _record_ingestion_security_event(
             db,
@@ -546,6 +545,7 @@ def add_file_source(
             filename=filename,
             content_type=content_type,
             body=body,
+            pdf_extraction=pdf_extraction,
         )
     except Exception as exc:
         _mark_source_failed(db, source, str(exc))
@@ -1416,6 +1416,7 @@ def _parse_file(
     filename: str,
     content_type: str,
     body: bytes,
+    pdf_extraction: secure_file_parser_service.PDFExtraction | None = None,
 ) -> ParsedSource:
     """Route supported uploads through text, PDF, image, or multimodal extraction."""
     lowered = filename.casefold()
@@ -1440,11 +1441,12 @@ def _parse_file(
         )
 
     if content_type == "application/pdf" or lowered.endswith(".pdf"):
-        try:
-            reader = PdfReader(BytesIO(body))
-        except Exception as exc:
-            raise EvidenceIngestionError("PDF could not be parsed safely.") from exc
-        page_texts = [page.extract_text() or "" for page in reader.pages]
+        if pdf_extraction is None:
+            try:
+                pdf_extraction = secure_file_parser_service.extract_pdf(settings, body=body)
+            except secure_file_parser_service.PDFParserError as exc:
+                raise EvidenceIngestionError("PDF could not be parsed safely.") from exc
+        page_texts = pdf_extraction.page_texts
         text = "\n\n".join(page_texts)
         normalized = _normalize_text(text)
         metadata = _pdf_text_metadata(
@@ -1507,65 +1509,22 @@ def _parse_file(
     )
 
 
-def _preflight_file_content(settings: Settings, *, content_type: str, body: bytes) -> None:
-    if content_type != "application/pdf":
-        return
-    try:
-        reader = PdfReader(BytesIO(body), strict=False)
-    except Exception as exc:
-        raise EvidenceSecurityError("PDF could not be parsed safely.") from exc
-    if reader.is_encrypted:
-        raise EvidenceSecurityError("Password-protected PDFs are not allowed.")
-    try:
-        contains_active_content = _pdf_contains_active_content(reader.trailer.get("/Root"))
-    except Exception as exc:
-        raise EvidenceSecurityError("PDF active content could not be inspected safely.") from exc
-    if contains_active_content:
-        raise EvidenceSecurityError("PDF active content is not allowed.")
-    try:
-        page_count = len(reader.pages)
-    except Exception as exc:
-        raise EvidenceSecurityError("PDF page structure could not be inspected safely.") from exc
-    if page_count > settings.max_pdf_pages:
-        raise EvidenceSecurityError(
-            f"PDF exceeds {settings.max_pdf_pages} page limit."
-        )
-
-
-def _pdf_contains_active_content(
-    value: object,
+def _preflight_file_content(
+    settings: Settings,
     *,
-    seen: set[int] | None = None,
-    depth: int = 0,
-) -> bool:
-    active_keys = {
-        "/AA",
-        "/EmbeddedFiles",
-        "/JavaScript",
-        "/JS",
-        "/Launch",
-        "/OpenAction",
-        "/RichMedia",
-    }
-    if depth > 64:
-        return True
-    seen = seen or set()
-    if hasattr(value, "get_object"):
-        value = value.get_object()
-    value_id = id(value)
-    if value_id in seen:
-        return False
-    seen.add(value_id)
-    if isinstance(value, dict):
-        if active_keys.intersection(str(key) for key in value):
-            return True
-        return any(
-            _pdf_contains_active_content(item, seen=seen, depth=depth + 1)
-            for item in value.values()
-        )
-    if isinstance(value, (list, tuple)):
-        return any(_pdf_contains_active_content(item, seen=seen, depth=depth + 1) for item in value)
-    return False
+    content_type: str,
+    body: bytes,
+) -> secure_file_parser_service.PDFExtraction | None:
+    if content_type != "application/pdf":
+        return None
+    try:
+        return secure_file_parser_service.extract_pdf(settings, body=body)
+    except secure_file_parser_service.PDFSecurityError as exc:
+        raise EvidenceSecurityError(str(exc)) from exc
+    except secure_file_parser_service.PDFResourceLimitError as exc:
+        raise EvidenceSecurityError(str(exc)) from exc
+    except secure_file_parser_service.PDFParserError as exc:
+        raise EvidenceSecurityError("PDF could not be parsed safely.") from exc
 
 
 def _validate_fetch_target(url: str, settings: Settings | None = None) -> None:
