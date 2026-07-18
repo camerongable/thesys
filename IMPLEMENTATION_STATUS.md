@@ -291,6 +291,10 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Require approved source classification/security metadata and approved chunk
   eligibility in both retrieval and re-embedding paths. Missing metadata fails
   closed rather than being treated as legacy content.
+- [x] Add a ClamAV-compatible streaming scanner adapter and require it in hosted
+  configuration. Disabled, unavailable, and infected scanner outcomes create a
+  metadata-only quarantined source plus a high-risk audit event before object
+  storage, parsing, chunking, or embedding.
 - [ ] Add Presidio-backed detection, encrypted project-local reidentification
   mappings, and separately authorized reidentification.
 - [ ] Enforce the remaining secure-ingestion state machine, malware quarantine,
@@ -308,6 +312,9 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Retrieval/re-embedding security-gate checkpoint passed (`28 passed,
   1 warning`), covering blocked source and chunk metadata plus normal approved
   retrieval.
+- [x] Upload quarantine checkpoint passed (`36 passed, 5 warnings`), covering
+  unavailable and infected scanners, no object/chunk persistence, and existing
+  clean upload behavior.
 
 ## Next Sprint
 

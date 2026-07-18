@@ -38,6 +38,11 @@ services:
     volumes:
       - minio_data:/data
 
+  clamav:
+    image: clamav/clamav:stable
+    ports:
+      - "3310:3310"
+
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
     command: ["--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "4000"]
@@ -108,6 +113,9 @@ services:
       S3_RETENTION_DAYS: ${S3_RETENTION_DAYS:-30}
       OBJECT_STORAGE_MODE: ${OBJECT_STORAGE_MODE:-s3}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
+      MALWARE_SCANNER_MODE: clamav
+      MALWARE_SCANNER_HOST: clamav
+      MALWARE_SCANNER_PORT: 3310
       URL_FETCH_TIMEOUT_SECONDS: ${URL_FETCH_TIMEOUT_SECONDS:-15}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-deterministic}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-deterministic-hash-embedding-1536}
@@ -159,6 +167,8 @@ services:
       redis:
         condition: service_healthy
       minio:
+        condition: service_started
+      clamav:
         condition: service_started
       litellm:
         condition: service_started

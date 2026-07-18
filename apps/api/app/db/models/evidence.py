@@ -31,7 +31,7 @@ class EvidenceSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="ck_evidence_sources_source_type",
         ),
         CheckConstraint(
-            "ingestion_status in ('pending','processing','ready','failed')",
+            "ingestion_status in ('pending','processing','ready','failed','quarantined')",
             name="ck_evidence_sources_ingestion_status",
         ),
     )

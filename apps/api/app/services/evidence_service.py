@@ -30,6 +30,7 @@ from app.services import (
     ai_run_service,
     embedding_service,
     governance_service,
+    malware_scanning_service,
     multimodal_extraction_service,
     object_storage_service,
     project_service,
@@ -413,6 +414,20 @@ def add_file_source(
     filename = upload_validation.filename
     content_type = upload_validation.content_type
     source_id = uuid.uuid4()
+    scan_result = malware_scanning_service.scan_upload(settings, body)
+    if scan_result.status is not malware_scanning_service.MalwareScanStatus.CLEAN:
+        _quarantine_file_upload(
+            db,
+            auth,
+            project_id=project_id,
+            source_id=source_id,
+            filename=filename,
+            content_type=content_type,
+            size_bytes=len(body),
+            scan_result=scan_result,
+        )
+        raise EvidenceIngestionError("File evidence ingestion failed.")
+
     try:
         storage_key = object_storage_service.put_evidence_object(
             settings,
@@ -444,8 +459,16 @@ def add_file_source(
         workspace_id=auth.workspace_id,
         project_id=project_id,
         source_type="file",
-        title=filename,
+        title=data_protection_service.redact_for_model(filename, project_id=project_id),
         object_storage_key=storage_key,
+        source_metadata={
+            "content_type": content_type,
+            "security": {
+                "security_status": "quarantined",
+                "classification_status": "pending",
+                "malware_status": "clean",
+            },
+        },
         ingestion_status="processing",
         created_by=auth.user_id,
     )
@@ -809,13 +832,19 @@ def _process_source_text(
             or base_metadata.get("text_extraction")
             or "normalized_text"
         )
+        existing_security = (source.source_metadata or {}).get("security")
+        malware_status = (
+            existing_security.get("malware_status")
+            if isinstance(existing_security, dict)
+            else "not_scanned"
+        )
         source_security_metadata = {
             "data_classification": protected_source_text.data_classification.value,
             "pii_status": protected_source_text.pii_status,
             "pii_entity_types": list(protected_source_text.pii_entity_types),
             "security_status": "approved",
             "classification_status": "approved",
-            "malware_status": "not_scanned",
+            "malware_status": malware_status,
             "sanitization_version": protected_source_text.sanitization_version,
         }
         processed_metadata = _merge_metadata(
@@ -1239,6 +1268,61 @@ def _validate_fetch_target(url: str, settings: Settings | None = None) -> None:
         validate_url_fetch_target(url, settings)
     except SecurityValidationError as exc:
         raise EvidenceSecurityError(exc.reason) from exc
+
+
+def _quarantine_file_upload(
+    db: Session,
+    auth: AuthContext,
+    *,
+    project_id: uuid.UUID,
+    source_id: uuid.UUID,
+    filename: str,
+    content_type: str,
+    size_bytes: int,
+    scan_result: malware_scanning_service.MalwareScanResult,
+) -> None:
+    source = EvidenceSource(
+        id=source_id,
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        source_type="file",
+        title=data_protection_service.redact_for_model(filename, project_id=project_id),
+        ingestion_status="quarantined",
+        ingestion_error="File was quarantined before parsing.",
+        source_metadata={
+            "content_type": content_type,
+            "file_size_bytes": size_bytes,
+            "security": {
+                "data_classification": "restricted",
+                "pii_status": "not_scanned",
+                "pii_entity_types": [],
+                "security_status": "quarantined",
+                "classification_status": "pending",
+                "malware_status": scan_result.status.value,
+            },
+        },
+        created_by=auth.user_id,
+    )
+    db.add(source)
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="evidence_upload_quarantined",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="evidence_source",
+        entity_id=source_id,
+        risk_level="high",
+        summary="Quarantined an evidence upload before parsing.",
+        metadata={
+            "content_type": content_type,
+            "size_bytes": size_bytes,
+            "malware_status": scan_result.status.value,
+            "signature": scan_result.signature,
+            "reason": scan_result.reason,
+        },
+    )
+    db.commit()
 
 
 def _record_ingestion_security_event(

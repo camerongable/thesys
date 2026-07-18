@@ -16,6 +16,7 @@ from app.services.security_policy_service import reset_policy_state
 @pytest.fixture(autouse=True)
 def force_llm_stub(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     monkeypatch.setenv("LLM_STUB_MODE", "always")
+    monkeypatch.setenv("MALWARE_SCANNER_MODE", "deterministic")
     get_settings.cache_clear()
     reset_policy_state()
     try:

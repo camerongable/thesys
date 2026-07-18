@@ -314,6 +314,31 @@ def test_session_revocation_migration_forces_rls_and_immutable_runtime_grants(mo
     assert "UPDATE" not in combined and "DELETE" not in combined
 
 
+def test_evidence_quarantine_migration_allows_the_fail_closed_status(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0033_evidence_quarantine.py"
+    spec = importlib.util.spec_from_file_location("evidence_quarantine_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    constraints: list[tuple[object, ...]] = []
+    monkeypatch.setattr(migration.op, "drop_constraint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "create_check_constraint",
+        lambda *args, **_kwargs: constraints.append(args),
+    )
+
+    migration.upgrade()
+
+    assert constraints == [
+        (
+            migration.CONSTRAINT_NAME,
+            migration.TABLE_NAME,
+            "ingestion_status in ('pending','processing','ready','failed','quarantined')",
+        )
+    ]
+
+
 def test_application_credentials_are_read_only_through_secret_provider() -> None:
     sensitive_settings = {
         "auth_jwt_secret",

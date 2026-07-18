@@ -256,6 +256,23 @@ class Settings(BaseSettings):
         validation_alias="LOCAL_OBJECT_STORAGE_PATH",
     )
     max_upload_mb: int = Field(default=10, validation_alias="MAX_UPLOAD_MB")
+    malware_scanner_mode: Literal["clamav", "deterministic", "disabled"] = Field(
+        default="clamav",
+        validation_alias="MALWARE_SCANNER_MODE",
+    )
+    malware_scanner_host: str = Field(default="clamav", validation_alias="MALWARE_SCANNER_HOST")
+    malware_scanner_port: int = Field(
+        default=3310,
+        ge=1,
+        le=65535,
+        validation_alias="MALWARE_SCANNER_PORT",
+    )
+    malware_scanner_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        le=60,
+        validation_alias="MALWARE_SCANNER_TIMEOUT_SECONDS",
+    )
     url_fetch_timeout_seconds: float = Field(
         default=15.0,
         validation_alias="URL_FETCH_TIMEOUT_SECONDS",
@@ -627,6 +644,10 @@ class Settings(BaseSettings):
                 raise ValueError("Hosted application roles must not create S3 buckets.")
             if not self.s3_verify_bucket_security:
                 raise ValueError("Hosted S3 bucket security verification is required.")
+            if self.malware_scanner_mode != "clamav":
+                raise ValueError("Hosted environments must use MALWARE_SCANNER_MODE=clamav.")
+            if not self.malware_scanner_host.strip():
+                raise ValueError("MALWARE_SCANNER_HOST is required for hosted environments.")
             self.auth_jwt_secret = None
             self.litellm_api_key = ""
             self.openai_api_key = None
