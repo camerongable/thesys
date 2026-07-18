@@ -32,6 +32,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { SafeExternalLink } from "@/components/safe-external-link";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   approveAgenticResearchMemo,
@@ -3774,15 +3775,13 @@ function ResearchHistoryPanel({ projectId }: { projectId: string }) {
                     </span>
                   ) : null}
                   {sprintHistory.sprint.langsmith_trace_url ? (
-                    <a
+                    <SafeExternalLink
                       className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-primary hover:underline"
                       href={sprintHistory.sprint.langsmith_trace_url}
-                      rel="noreferrer"
-                      target="_blank"
                     >
                       <ExternalLink className="h-3 w-3" aria-hidden="true" />
                       View trace
-                    </a>
+                    </SafeExternalLink>
                   ) : null}
                 </div>
               </div>
@@ -4682,14 +4681,12 @@ function EvidenceReviewActiveItem({
             </Button>
           </div>
         </div>
-        <a
+        <SafeExternalLink
           className="mt-3 block break-all text-xs text-primary hover:underline"
           href={source.url}
-          rel="noreferrer"
-          target="_blank"
         >
           {source.url}
-        </a>
+        </SafeExternalLink>
         {source.snippet ? (
           <p className="mt-4 max-w-[72ch] text-sm leading-6 text-muted-foreground">
             {clarifyWorkspaceTerm(source.snippet)}
@@ -4762,14 +4759,12 @@ function EvidenceReviewActiveItem({
           </div>
         </div>
         {candidate.url ? (
-          <a
+          <SafeExternalLink
             className="mt-3 block break-all text-xs text-primary hover:underline"
             href={candidate.url}
-            rel="noreferrer"
-            target="_blank"
           >
             {candidate.url}
-          </a>
+          </SafeExternalLink>
         ) : null}
         <p className="mt-4 max-w-[72ch] text-sm leading-6 text-muted-foreground">
           {clarifyWorkspaceTerm(candidate.positioning ?? "No positioning note yet.")}
@@ -5098,15 +5093,13 @@ function ResearchMemoReview({
               {formatDateTime(version.created_at)}
             </span>
             {version.langsmith_trace_url ? (
-              <a
+              <SafeExternalLink
                 className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-primary hover:underline"
                 href={version.langsmith_trace_url}
-                rel="noreferrer"
-                target="_blank"
               >
                 <ExternalLink className="h-3 w-3" aria-hidden="true" />
                 View trace
-              </a>
+              </SafeExternalLink>
             ) : null}
           </div>
         </div>
@@ -5259,15 +5252,13 @@ function ResearchMemoReview({
                 citations.map((citation) => (
                   <div key={`${citation.source_id}-${citation.chunk_id ?? "source"}`}>
                     {citation.url ? (
-                      <a
+                      <SafeExternalLink
                         className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
                         href={citation.url}
-                        rel="noreferrer"
-                        target="_blank"
                       >
                         {clarifyWorkspaceTerm(citation.title ?? citation.url)}
                         <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                      </a>
+                      </SafeExternalLink>
                     ) : (
                       <p className="text-sm font-medium">
                         {clarifyWorkspaceTerm(citation.title ?? citation.source_id)}
@@ -5345,15 +5336,13 @@ function SourceGroundedMemo({
               citations.map((citation) => (
                 <div key={`${citation.source_id}-${citation.chunk_id ?? "source"}`}>
                   {citation.url ? (
-                    <a
+                    <SafeExternalLink
                       className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
                       href={citation.url}
-                      rel="noreferrer"
-                      target="_blank"
                     >
                       {clarifyWorkspaceTerm(citation.title ?? citation.url)}
                       <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                    </a>
+                    </SafeExternalLink>
                   ) : (
                     <p className="text-sm font-medium">
                       {clarifyWorkspaceTerm(citation.title ?? citation.source_id)}
@@ -5492,14 +5481,12 @@ function SourceCandidateList({
                 </div>
               </summary>
               <div className="mt-3 border-t border-border pt-3">
-                <a
+                <SafeExternalLink
                   className="block break-all text-xs text-primary hover:underline"
                   href={source.url}
-                  rel="noreferrer"
-                  target="_blank"
                 >
                   {source.url}
-                </a>
+                </SafeExternalLink>
                 {source.snippet ? (
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
                     {source.snippet}
@@ -5665,14 +5652,12 @@ function CompetitorCandidateItem({
 
       <div className="mt-3 border-t border-border pt-3">
         {candidate.url ? (
-          <a
+          <SafeExternalLink
             className="block break-all text-xs text-primary hover:underline"
             href={candidate.url}
-            rel="noreferrer"
-            target="_blank"
           >
             {candidate.url}
-          </a>
+          </SafeExternalLink>
         ) : null}
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           {candidate.positioning ?? "No positioning note yet."}

@@ -13,6 +13,7 @@ import { ChangeEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { SafeExternalLink } from "@/components/safe-external-link";
 import { DomainError, DomainHeader, DomainPanel } from "@/features/projects/decision-room";
 import {
   addEvidenceNote,
@@ -798,14 +799,12 @@ function SourceDetailPanel({ source }: { source: EvidenceSource | null }) {
           </div>
           <h3 className="mt-3 text-sm font-semibold">{source.title ?? "Untitled source"}</h3>
           {source.url ? (
-            <a
+            <SafeExternalLink
               className="mt-2 block break-all text-xs text-primary hover:underline"
               href={source.url}
-              rel="noreferrer"
-              target="_blank"
             >
               {source.url}
-            </a>
+            </SafeExternalLink>
           ) : null}
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             {source.summary ?? source.text_preview ?? "No summary available."}
@@ -982,14 +981,12 @@ function SourceRow({
               Source Details
             </h4>
             {source.url ? (
-              <a
+              <SafeExternalLink
                 className="mt-2 block truncate text-sm text-primary hover:underline"
                 href={source.url}
-                rel="noreferrer"
-                target="_blank"
               >
                 {source.url}
-              </a>
+              </SafeExternalLink>
             ) : null}
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               {source.text_preview ?? source.summary ?? "No preview available."}

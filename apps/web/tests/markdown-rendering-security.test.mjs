@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const renderer = readSource("../src/features/projects/markdown-content.tsx");
 const safeUrlPolicy = readSource("../src/lib/safe-external-url.ts");
+const safeExternalLink = readSource("../src/components/safe-external-link.tsx");
 const safeExternalUrl = loadSafeExternalUrl(safeUrlPolicy);
 
 test("Markdown rendering applies the shared external URL policy", () => {
@@ -27,6 +28,28 @@ test("Markdown images are rendered as inert alt text", () => {
   assert.match(renderer, /text\.split\(\/\(!\?\\\[/);
   assert.match(renderer, /if \(!destination \|\| link\[1\] === "!"\)/);
   assert.match(renderer, /return link\[2\];/);
+});
+
+test("project metadata and citations use the safe external anchor wrapper", () => {
+  assert.match(safeExternalLink, /safeExternalUrl\(href\)/);
+  assert.match(safeExternalLink, /rel="noopener noreferrer"/);
+  assert.match(safeExternalLink, /return <span className=\{props\.className\}>/);
+
+  for (const [path, expectedCount] of [
+    ["../src/features/projects/guide-panel.tsx", 1],
+    ["../src/features/projects/workflow-trace.tsx", 1],
+    ["../src/features/projects/evidence-tab.tsx", 2],
+    ["../src/features/projects/competitors-tab.tsx", 2],
+    ["../src/features/projects/project-overview.tsx", 8],
+  ]) {
+    const source = readSource(path);
+    assert.equal((source.match(/<SafeExternalLink/g) ?? []).length, expectedCount, path);
+    assert.doesNotMatch(
+      source,
+      /<a[\s\S]{0,240}href=\{(?:source|citation|candidate|competitor|run|version|sprintHistory)\./,
+      path,
+    );
+  }
 });
 
 function readSource(relativePath) {

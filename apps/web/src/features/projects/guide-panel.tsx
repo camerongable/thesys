@@ -14,6 +14,7 @@ import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { SafeExternalLink } from "@/components/safe-external-link";
 import {
   dismissProjectNudge,
   executeGuideAction,
@@ -446,14 +447,12 @@ function GuideAnswerMetadata({ response }: { response: GuideChatResponse }) {
                   </span>
                 </div>
                 {citation.url ? (
-                  <a
+                  <SafeExternalLink
                     className="mt-1 block truncate text-primary hover:underline"
                     href={citation.url}
-                    rel="noreferrer"
-                    target="_blank"
                   >
                     {citation.url}
-                  </a>
+                  </SafeExternalLink>
                 ) : null}
                 {citation.excerpt ? (
                   <p className="mt-2 line-clamp-3 leading-5 text-muted-foreground">

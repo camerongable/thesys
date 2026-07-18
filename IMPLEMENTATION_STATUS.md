@@ -458,8 +458,11 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Enforce an HTTPS-only browser URL policy in the shared Markdown renderer.
   Rendered Markdown now turns unsafe destinations and all image destinations
   into inert text, while approved links use `noopener noreferrer`.
-- [ ] Apply the browser URL policy to remaining direct metadata/citation anchors
-  and integrate guardrails with remaining model-provider boundaries before
+- [x] Apply the same browser URL policy to every direct project metadata,
+  citation, candidate, competitor, and trace anchor. Invalid URLs retain their
+  text but never render as anchors; the final scan leaves no raw new-window
+  external-data anchors outside the shared policy components.
+- [ ] Integrate guardrails with remaining model-provider boundaries before
   claiming the full Sprint 64 gateway.
 
 ## Sprint 64 Verification
@@ -482,11 +485,14 @@ current verdict, next action, evidence health, validation, and decision state.
   command remains unavailable because npm registry resets prevented dependency
   installation and the two existing TypeScript-dependent tests cannot resolve
   `typescript`.
+- [x] Direct external-anchor regression suite passed (`3 passed`), verifying the
+  safe-link wrapper and every project metadata/citation/trace surface. The same
+  npm dependency-fetch limitation prevents broader web type and integration
+  checks in this environment.
 
 ## Next Sprint
 
-Continue Sprint 64 by applying the browser URL policy to direct metadata and
-citation anchors, then extending the central gateway to remaining
+Continue Sprint 64 by extending the central gateway to remaining
 model-provider boundaries.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
