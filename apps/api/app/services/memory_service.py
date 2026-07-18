@@ -288,6 +288,7 @@ def upsert_memory_item(
     ):
         status_value = "proposed"
     existing = None
+    conflicting_active: ProjectMemoryItem | None = None
     if entity_type and entity_id:
         existing = db.scalar(
             select(ProjectMemoryItem).where(
@@ -298,6 +299,13 @@ def upsert_memory_item(
                 ProjectMemoryItem.memory_type == memory_type,
             )
         )
+    if existing is not None and status_value == "proposed" and existing.status == "active":
+        if (existing.provenance_metadata or {}).get("content_hash") == safe_provenance[
+            "content_hash"
+        ]:
+            return existing
+        conflicting_active = existing
+        existing = None
     if existing is None:
         existing = ProjectMemoryItem(
             workspace_id=auth.workspace_id,
@@ -330,6 +338,12 @@ def upsert_memory_item(
         existing.status = status_value
         existing.expires_at = expires_at
     db.flush()
+    if conflicting_active is not None:
+        _link_memory_proposal_conflict(
+            project_id=project_id,
+            active=conflicting_active,
+            proposal=existing,
+        )
     return existing
 
 
@@ -428,6 +442,7 @@ def approve_memory_proposal(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only proposed memory can be approved.",
         )
+    conflicting_active_items = _conflicting_active_memory_items(db, auth, project_id, item)
     item.status = "active"
     reviewed_at = datetime.now(UTC)
     item.provenance_metadata = _reviewed_memory_metadata(
@@ -444,6 +459,18 @@ def approve_memory_proposal(
         source_entity_id=item.source_entity_id,
         write_policy=item.write_policy,
     )
+    resolution_metadata = {
+        "conflict_resolved_by_user_id": str(auth.user_id),
+        "conflict_resolved_at": reviewed_at.isoformat(),
+    }
+    item.provenance_metadata = {**item.provenance_metadata, **resolution_metadata}
+    for active_item in conflicting_active_items:
+        active_item.status = "superseded"
+        active_item.superseded_by_id = item.id
+        active_item.provenance_metadata = {
+            **(active_item.provenance_metadata or {}),
+            **resolution_metadata,
+        }
     governance_service.record_audit_event(
         db,
         auth,
@@ -686,6 +713,7 @@ def detect_memory_conflicts(
                 "titles": [item.title for item in candidates],
             }
         )
+    conflicts.extend(_proposal_conflicts(db, auth, project_id))
     if mark:
         db.flush()
         if commit:
@@ -766,3 +794,129 @@ def _ensure_conflict_member(item: ProjectMemoryItem, conflict_group_id: str) -> 
             status_code=status.HTTP_409_CONFLICT,
             detail="Memory item is not part of the requested conflict group.",
         ) from exc
+
+
+def _link_memory_proposal_conflict(
+    *,
+    project_id: uuid.UUID,
+    active: ProjectMemoryItem,
+    proposal: ProjectMemoryItem,
+) -> None:
+    conflict_group_id = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"thesys:memory-proposal-conflict:{project_id}:{active.id}:{proposal.id}",
+        )
+    )
+    detected_at = datetime.now(UTC).isoformat()
+    active_metadata = dict(active.provenance_metadata or {})
+    active_conflicts = _metadata_id_list(active_metadata.get("contradicts_memory_ids"))
+    active_metadata.update(
+        {
+            "conflict_group_id": conflict_group_id,
+            "conflict_detected_at": detected_at,
+            "contradicts_memory_ids": sorted({*active_conflicts, str(proposal.id)}),
+        }
+    )
+    proposal_metadata = dict(proposal.provenance_metadata or {})
+    proposal_conflicts = _metadata_id_list(proposal_metadata.get("contradicts_memory_ids"))
+    proposal_metadata.update(
+        {
+            "conflict_group_id": conflict_group_id,
+            "conflict_detected_at": detected_at,
+            "contradicts_memory_ids": sorted({*proposal_conflicts, str(active.id)}),
+        }
+    )
+    active.provenance_metadata = active_metadata
+    proposal.provenance_metadata = proposal_metadata
+
+
+def _conflicting_active_memory_items(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    proposal: ProjectMemoryItem,
+) -> list[ProjectMemoryItem]:
+    conflicting_ids = _metadata_id_list(
+        (proposal.provenance_metadata or {}).get("contradicts_memory_ids")
+    )
+    if not conflicting_ids:
+        return []
+    parsed_ids = [uuid.UUID(value) for value in conflicting_ids if _is_uuid(value)]
+    if not parsed_ids:
+        return []
+    return list(
+        db.scalars(
+            select(ProjectMemoryItem).where(
+                ProjectMemoryItem.workspace_id == auth.workspace_id,
+                ProjectMemoryItem.project_id == project_id,
+                ProjectMemoryItem.id.in_(parsed_ids),
+                ProjectMemoryItem.status == "active",
+            )
+        )
+    )
+
+
+def _proposal_conflicts(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+) -> list[dict[str, Any]]:
+    proposals = list(
+        db.scalars(
+            select(ProjectMemoryItem).where(
+                ProjectMemoryItem.workspace_id == auth.workspace_id,
+                ProjectMemoryItem.project_id == project_id,
+                ProjectMemoryItem.status == "proposed",
+            )
+        )
+    )
+    conflicts: list[dict[str, Any]] = []
+    for proposal in proposals:
+        metadata = proposal.provenance_metadata or {}
+        conflict_group_id = metadata.get("conflict_group_id")
+        conflicting_ids = _metadata_id_list(metadata.get("contradicts_memory_ids"))
+        if not isinstance(conflict_group_id, str) or not conflicting_ids:
+            continue
+        conflicting_item_ids = [
+            uuid.UUID(value) for value in conflicting_ids if _is_uuid(value)
+        ]
+        item_ids = [proposal.id, *conflicting_item_ids]
+        conflicting_items = {
+            item.id: item
+            for item in db.scalars(
+                select(ProjectMemoryItem).where(
+                    ProjectMemoryItem.workspace_id == auth.workspace_id,
+                    ProjectMemoryItem.project_id == project_id,
+                    ProjectMemoryItem.id.in_(conflicting_item_ids),
+                )
+            )
+        }
+        conflicts.append(
+            {
+                "conflict_group_id": conflict_group_id,
+                "reason": "Proposed memory conflicts with active memory and requires review.",
+                "memory_item_ids": item_ids,
+                "titles": [
+                    proposal.title,
+                    *[
+                        conflicting_items[item_id].title
+                        for item_id in conflicting_item_ids
+                        if item_id in conflicting_items
+                    ],
+                ],
+            }
+        )
+    return conflicts
+
+
+def _metadata_id_list(value: object) -> list[str]:
+    return [str(item) for item in value] if isinstance(value, list) else []
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+    except ValueError:
+        return False
+    return True

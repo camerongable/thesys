@@ -558,6 +558,12 @@ current verdict, next action, evidence health, validation, and decision state.
   recall is fail-closed for missing security metadata and returns only active,
   approved, sufficiently trusted records with an Inspect-visible exclusion
   reason for every rejected item.
+- [x] Preserve the active memory version when a proposed update for the same
+  entity has a different content hash. The active and proposed versions receive
+  reciprocal conflict links and a shared conflict group; Inspect exposes both
+  versions for review. Approval is the only path that supersedes the active
+  version, preserving its history and recording the reviewer and resolution
+  time.
 
 ## Sprint 65 Verification
 
@@ -575,12 +581,15 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Secure-memory write/recall checkpoint passed (`91 passed, 1 xfailed, 1
   warning`); repository-wide lint and the full backend suite passed (`422
   passed, 1 skipped, 1 xfailed, 12 warnings`).
+- [x] Conflict-safe memory-version checkpoint passed (`92 passed, 1 xfailed, 1
+  warning`); repository-wide lint and the full backend suite passed (`423
+  passed, 1 skipped, 1 xfailed, 12 warnings`).
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
 add anomalous-embedding and recommendation-shift poisoning detection, then
-harden memory conflict, expiry, and source-invalidation paths.
+harden memory expiry and source-invalidation paths.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

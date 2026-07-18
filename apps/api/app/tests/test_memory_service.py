@@ -142,6 +142,95 @@ def test_evidence_derived_agent_memory_requires_approval_before_recall(
     assert [candidate.id for candidate in selected] == [item.id]
 
 
+def test_conflicting_memory_proposal_preserves_active_version_until_approval(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    subject_id = uuid.uuid4()
+    active = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="semantic",
+        write_policy="direct",
+        entity_type="assumption",
+        entity_id=subject_id,
+        title="Current buyer belief",
+        summary="Independent coaches will pay for check-in triage.",
+        content={"claim": "coaches will pay"},
+    )
+    db_session.commit()
+
+    duplicate = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="semantic",
+        write_policy="approval_required",
+        entity_type="assumption",
+        entity_id=subject_id,
+        title="Repeated buyer belief",
+        summary="Independent coaches will pay for check-in triage.",
+        content={"claim": "coaches will pay"},
+        provenance_metadata={"origin": "agent", "trust_score": 0.8},
+        status_value="proposed",
+    )
+    assert duplicate.id == active.id
+    assert active.status == "active"
+
+    proposal = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="semantic",
+        write_policy="approval_required",
+        entity_type="assumption",
+        entity_id=subject_id,
+        title="Conflicting buyer belief",
+        summary="Independent coaches will not pay for check-in triage.",
+        content={"claim": "coaches will not pay"},
+        provenance_metadata={"origin": "agent", "trust_score": 0.8},
+        status_value="proposed",
+    )
+    db_session.commit()
+
+    assert proposal.id != active.id
+    assert active.status == "active"
+    assert active.summary == "Independent coaches will pay for check-in triage."
+    assert proposal.status == "proposed"
+    assert proposal.provenance_metadata["contradicts_memory_ids"] == [str(active.id)]
+    assert active.provenance_metadata["contradicts_memory_ids"] == [str(proposal.id)]
+    assert active.provenance_metadata["conflict_group_id"] == (
+        proposal.provenance_metadata["conflict_group_id"]
+    )
+
+    inspect = memory_service.inspect_memory(
+        db_session,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+    )
+    assert [item["id"] for item in inspect["selected_memory"]] == [str(active.id)]
+    assert [item["id"] for item in inspect["proposed_memory"]] == [str(proposal.id)]
+    assert inspect["conflicts"] == [
+        {
+            "conflict_group_id": proposal.provenance_metadata["conflict_group_id"],
+            "reason": "Proposed memory conflicts with active memory and requires review.",
+            "memory_item_ids": [proposal.id, active.id],
+            "titles": [proposal.title, active.title],
+        }
+    ]
+
+    approved = memory_service.approve_memory_proposal(db_session, auth, project_id, proposal.id)
+    db_session.refresh(active)
+    assert approved.status == "active"
+    assert active.status == "superseded"
+    assert active.superseded_by_id == approved.id
+    assert approved.provenance_metadata["conflict_resolved_by_user_id"] == str(auth.user_id)
+
+
 def test_low_trust_memory_is_excluded_from_recall_with_reason(
     client: TestClient,
     db_session: Session,

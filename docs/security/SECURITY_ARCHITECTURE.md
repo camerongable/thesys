@@ -70,7 +70,9 @@ central gates in this target flow.
   content hash, trust, security status, approval state, conflict references, and
   verification time. Evidence-derived agent memory is a proposal, not active
   state; recall admits only active, approved, sufficiently trusted records and
-  gives Inspect an explicit exclusion reason for every denial.
+  gives Inspect an explicit exclusion reason for every denial. A proposed
+  conflicting update cannot overwrite active memory: both versions are linked
+  for Inspect review, and only reviewer approval supersedes the prior version.
 - Model output failing schema, citation, or DLP validation is rejected or safely
   regenerated; it is never executed as policy.
 - Approval timeout, cancellation, or mismatch leaves the proposed mutation
