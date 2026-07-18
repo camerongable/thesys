@@ -3,7 +3,7 @@ from io import BytesIO
 import pytest
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
-from pypdf.generic import DictionaryObject, NameObject, TextStringObject
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject, TextStringObject
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -30,6 +30,17 @@ def _build_pdf(
                 NameObject("/JS"): TextStringObject("app.alert('unsafe')"),
             }
         )
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def _build_compressed_pdf(*, expanded_bytes: int) -> bytes:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=72, height=72)
+    stream = DecodedStreamObject()
+    stream.set_data(b"A" * expanded_bytes)
+    page[NameObject("/Contents")] = writer._add_object(stream.flate_encode())
     output = BytesIO()
     writer.write(output)
     return output.getvalue()
@@ -147,6 +158,46 @@ def test_pdf_resource_limit_is_rejected_before_storage(
     )
     assert audit is not None
     assert "configured timeout" in audit.event_metadata["reason"]
+
+
+def test_pdf_decompression_ratio_is_rejected_before_storage(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAX_PDF_DECOMPRESSION_RATIO", "10")
+    get_settings.cache_clear()
+    project_id = _create_project(client)
+
+    def storage_must_not_run(**_kwargs: object) -> str:
+        raise AssertionError("Expanding PDFs must not reach object storage.")
+
+    monkeypatch.setattr(
+        evidence_service.object_storage_service,
+        "put_evidence_object",
+        storage_must_not_run,
+    )
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/file",
+        files={
+            "file": (
+                "expanding.pdf",
+                _build_compressed_pdf(expanded_bytes=20_000),
+                "application/pdf",
+            )
+        },
+    )
+
+    assert response.status_code == 422
+    assert db_session.scalar(select(EvidenceSource)) is None
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "evidence_upload_rejected")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert "decompression ratio" in audit.event_metadata["reason"]
+    get_settings.cache_clear()
 
 
 def test_bounded_pdf_parser_extracts_a_valid_document() -> None:

@@ -332,8 +332,11 @@ current verdict, next action, evidence health, validation, and decision state.
   with `RLIMIT_AS`.
 - [x] Reject ZIP and other unsupported archive content before malware scanning,
   storage, or parsing through the strict upload extension/MIME allowlist.
-- [ ] Complete the remaining file parser/content controls: decompression-ratio
-  limits and image metadata stripping where appropriate.
+- [x] Enforce a configurable PDF stream decompression-ratio limit inside the
+  isolated parser worker. Every reachable encoded stream is checked before page
+  text extraction, and an over-limit stream is rejected before object storage.
+- [ ] Complete the remaining image-side controls: compressed-image expansion
+  limits and metadata stripping before storage or provider transit.
 - [x] Require extension, declared MIME, and independently detected content MIME
   to agree before any upload reaches malware scanning, storage, or parsing.
   `python-magic` is the primary detector; an unavailable binding falls back to
@@ -414,11 +417,14 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Bounded PDF parser checkpoint passed (`152 passed, 1 skipped, 2 xfailed,
   10 warnings`), covering isolated valid parsing, resource-limit rejection before
   storage, PDF security preflight, ingestion, and broader security boundaries.
+- [x] PDF decompression-ratio checkpoint passed (`153 passed, 1 skipped, 2
+  xfailed, 11 warnings`), covering an over-limit compressed stream rejected
+  before storage alongside the evidence and security boundary suite.
 
 ## Next Sprint
 
-Continue V1 Sprint 63 with decompression-ratio limits and image metadata
-stripping, then begin Sprint 64's central policy guardrail work.
+Continue V1 Sprint 63 with image decompression safety and metadata stripping,
+then begin Sprint 64's central policy guardrail work.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

@@ -9,6 +9,7 @@ from io import BytesIO
 from typing import Any
 
 from pypdf import PdfReader
+from pypdf.generic import StreamObject
 
 from app.core.config import Settings
 
@@ -47,6 +48,7 @@ def extract_pdf(settings: Settings, *, body: bytes) -> PDFExtraction:
             settings.max_pdf_pages,
             settings.max_extracted_text_chars,
             settings.pdf_extraction_memory_mb,
+            settings.max_pdf_decompression_ratio,
         ),
     )
     process.start()
@@ -83,6 +85,7 @@ def _extract_pdf_in_worker(
     max_pages: int,
     max_text_chars: int,
     memory_limit_mb: int,
+    max_decompression_ratio: float,
 ) -> None:
     try:
         _apply_memory_limit(memory_limit_mb)
@@ -92,6 +95,16 @@ def _extract_pdf_in_worker(
             return
         if _contains_active_content(reader.trailer.get("/Root")):
             _send(connection, "security", "PDF active content is not allowed.")
+            return
+        if _exceeds_decompression_ratio(
+            reader.trailer.get("/Root"),
+            max_decompression_ratio=max_decompression_ratio,
+        ):
+            _send(
+                connection,
+                "resource",
+                "PDF stream exceeds the configured decompression ratio limit.",
+            )
             return
         page_count = len(reader.pages)
         if page_count > max_pages:
@@ -165,6 +178,44 @@ def _contains_active_content(
         )
     if isinstance(value, (list, tuple)):
         return any(_contains_active_content(item, seen=seen, depth=depth + 1) for item in value)
+    return False
+
+
+def _exceeds_decompression_ratio(
+    value: object,
+    *,
+    max_decompression_ratio: float,
+    seen: set[int] | None = None,
+) -> bool:
+    seen = seen or set()
+    if hasattr(value, "get_object"):
+        value = value.get_object()
+    value_id = id(value)
+    if value_id in seen:
+        return False
+    seen.add(value_id)
+    if isinstance(value, StreamObject):
+        encoded_length = len(value._data)
+        if encoded_length and len(value.get_data()) / encoded_length > max_decompression_ratio:
+            return True
+    if isinstance(value, dict):
+        return any(
+            _exceeds_decompression_ratio(
+                item,
+                max_decompression_ratio=max_decompression_ratio,
+                seen=seen,
+            )
+            for item in value.values()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(
+            _exceeds_decompression_ratio(
+                item,
+                max_decompression_ratio=max_decompression_ratio,
+                seen=seen,
+            )
+            for item in value
+        )
     return False
 
 

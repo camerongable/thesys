@@ -389,6 +389,12 @@ class Settings(BaseSettings):
         le=4096,
         validation_alias="PDF_EXTRACTION_MEMORY_MB",
     )
+    max_pdf_decompression_ratio: float = Field(
+        default=100.0,
+        ge=1.0,
+        le=1000.0,
+        validation_alias="MAX_PDF_DECOMPRESSION_RATIO",
+    )
     embedding_model: str = Field(
         default="deterministic-hash-embedding-1536",
         validation_alias="EMBEDDING_MODEL",
