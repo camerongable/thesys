@@ -1,9 +1,12 @@
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import AuditEvent, EvidenceChunk, EvidenceSource
 from app.features.evidence.source_provenance import assess_source_trust
+from app.services import embedding_service
 
 
 def test_instruction_heavy_source_is_quarantined_before_embedding(
@@ -86,6 +89,54 @@ def test_repeated_identical_sources_are_quarantined_as_duplicate_flooding(
         select(EvidenceChunk).where(EvidenceChunk.source_id == sources[-1].id)
     )
     assert quarantined_chunk is None
+
+
+def test_anomalous_embedding_cluster_is_quarantined_before_chunk_persistence(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    def clustered_embedding(_db, _auth, settings, _text, *, project_id=None):
+        return embedding_service.EmbeddingResult(
+            vector=[1.0] * settings.embedding_dimension,
+            provider="test",
+            model="clustered",
+            dimension=settings.embedding_dimension,
+            version="test",
+            embedded_at=datetime.now(UTC),
+        )
+
+    monkeypatch.setattr(
+        embedding_service,
+        "embed_text_with_metadata_cached",
+        clustered_embedding,
+    )
+    project_id = _create_project(client)
+    payloads = [
+        {"title": "First signal", "text": "Coaches lose time assembling client check-ins."},
+        {
+            "title": "Second signal",
+            "text": "Parents struggle to coordinate school pickup schedules.",
+        },
+        {"title": "Third signal", "text": "Restaurants need better inventory forecasting systems."},
+    ]
+
+    responses = [
+        client.post(f"/api/projects/{project_id}/evidence/note", json=payload)
+        for payload in payloads
+    ]
+
+    assert [response.status_code for response in responses] == [201, 201, 201]
+    sources = list(db_session.scalars(select(EvidenceSource).order_by(EvidenceSource.created_at)))
+    assert [source.ingestion_status for source in sources] == ["ready", "ready", "quarantined"]
+    trust = sources[-1].source_metadata["source_trust"]
+    assert trust["anomalous_embedding_cluster_count"] == 2
+    assert trust["security_status"] == "quarantined"
+    assert "anomalous_embedding_cluster" in trust["signals"]
+    assert (
+        db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == sources[-1].id))
+        is None
+    )
 
 
 def _create_project(client: TestClient) -> str:

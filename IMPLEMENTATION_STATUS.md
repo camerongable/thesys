@@ -573,6 +573,10 @@ current verdict, next action, evidence health, validation, and decision state.
   expiry in secure-memory provenance, and normalize timestamp comparisons at
   the recall boundary. Expired memory cannot enter workflow context and remains
   Inspect-visible with an `expired` exclusion reason.
+- [x] Detect anomalous embedding clusters before evidence chunks are persisted.
+  A distinct source whose candidate vectors nearly match two approved,
+  different-content project sources receives an inspectable source-trust signal
+  and is quarantined with a completed ingestion audit trail.
 
 ## Sprint 65 Verification
 
@@ -599,12 +603,15 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Secure-memory expiry checkpoint passed (`93 passed, 1 xfailed, 1
   warning`); repository-wide lint and the full backend suite passed (`424
   passed, 1 skipped, 1 xfailed, 12 warnings`).
+- [x] Anomalous embedding-cluster checkpoint passed (`28 passed, 1 xfailed, 1
+  warning`); repository-wide lint and the full backend suite passed (`425
+  passed, 1 skipped, 1 xfailed, 12 warnings`).
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-add anomalous-embedding and recommendation-shift poisoning detection, then
-review retrieval sufficiency and explicit abstention behavior.
+add recommendation-shift poisoning detection, then review retrieval sufficiency
+and explicit abstention behavior.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

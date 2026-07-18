@@ -64,8 +64,11 @@ central gates in this target flow.
   policy-override, tool-schema, system-message impersonation, or hidden-Unicode
   sources are quarantined before vector creation and emit a redacted audit
   event. Repeated identical source bodies become a duplicate-flooding signal;
-  approved candidate rankings also subtract source-risk and cross-source
-  duplicate penalties before reranking and context assembly.
+  candidate vectors that nearly match multiple approved, different-content
+  sources become an anomalous-embedding-cluster signal and are quarantined
+  before evidence chunks are persisted. Approved candidate rankings also
+  subtract source-risk and cross-source duplicate penalties before reranking
+  and context assembly.
 - Durable memory writes normalize a versioned record of origin, source IDs,
   content hash, trust, security status, approval state, conflict references, and
   verification time. Evidence-derived agent memory is a proposal, not active

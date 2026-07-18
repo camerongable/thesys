@@ -58,6 +58,8 @@ _POISONING_PATTERNS = {
 SOURCE_QUALITY_POLICY_VERSION = "source-quality:v2"
 SNAPSHOT_POLICY_VERSION = "source-snapshot:v1"
 SOURCE_TRUST_POLICY_VERSION = "source-trust:v1"
+ANOMALOUS_EMBEDDING_SIMILARITY_THRESHOLD = 0.995
+ANOMALOUS_EMBEDDING_CLUSTER_SOURCE_THRESHOLD = 2
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,7 @@ class SourceTrust:
     approved_at: datetime | None
     last_verified_at: datetime
     duplicate_source_count: int
+    anomalous_embedding_cluster_count: int
     signals: tuple[str, ...]
 
     def metadata(self) -> dict[str, Any]:
@@ -99,6 +102,7 @@ class SourceTrust:
             "approved_at": self.approved_at.isoformat() if self.approved_at else None,
             "last_verified_at": self.last_verified_at.isoformat(),
             "duplicate_source_count": self.duplicate_source_count,
+            "anomalous_embedding_cluster_count": self.anomalous_embedding_cluster_count,
             "signals": list(self.signals),
         }
 
@@ -219,6 +223,7 @@ def assess_source_trust(
     metadata: dict[str, Any],
     approved_by: object | None,
     duplicate_source_count: int = 0,
+    anomalous_embedding_cluster_count: int = 0,
 ) -> SourceTrust:
     """Assess instruction and poisoning signals before a source becomes retrievable."""
     prompt_markers = detect_prompt_injection_markers(text)
@@ -233,6 +238,8 @@ def assess_source_trust(
         signals.append("hidden_unicode")
     if duplicate_source_count:
         signals.append("duplicate_source_content")
+    if anomalous_embedding_cluster_count >= ANOMALOUS_EMBEDDING_CLUSTER_SOURCE_THRESHOLD:
+        signals.append("anomalous_embedding_cluster")
     signals = sorted(set(signals))
 
     injection_score = min(
@@ -246,7 +253,8 @@ def assess_source_trust(
         0.2 * instruction_count
         + 0.3 * sum(1 for count in poisoning_matches.values() if count)
         + (0.2 if hidden_unicode else 0.0)
-        + min(duplicate_source_count * 0.35, 0.8),
+        + min(duplicate_source_count * 0.35, 0.8)
+        + min(anomalous_embedding_cluster_count * 0.4, 0.8),
     )
     quarantined = injection_score >= 0.6 or poisoning_score >= 0.7
     provenance_type = _provenance_type(source_type, metadata)
@@ -271,6 +279,7 @@ def assess_source_trust(
         approved_at=now if not quarantined else None,
         last_verified_at=now,
         duplicate_source_count=duplicate_source_count,
+        anomalous_embedding_cluster_count=anomalous_embedding_cluster_count,
         signals=tuple(signals),
     )
 

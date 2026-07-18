@@ -1117,6 +1117,69 @@ def _process_source_text(
             )
             return source
 
+        embedded_chunks = [
+            (
+                chunk_info,
+                embedding_service.embed_text_with_metadata_cached(
+                    db,
+                    auth,
+                    settings,
+                    chunk_info.text,
+                    project_id=source.project_id,
+                ),
+            )
+            for chunk_info in chunks
+        ]
+        anomalous_embedding_cluster_count = _anomalous_embedding_cluster_source_count(
+            db,
+            source,
+            candidate_vectors=[embedding.vector for _chunk_info, embedding in embedded_chunks],
+            content_hash=content_hash,
+        )
+        if anomalous_embedding_cluster_count:
+            source_trust = source_provenance_service.assess_source_trust(
+                source_type=source.source_type,
+                text=searchable_text,
+                metadata=processed_metadata,
+                approved_by=source.created_by,
+                duplicate_source_count=duplicate_source_count,
+                anomalous_embedding_cluster_count=anomalous_embedding_cluster_count,
+            )
+            source_security_metadata["security_status"] = source_trust.security_status
+            source.source_metadata = _merge_metadata(
+                source.source_metadata or {},
+                {
+                    "security": source_security_metadata,
+                    "source_trust": source_trust.metadata(),
+                },
+            )
+            if source_trust.security_status != "approved":
+                _quarantine_source_for_trust(
+                    db,
+                    auth,
+                    source,
+                    source_trust=source_trust,
+                )
+                db.commit()
+                db.refresh(source)
+                source = get_source(db, auth, source.project_id, source.id)
+                workflow_utils.complete_zero_cost_step_and_run(
+                    db,
+                    run=run,
+                    step=step,
+                    output_json={
+                        "source_id": str(source.id),
+                        "chunk_count": 0,
+                        "security_status": source_trust.security_status,
+                        "source_trust": source_trust.metadata(),
+                    },
+                    latency_ms=int((perf_counter() - started) * 1000),
+                    output_summary="Quarantined evidence source after embedding-cluster review.",
+                    model_provider=settings.embedding_provider,
+                    model_name=settings.embedding_model,
+                )
+                return source
+
         secure_ingestion_state_service.transition(
             source,
             secure_ingestion_state_service.SecureIngestionState.APPROVED_FOR_EMBEDDING,
@@ -1124,14 +1187,7 @@ def _process_source_text(
         source.ingestion_status = "ready"
         source.ingestion_error = None
 
-        for index, chunk_info in enumerate(chunks):
-            embedding = embedding_service.embed_text_with_metadata_cached(
-                db,
-                auth,
-                settings,
-                chunk_info.text,
-                project_id=source.project_id,
-            )
+        for index, (chunk_info, embedding) in enumerate(embedded_chunks):
             quote_provenance = source_provenance_service.chunk_quote_provenance(
                 source_metadata=source.source_metadata or {},
                 chunk_text=chunk_info.text,
@@ -1362,6 +1418,39 @@ def _duplicate_content_source_count(
         for candidate in candidates
         if (candidate.source_metadata or {}).get("content_hash") == content_hash
     )
+
+
+def _anomalous_embedding_cluster_source_count(
+    db: Session,
+    source: EvidenceSource,
+    *,
+    candidate_vectors: list[list[float]],
+    content_hash: str,
+) -> int:
+    if not candidate_vectors:
+        return 0
+    matched_source_ids: set[uuid.UUID] = set()
+    rows = db.execute(
+        select(EvidenceChunk, EvidenceSource)
+        .join(EvidenceSource, EvidenceSource.id == EvidenceChunk.source_id)
+        .where(
+            EvidenceChunk.workspace_id == source.workspace_id,
+            EvidenceChunk.project_id == source.project_id,
+            EvidenceSource.id != source.id,
+            EvidenceSource.ingestion_status == "ready",
+            EvidenceChunk.embedding.is_not(None),
+        )
+    )
+    for peer_chunk, peer_source in rows:
+        if (peer_source.source_metadata or {}).get("content_hash") == content_hash:
+            continue
+        if any(
+            embedding_service.cosine_similarity(candidate, peer_chunk.embedding)
+            >= source_provenance_service.ANOMALOUS_EMBEDDING_SIMILARITY_THRESHOLD
+            for candidate in candidate_vectors
+        ):
+            matched_source_ids.add(peer_source.id)
+    return len(matched_source_ids)
 
 
 def _find_ready_source_by_content_hash(
