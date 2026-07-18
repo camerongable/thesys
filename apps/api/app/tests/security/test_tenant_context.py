@@ -89,6 +89,7 @@ def test_hosted_configuration_rejects_bootstrap_or_wrong_runtime_role() -> None:
             secret_provider="cloud",
             database_runtime_role="api",
             database_url="postgresql+psycopg://postgres:secret@db.example/thesys",
+            malware_scanner_mode="clamav",
         )
 
     settings = Settings(
@@ -100,5 +101,6 @@ def test_hosted_configuration_rejects_bootstrap_or_wrong_runtime_role() -> None:
         object_storage_mode="s3",
         s3_endpoint_url="https://s3.example.com",
         s3_verify_bucket_security=True,
+        malware_scanner_mode="clamav",
     )
     assert settings.database_runtime_role == "worker"

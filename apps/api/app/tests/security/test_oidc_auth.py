@@ -59,6 +59,7 @@ def test_identity_configuration_rejects_dev_auth_outside_local() -> None:
             object_storage_mode="s3",
             s3_endpoint_url="https://s3.example.com",
             s3_verify_bucket_security=True,
+            malware_scanner_mode="clamav",
         )
 
     with pytest.raises(ValidationError, match="approved asymmetric algorithms"):
@@ -69,6 +70,7 @@ def test_identity_configuration_rejects_dev_auth_outside_local() -> None:
             object_storage_mode="s3",
             s3_endpoint_url="https://s3.example.com",
             s3_verify_bucket_security=True,
+            malware_scanner_mode="clamav",
             oidc_issuer=ISSUER,
             oidc_audience=AUDIENCE,
             oidc_jwks_url=JWKS_URL,

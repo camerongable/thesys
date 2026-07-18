@@ -106,7 +106,7 @@ class DataProtectionService:
         *,
         project_id: uuid.UUID | None = None,
     ) -> SanitizedText:
-        del project_id  # Tokens intentionally remain project-local once encrypted mappings land.
+        del project_id  # Non-ingestion callers redact without persisting a reversible mapping.
         detections = self.detect_pii(text)
         replacements: dict[tuple[int, int], str] = {}
         token_counts: dict[str, int] = {}
@@ -131,8 +131,8 @@ class DataProtectionService:
     def tokenize_identifiers(self, text: str, *, project_id: uuid.UUID) -> str:
         return self.create_searchable_copy(text, project_id=project_id).text
 
-    def authorize_reidentification(self, *_args: object, **_kwargs: object) -> bool:
-        return False
+    def authorize_reidentification(self, auth: object) -> bool:
+        return getattr(auth, "role", None) == "owner"
 
     @staticmethod
     def is_source_approved(metadata: dict[str, object] | None) -> bool:

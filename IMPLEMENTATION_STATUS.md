@@ -299,12 +299,15 @@ current verdict, next action, evidence health, validation, and decision state.
   chat payload and sends a redacted/tokenized representation when it contains
   PII or restricted values. Trace payloads and errors now redact the same PII
   classes, secrets, and sensitive keys before LangSmith export.
-- [ ] Add Presidio-backed detection, encrypted project-local reidentification
-  mappings, and separately authorized reidentification.
-- [ ] Enforce the remaining secure-ingestion state machine, malware quarantine,
-  and MIME/content scanning.
-- [ ] Extend classification routing to non-chat providers, add encrypted
-  reidentification maps, and complete retention/deletion propagation coverage.
+- [x] Add encrypted project-local reidentification mappings under migration
+  `0034_pii_token_mappings`. Each mapping uses the workspace envelope key with a
+  project-specific authenticated purpose; identical identifiers receive an
+  independent token map per project, and only workspace owners can reverse a
+  token through an attributable high-risk audit event.
+- [ ] Add Presidio-backed detection and complete the remaining secure-ingestion
+  state-machine and MIME/content coverage.
+- [ ] Extend classification routing to non-chat providers and complete
+  retention/deletion propagation coverage.
 
 ## Sprint 63 Verification
 
@@ -321,11 +324,20 @@ current verdict, next action, evidence health, validation, and decision state.
   clean upload behavior.
 - [x] Provider/trace sanitization checkpoint passed (`35 passed, 1 warning`),
   including a captured LiteLLM HTTP request with PII and API keys removed.
+- [x] Encrypted project-local pseudonymization checkpoint passed (`13 passed,
+  1 warning`), covering encrypted stored values, project-local token scopes,
+  owner-only reidentification, no PII in audit metadata, and existing ingestion
+  plus envelope-encryption behavior.
+- [x] RLS/migration pseudonymization checkpoint passed (`20 passed, 1 skipped,
+  2 xfailed, 1 warning`); migration `0034_pii_token_mappings` rendered offline
+  and is the only Alembic head.
+- [x] Full backend regression passed (`355 passed, 1 skipped, 2 xfailed,
+  5 warnings`) with repository-wide lint, compile, and whitespace checks clean.
 
 ## Next Sprint
 
-Continue V1 Sprint 62 with the remaining service-level cross-tenant matrix and
-authorization-denial emitters for the remaining direct resource/mutation boundaries.
+Continue V1 Sprint 63 with retention/deletion propagation and the remaining
+provider-routing and ingestion-state hardening.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

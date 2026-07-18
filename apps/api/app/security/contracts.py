@@ -129,6 +129,12 @@ DATA_TYPES: dict[str, ClassifiedDataType] = {
         ProviderPolicy.LOCAL_ONLY,
         "PlatformSecurity",
     ),
+    "pii_token_mapping": ClassifiedDataType(
+        "Encrypted project-local mapping from a PII token to its original identifier",
+        DataClassification.RESTRICTED,
+        ProviderPolicy.LOCAL_ONLY,
+        "PseudonymizationService",
+    ),
     "system_prompts": ClassifiedDataType(
         "System prompts",
         DataClassification.CONFIDENTIAL,
@@ -339,6 +345,7 @@ RLS_DIRECT_TENANT_TABLES = frozenset(
         "project_memory_items",
         "project_nudges",
         "project_theses",
+        "pii_token_mappings",
         "projects",
         "research_plans",
         "research_sprints",

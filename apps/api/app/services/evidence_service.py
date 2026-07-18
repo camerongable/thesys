@@ -34,6 +34,7 @@ from app.services import (
     multimodal_extraction_service,
     object_storage_service,
     project_service,
+    pseudonymization_service,
     source_provenance_service,
 )
 from app.services.common import workflow as workflow_utils
@@ -800,9 +801,12 @@ def _process_source_text(
     started = perf_counter()
 
     try:
-        protected_source_text = data_protection_service.create_searchable_copy(
-            text,
+        protected_source_text = pseudonymization_service.create_searchable_copy(
+            db,
+            auth,
+            settings,
             project_id=source.project_id,
+            text=text,
         )
         normalized = _normalize_text(text)
         if not normalized:
@@ -1086,7 +1090,13 @@ def _merge_source_chunk_metadata(
     metadata: dict[str, Any],
 ) -> None:
     for chunk in source.chunks:
-        chunk.chunk_metadata = _merge_metadata(chunk.chunk_metadata or {}, metadata)
+        existing = chunk.chunk_metadata or {}
+        merged = _merge_metadata(existing, metadata)
+        existing_security = existing.get("security")
+        incoming_security = metadata.get("security")
+        if isinstance(existing_security, dict) and isinstance(incoming_security, dict):
+            merged["security"] = {**existing_security, **incoming_security}
+        chunk.chunk_metadata = merged
 
 
 def _merge_metadata(

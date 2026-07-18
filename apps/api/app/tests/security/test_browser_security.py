@@ -43,6 +43,7 @@ def test_production_api_responses_include_hsts(monkeypatch) -> None:
         object_storage_mode="s3",
         s3_endpoint_url="https://s3.example.com",
         s3_verify_bucket_security=True,
+        malware_scanner_mode="clamav",
     )
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
 

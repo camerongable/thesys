@@ -1,3 +1,4 @@
+import base64
 from collections.abc import Generator
 
 import pytest
@@ -17,6 +18,7 @@ from app.services.security_policy_service import reset_policy_state
 def force_llm_stub(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     monkeypatch.setenv("LLM_STUB_MODE", "always")
     monkeypatch.setenv("MALWARE_SCANNER_MODE", "deterministic")
+    monkeypatch.setenv("THESYS_ENCRYPTION_KEK_V1", base64.b64encode(b"1" * 32).decode("ascii"))
     get_settings.cache_clear()
     reset_policy_state()
     try:

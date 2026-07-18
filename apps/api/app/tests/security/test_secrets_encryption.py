@@ -51,6 +51,7 @@ def test_secret_provider_policy_is_environment_specific() -> None:
         object_storage_mode="s3",
         s3_endpoint_url="https://s3.example.com",
         s3_verify_bucket_security=True,
+        malware_scanner_mode="clamav",
     )
     assert hosted.secret_provider == "cloud"
     assert hosted.should_use_llm_stub is False

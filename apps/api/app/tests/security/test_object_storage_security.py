@@ -123,6 +123,7 @@ def test_hosted_object_storage_configuration_fails_closed() -> None:
         "auth_mode": "api_key",
         "secret_provider": "cloud",
         "database_url": "postgresql+psycopg://thesys_api:secret@db.example/thesys",
+        "malware_scanner_mode": "clamav",
     }
 
     with pytest.raises(ValidationError, match="OBJECT_STORAGE_MODE"):
