@@ -18,6 +18,7 @@ from app.temporal.activities import (
     persist_memory_update_activity,
     run_langgraph_research_activity,
     run_langsmith_eval_activity,
+    run_workspace_retention_cleanup_activity,
     wait_for_optional_source_competitor_review_activity,
 )
 from app.temporal.workflows import ResearchSprintWorkflow
@@ -76,6 +77,7 @@ async def run_worker() -> None:
             embed_evidence_activity,
             run_langgraph_research_activity,
             run_langsmith_eval_activity,
+            run_workspace_retention_cleanup_activity,
             create_memory_update_proposals_activity,
             persist_memory_update_activity,
             finalize_sprint_activity,

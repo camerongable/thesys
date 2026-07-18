@@ -317,9 +317,14 @@ current verdict, next action, evidence health, validation, and decision state.
   maps and routes expired evidence through full deletion propagation.
 - [ ] Add Presidio-backed detection and complete the remaining secure-ingestion
   state-machine and MIME/content coverage.
-- [ ] Enforce scheduled retention cleanup for local model/audit/security records,
-  configure provider-owned LangSmith/Temporal retention, and extend
-  classification routing to non-chat providers.
+- [x] Add a tenant-scoped Temporal maintenance activity for local retention. It
+  redacts expired AI prompts, outputs, errors, and local LangSmith references
+  while preserving run accounting, and deletes expired workspace-attributable
+  audit/security events without deleting active session revocations.
+- [ ] Register one maintenance schedule per workspace, configure provider-owned
+  LangSmith/Temporal retention, add the separately authorized unscoped
+  pre-authentication-event cleanup path, and extend classification routing to
+  non-chat providers.
 
 ## Sprint 63 Verification
 

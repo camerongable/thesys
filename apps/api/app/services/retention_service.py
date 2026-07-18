@@ -1,15 +1,23 @@
 """Retention policy registry and local cleanup primitives."""
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
 from app.core.config import Settings
-from app.db.models import EvidenceSource, PiiTokenMapping
+from app.db.models import (
+    AIRun,
+    AIStep,
+    ArtifactVersion,
+    AuditEvent,
+    AuthenticationEvent,
+    EvidenceSource,
+    PiiTokenMapping,
+)
 
 
 class RetentionAsset(StrEnum):
@@ -30,6 +38,20 @@ class RetentionPolicy:
     asset: RetentionAsset
     days: int
     enforcement_boundary: str
+
+
+@dataclass(frozen=True)
+class LocalRetentionCleanupResult:
+    """Counts returned by a workspace-scoped local-record retention purge."""
+
+    model_prompts_redacted: int = 0
+    model_outputs_redacted: int = 0
+    trace_references_cleared: int = 0
+    audit_events_deleted: int = 0
+    security_events_deleted: int = 0
+
+    def as_dict(self) -> dict[str, int]:
+        return asdict(self)
 
 
 def policies(settings: Settings) -> dict[RetentionAsset, RetentionPolicy]:
@@ -145,6 +167,139 @@ def purge_expired_pii_token_mappings(
     return int(result.rowcount or 0)
 
 
+def purge_expired_local_records(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+) -> LocalRetentionCleanupResult:
+    """Enforce local retention for one tenant without deleting run accounting.
+
+    Execution status, timing, token, and cost fields remain available for product
+    operations. Prompts, outputs, errors, and local trace links are removed on
+    their individual schedules. Pre-authentication events lack a workspace and
+    deliberately require a separate platform-maintenance path.
+    """
+    current_time = now or datetime.now(UTC)
+    workspace_run_ids = select(AIRun.id).where(AIRun.workspace_id == auth.workspace_id)
+
+    prompt_cutoff = _retention_cutoff(settings, RetentionAsset.MODEL_PROMPT, current_time)
+    prompt_result = db.execute(
+        update(AIRun)
+        .where(
+            AIRun.workspace_id == auth.workspace_id,
+            AIRun.created_at <= prompt_cutoff,
+            AIRun.input_summary.is_not(None),
+        )
+        .values(input_summary=None)
+        .execution_options(synchronize_session=False)
+    )
+    prompt_step_result = db.execute(
+        update(AIStep)
+        .where(
+            AIStep.ai_run_id.in_(workspace_run_ids),
+            AIStep.created_at <= prompt_cutoff,
+            AIStep.input_json.is_not(None),
+        )
+        .values(input_json=None)
+        .execution_options(synchronize_session=False)
+    )
+
+    output_cutoff = _retention_cutoff(settings, RetentionAsset.MODEL_OUTPUT, current_time)
+    output_result = db.execute(
+        update(AIRun)
+        .where(
+            AIRun.workspace_id == auth.workspace_id,
+            AIRun.created_at <= output_cutoff,
+            or_(AIRun.output_summary.is_not(None), AIRun.error.is_not(None)),
+        )
+        .values(output_summary=None, error=None)
+        .execution_options(synchronize_session=False)
+    )
+    output_step_result = db.execute(
+        update(AIStep)
+        .where(
+            AIStep.ai_run_id.in_(workspace_run_ids),
+            AIStep.created_at <= output_cutoff,
+            or_(AIStep.output_json.is_not(None), AIStep.error.is_not(None)),
+        )
+        .values(output_json=None, error=None)
+        .execution_options(synchronize_session=False)
+    )
+
+    trace_cutoff = _retention_cutoff(settings, RetentionAsset.LANGSMITH_TRACE, current_time)
+    trace_result = db.execute(
+        update(AIRun)
+        .where(
+            AIRun.workspace_id == auth.workspace_id,
+            AIRun.created_at <= trace_cutoff,
+            or_(AIRun.langsmith_trace_id.is_not(None), AIRun.langsmith_trace_url.is_not(None)),
+        )
+        .values(langsmith_trace_id=None, langsmith_trace_url=None)
+        .execution_options(synchronize_session=False)
+    )
+    trace_step_result = db.execute(
+        update(AIStep)
+        .where(
+            AIStep.ai_run_id.in_(workspace_run_ids),
+            AIStep.created_at <= trace_cutoff,
+            or_(
+                AIStep.langsmith_trace_id.is_not(None),
+                AIStep.langsmith_run_id.is_not(None),
+                AIStep.langsmith_trace_url.is_not(None),
+            ),
+        )
+        .values(langsmith_trace_id=None, langsmith_run_id=None, langsmith_trace_url=None)
+        .execution_options(synchronize_session=False)
+    )
+    artifact_trace_result = db.execute(
+        update(ArtifactVersion)
+        .where(
+            ArtifactVersion.workspace_id == auth.workspace_id,
+            ArtifactVersion.created_at <= trace_cutoff,
+            or_(
+                ArtifactVersion.langsmith_trace_id.is_not(None),
+                ArtifactVersion.langsmith_trace_url.is_not(None),
+            ),
+        )
+        .values(langsmith_trace_id=None, langsmith_trace_url=None)
+        .execution_options(synchronize_session=False)
+    )
+
+    audit_cutoff = _retention_cutoff(settings, RetentionAsset.AUDIT_EVENT, current_time)
+    audit_result = db.execute(
+        delete(AuditEvent)
+        .where(
+            AuditEvent.workspace_id == auth.workspace_id,
+            AuditEvent.created_at <= audit_cutoff,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    security_cutoff = _retention_cutoff(settings, RetentionAsset.SECURITY_EVENT, current_time)
+    security_result = db.execute(
+        delete(AuthenticationEvent)
+        .where(
+            AuthenticationEvent.workspace_id == auth.workspace_id,
+            AuthenticationEvent.created_at <= security_cutoff,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    db.commit()
+
+    return LocalRetentionCleanupResult(
+        model_prompts_redacted=_affected_rows(prompt_result) + _affected_rows(prompt_step_result),
+        model_outputs_redacted=_affected_rows(output_result) + _affected_rows(output_step_result),
+        trace_references_cleared=(
+            _affected_rows(trace_result)
+            + _affected_rows(trace_step_result)
+            + _affected_rows(artifact_trace_result)
+        ),
+        audit_events_deleted=_affected_rows(audit_result),
+        security_events_deleted=_affected_rows(security_result),
+    )
+
+
 def _expired_source(source: EvidenceSource, now: datetime) -> bool:
     security = (source.source_metadata or {}).get("security")
     if not isinstance(security, dict):
@@ -159,3 +314,11 @@ def _expired_source(source: EvidenceSource, now: datetime) -> bool:
     if expires_at_value.tzinfo is None:
         expires_at_value = expires_at_value.replace(tzinfo=UTC)
     return expires_at_value <= now
+
+
+def _retention_cutoff(settings: Settings, asset: RetentionAsset, now: datetime) -> datetime:
+    return now - timedelta(days=policies(settings)[asset].days)
+
+
+def _affected_rows(result: object) -> int:
+    return int(getattr(result, "rowcount", 0) or 0)

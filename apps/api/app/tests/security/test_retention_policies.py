@@ -7,7 +7,20 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
 from app.core.config import get_settings
-from app.db.models import EvidenceChunk, EvidenceSource, PiiTokenMapping, User, Workspace
+from app.db.models import (
+    AIRun,
+    AIStep,
+    Artifact,
+    ArtifactVersion,
+    AuditEvent,
+    AuthenticationEvent,
+    EvidenceChunk,
+    EvidenceSource,
+    PiiTokenMapping,
+    SessionRevocation,
+    User,
+    Workspace,
+)
 from app.services import retention_service
 
 
@@ -88,6 +101,152 @@ def test_expired_evidence_and_pii_mappings_are_purged_by_workspace(
     assert (
         db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == source_id)) is None
     )
+
+
+def test_local_retention_cleanup_removes_expired_payloads_but_keeps_run_accounting(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project = client.post("/api/projects", json={"name": "Local retention cleanup"}).json()
+    source_response = client.post(
+        f"/api/projects/{project['id']}/evidence/note",
+        json={"title": "Retention owner", "text": "A scoped owner record."},
+    )
+    source = db_session.scalar(
+        select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(source_response.json()["id"]))
+    )
+    assert source is not None
+    owner = _owner_auth_context(db_session, source)
+    expired_at = datetime.now(UTC) - timedelta(days=800)
+
+    expired_run = AIRun(
+        workspace_id=source.workspace_id,
+        project_id=source.project_id,
+        workflow_type="retention_test",
+        status="succeeded",
+        input_summary="expired prompt",
+        output_summary="expired output",
+        total_tokens=123,
+        total_cost=4,
+        langsmith_trace_id="expired-trace",
+        langsmith_trace_url="https://trace.example/expired",
+        error="expired error",
+        created_by=source.created_by,
+        created_at=expired_at,
+    )
+    current_run = AIRun(
+        workspace_id=source.workspace_id,
+        project_id=source.project_id,
+        workflow_type="retention_test",
+        status="succeeded",
+        input_summary="current prompt",
+        output_summary="current output",
+        total_tokens=456,
+        langsmith_trace_id="current-trace",
+        created_by=source.created_by,
+    )
+    db_session.add_all((expired_run, current_run))
+    db_session.flush()
+    expired_step = AIStep(
+        ai_run_id=expired_run.id,
+        step_name="expired_step",
+        status="succeeded",
+        input_json={"prompt": "expired"},
+        output_json={"answer": "expired"},
+        tokens=21,
+        langsmith_trace_id="expired-trace",
+        langsmith_run_id="expired-run",
+        langsmith_trace_url="https://trace.example/expired-step",
+        error="expired step error",
+        created_at=expired_at,
+    )
+    artifact = Artifact(
+        workspace_id=source.workspace_id,
+        project_id=source.project_id,
+        artifact_type="other",
+        title="Expired trace artifact",
+        created_by=source.created_by,
+    )
+    db_session.add_all((expired_step, artifact))
+    db_session.flush()
+    expired_version = ArtifactVersion(
+        workspace_id=source.workspace_id,
+        artifact_id=artifact.id,
+        version=1,
+        markdown_content="Expired artifact contents remain durable.",
+        structured_content={},
+        langsmith_trace_id="expired-artifact-trace",
+        langsmith_trace_url="https://trace.example/expired-artifact",
+        created_by=source.created_by,
+        created_at=expired_at,
+    )
+    expired_audit = AuditEvent(
+        workspace_id=source.workspace_id,
+        project_id=source.project_id,
+        user_id=source.created_by,
+        event_type="retention_test",
+        actor_type="system",
+        summary="Expired audit record",
+        risk_level="low",
+        event_metadata={},
+        created_at=expired_at,
+    )
+    expired_security = AuthenticationEvent(
+        workspace_id=source.workspace_id,
+        user_id=source.created_by,
+        event_type="login_success",
+        authentication_method="dev",
+        reason_code="retention_test",
+        created_at=expired_at,
+    )
+    session_revocation = SessionRevocation(
+        workspace_id=source.workspace_id,
+        user_id=source.created_by,
+        session_identifier_hash="0" * 64,
+        revoked_at=expired_at,
+    )
+    db_session.add_all((expired_version, expired_audit, expired_security, session_revocation))
+    db_session.commit()
+    expired_audit_id = expired_audit.id
+    expired_security_id = expired_security.id
+    session_revocation_id = session_revocation.id
+
+    result = retention_service.purge_expired_local_records(
+        db_session,
+        owner,
+        get_settings(),
+    )
+    assert result.as_dict() == {
+        "model_prompts_redacted": 2,
+        "model_outputs_redacted": 2,
+        "trace_references_cleared": 3,
+        "audit_events_deleted": 1,
+        "security_events_deleted": 1,
+    }
+
+    db_session.expire_all()
+    expired_run = db_session.get(AIRun, expired_run.id)
+    expired_step = db_session.get(AIStep, expired_step.id)
+    expired_version = db_session.get(ArtifactVersion, expired_version.id)
+    current_run = db_session.get(AIRun, current_run.id)
+    assert expired_run is not None and expired_step is not None and expired_version is not None
+    assert current_run is not None
+    assert expired_run.input_summary is None
+    assert expired_run.output_summary is None
+    assert expired_run.error is None
+    assert expired_run.langsmith_trace_id is None
+    assert expired_run.total_tokens == 123
+    assert expired_step.input_json is None
+    assert expired_step.output_json is None
+    assert expired_step.error is None
+    assert expired_step.tokens == 21
+    assert expired_version.langsmith_trace_id is None
+    assert current_run.input_summary == "current prompt"
+    assert current_run.output_summary == "current output"
+    assert current_run.langsmith_trace_id == "current-trace"
+    assert db_session.get(AuditEvent, expired_audit_id) is None
+    assert db_session.get(AuthenticationEvent, expired_security_id) is None
+    assert db_session.get(SessionRevocation, session_revocation_id) is not None
 
 
 def _owner_auth_context(db: Session, source: EvidenceSource) -> AuthContext:

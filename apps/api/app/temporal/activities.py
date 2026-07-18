@@ -28,6 +28,7 @@ from app.services import (
     competitor_discovery_service,
     eval_service,
     governance_service,
+    retention_service,
     source_discovery_service,
 )
 
@@ -318,6 +319,28 @@ async def finalize_sprint_activity(payload: Payload) -> Payload:
         return _activity_result(sprint, finalized_status=status)
 
     return await _run_db_activity(payload, "finalize_research_sprint", _finalize)
+
+
+@activity.defn(name="run_workspace_retention_cleanup_activity")
+async def run_workspace_retention_cleanup_activity(payload: Payload) -> Payload:
+    """Run one tenant's retention purge from a scheduled worker invocation."""
+    return await asyncio.to_thread(_run_workspace_retention_cleanup_sync, payload)
+
+
+def _run_workspace_retention_cleanup_sync(payload: Payload) -> Payload:
+    settings = get_settings()
+    with SessionLocal() as db:
+        try:
+            auth = _auth_from_payload(db, payload)
+            bind_tenant_context(db, auth.principal)
+            result = retention_service.purge_expired_local_records(db, auth, settings)
+            return {
+                "workspace_id": str(auth.workspace_id),
+                "retention_cleanup": result.as_dict(),
+            }
+        except Exception:
+            db.rollback()
+            raise
 
 
 async def _run_db_activity(
