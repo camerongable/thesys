@@ -73,6 +73,7 @@ from app.features.retrieval import reranker
 from app.features.retrieval import result_shaping as retrieval_result_shaping
 from app.features.retrieval import scoring as retrieval_scoring
 from app.features.retrieval import security_ranking as retrieval_security_ranking
+from app.features.retrieval import sufficiency as retrieval_sufficiency
 from app.features.validation import generation as validation_generation
 from app.features.validation import result_interpretation
 from app.mcp import adapter as mcp_adapter
@@ -91,6 +92,7 @@ from app.schemas.evidence import (
     RetrievalQualityReportRead,
     RetrievalQueryPlanRead,
     RetrievalRerankerDiagnosticsRead,
+    RetrievalSufficiencyRead,
 )
 from app.schemas.guide import (
     GuideActionRead,
@@ -480,10 +482,21 @@ def test_retrieval_diagnostic_helpers_are_feature_owned_and_service_compatible()
         reranker_used=True,
         context_token_count=120,
     )
+    sufficiency = RetrievalSufficiencyRead(
+        relevant_source_count=2,
+        source_diversity=1.0,
+        average_relevance=0.67,
+        trusted_source_ratio=1.0,
+        coverage_by_subquestion={"pricing": 1.0},
+        sufficient=True,
+    )
 
     assert retrieval_service._diagnostics is retrieval_diagnostics.base_diagnostics
     assert retrieval_service._pipeline_diagnostics is (
         retrieval_diagnostics.pipeline_diagnostics
+    )
+    assert retrieval_service._assess_retrieval_sufficiency is (
+        retrieval_sufficiency.assess_retrieval_sufficiency
     )
 
     base = retrieval_diagnostics.base_diagnostics(
@@ -508,6 +521,7 @@ def test_retrieval_diagnostic_helpers_are_feature_owned_and_service_compatible()
         reranker=reranker_diag,
         context=context_diag,
         quality_report=quality,
+        sufficiency=sufficiency,
         cache={"status": "miss"},
     )
 
@@ -520,6 +534,7 @@ def test_retrieval_diagnostic_helpers_are_feature_owned_and_service_compatible()
     assert pipeline.reranker == reranker_diag
     assert pipeline.context == context_diag
     assert pipeline.quality_report == quality
+    assert pipeline.sufficiency == sufficiency
     assert pipeline.cache == {"status": "miss"}
 
 

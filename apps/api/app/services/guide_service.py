@@ -592,6 +592,19 @@ def _stream_grounded_chat_response(
         context_pack=context_pack.model_dump(mode="json"),
     )
     yield from _retrieval_completed_events(retrieval_response)
+    if _requires_evidence_grounding(message) and not _retrieval_is_sufficient(search):
+        return (
+            _insufficient_evidence_response(
+                context,
+                search,
+                context_pack.model_dump(mode="json"),
+            ),
+            None,
+            Decimal("0"),
+            "retrieval-abstention",
+            settings.litellm_model,
+            False,
+        )
 
     generation_step = ai_run_service.start_step(
         db,
@@ -1011,6 +1024,8 @@ def _attach_grounding_metadata(
     )
     response.confidence_level = _grounded_confidence(context, bool(search.cited_evidence_ids))
     response.related_entities = _related_entities_with_evidence(context, search.cited_evidence_ids)
+    if _requires_evidence_grounding(message) and not _retrieval_is_sufficient(search):
+        return _insufficient_evidence_response(context, search, response.context_pack)
     if not search.cited_evidence_ids and not response.unsupported_or_missing_evidence:
         response.unsupported_or_missing_evidence = [
             "No project evidence was retrieved for this guide answer."
@@ -1056,6 +1071,14 @@ def _grounded_chat_response(
     )
     search = _exclude_blocked_evidence(search, guarded_content.blocked_source_ids)
     context_pack_payload = context_pack.model_dump(mode="json")
+    if _requires_evidence_grounding(message) and not _retrieval_is_sufficient(search):
+        return (
+            _insufficient_evidence_response(context, search, context_pack_payload),
+            None,
+            Decimal("0"),
+            "retrieval-abstention",
+            settings.litellm_model,
+        )
     key_payload, family_payload, version_payload = ai_cache_service.guide_answer_cache_payloads(
         db,
         auth,
@@ -1261,6 +1284,50 @@ def _search_guide_evidence(
             latency_ms=int((perf_counter() - started) * 1000),
         )
         raise
+
+
+def _requires_evidence_grounding(message: str) -> bool:
+    normalized = message.casefold()
+    return any(
+        term in normalized
+        for term in ("evidence", "source", "research", "finding", "support", "citation")
+    )
+
+
+def _retrieval_is_sufficient(search: _GuideEvidenceSearch) -> bool:
+    diagnostics = search.retrieval_diagnostics or {}
+    sufficiency = diagnostics.get("sufficiency")
+    return isinstance(sufficiency, dict) and sufficiency.get("sufficient") is True
+
+
+def _insufficient_evidence_response(
+    context: GuideContextRead,
+    search: _GuideEvidenceSearch,
+    context_pack: dict[str, Any] | None,
+) -> GuideChatResponseRead:
+    diagnostics = search.retrieval_diagnostics or {}
+    sufficiency = diagnostics.get("sufficiency")
+    reasons = (
+        sufficiency.get("reasons", [])
+        if isinstance(sufficiency, dict) and isinstance(sufficiency.get("reasons"), list)
+        else []
+    )
+    action = _action_by_id(context, "show_blocker_evidence")
+    return GuideChatResponseRead(
+        answer=(
+            "I do not have enough reliable project evidence to make a factual answer. "
+            "Any conclusion here would only be a hypothesis; add or retrieve more evidence first."
+        ),
+        recommended_action=action,
+        action_cards=[action, *_support_actions(context)[:2]],
+        related_entities=_related_entities(context),
+        confidence_level="unknown",
+        unsupported_or_missing_evidence=[str(reason) for reason in reasons[:4]]
+        or ["Retrieval did not provide sufficient evidence for a factual answer."],
+        used_llm=False,
+        retrieval_diagnostics=search.retrieval_diagnostics,
+        context_pack=context_pack,
+    )
 
 
 _grounded_guide_messages = guide_prompting.grounded_guide_messages

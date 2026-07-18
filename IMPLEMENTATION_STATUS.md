@@ -577,6 +577,13 @@ current verdict, next action, evidence health, validation, and decision state.
   A distinct source whose candidate vectors nearly match two approved,
   different-content project sources receives an inspectable source-trust signal
   and is quarantined with a completed ingestion audit trail.
+- [x] Add structured retrieval-sufficiency diagnostics for relevant approved
+  sources, source diversity, average relevance, trusted-source ratio, and
+  planned-subquestion coverage. Evidence-seeking Ask Thesys requests now
+  abstain with explicit hypothesis labeling and retrieval reasons when that
+  assessment is insufficient; the same fail-closed response prevents provider
+  invocation after insufficient or guardrail-filtered evidence in regular and
+  streamed flows.
 
 ## Sprint 65 Verification
 
@@ -606,12 +613,20 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Anomalous embedding-cluster checkpoint passed (`28 passed, 1 xfailed, 1
   warning`); repository-wide lint and the full backend suite passed (`425
   passed, 1 skipped, 1 xfailed, 12 warnings`).
+- [x] Retrieval-sufficiency and Guide abstention checkpoint passed (`90 passed,
+  1 warning`), covering the structured assessment, normal Guide abstention,
+  SSE abstention, and the stronger provider-free response after indirect
+  injection removes all usable evidence.
+- [x] Application lint and compile checks passed, and the full backend suite
+  passed (`428 passed, 1 skipped, 1 xfailed, 12 warnings`). Repository-root
+  lint remains limited by 12 pre-existing line-length violations in historical
+  Alembic migrations outside this sprint slice.
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-add recommendation-shift poisoning detection, then review retrieval sufficiency
-and explicit abstention behavior.
+add recommendation-shift poisoning detection, then continue the remaining
+secure-RAG parity and memory-poisoning acceptance work.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

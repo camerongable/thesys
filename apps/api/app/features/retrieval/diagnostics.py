@@ -13,6 +13,7 @@ from app.schemas.evidence import (
     RetrievalQualityReportRead,
     RetrievalQueryPlanRead,
     RetrievalRerankerDiagnosticsRead,
+    RetrievalSufficiencyRead,
 )
 
 
@@ -51,6 +52,7 @@ def pipeline_diagnostics(
     reranker: RetrievalRerankerDiagnosticsRead,
     context: RetrievalContextDiagnosticsRead,
     quality_report: RetrievalQualityReportRead,
+    sufficiency: RetrievalSufficiencyRead,
     cache: dict[str, Any] | None,
 ) -> RetrievalDiagnosticsRead:
     diagnostic_payload = primary.model_dump()
@@ -67,6 +69,7 @@ def pipeline_diagnostics(
             "reranker": reranker,
             "context": context,
             "quality_report": quality_report,
+            "sufficiency": sufficiency,
             "cache": cache,
         }
     )

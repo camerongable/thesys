@@ -616,8 +616,7 @@ def test_guide_chat_stream_blocks_indirect_injection_from_retrieved_evidence(
         body = "".join(response.iter_text())
 
     assert response.status_code == 200
-    assert attack not in captured_prompt["text"]
-    assert source_id not in captured_prompt["text"]
+    assert captured_prompt == {}
     events = _sse_events(body)
     retrieval_payload = next(payload for event, payload in events if event == "retrieval_result")
     assert retrieval_payload["cited_evidence_ids"] == []
@@ -626,6 +625,7 @@ def test_guide_chat_stream_blocks_indirect_injection_from_retrieved_evidence(
     final_payload = events[-1][1]
     assert final_payload["cited_evidence_ids"] == []
     assert source_id not in final_payload["context_pack"]["available_citation_ids"]
+    assert "do not have enough reliable project evidence" in final_payload["answer"]
     audit = db_session.scalar(
         select(AuditEvent).where(
             AuditEvent.project_id == uuid.UUID(project_id),

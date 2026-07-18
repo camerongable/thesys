@@ -26,6 +26,7 @@ from app.features.retrieval import reranker as retrieval_reranker_feature
 from app.features.retrieval import result_shaping as retrieval_result_shaping_feature
 from app.features.retrieval import scoring as retrieval_scoring_feature
 from app.features.retrieval import security_ranking as retrieval_security_ranking_feature
+from app.features.retrieval import sufficiency as retrieval_sufficiency_feature
 from app.features.retrieval.security_policy import RetrievalSecurityPolicy
 from app.schemas.evidence import (
     EvidenceRetrievalResultRead,
@@ -226,6 +227,7 @@ def retrieve_evidence_pipeline(
         reranker_used=reranker.enabled and not reranker.fallback_used,
         token_count=context.token_count,
     )
+    sufficiency = _assess_retrieval_sufficiency(assembled, plan)
     primary = (
         diagnostics[0]
         if diagnostics
@@ -248,6 +250,7 @@ def retrieve_evidence_pipeline(
         reranker=reranker,
         context=context,
         quality_report=quality,
+        sufficiency=sufficiency,
         cache=ai_cache_service.cache_event_diagnostics(cache_lookup.event),
     )
     ai_cache_service.store(
@@ -897,3 +900,4 @@ def _pgvector_index_status(db: Session) -> tuple[str | None, bool]:
 
 _diagnostics = retrieval_diagnostics_feature.base_diagnostics
 _pipeline_diagnostics = retrieval_diagnostics_feature.pipeline_diagnostics
+_assess_retrieval_sufficiency = retrieval_sufficiency_feature.assess_retrieval_sufficiency

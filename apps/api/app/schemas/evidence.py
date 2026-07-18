@@ -143,6 +143,16 @@ class RetrievalQualityReportRead(BaseModel):
     context_token_count: int
 
 
+class RetrievalSufficiencyRead(BaseModel):
+    relevant_source_count: int
+    source_diversity: float
+    average_relevance: float
+    trusted_source_ratio: float
+    coverage_by_subquestion: dict[str, float] = Field(default_factory=dict)
+    sufficient: bool
+    reasons: list[str] = Field(default_factory=list)
+
+
 class RetrievalDiagnosticsRead(BaseModel):
     embedding_provider: str
     embedding_model: str
@@ -159,6 +169,7 @@ class RetrievalDiagnosticsRead(BaseModel):
     reranker: RetrievalRerankerDiagnosticsRead | None = None
     context: RetrievalContextDiagnosticsRead | None = None
     quality_report: RetrievalQualityReportRead | None = None
+    sufficiency: RetrievalSufficiencyRead | None = None
     cache: dict[str, object] | None = None
 
 
