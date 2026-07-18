@@ -105,6 +105,7 @@ def test_data_classification_registry_covers_sensitive_assets() -> None:
         "mcp_server_registrations",
         "audit_events",
         "authentication_events",
+        "session_revocations",
         "langsmith_traces",
         "temporal_workflow_state",
         "model_provider_payload",
@@ -193,6 +194,7 @@ def test_rls_migration_forces_policies_and_scoped_role_grants(monkeypatch) -> No
     assert set(migration.RLS_DIRECT_TABLES) < RLS_DIRECT_TENANT_TABLES
     assert RLS_DIRECT_TENANT_TABLES - set(migration.RLS_DIRECT_TABLES) == {
         "authentication_events",
+        "session_revocations",
         "workspace_data_keys",
     }
     assert set(migration.RLS_INHERITED_TABLES) == RLS_INHERITED_TENANT_TABLES
@@ -277,6 +279,33 @@ def test_authentication_event_migration_limits_pre_authentication_writes(monkeyp
     assert "workspace_id IS NULL AND user_id IS NULL" in combined
     assert "thesys_api" in combined and "SELECT, INSERT" in combined
     assert "thesys_worker" in combined and "thesys_readonly" in combined
+
+
+def test_session_revocation_migration_forces_rls_and_immutable_runtime_grants(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0032_session_revocations.py"
+    spec = importlib.util.spec_from_file_location("session_revocation_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "session_revocations" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "session_revocations" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "session_revocations"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT" in combined
+    assert "UPDATE" not in combined and "DELETE" not in combined
 
 
 def test_application_credentials_are_read_only_through_secret_provider() -> None:

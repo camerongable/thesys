@@ -55,8 +55,9 @@ reapplies both settings after every commit or rollback before the next query.
 
 Migration `0029_tenant_rls` enables and forces row-level security on the original
 38 tenant tables. Migrations `0030_workspace_data_keys` and
-`0031_authentication_events` add the restricted wrapped-key and immutable
-authentication-event tables, bringing the contract to 40 tenant tables.
+`0031_authentication_events`, and `0032_session_revocations` add the restricted
+wrapped-key, immutable authentication-event, and hashed session-revocation
+tables, bringing the contract to 41 tenant tables.
 Thirty-three original tables compare their own `workspace_id`; five child/link
 tables authorize through their tenant-scoped parent. Missing context fails
 closed. Existing service-level workspace filters remain required.

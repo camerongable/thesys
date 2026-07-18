@@ -359,6 +359,11 @@ They record only event and reason codes, authentication method, and internal
 workspace/user IDs when attribution is established; bearer tokens, API keys,
 and arbitrary request metadata are not accepted by the event model.
 
+OIDC sessions with a `sid`, and JWTs with a `jti`, can revoke themselves through
+`POST /api/session/revoke`. Revocation stores a workspace/user-scoped SHA-256
+digest rather than the raw identifier, creates a `session_revoked` audit event,
+and blocks later reuse before route handling.
+
 ---
 
 ## Architecture Overview

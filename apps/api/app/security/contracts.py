@@ -159,6 +159,12 @@ DATA_TYPES: dict[str, ClassifiedDataType] = {
         ProviderPolicy.LOCAL_ONLY,
         "IdentityService",
     ),
+    "session_revocations": ClassifiedDataType(
+        "Hashed session revocations",
+        DataClassification.CONFIDENTIAL,
+        ProviderPolicy.LOCAL_ONLY,
+        "IdentityService",
+    ),
     "langsmith_traces": ClassifiedDataType(
         "LangSmith traces",
         DataClassification.CONFIDENTIAL,
@@ -337,6 +343,7 @@ RLS_DIRECT_TENANT_TABLES = frozenset(
         "research_plans",
         "research_sprints",
         "risks",
+        "session_revocations",
         "thesis_canvases",
         "thesis_evolution_events",
         "tool_invocations",

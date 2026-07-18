@@ -15,7 +15,7 @@ from app.core import oidc
 from app.core.auth import get_current_auth_context
 from app.core.config import Settings, get_settings
 from app.core.oidc import OIDCValidationError, oidc_external_auth_id, verify_oidc_token
-from app.db.models import User, Workspace, WorkspaceMember
+from app.db.models import AuthenticationEvent, SessionRevocation, User, Workspace, WorkspaceMember
 from app.db.tenant import get_bound_tenant_context
 from app.main import create_app
 
@@ -240,6 +240,46 @@ def test_oidc_auth_resolves_preprovisioned_membership_into_principal(
     assert tenant_context is not None
     assert tenant_context.user_id == user.id
     assert tenant_context.workspace_id == workspace.id
+
+
+def test_oidc_session_revocation_blocks_reuse_and_records_safe_audit(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    rsa_private_key: rsa.RSAPrivateKey,
+    install_static_jwks: Callable[[rsa.RSAPrivateKey], None],
+) -> None:
+    install_static_jwks(rsa_private_key)
+    user, workspace = _provision_identity(db_session)
+    _configure_oidc(monkeypatch)
+    token = _sign_token(
+        rsa_private_key,
+        _claims(workspace.id, sid="session-to-revoke", jti="token-to-revoke"),
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    initial = client.get("/api/projects", headers=headers)
+    revoked = client.post("/api/session/revoke", headers=headers)
+    reused = client.get("/api/projects", headers=headers)
+
+    assert initial.status_code == 200
+    assert revoked.status_code == 204
+    assert reused.status_code == 401
+    revocation = db_session.scalar(select(SessionRevocation))
+    assert revocation is not None
+    assert revocation.workspace_id == workspace.id
+    assert revocation.user_id == user.id
+    assert len(revocation.session_identifier_hash) == 64
+    assert "session-to-revoke" not in str(revocation.__dict__)
+    events = list(db_session.scalars(select(AuthenticationEvent)))
+    assert any(
+        event.event_type == "session_revoked" and event.reason_code == "self_revocation"
+        for event in events
+    )
+    assert any(
+        event.event_type == "login_failure" and event.reason_code == "session_revoked"
+        for event in events
+    )
 
 
 def test_oidc_auth_never_provisions_from_token_claims(

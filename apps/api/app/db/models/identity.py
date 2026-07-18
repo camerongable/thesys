@@ -109,3 +109,37 @@ class AuthenticationEvent(UUIDPrimaryKeyMixin, Base):
         nullable=False,
         index=True,
     )
+
+
+class SessionRevocation(UUIDPrimaryKeyMixin, Base):
+    """Hashed session identifiers that must no longer authenticate a principal."""
+
+    __tablename__ = "session_revocations"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "user_id",
+            "session_identifier_hash",
+            name="uq_session_revocations_identity",
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    session_identifier_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    revoked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+        index=True,
+    )

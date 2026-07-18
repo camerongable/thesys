@@ -96,11 +96,12 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Add persistent user status and migration `0028_production_identity`.
 - [x] Bind validated principals to transaction-local Postgres workspace/user
   settings and reapply them after every session transaction boundary.
-- [x] Enable and force RLS across all 40 currently modeled tenant tables:
+- [x] Enable and force RLS across all 41 currently modeled tenant tables:
   migration `0029_tenant_rls` covers the original 38, migration
   `0030_workspace_data_keys` covers the restricted key table, migration
-  `0031_authentication_events` covers immutable authentication outcomes, and
-  five child/link tables use inherited parent policies.
+  `0031_authentication_events` covers immutable authentication outcomes,
+  `0032_session_revocations` covers hashed session invalidation, and five
+  child/link tables use inherited parent policies.
 - [x] Separate migration, API, Temporal worker, and readonly database roles;
   hosted startup rejects a bootstrap or mismatched runtime username.
 - [x] Add direct wrong-tenant Postgres ORM coverage for projects, evidence,
@@ -139,9 +140,11 @@ current verdict, next action, evidence health, validation, and decision state.
   credentials, rejected bearer tokens, and denied OIDC identity/membership
   resolution now emit durable `login_success`, `login_failure`,
   `token_validation_failure`, or `workspace_access_denied` records.
-- [ ] Add role-change, session-revocation, cross-tenant-attempt, and broader
-  authorization-denial emitters when their corresponding mutation/resource
-  flows are introduced.
+- [x] Add self-service session revocation for OIDC `sid` or JWT `jti` identities:
+  revocation stores only a tenant/user-scoped SHA-256 digest, emits
+  `session_revoked`, and rejects subsequent use before it reaches a route.
+- [ ] Add role-change, cross-tenant-attempt, and broader authorization-denial
+  emitters when their corresponding mutation/resource flows are introduced.
 
 ## Sprint 62 Identity Verification
 
@@ -218,6 +221,9 @@ current verdict, next action, evidence health, validation, and decision state.
   1 warning`). Tests cover successful attribution, token-validation failure,
   OIDC workspace denial, the absence of credential storage columns, and the
   forced-RLS pre-auth insertion contract.
+- [x] OIDC session revocation tests passed (`42 passed, 3 xfailed`), covering
+  endpoint behavior, hashed-only persistence, audit
+  attribution, and denial on token reuse.
 - [ ] Run migration `0031_authentication_events` and its policy checks against
   the existing live-Postgres CI checkpoint. Local SQLite tests prove the model
   and offline migration contract but not a PostgreSQL RLS execution.
@@ -226,10 +232,20 @@ current verdict, next action, evidence health, validation, and decision state.
   `0031_authentication_events`; offline PostgreSQL SQL renders its checks,
   forced RLS, pre-auth insert policy, and scoped runtime grants.
 
+## Sprint 62 Session Revocation Verification
+
+- [x] The full backend regression suite passed (`334 passed, 1 skipped,
+  3 xfailed, 3 warnings`). `alembic heads` reports
+  `0032_session_revocations`; offline PostgreSQL SQL renders the table, digest
+  uniqueness, forced RLS, and insert/select-only runtime grants.
+- [ ] Run migration `0032_session_revocations` and its tenant policy against the
+  live-Postgres CI checkpoint. Local tests prove the application behavior and
+  offline migration contract but not live PostgreSQL RLS enforcement.
+
 ## Next Sprint
 
-Continue V1 Sprint 62 with session/role revocation audit flows and the remaining
-service-level cross-tenant matrix.
+Continue V1 Sprint 62 with role-change and cross-tenant-attempt audit emitters,
+then finish the remaining service-level cross-tenant matrix.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

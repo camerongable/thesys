@@ -38,6 +38,7 @@ live in `apps/api/app/security/contracts.py`.
 | MCP server registrations | Confidential | Local only | ToolPolicyGateway |
 | Audit events | Confidential | Local only | GovernanceService |
 | Authentication audit events | Confidential | Local only | IdentityService |
+| Hashed session revocations | Confidential | Local only | IdentityService |
 | LangSmith traces | Same as contained data; confidential by default | Approved provider | ObservabilityService |
 | Temporal workflow state | Confidential | Local only | TemporalResearchService |
 | Raw model-provider request/response | Confidential or restricted based on payload | Matching approved provider | AISafetyGateway |

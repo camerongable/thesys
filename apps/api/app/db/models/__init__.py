@@ -13,7 +13,13 @@ from app.db.models.cache import AICacheEntry, AICacheEvent
 from app.db.models.competitor import Competitor, CompetitorEvidenceLink
 from app.db.models.evidence import EvidenceChunk, EvidenceSource
 from app.db.models.governance import ApprovalRequest, AuditEvent
-from app.db.models.identity import AuthenticationEvent, User, Workspace, WorkspaceMember
+from app.db.models.identity import (
+    AuthenticationEvent,
+    SessionRevocation,
+    User,
+    Workspace,
+    WorkspaceMember,
+)
 from app.db.models.memory import ProjectMemoryItem
 from app.db.models.nudge import ProjectNudge
 from app.db.models.project import (
@@ -78,6 +84,7 @@ __all__ = [
     "ResearchPlan",
     "ResearchSprint",
     "Risk",
+    "SessionRevocation",
     "TimestampMixin",
     "ThesisCanvas",
     "ThesisEvolutionEvent",

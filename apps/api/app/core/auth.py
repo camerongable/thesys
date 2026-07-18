@@ -18,7 +18,7 @@ from app.db.models import User, Workspace
 from app.db.session import get_db
 from app.db.tenant import bind_tenant_context
 from app.security.secrets import SecretName, SecretProviderError, resolve_secret
-from app.services import auth_audit_service
+from app.services import auth_audit_service, session_revocation_service
 from app.services.identity_service import (
     ensure_dev_identity,
     ensure_external_identity,
@@ -174,6 +174,19 @@ def get_current_auth_context(
         raise
 
     bind_tenant_context(db, auth.principal)
+    if session_revocation_service.is_current_session_revoked(db, auth):
+        _persist_authentication_event(
+            db,
+            event_type="login_failure",
+            authentication_method=auth.principal.authentication_method,
+            reason_code="session_revoked",
+            workspace_id=auth.workspace_id,
+            user_id=auth.user_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session is revoked.",
+        )
     _persist_authentication_event(
         db,
         event_type="login_success",

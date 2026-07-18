@@ -76,6 +76,13 @@ def test_missing_oidc_credentials_records_login_failure(
     assert event.user_id is None
 
 
+def test_session_revocation_requires_a_session_identifier(client: TestClient) -> None:
+    response = client.post("/api/session/revoke")
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert response.json() == {"detail": "The authenticated session cannot be revoked."}
+
+
 def test_oidc_identity_denial_records_workspace_access_denied(
     client: TestClient,
     db_session: Session,

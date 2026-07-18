@@ -44,6 +44,13 @@ cannot persist bearer tokens, API keys, or arbitrary request metadata. Forced
 RLS scopes attributed events to their workspace, and a separate insert-only
 policy permits only null-identity pre-authentication failures.
 
+`POST /api/session/revoke` invalidates the authenticated OIDC `sid` or JWT
+`jti`. The database stores a SHA-256 digest of that identifier, scoped to the
+user and workspace; it never stores the raw session or token identifier. Every
+authenticated request checks the digest before route handling, and successful
+self-revocation creates a `session_revoked` audit event. Service accounts and
+tokens without a `sid` or `jti` cannot use this endpoint.
+
 ## Database Roles And RLS
 
 | Role | Runtime use | Privileges |
