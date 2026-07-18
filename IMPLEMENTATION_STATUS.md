@@ -462,8 +462,15 @@ current verdict, next action, evidence health, validation, and decision state.
   citation, candidate, competitor, and trace anchor. Invalid URLs retain their
   text but never render as anchors; the final scan leaves no raw new-window
   external-data anchors outside the shared policy components.
-- [ ] Integrate guardrails with remaining model-provider boundaries before
-  claiming the full Sprint 64 gateway.
+- [x] Route every current LiteLLM text-generation boundary through the gateway:
+  normal and streaming chat calls use `LiteLLMClient`, while direct multimodal
+  extraction now adds the trusted prompt boundary, file-content screening, and
+  output checks before JSON parsing or evidence persistence. The former Sprint
+  64 all-LLM-call invariant is now enforced rather than expected to fail.
+- [ ] Complete the remaining Sprint 64 acceptance audit, including the explicit
+  embedding-provider scope, citation semantic-support verification, optional
+  classifier adapter runtime posture, and documented detector-unavailability
+  behavior before claiming the full gateway.
 
 ## Sprint 64 Verification
 
@@ -489,11 +496,15 @@ current verdict, next action, evidence health, validation, and decision state.
   safe-link wrapper and every project metadata/citation/trace surface. The same
   npm dependency-fetch limitation prevents broader web type and integration
   checks in this environment.
+- [x] Multimodal and all-model-call checkpoint passed (`409 passed, 1 skipped,
+  1 xfailed, 12 warnings`), including direct multimodal input/output blocking
+  tests and the now-enforced Sprint 64 provider-boundary invariant.
 
 ## Next Sprint
 
-Continue Sprint 64 by extending the central gateway to remaining
-model-provider boundaries.
+Continue Sprint 64 with an acceptance audit of embedding-provider scope,
+citation support verification, optional classifier adapters, and detector
+failure behavior.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

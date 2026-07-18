@@ -1,7 +1,6 @@
 import ast
 import importlib.util
 import inspect
-from importlib.util import find_spec
 from pathlib import Path
 
 import pytest
@@ -492,9 +491,27 @@ def test_sources_require_classification_before_retrieval() -> None:
     assert "is_chunk_retrievable" in reembedding
 
 
-@pytest.mark.xfail(strict=True, reason="Sprint 64 will centralize all model calls.")
 def test_all_llm_calls_route_through_guardrail_gateway() -> None:
-    assert find_spec("app.security.guardrail_gateway") is not None
+    provider_boundaries = [
+        path
+        for path in (REPO_ROOT / "apps/api/app").rglob("*.py")
+        if "tests" not in path.parts and "/v1/chat/completions" in path.read_text()
+    ]
+
+    assert {path.relative_to(REPO_ROOT).as_posix() for path in provider_boundaries} == {
+        "apps/api/app/ai/litellm_client.py",
+        "apps/api/app/services/multimodal_extraction_service.py",
+    }
+    for path in provider_boundaries:
+        source = path.read_text()
+        assert "GuardrailGateway" in source, path
+        assert "build_secure_prompt" in source, path
+        assert "evaluate_model_output" in source, path
+
+    multimodal_source = (
+        REPO_ROOT / "apps/api/app/services/multimodal_extraction_service.py"
+    ).read_text()
+    assert "evaluate_retrieved_content" in multimodal_source
 
 
 @pytest.mark.xfail(strict=True, reason="Sprint 67 will add complete durable-workflow budgets.")

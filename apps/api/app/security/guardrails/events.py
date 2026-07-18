@@ -27,7 +27,15 @@ def security_event_type(detection: DetectionResult) -> str | None:
 
 def detection_metadata(decision: GuardrailDecision) -> dict[str, Any]:
     """Return durable, non-content-bearing evidence for a guardrail decision."""
-    detection = decision.detection
+    return {
+        **detection_result_metadata(decision.detection),
+        "tools_allowed": decision.tools_allowed,
+        "memory_writes_allowed": decision.memory_writes_allowed,
+    }
+
+
+def detection_result_metadata(detection: DetectionResult) -> dict[str, Any]:
+    """Return non-content-bearing metadata for output-only detector results."""
     return {
         "category": detection.category,
         "score": detection.score,
@@ -35,8 +43,6 @@ def detection_metadata(decision: GuardrailDecision) -> dict[str, Any]:
         "detector": detection.detector,
         "detector_version": detection.detector_version,
         "reasons": list(detection.reasons),
-        "tools_allowed": decision.tools_allowed,
-        "memory_writes_allowed": decision.memory_writes_allowed,
     }
 
 
