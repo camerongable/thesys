@@ -36,6 +36,8 @@ from app.schemas.guide import (
     GuideContextRead,
     GuideResponseRead,
 )
+from app.security.guardrails import GuardrailGateway
+from app.security.guardrails.events import detection_metadata, record_detection
 from app.services import (
     ai_cache_service,
     ai_run_service,
@@ -145,6 +147,16 @@ def chat(
     model_name = settings.litellm_model
 
     try:
+        guardrail_decision = GuardrailGateway(settings).evaluate_user_input(
+            message,
+            workflow="guide_chat",
+        )
+        guardrail_event = record_detection(
+            db,
+            auth,
+            project_id=project_id,
+            decision=guardrail_decision,
+        )
         intent_step = ai_run_service.start_step(
             db,
             run,
@@ -162,6 +174,8 @@ def chat(
             output_json={
                 "in_scope": in_scope,
                 "used_llm": not settings.should_use_llm_stub and in_scope,
+                "guardrail": detection_metadata(guardrail_decision),
+                "guardrail_event": guardrail_event,
             },
             latency_ms=0,
             tokens=None,
@@ -172,7 +186,9 @@ def chat(
         # response can surface an approval request, but it cannot write memory,
         # validation plans, or decisions directly.
         proposal_tool = _proposal_tool_for_message(normalized)
-        if not in_scope:
+        if not guardrail_decision.tools_allowed:
+            response = _guardrail_blocked_chat_response(context)
+        elif not in_scope:
             response = _out_of_scope_chat_response(context)
         elif proposal_tool is not None:
             response = _proposal_chat_response(
@@ -281,6 +297,16 @@ def stream_chat_events(
             yield from _timeout_stream_events(db, run, context, timeout)
             return
 
+        guardrail_decision = GuardrailGateway(settings).evaluate_user_input(
+            message,
+            workflow="guide_chat",
+        )
+        guardrail_event = record_detection(
+            db,
+            auth,
+            project_id=project_id,
+            decision=guardrail_decision,
+        )
         intent_step = ai_run_service.start_step(
             db,
             run,
@@ -299,6 +325,8 @@ def stream_chat_events(
             output_json={
                 "in_scope": in_scope,
                 "used_llm": not settings.should_use_llm_stub and in_scope,
+                "guardrail": detection_metadata(guardrail_decision),
+                "guardrail_event": guardrail_event,
             },
             latency_ms=0,
             tokens=None,
@@ -310,6 +338,7 @@ def stream_chat_events(
                 "phase": "intent_guardrail",
                 "in_scope": in_scope,
                 "recent_turn_count": len(bounded_recent_turns),
+                "guardrail_action": guardrail_decision.detection.action,
             },
         )
         if _stream_timed_out(started_at, timeout):
@@ -317,7 +346,9 @@ def stream_chat_events(
             return
 
         proposal_tool = _proposal_tool_for_message(normalized)
-        if not in_scope:
+        if not guardrail_decision.tools_allowed:
+            response = _guardrail_blocked_chat_response(context)
+        elif not in_scope:
             response = _out_of_scope_chat_response(context)
         elif proposal_tool is not None:
             yield (
@@ -476,6 +507,18 @@ def _timeout_chat_response(
         ],
         ai_run_id=run_id,
     )
+
+
+def _guardrail_blocked_chat_response(context: GuideContextRead) -> GuideChatResponseRead:
+    response = _out_of_scope_chat_response(context)
+    response.answer = (
+        "I cannot process that request. Ask a project question without instruction overrides, "
+        "prompt extraction, tool manipulation, or external data-transfer requests."
+    )
+    response.unsupported_or_missing_evidence = [
+        "Guardrail policy blocked tools, memory context, retrieval, and model processing."
+    ]
+    return response
 
 
 _retrieval_started_events = guide_events.retrieval_started_events

@@ -446,9 +446,13 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Add common retrieved-content XML wrapping, conservative Markdown/HTML/link
   sanitization, and citation membership validation primitives for subsequent
   retrieval and rendering integrations.
-- [ ] Integrate guardrail detections with workflow-owned audit/security events,
-  retrieval provenance, tool/memory restrictions, rendering surfaces, and all
-  remaining provider boundaries before claiming the full Sprint 64 gateway.
+- [x] Evaluate Ask Thesys messages before proposal tools, retrieval, memory
+  context, or model processing. Actionable detections now create redacted,
+  attributable guardrail audit events and record decision-only evidence in the
+  AI step; restricted guide requests receive a safe response without tools.
+- [ ] Integrate retrieved-content provenance and decisions, rendering surfaces,
+  and all remaining provider boundaries before claiming the full Sprint 64
+  gateway.
 
 ## Sprint 64 Verification
 
@@ -456,11 +460,15 @@ current verdict, next action, evidence health, validation, and decision state.
   full backend checkpoints passed (`399 passed, 1 skipped, 2 xfailed, 12
   warnings`); repository-wide lint, compile, lock, and whitespace checks are
   clean.
+- [x] Guide workflow guardrail and audit-event checkpoint passed (`401 passed,
+  1 skipped, 2 xfailed, 12 warnings`), including regular and SSE requests that
+  confirm direct injections create `prompt_injection_detected` events and cannot
+  invoke proposal or retrieval tools.
 
 ## Next Sprint
 
-Continue Sprint 64 by attaching detections to audit events and expanding the
-central gateway across retrieval, rendering, and remaining provider boundaries.
+Continue Sprint 64 by expanding the central gateway across retrieved-content
+provenance, rendering, and remaining provider boundaries.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
