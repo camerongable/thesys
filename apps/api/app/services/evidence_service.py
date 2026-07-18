@@ -46,6 +46,7 @@ from app.services import (
     project_service,
     pseudonymization_service,
     retention_service,
+    secure_ingestion_state_service,
     source_provenance_service,
 )
 from app.services.common import workflow as workflow_utils
@@ -157,6 +158,7 @@ def add_note_source(
         ingestion_status="processing",
         created_by=auth.user_id,
     )
+    secure_ingestion_state_service.initialize(source)
     db.add(source)
     db.commit()
     db.refresh(source)
@@ -194,6 +196,7 @@ def add_url_source(
         ingestion_status="processing",
         created_by=auth.user_id,
     )
+    secure_ingestion_state_service.initialize(source)
     db.add(source)
     db.commit()
     db.refresh(source)
@@ -273,6 +276,7 @@ def add_discovered_url_source(
         ingestion_status="processing",
         created_by=auth.user_id,
     )
+    secure_ingestion_state_service.initialize(source)
     db.add(source)
     db.commit()
     db.refresh(source)
@@ -363,6 +367,7 @@ def add_discovered_url_snapshot(
         ingestion_status="processing",
         created_by=auth.user_id,
     )
+    secure_ingestion_state_service.initialize(source)
     db.add(source)
     db.commit()
     db.refresh(source)
@@ -506,6 +511,15 @@ def add_file_source(
         ingestion_status="processing",
         created_by=auth.user_id,
     )
+    secure_ingestion_state_service.initialize(source)
+    secure_ingestion_state_service.transition(
+        source,
+        secure_ingestion_state_service.SecureIngestionState.MALWARE_SCANNING,
+    )
+    secure_ingestion_state_service.transition(
+        source,
+        secure_ingestion_state_service.SecureIngestionState.EXTRACTION_PENDING,
+    )
     db.add(source)
     governance_service.record_audit_event(
         db,
@@ -562,6 +576,11 @@ def reprocess_source(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Source has no parsed text to reprocess.",
         )
+    secure_ingestion_state_service.initialize(source)
+    secure_ingestion_state_service.transition(
+        source,
+        secure_ingestion_state_service.SecureIngestionState.EXTRACTION_PENDING,
+    )
     source.ingestion_status = "processing"
     source.ingestion_error = None
     db.commit()
@@ -857,6 +876,19 @@ def _process_source_text(
     started = perf_counter()
 
     try:
+        secure_ingestion_state_service.initialize(source)
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.EXTRACTION_PENDING,
+        )
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.EXTRACTED,
+        )
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.CLASSIFICATION_PENDING,
+        )
         protected_source_text = pseudonymization_service.create_searchable_copy(
             db,
             auth,
@@ -871,6 +903,20 @@ def _process_source_text(
             raise EvidenceIngestionError(
                 f"Extracted text exceeds {settings.max_extracted_text_chars} character limit."
             )
+
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.CLASSIFIED,
+        )
+        if protected_source_text.pii_status == "redacted":
+            secure_ingestion_state_service.transition(
+                source,
+                secure_ingestion_state_service.SecureIngestionState.PII_REVIEW_PENDING,
+            )
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.APPROVED_FOR_EMBEDDING,
+        )
 
         searchable_text = _normalize_text(protected_source_text.text)
         chunks = _chunk_text(searchable_text)
@@ -1056,6 +1102,15 @@ def _process_source_text(
             )
             db.add(chunk)
 
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.EMBEDDED,
+        )
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.RETRIEVABLE,
+        )
+
         db.commit()
         db.refresh(source)
         source = get_source(db, auth, source.project_id, source.id)
@@ -1102,6 +1157,18 @@ def _mark_source_failed(
     *,
     metadata: dict[str, Any] | None = None,
 ) -> None:
+    secure_ingestion_state_service.initialize(source)
+    current_state = secure_ingestion_state_service.state(source)
+    if current_state is secure_ingestion_state_service.SecureIngestionState.RETRIEVABLE:
+        return
+    if current_state not in {
+        secure_ingestion_state_service.SecureIngestionState.FAILED,
+        secure_ingestion_state_service.SecureIngestionState.QUARANTINED,
+    }:
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.FAILED,
+        )
     source.ingestion_status = "failed"
     source.ingestion_error = error[:2000]
     if metadata:
@@ -1540,6 +1607,15 @@ def _quarantine_file_upload(
             },
         },
         created_by=auth.user_id,
+    )
+    secure_ingestion_state_service.initialize(source)
+    secure_ingestion_state_service.transition(
+        source,
+        secure_ingestion_state_service.SecureIngestionState.MALWARE_SCANNING,
+    )
+    secure_ingestion_state_service.transition(
+        source,
+        secure_ingestion_state_service.SecureIngestionState.QUARANTINED,
     )
     db.add(source)
     governance_service.record_audit_event(

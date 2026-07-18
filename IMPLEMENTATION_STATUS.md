@@ -319,9 +319,14 @@ current verdict, next action, evidence health, validation, and decision state.
   deterministic credential/identifier scanner. Extended identifiers such as
   SSNs, IBANs, bank accounts, passports, and IP addresses now contribute to
   classification and redaction without an implicit NLP-model download.
-- [ ] Complete the remaining secure-ingestion state-machine and parser/content
-  limits, including password-protected files, active PDF content, decompression
-  limits, and page/extraction resource bounds.
+- [x] Persist a validated secure-ingestion lifecycle in source metadata across
+  note, URL, discovery, and file paths: uploaded, malware scanning,
+  extraction, classification, optional PII review, embedding, and retrieval.
+  The history preserves reprocessing attempts and records terminal quarantined
+  or failed outcomes; invalid terminal transitions are rejected.
+- [ ] Complete the remaining file parser/content resource controls: extraction
+  timeout and memory bounds, decompression-ratio limits, unsupported-archive
+  rejection, and image metadata stripping where appropriate.
 - [x] Require extension, declared MIME, and independently detected content MIME
   to agree before any upload reaches malware scanning, storage, or parsing.
   `python-magic` is the primary detector; an unavailable binding falls back to
@@ -395,11 +400,15 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] PDF preflight checkpoint passed (`137 passed, 1 skipped, 2 xfailed, 6
   warnings`), covering encrypted and active-content PDF denial before storage,
   configurable page limits, malware quarantine, and normal PDF extraction.
+- [x] Secure-ingestion lifecycle checkpoint passed (`150 passed, 1 skipped, 2
+  xfailed, 9 warnings`), covering complete source histories, reprocessing,
+  failed URL ingestion, scanner quarantine, PDF preflight, and rejected invalid
+  terminal transitions.
 
 ## Next Sprint
 
-Continue V1 Sprint 63 with the remaining secure-ingestion state-machine and
-MIME/content coverage, then begin Sprint 64's central policy guardrail work.
+Continue V1 Sprint 63 with the remaining file parser/content resource controls,
+then begin Sprint 64's central policy guardrail work.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

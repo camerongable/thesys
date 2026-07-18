@@ -13,6 +13,11 @@ from app.schemas.evidence import EvidenceRetrievalResultRead, RetrievalQueryPlan
 from app.services import evidence_service, multimodal_extraction_service, retrieval_service
 
 
+def _ingestion_states(source: EvidenceSource) -> list[str]:
+    ingestion = source.source_metadata["ingestion"]
+    return [entry["state"] for entry in ingestion["history"]]
+
+
 def test_note_ingestion_chunks_embeds_and_retrieves(
     client: TestClient,
     db_session: Session,
@@ -42,6 +47,21 @@ def test_note_ingestion_chunks_embeds_and_retrieves(
     assert source["classification"] == "customer_discovery"
     assert source["chunk_count"] == 1
     assert source["summary"]
+
+    persisted_source = db_session.scalar(
+        select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(source["id"]))
+    )
+    assert persisted_source is not None
+    assert _ingestion_states(persisted_source) == [
+        "uploaded",
+        "extraction_pending",
+        "extracted",
+        "classification_pending",
+        "classified",
+        "approved_for_embedding",
+        "embedded",
+        "retrievable",
+    ]
 
     chunk = db_session.scalar(select(EvidenceChunk))
     assert chunk is not None
@@ -97,6 +117,25 @@ def test_note_ingestion_chunks_embeds_and_retrieves(
     assert quality["citation_coverage_proxy"] == 1
     assert quality["precision_at_k"] is not None
     assert quality["mrr"] is not None
+
+    reprocess_response = client.post(
+        f"/api/projects/{project_id}/evidence/{source['id']}/reprocess"
+    )
+    assert reprocess_response.status_code == 200
+    db_session.expire_all()
+    reprocessed_source = db_session.scalar(
+        select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(source["id"]))
+    )
+    assert reprocessed_source is not None
+    assert _ingestion_states(reprocessed_source)[-7:] == [
+        "extraction_pending",
+        "extracted",
+        "classification_pending",
+        "classified",
+        "approved_for_embedding",
+        "embedded",
+        "retrievable",
+    ]
 
 
 def test_broad_evidence_retrieval_plans_reranks_and_assembles_context(

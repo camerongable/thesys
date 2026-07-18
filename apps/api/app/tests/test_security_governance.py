@@ -43,6 +43,10 @@ def test_url_ingestion_blocks_local_network_targets_and_audits_denial(
     assert source is not None
     assert source.ingestion_status == "failed"
     assert "blocked network address" in (source.ingestion_error or "")
+    assert [entry["state"] for entry in source.source_metadata["ingestion"]["history"]] == [
+        "uploaded",
+        "failed",
+    ]
     audit = db_session.scalar(
         select(AuditEvent)
         .where(AuditEvent.event_type == "evidence_url_fetch_blocked")
