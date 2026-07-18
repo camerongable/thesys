@@ -143,6 +143,66 @@ def test_note_ingestion_chunks_embeds_and_retrieves(
     ]
 
 
+def test_workflow_traces_hide_evidence_after_source_quarantine(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_response = client.post("/api/projects", json={"name": "Trace eligibility"})
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+    source_text = "trace-only evidence must disappear after its source is quarantined"
+    source_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={"title": "Trace source", "text": source_text},
+    )
+    assert source_response.status_code == 201
+    source_id = source_response.json()["id"]
+
+    retrieval_response = client.post(
+        f"/api/projects/{project_id}/evidence/retrieve",
+        json={"query": "trace-only evidence source quarantine", "mode": "hybrid", "top_k": 5},
+    )
+    assert retrieval_response.status_code == 200
+    retrieval = retrieval_response.json()
+    assert retrieval["results"]
+
+    source = db_session.scalar(
+        select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(source_id))
+    )
+    assert source is not None
+    source.source_metadata = {
+        **source.source_metadata,
+        "security": {
+            **source.source_metadata["security"],
+            "security_status": "quarantined",
+        },
+        "source_trust": {
+            **source.source_metadata["source_trust"],
+            "security_status": "quarantined",
+        },
+    }
+    db_session.commit()
+
+    detail_response = client.get(f"/api/workflows/{retrieval['ai_run_id']}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["steps"][0]["output_json"]["results"] == []
+    assert source_text not in detail_response.text
+
+    list_response = client.get(f"/api/projects/{project_id}/workflows")
+    assert list_response.status_code == 200
+    listed_run = next(
+        run
+        for run in list_response.json()["runs"]
+        if run["id"] == retrieval["ai_run_id"]
+    )
+    assert listed_run["steps"][0]["output_json"]["results"] == []
+    assert source_text not in list_response.text
+
+    event_response = client.get(f"/api/workflows/{retrieval['ai_run_id']}/events")
+    assert event_response.status_code == 200
+    assert source_text not in event_response.text
+
+
 def test_broad_evidence_retrieval_plans_reranks_and_assembles_context(
     client: TestClient,
 ) -> None:

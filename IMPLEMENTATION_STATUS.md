@@ -616,6 +616,11 @@ current verdict, next action, evidence health, validation, and decision state.
   evidence path. It applies the shared SQL filters before ordering and repeats
   the Python eligibility check, preventing quarantined, low-trust, restricted,
   or retrieval-disabled chunks from entering research context.
+- [x] Apply current shared retrieval eligibility when serializing workflow
+  trace/replay output. Detail, project-list, and SSE trace surfaces now remove
+  results and ingestion-step output from revoked sources, and suppress an
+  associated run summary rather than replaying evidence that has since become
+  quarantined or otherwise ineligible.
 
 ## Sprint 65 Verification
 
@@ -682,11 +687,16 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] LangGraph source-reader policy checkpoint passed (`9 passed, 1 warning`)
   across retrieval-policy, agentic-research, and secure-ranking regressions,
   with changed-file lint and compile checks clean.
+- [x] Workflow trace/replay policy checkpoint passed (`26 passed, 1 warning`)
+  across evidence, workflow-event, retrieval-policy, and workflow-scope
+  regressions; changed-file compile checks and repository application lint
+  passed.
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-audit trace/replay retrieval-path parity plus memory-poisoning acceptance work.
+complete the remaining memory-poisoning acceptance work and audit any remaining
+evidence-derived replay surfaces.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
