@@ -318,10 +318,13 @@ errors pass through secret redaction for API keys, bearer tokens, JWT-like
 tokens, sensitive key names, secret values, and emails.
 
 In local dev auth, `X-Dev-User-Role` can be set to one of `owner`, `admin`,
-`editor`, or `viewer` to exercise governance behavior. Outside `AUTH_MODE=dev`,
-development auth headers are rejected. `AUTH_MODE=jwt` verifies signed bearer
-tokens, and `AUTH_MODE=api_key` verifies hashed service-account API keys for
-integration-style access. JWT key IDs, revoked JWT IDs, and revoked API-key
+`editor`, or `viewer` to exercise governance behavior. Dev auth is rejected
+outside `APP_ENV=local`. `AUTH_MODE=oidc` verifies asymmetric bearer tokens
+against a fixed algorithm allowlist and JWKS, then resolves a pre-provisioned
+active user, exact workspace membership, and stored role into a `Principal`.
+`AUTH_MODE=jwt` remains a shared-secret demo path, and `AUTH_MODE=api_key`
+verifies hashed service-account API keys for integration-style access. JWT key
+IDs, revoked JWT IDs, and revoked API-key
 hashes are configurable to model rotation and revocation behavior.
 
 ---

@@ -180,7 +180,6 @@ def test_externally_visible_tool_paths_emit_audit_events() -> None:
     assert "_audit_tool_denial" in execute_source
 
 
-@pytest.mark.xfail(strict=True, reason="Sprint 62 will reject dev auth in production config.")
 def test_production_auth_cannot_run_in_dev_header_mode() -> None:
     with pytest.raises(ValueError):
         Settings(environment="production", auth_mode="dev")

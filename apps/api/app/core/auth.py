@@ -12,9 +12,14 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.oidc import OIDCValidationError, verify_oidc_token
 from app.db.models import User, Workspace
 from app.db.session import get_db
-from app.services.identity_service import ensure_dev_identity, ensure_external_identity
+from app.services.identity_service import (
+    ensure_dev_identity,
+    ensure_external_identity,
+    resolve_oidc_identity,
+)
 
 ProjectPermission = Literal[
     "view_project",
@@ -56,18 +61,59 @@ ROLE_PERMISSIONS: dict[str, set[ProjectPermission]] = {
 
 
 @dataclass(frozen=True)
+class Principal:
+    user_id: uuid.UUID
+    external_subject: str
+    workspace_id: uuid.UUID
+    role: Literal["owner", "admin", "editor", "viewer"]
+    authentication_method: str
+    session_id: str | None = None
+    token_id: str | None = None
+
+
+@dataclass(frozen=True)
 class AuthContext:
     user: User
     workspace: Workspace
-    role: str
+    principal: Principal
+
+    @classmethod
+    def from_identity(
+        cls,
+        *,
+        user: User,
+        workspace: Workspace,
+        role: str,
+        authentication_method: str,
+        external_subject: str | None = None,
+        session_id: str | None = None,
+        token_id: str | None = None,
+    ) -> "AuthContext":
+        normalized = normalized_role(role)
+        if normalized not in ROLE_PERMISSIONS:
+            raise ValueError("Identity has an unsupported workspace role.")
+        principal = Principal(
+            user_id=user.id,
+            external_subject=external_subject or user.external_auth_id,
+            workspace_id=workspace.id,
+            role=normalized,
+            authentication_method=authentication_method,
+            session_id=session_id,
+            token_id=token_id,
+        )
+        return cls(user=user, workspace=workspace, principal=principal)
 
     @property
     def user_id(self) -> uuid.UUID:
-        return self.user.id
+        return self.principal.user_id
 
     @property
     def workspace_id(self) -> uuid.UUID:
-        return self.workspace.id
+        return self.principal.workspace_id
+
+    @property
+    def role(self) -> str:
+        return self.principal.role
 
 
 DbDep = Annotated[Session, Depends(get_db)]
@@ -106,10 +152,12 @@ def get_current_auth_context(
         return _auth_from_jwt(db, settings, authorization)
     if auth_mode == "api_key":
         return _auth_from_api_key(db, settings, x_api_key)
+    if auth_mode == "oidc":
+        return _auth_from_oidc(db, settings, authorization)
 
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Unsupported AUTH_MODE. Use dev, jwt, or api_key.",
+        detail="Unsupported AUTH_MODE. Use dev, jwt, api_key, or oidc.",
     )
 
 
@@ -165,6 +213,9 @@ def _auth_from_jwt(
         display_name=display_name,
         workspace_name=workspace_name,
         role=role,
+        authentication_method="jwt",
+        external_subject=subject,
+        token_id=str(claims.get("jti") or "") or None,
     )
 
 
@@ -195,6 +246,36 @@ def _auth_from_api_key(
         display_name="Thesys Service Account",
         workspace_name=settings.auth_service_account_workspace,
         role=settings.auth_service_account_role,
+        authentication_method="api_key",
+    )
+
+
+def _auth_from_oidc(
+    db: Session,
+    settings: Settings,
+    authorization: str | None,
+) -> AuthContext:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Bearer token required.",
+        )
+    try:
+        claims = verify_oidc_token(authorization.split(" ", 1)[1], settings)
+    except OIDCValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid OIDC token.",
+        ) from exc
+
+    return resolve_oidc_identity(
+        db,
+        issuer=settings.oidc_issuer or "",
+        external_subject=claims.external_subject,
+        workspace_id=claims.workspace_id,
+        token_role=claims.role,
+        session_id=claims.session_id,
+        token_id=claims.token_id,
     )
 
 

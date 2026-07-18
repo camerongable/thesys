@@ -9,10 +9,14 @@ from app.db.models.base import Base, UUIDPrimaryKeyMixin
 
 class User(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("status in ('active','disabled')", name="ck_users_status"),
+    )
 
     external_auth_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

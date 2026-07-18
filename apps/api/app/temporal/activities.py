@@ -371,8 +371,14 @@ def _auth_from_payload(db: Session, payload: Payload) -> AuthContext:
             WorkspaceMember.workspace_id == workspace_id,
         )
     )
-    role = membership.role if membership else "owner"
-    return AuthContext(user=user, workspace=workspace, role=role)
+    if membership is None or user.status != "active":
+        raise RuntimeError("Temporal activity identity is not an active workspace member.")
+    return AuthContext.from_identity(
+        user=user,
+        workspace=workspace,
+        role=membership.role,
+        authentication_method="temporal_workflow",
+    )
 
 
 def _get_sprint(db: Session, sprint_id: uuid.UUID) -> ResearchSprint:

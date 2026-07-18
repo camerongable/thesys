@@ -2,12 +2,15 @@
 
 ## Current Phase
 
-V1 Sprints 51-60 closed the ordered AI engineering gap track. Sprint 61 now
-establishes the formal security contract for the V1 security-hardening phase:
+V1 Sprints 51-60 closed the ordered AI engineering gap track. Sprint 61
+established the formal security contract for the V1 security-hardening phase:
 code-owned data classifications and security invariants, explicit tenant and
 memory-write paths, a threat model, trust-boundary architecture, control matrix,
 abuse cases, automated invariant checks, and a pull-request security checklist.
-Sprints 62-68 own the production identity, secure ingestion, centralized
+Sprint 62 production identity work is now underway: OIDC/JWKS verification,
+principal-backed authorization context, strict active membership resolution,
+and the production dev-auth startup guard are implemented. Sprints 62-68 own
+the remaining tenant isolation, secrets/encryption, secure ingestion, centralized
 guardrails, secure RAG/memory, MCP/tool policy, monitoring/incident response,
 and adversarial CI controls identified as partial or planned by that contract.
 
@@ -76,9 +79,37 @@ current verdict, next action, evidence health, validation, and decision state.
   passed (`45 passed, 4 xfailed, 3 warnings`).
 - [x] `git diff --check` passed.
 
+## Sprint 62 Progress
+
+- [x] Add `APP_ENV`-aware configuration and reject `AUTH_MODE=dev` outside
+  local development.
+- [x] Add OIDC/JWKS authentication with a configured asymmetric algorithm
+  allowlist, signature and standard-claim validation, authorized-party checks,
+  and bounded JWKS caching/timeouts.
+- [x] Add the validated `Principal` model and route authorization identity
+  through it, including Temporal activity reconstruction.
+- [x] Require pre-provisioned, active OIDC users, exact workspace membership,
+  and agreement with the database role; never provision from token claims.
+- [x] Add persistent user status and migration `0028_production_identity`.
+- [ ] Add Postgres RLS, transaction-local identity, database roles, and direct
+  cross-tenant ORM/database tests.
+- [ ] Add production secret providers and envelope encryption.
+- [ ] Harden object storage, browser/session policy, and auth audit events.
+
+## Sprint 62 Identity Verification
+
+- [x] Focused OIDC and invariant tests passed (`29 passed, 3 xfailed`; expected
+  remaining gaps: Sprints 63, 64, and 67).
+- [x] The full backend test suite passed (`293 passed, 3 xfailed, 3 warnings`).
+- [x] Focused ruff, compileall, and production startup-guard checks passed.
+- [x] The non-strict local security gate passed (`38 passed`; AI quality
+  `10/10`). `pip-audit`, Docker inventory, and the npm registry audit were
+  unavailable and remained explicit non-strict warnings.
+
 ## Next Sprint
 
-V1 Sprint 62: Production Identity, Tenant Isolation, Secrets, and Encryption.
+Continue V1 Sprint 62 with Postgres RLS, scoped database roles, and direct
+cross-tenant database tests.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

@@ -1,17 +1,28 @@
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     app_name: str = "Thesys API"
-    environment: str = Field(default="local", validation_alias="ENVIRONMENT")
+    environment: str = Field(
+        default="local",
+        validation_alias=AliasChoices("APP_ENV", "ENVIRONMENT"),
+    )
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
-    auth_mode: str = Field(default="dev", validation_alias="AUTH_MODE")
+    auth_mode: Literal["dev", "jwt", "api_key", "oidc"] = Field(
+        default="dev",
+        validation_alias="AUTH_MODE",
+    )
     dev_auth_default_email: str = Field(
         default="dev@thesys.local",
         validation_alias="DEV_AUTH_DEFAULT_EMAIL",
@@ -47,6 +58,29 @@ class Settings(BaseSettings):
     auth_service_account_role: Literal["owner", "admin", "editor", "viewer"] = Field(
         default="admin",
         validation_alias="AUTH_SERVICE_ACCOUNT_ROLE",
+    )
+    oidc_issuer: str | None = Field(default=None, validation_alias="OIDC_ISSUER")
+    oidc_audience: str | None = Field(default=None, validation_alias="OIDC_AUDIENCE")
+    oidc_jwks_url: str | None = Field(default=None, validation_alias="OIDC_JWKS_URL")
+    oidc_required_algorithms: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["RS256"],
+        validation_alias="OIDC_REQUIRED_ALGORITHMS",
+    )
+    oidc_authorized_party: str | None = Field(
+        default=None,
+        validation_alias="OIDC_AUTHORIZED_PARTY",
+    )
+    oidc_jwks_cache_seconds: int = Field(
+        default=300,
+        ge=60,
+        le=86_400,
+        validation_alias="OIDC_JWKS_CACHE_SECONDS",
+    )
+    oidc_jwks_timeout_seconds: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=30.0,
+        validation_alias="OIDC_JWKS_TIMEOUT_SECONDS",
     )
 
     database_url: str = Field(
@@ -429,6 +463,7 @@ class Settings(BaseSettings):
         "auth_revoked_api_key_hashes",
         "auth_jwt_allowed_key_ids",
         "auth_jwt_revoked_ids",
+        "oidc_required_algorithms",
         "url_fetch_allowed_domains",
         "url_fetch_denied_domains",
         "url_fetch_allowed_content_types",
@@ -440,6 +475,48 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
+    @field_validator("environment", mode="before")
+    @classmethod
+    def normalize_environment(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("auth_mode", mode="before")
+    @classmethod
+    def normalize_auth_mode(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @model_validator(mode="after")
+    def validate_identity_configuration(self) -> "Settings":
+        if self.auth_mode == "dev" and self.environment != "local":
+            raise ValueError("AUTH_MODE=dev is permitted only when APP_ENV=local.")
+
+        if self.auth_mode != "oidc":
+            return self
+
+        required = {
+            "OIDC_ISSUER": self.oidc_issuer,
+            "OIDC_AUDIENCE": self.oidc_audience,
+            "OIDC_JWKS_URL": self.oidc_jwks_url,
+        }
+        missing = [name for name, value in required.items() if not value or not value.strip()]
+        if missing:
+            raise ValueError(f"AUTH_MODE=oidc requires {', '.join(missing)}.")
+
+        allowed_asymmetric_algorithms = {
+            "RS256",
+            "RS384",
+            "RS512",
+            "ES256",
+            "ES384",
+            "ES512",
+        }
+        configured_algorithms = set(self.oidc_required_algorithms)
+        if not configured_algorithms or not configured_algorithms <= allowed_asymmetric_algorithms:
+            raise ValueError(
+                "OIDC_REQUIRED_ALGORITHMS must contain only approved asymmetric algorithms."
+            )
+        return self
 
     @field_validator("url_fetch_allowed_ports", mode="before")
     @classmethod

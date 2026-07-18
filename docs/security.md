@@ -29,13 +29,22 @@ files above are authoritative for the Sprint 61-68 hardening phase.
 - `AUTH_MODE=api_key` verifies SHA-256 API key hashes and maps accepted keys to
   a service-account workspace membership. Revoked key hashes are denied even if
   they remain present in the accepted-key set.
-- Dev auth headers are rejected outside `AUTH_MODE=dev`.
+- `AUTH_MODE=oidc` verifies an asymmetric JWT against the configured JWKS,
+  issuer, audience, expiry, not-before time, subject, authorized party, and
+  algorithm allowlist. OIDC users and exact workspace memberships must be
+  provisioned in the database; token claims cannot create a tenant or replace
+  the stored role.
+- Dev auth headers are rejected outside `AUTH_MODE=dev`, and application
+  configuration fails validation when dev auth is selected outside
+  `APP_ENV=local`.
 - Project routes still enforce workspace scoping and role permissions through
-  `AuthContext`, `WorkspaceMember`, and `require_permission`.
+  a validated `Principal` carried by `AuthContext`, `WorkspaceMember`, and
+  `require_permission`.
 
-The JWT verifier is a production-auth shape for this portfolio project. A real
-hosted deployment should replace the shared-secret verifier with OIDC/JWKS,
-provider-managed workspace membership, and database-backed revocation state.
+The HS256 JWT mode remains a portfolio/demo compatibility path. Hosted user
+authentication should use OIDC/JWKS and pre-provisioned membership. OIDC users
+are keyed by `oidc_external_auth_id(issuer, subject)`; account status and the
+database membership role are authoritative after token validation.
 
 ## Expensive Workflow Policy
 
@@ -118,10 +127,10 @@ are installed and network policy is stable.
 
 ## Remaining Production Work
 
-- Replace HS256 JWT demo verifier with OIDC/JWKS validation.
+- Add an identity provisioning/admin workflow around the strict OIDC mapping.
 - Move rate/concurrency counters to Redis or another shared store for multi-node
   deployments.
 - Add token rotation/revocation tables for API keys and service accounts.
 - Add provider-specific response-size enforcement where SDKs expose streaming
   byte counters.
-- Add row-level security if the product becomes multi-tenant SaaS.
+- Add Postgres row-level security and separate application database roles.
