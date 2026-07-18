@@ -1,3 +1,4 @@
+import base64
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -428,9 +429,11 @@ def test_image_upload_uses_deterministic_multimodal_extraction_and_retrieval(
         files={
             "file": (
                 "sprint-40-fixture.png",
-                (
-                    b"\x89PNG\r\nTHESYS_OCR_TEXT: Coaches saw weekly check-in pain "
-                    b"and willingness to pay for synthesis."
+                base64.b64decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAY3RFWHREZXNjcmlwdGlv"
+                    "bgBUSEVTWVNfT0NSX1RFWFQ6IENvYWNoZXMgc2F3IHdlZWtseSBjaGVjay1pbiBwYWlu"
+                    "IGFuZCB3aWxsaW5nbmVzcyB0byBwYXkgZm9yIHN5bnRoZXNpcy5kbAaCAAAADElEQVR4"
+                    "nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC"
                 ),
                 "image/png",
             )

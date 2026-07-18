@@ -317,6 +317,10 @@ current verdict, next action, evidence health, validation, and decision state.
   maps and routes expired evidence through full deletion propagation.
 - [ ] Add Presidio-backed detection and complete the remaining secure-ingestion
   state-machine and MIME/content coverage.
+- [x] Require extension, declared MIME, and independently detected content MIME
+  to agree before any upload reaches malware scanning, storage, or parsing.
+  `python-magic` is the primary detector; an unavailable binding falls back to
+  the local `file` utility and rejects the upload when neither detector works.
 - [x] Add a tenant-scoped Temporal maintenance activity for local retention. It
   redacts expired AI prompts, outputs, errors, and local LangSmith references
   while preserving run accounting, and deletes expired workspace-attributable
@@ -372,6 +376,10 @@ current verdict, next action, evidence health, validation, and decision state.
   warning`), capturing outbound LiteLLM embedding and Tavily payloads after
   redaction and proving detected sensitive multimodal bytes never create an
   HTTP client.
+- [x] Content-based upload MIME checkpoint passed (`156 passed, 1 skipped, 2
+  xfailed, 6 warnings`), covering mismatch rejection before scanner/storage,
+  detector unavailability, scanner quarantine, evidence ingestion, and source
+  security metadata.
 
 ## Next Sprint
 

@@ -2,9 +2,16 @@
 
 import ipaddress
 import re
+import shutil
 import socket
+import subprocess
 from dataclasses import dataclass
 from urllib.parse import urlparse
+
+try:
+    import magic
+except ImportError:
+    magic = None
 
 from app.core.config import Settings
 
@@ -19,17 +26,23 @@ class SecurityValidationError(ValueError):
 class UploadValidationResult:
     filename: str
     content_type: str
+    detected_content_type: str
     media_type: str
 
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
-_ALLOWED_UPLOADS: dict[str, tuple[str, set[str], set[str]]] = {
-    "pdf": ("application/pdf", {".pdf"}, {"application/pdf"}),
-    "text": ("text/plain", {".txt"}, {"text/plain"}),
-    "markdown": ("text/markdown", {".md", ".markdown"}, {"text/markdown", "text/plain"}),
-    "png": ("image/png", {".png"}, {"image/png"}),
-    "jpeg": ("image/jpeg", {".jpg", ".jpeg"}, {"image/jpeg"}),
-    "webp": ("image/webp", {".webp"}, {"image/webp"}),
+_ALLOWED_UPLOADS: dict[str, tuple[str, set[str], set[str], set[str]]] = {
+    "pdf": ("application/pdf", {".pdf"}, {"application/pdf"}, {"application/pdf"}),
+    "text": ("text/plain", {".txt"}, {"text/plain"}, {"text/plain"}),
+    "markdown": (
+        "text/markdown",
+        {".md", ".markdown"},
+        {"text/markdown", "text/plain"},
+        {"text/plain"},
+    ),
+    "png": ("image/png", {".png"}, {"image/png"}, {"image/png"}),
+    "jpeg": ("image/jpeg", {".jpg", ".jpeg"}, {"image/jpeg"}, {"image/jpeg"}),
+    "webp": ("image/webp", {".webp"}, {"image/webp"}, {"image/webp"}),
 }
 
 
@@ -81,18 +94,30 @@ def validate_upload(
     normalized_content_type = (content_type or "application/octet-stream").split(";")[0].strip()
     normalized_content_type = normalized_content_type.casefold() or "application/octet-stream"
     extension = _extension(safe_filename)
+    detected_content_type = _detect_upload_content_type(body)
 
-    for media_type, (canonical_content_type, extensions, content_types) in _ALLOWED_UPLOADS.items():
+    for media_type, (
+        canonical_content_type,
+        extensions,
+        declared_content_types,
+        detected_content_types,
+    ) in _ALLOWED_UPLOADS.items():
         if extension not in extensions:
             continue
-        if normalized_content_type not in content_types:
+        if normalized_content_type not in declared_content_types:
             raise SecurityValidationError(
-                f"{extension} uploads must use one of: {', '.join(sorted(content_types))}."
+                f"{extension} uploads must use one of: {', '.join(sorted(declared_content_types))}."
+            )
+        if detected_content_type not in detected_content_types:
+            raise SecurityValidationError(
+                "Detected MIME type "
+                f"{detected_content_type} does not match the allowed content for {extension}."
             )
         _validate_magic_bytes(media_type, body)
         return UploadValidationResult(
             filename=safe_filename,
             content_type=canonical_content_type,
+            detected_content_type=detected_content_type,
             media_type=media_type,
         )
 
@@ -153,6 +178,40 @@ def _is_blocked_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) 
 def _extension(filename: str) -> str:
     marker = filename.rfind(".")
     return filename[marker:].casefold() if marker >= 0 else ""
+
+
+def _detect_upload_content_type(body: bytes) -> str:
+    """Identify upload content from bytes rather than client-controlled metadata."""
+    if magic is not None:
+        try:
+            detected = magic.from_buffer(body, mime=True)
+        except Exception:
+            detected = None
+        else:
+            return _normalize_detected_content_type(detected)
+
+    file_command = shutil.which("file")
+    if file_command:
+        try:
+            result = subprocess.run(
+                [file_command, "--brief", "--mime-type", "-"],
+                input=body,
+                capture_output=True,
+                check=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise SecurityValidationError("Upload MIME detection is unavailable.") from exc
+        return _normalize_detected_content_type(result.stdout.decode("utf-8", errors="replace"))
+
+    raise SecurityValidationError("Upload MIME detection is unavailable.")
+
+
+def _normalize_detected_content_type(detected: object) -> str:
+    normalized = str(detected).split(";", maxsplit=1)[0].strip().casefold()
+    if not normalized:
+        raise SecurityValidationError("Upload MIME detection returned no content type.")
+    return normalized
 
 
 def _validate_magic_bytes(media_type: str, body: bytes) -> None:

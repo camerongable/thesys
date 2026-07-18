@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core import security as security_module
 from app.core.config import get_settings
 from app.core.security import (
     SecurityValidationError,
@@ -107,6 +108,61 @@ def test_file_upload_rejects_unsafe_filename_and_type(
             body=b"PK\x03\x04",
             settings=get_settings(),
         )
+
+
+def test_file_upload_requires_content_detection_to_match_extension(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = _create_project(client)
+    monkeypatch.setattr(
+        security_module,
+        "_detect_upload_content_type",
+        lambda _body: "application/pdf",
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/file",
+        files={"file": ("notes.txt", b"harmless-looking text", "text/plain")},
+    )
+
+    assert response.status_code == 422
+    assert db_session.scalar(select(EvidenceSource)) is None
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "evidence_upload_rejected")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert "Detected MIME type application/pdf" in audit.event_metadata["reason"]
+
+
+def test_upload_validation_denies_when_mime_detector_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(security_module, "magic", None)
+    monkeypatch.setattr(security_module.shutil, "which", lambda _command: None)
+
+    with pytest.raises(SecurityValidationError, match="MIME detection is unavailable"):
+        validate_upload(
+            filename="notes.txt",
+            content_type="text/plain",
+            body=b"ordinary evidence notes",
+            settings=get_settings(),
+        )
+
+
+def test_upload_validation_returns_detected_content_type() -> None:
+    result = validate_upload(
+        filename="notes.txt",
+        content_type="text/plain",
+        body=b"ordinary evidence notes",
+        settings=get_settings(),
+    )
+
+    assert result.content_type == "text/plain"
+    assert result.detected_content_type == "text/plain"
 
 
 def test_extracted_text_limit_fails_closed(

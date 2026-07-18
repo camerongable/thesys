@@ -425,6 +425,7 @@ def add_file_source(
 
     filename = upload_validation.filename
     content_type = upload_validation.content_type
+    detected_content_type = upload_validation.detected_content_type
     source_id = uuid.uuid4()
     scan_result = malware_scanning_service.scan_upload(settings, body)
     if scan_result.status is not malware_scanning_service.MalwareScanStatus.CLEAN:
@@ -475,6 +476,7 @@ def add_file_source(
         object_storage_key=storage_key,
         source_metadata={
             "content_type": content_type,
+            "detected_content_type": detected_content_type,
             "security": {
                 "security_status": "quarantined",
                 "classification_status": "pending",
