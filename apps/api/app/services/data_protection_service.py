@@ -132,6 +132,26 @@ class DataProtectionService:
         return False
 
     @staticmethod
+    def is_source_approved(metadata: dict[str, object] | None) -> bool:
+        security = (metadata or {}).get("security")
+        if not isinstance(security, dict):
+            return False
+        return (
+            security.get("security_status") == "approved"
+            and security.get("classification_status") == "approved"
+        )
+
+    @staticmethod
+    def is_chunk_retrievable(metadata: dict[str, object] | None) -> bool:
+        security = (metadata or {}).get("security")
+        if not isinstance(security, dict):
+            return False
+        return (
+            security.get("retrieval_allowed") is True
+            and security.get("source_security_status") == "approved"
+        )
+
+    @staticmethod
     def _secret_entity_type(value: str) -> str:
         lowered = value.casefold()
         return "ACCESS_TOKEN" if "token" in lowered or "bearer" in lowered else "API_KEY"

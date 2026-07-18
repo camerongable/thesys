@@ -85,3 +85,65 @@ def test_note_pii_is_sanitized_before_persistence_and_embedding(
         "sanitization_version": "v1",
     }
     assert chunk.chunk_metadata["security"]["retrieval_allowed"] is True
+
+
+def test_unapproved_source_or_chunk_is_excluded_from_retrieval_and_reembedding(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_response = client.post(
+        "/api/projects",
+        json={"name": "Security eligibility", "short_description": "Retrieval gate coverage."},
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+    note_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={"title": "Approved note", "text": "A specific secure retrieval proof point."},
+    )
+    assert note_response.status_code == 201
+    source = db_session.scalar(select(EvidenceSource))
+    chunk = db_session.scalar(select(EvidenceChunk))
+    assert source is not None and chunk is not None
+    chunk.embedding_model = "old-model"
+    source.source_metadata = {
+        **source.source_metadata,
+        "security": {**source.source_metadata["security"], "security_status": "blocked"},
+    }
+    db_session.commit()
+
+    retrieval_response = client.post(
+        f"/api/projects/{project_id}/evidence/retrieve",
+        json={"query": "specific secure proof", "mode": "keyword"},
+    )
+    assert retrieval_response.status_code == 200
+    assert retrieval_response.json()["results"] == []
+    reembed_response = client.post(
+        f"/api/projects/{project_id}/evidence/reembed",
+        json={"dry_run": True, "scope": "project"},
+    )
+    assert reembed_response.status_code == 200
+    assert reembed_response.json()["eligible_count"] == 0
+
+    source.source_metadata = {
+        **source.source_metadata,
+        "security": {**source.source_metadata["security"], "security_status": "approved"},
+    }
+    chunk.chunk_metadata = {
+        **chunk.chunk_metadata,
+        "security": {**chunk.chunk_metadata["security"], "retrieval_allowed": False},
+    }
+    db_session.commit()
+
+    retrieval_response = client.post(
+        f"/api/projects/{project_id}/evidence/retrieve",
+        json={"query": "specific secure proof", "mode": "keyword"},
+    )
+    assert retrieval_response.status_code == 200
+    assert retrieval_response.json()["results"] == []
+    reembed_response = client.post(
+        f"/api/projects/{project_id}/evidence/reembed",
+        json={"dry_run": True, "scope": "project"},
+    )
+    assert reembed_response.status_code == 200
+    assert reembed_response.json()["eligible_count"] == 0

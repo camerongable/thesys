@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from app.core.config import Settings
-from app.db.models import Base, EvidenceSource
+from app.db.models import Base
 from app.features.governance_tools.registry import list_tool_definitions
 from app.security.contracts import (
     DATA_TYPES,
@@ -22,7 +22,13 @@ from app.security.contracts import (
     DataClassification,
     ProviderPolicy,
 )
-from app.services import memory_service, temporal_research_service, tool_service
+from app.services import (
+    evidence_service,
+    memory_service,
+    retrieval_service,
+    temporal_research_service,
+    tool_service,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 
@@ -420,9 +426,15 @@ def test_production_auth_cannot_run_in_dev_header_mode() -> None:
         Settings(environment="production", auth_mode="dev")
 
 
-@pytest.mark.xfail(strict=True, reason="Sprint 63 will require classification before promotion.")
 def test_sources_require_classification_before_retrieval() -> None:
-    assert EvidenceSource.__table__.c.classification.nullable is False
+    retrieval_conditions = inspect.getsource(retrieval_service._base_conditions)
+    reembedding = inspect.getsource(evidence_service.reembed_evidence)
+
+    assert 'source_metadata["security"]["security_status"]' in retrieval_conditions
+    assert 'source_metadata["security"]["classification_status"]' in retrieval_conditions
+    assert 'chunk_metadata["security"]["retrieval_allowed"]' in retrieval_conditions
+    assert "is_source_approved" in reembedding
+    assert "is_chunk_retrievable" in reembedding
 
 
 @pytest.mark.xfail(strict=True, reason="Sprint 64 will centralize all model calls.")

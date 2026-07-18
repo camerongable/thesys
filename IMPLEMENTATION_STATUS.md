@@ -288,11 +288,13 @@ current verdict, next action, evidence health, validation, and decision state.
   PII status/entity types, approval state, sanitization version, and vector
   retrieval eligibility. Preserve sanitized line layout for deterministic PDF
   table provenance while using normalized sanitized text for chunks.
+- [x] Require approved source classification/security metadata and approved chunk
+  eligibility in both retrieval and re-embedding paths. Missing metadata fails
+  closed rather than being treated as legacy content.
 - [ ] Add Presidio-backed detection, encrypted project-local reidentification
   mappings, and separately authorized reidentification.
-- [ ] Enforce the full secure-ingestion state machine, malware quarantine and
-  MIME/content scanning, and retrieval denial for unscanned or unapproved
-  sources.
+- [ ] Enforce the remaining secure-ingestion state machine, malware quarantine,
+  and MIME/content scanning.
 - [ ] Add provider classification routing, trace redaction, retention policy,
   and deletion propagation coverage.
 
@@ -303,6 +305,9 @@ current verdict, next action, evidence health, validation, and decision state.
   keys reach neither persisted chunks nor embedding inputs.
 - [x] Source discovery and upload-security checkpoint passed (`47 passed,
   3 warnings`), including PDF table-extraction regression coverage.
+- [x] Retrieval/re-embedding security-gate checkpoint passed (`28 passed,
+  1 warning`), covering blocked source and chunk metadata plus normal approved
+  retrieval.
 
 ## Next Sprint
 

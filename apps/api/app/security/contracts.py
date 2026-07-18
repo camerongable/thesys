@@ -246,11 +246,11 @@ SECURITY_INVARIANTS: tuple[SecurityInvariant, ...] = (
     SecurityInvariant(
         "SEC-INV-06",
         "No source may become retrievable before security classification.",
-        "planned",
+        "enforced",
         63,
-        "Ingestion quarantine and searchable-representation promotion.",
+        "Approved source and chunk security metadata is required at retrieval and re-embedding.",
         "test_sources_require_classification_before_retrieval",
-        "Evidence classification is currently nullable.",
+        "File malware quarantine and explicit retention-state enforcement remain Sprint 63 work.",
     ),
     SecurityInvariant(
         "SEC-INV-07",

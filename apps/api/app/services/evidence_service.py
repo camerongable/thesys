@@ -632,14 +632,25 @@ def reembed_evidence(
 ) -> ReembedResult:
     """Refresh embeddings when provider/model/dimension/version settings change."""
     project_service.get_project(db, auth, project_id)
-    stmt = select(EvidenceChunk).where(EvidenceChunk.workspace_id == auth.workspace_id)
+    stmt = (
+        select(EvidenceChunk, EvidenceSource)
+        .join(EvidenceSource, EvidenceSource.id == EvidenceChunk.source_id)
+        .where(EvidenceChunk.workspace_id == auth.workspace_id)
+    )
     if scope == "project":
         stmt = stmt.where(EvidenceChunk.project_id == project_id)
     elif scope != "workspace":
         raise ValueError(f"Unsupported re-embedding scope: {scope}")
 
-    chunks = list(db.scalars(stmt.order_by(EvidenceChunk.created_at.asc())))
-    eligible = [chunk for chunk in chunks if force or _chunk_needs_reembedding(chunk, settings)]
+    rows = list(db.execute(stmt.order_by(EvidenceChunk.created_at.asc())).all())
+    chunks = [chunk for chunk, _source in rows]
+    eligible = [
+        chunk
+        for chunk, source in rows
+        if data_protection_service.is_source_approved(source.source_metadata)
+        and data_protection_service.is_chunk_retrievable(chunk.chunk_metadata)
+        and (force or _chunk_needs_reembedding(chunk, settings))
+    ]
     failures: list[ReembedFailure] = []
     reembedded_count = 0
 

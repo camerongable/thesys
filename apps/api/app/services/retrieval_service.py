@@ -607,6 +607,12 @@ def _base_conditions(
         EvidenceSource.workspace_id == auth.workspace_id,
         EvidenceSource.project_id == project_id,
         EvidenceSource.ingestion_status == "ready",
+        EvidenceSource.source_metadata["security"]["security_status"].as_string() == "approved",
+        EvidenceSource.source_metadata["security"]["classification_status"].as_string()
+        == "approved",
+        EvidenceChunk.chunk_metadata["security"]["retrieval_allowed"].as_boolean().is_(True),
+        EvidenceChunk.chunk_metadata["security"]["source_security_status"].as_string()
+        == "approved",
     ]
     if payload.source_types:
         conditions.append(EvidenceSource.source_type.in_(payload.source_types))
