@@ -590,6 +590,12 @@ current verdict, next action, evidence health, validation, and decision state.
   retrievable to quarantined with its chunks removed, and produces an
   attributable audit event. The affected memory and decision proposals replace
   the reversal with an explicit independent-corroboration requirement.
+- [x] Detect a conflicting research claim introduced by exactly one newly added
+  source. The guard requires opposite polarity and strong topical overlap with
+  prior supported evidence, so ordinary disagreement and multi-source claims do
+  not trigger it. A detected source is quarantined and de-chunked before the
+  memo version persists; its claim is retained only as unsupported without
+  citations, and memory/decision proposals require independent corroboration.
 
 ## Sprint 65 Verification
 
@@ -635,12 +641,17 @@ current verdict, next action, evidence health, validation, and decision state.
   passed (`430 passed, 1 skipped, 1 xfailed, 12 warnings`). Repository-root
   lint remains limited by 12 pre-existing line-length violations in historical
   Alembic migrations outside this sprint slice.
+- [x] Single-source conflicting-claim checkpoint passed (`11 passed, 1
+  warning`) across source-trust and agentic-research regressions. Application
+  lint and compile checks passed, and the full backend suite passed (`432
+  passed, 1 skipped, 1 xfailed, 12 warnings`). Repository-root lint remains
+  limited by 12 pre-existing line-length violations in historical Alembic
+  migrations outside this sprint slice.
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-detect conflicting claims introduced by one new source, then continue the
-remaining secure-RAG parity and memory-poisoning acceptance work.
+continue the remaining secure-RAG parity and memory-poisoning acceptance work.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

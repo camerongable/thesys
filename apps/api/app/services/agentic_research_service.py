@@ -1571,6 +1571,19 @@ def _write_research_memo_step(
     started = perf_counter()
     try:
         artifact = _get_or_create_research_memo_artifact(db, auth, project)
+        claim_conflict = _single_source_claim_conflict(
+            db,
+            auth,
+            project.id,
+            memo.claims,
+            selected_evidence,
+        )
+        if claim_conflict.detected:
+            for source_id in claim_conflict.controlling_source_ids:
+                source = db.get(EvidenceSource, uuid.UUID(source_id))
+                if source is not None:
+                    evidence_service.quarantine_source_for_conflicting_claim(db, auth, source)
+            memo = _suppress_conflicting_claim(memo, claim_conflict)
         version_number = _next_artifact_version(db, artifact.id)
         version = ArtifactVersion(
             workspace_id=auth.workspace_id,
@@ -1609,6 +1622,35 @@ def _write_research_memo_step(
         db.flush()
         artifact.current_version_id = version.id
         claims = _write_claims(db, auth, project, version, memo.claims)
+        if claim_conflict.detected:
+            content = dict(version.structured_content)
+            content["conflicting_claim"] = {
+                "proposed_claim": claim_conflict.proposed_claim,
+                "existing_claim": claim_conflict.existing_claim,
+                "controlling_source_ids": list(claim_conflict.controlling_source_ids),
+                "action": "source_quarantined_pending_independent_corroboration",
+            }
+            version.structured_content = content
+            flag_modified(version, "structured_content")
+            governance_service.record_audit_event(
+                db,
+                auth,
+                event_type="conflicting_claim_detected",
+                actor_type="system",
+                project_id=project.id,
+                entity_type="artifact_version",
+                entity_id=version.id,
+                risk_level="high",
+                summary=(
+                    "A single newly added source introduced a claim that conflicts with "
+                    "existing supported evidence."
+                ),
+                metadata={
+                    "proposed_claim": claim_conflict.proposed_claim,
+                    "existing_claim": claim_conflict.existing_claim,
+                    "controlling_source_ids": list(claim_conflict.controlling_source_ids),
+                },
+            )
         recommendation_shift = _recommendation_shift(
             db,
             auth,
@@ -1653,6 +1695,11 @@ def _write_research_memo_step(
             research_sprint_id=sprint.id,
             artifact_version_id=version.id,
         )
+        if claim_conflict.detected:
+            proposal_payloads = _replace_conflicting_claim_proposals(
+                proposal_payloads,
+                claim_conflict,
+            )
         if recommendation_shift.detected:
             proposal_payloads = _replace_recommendation_shift_proposals(
                 proposal_payloads,
@@ -2196,6 +2243,86 @@ def _recommendation_shift(
     )
 
 
+def _single_source_claim_conflict(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    proposed_claims: list[ClaimDraft],
+    selected_evidence: list[EvidenceRetrievalResultRead],
+):
+    existing_claims = list(
+        db.scalars(
+            select(Claim)
+            .join(ClaimEvidenceLink, ClaimEvidenceLink.claim_id == Claim.id)
+            .where(
+                Claim.workspace_id == auth.workspace_id,
+                Claim.project_id == project_id,
+                Claim.support_level.in_(("supported", "partial")),
+            )
+            .distinct()
+            .order_by(Claim.created_at.desc())
+        )
+    )
+    if not existing_claims:
+        return source_provenance_service.ClaimConflict(
+            detected=False,
+            proposed_claim=None,
+            existing_claim=None,
+            controlling_source_ids=(),
+        )
+
+    selected_source_ids = {result.source_id for result in selected_evidence}
+    proposed_claim_sources = [
+        (draft.text, {citation.source_id for citation in draft.citations})
+        for draft in proposed_claims
+    ]
+    cited_source_ids = {
+        source_id
+        for _, source_ids in proposed_claim_sources
+        for source_id in source_ids
+        if source_id in selected_source_ids
+    }
+    newest_existing_claim = max(claim.created_at for claim in existing_claims)
+    newly_added_source_ids = set(
+        db.scalars(
+            select(EvidenceSource.id).where(
+                EvidenceSource.workspace_id == auth.workspace_id,
+                EvidenceSource.project_id == project_id,
+                EvidenceSource.id.in_(cited_source_ids),
+                EvidenceSource.created_at > newest_existing_claim,
+                EvidenceSource.ingestion_status == "ready",
+            )
+        )
+    )
+    return source_provenance_service.assess_single_source_claim_conflict(
+        proposed_claims=proposed_claim_sources,
+        existing_claims=[claim.text for claim in existing_claims],
+        newly_added_source_ids=newly_added_source_ids,
+    )
+
+
+def _suppress_conflicting_claim(
+    memo: AgenticResearchMemoDraft,
+    claim_conflict: source_provenance_service.ClaimConflict,
+) -> AgenticResearchMemoDraft:
+    controlling_source_ids = {
+        uuid.UUID(source_id) for source_id in claim_conflict.controlling_source_ids
+    }
+    claims = [
+        claim.model_copy(update={"support_level": "unsupported", "citations": []})
+        if claim.text == claim_conflict.proposed_claim
+        and {citation.source_id for citation in claim.citations} == controlling_source_ids
+        else claim
+        for claim in memo.claims
+    ]
+    unsupported_claims = list(
+        dict.fromkeys([*memo.unsupported_claims, claim_conflict.proposed_claim])
+    )
+    return memo.model_copy(
+        update={"claims": claims, "unsupported_claims": unsupported_claims[:12]}
+    )
+
+
 def _replace_recommendation_shift_proposals(proposal_payloads, recommendation_shift):
     abstention = (
         "Do not change the decision from this source alone. Collect independent "
@@ -2218,6 +2345,35 @@ def _replace_recommendation_shift_proposals(proposal_payloads, recommendation_sh
             **proposal_payloads.decision,
             "decision_recommendation": abstention,
             "recommendation_shift": shift_metadata,
+        },
+        memory_update_input=proposal_payloads.memory_update_input,
+        validation_plan_input=proposal_payloads.validation_plan_input,
+        decision_input=proposal_payloads.decision_input,
+    )
+
+
+def _replace_conflicting_claim_proposals(proposal_payloads, claim_conflict):
+    abstention = (
+        "Do not make a decision from a claim introduced by one source that conflicts "
+        "with existing evidence. Collect independent corroboration first."
+    )
+    conflict_metadata = {
+        "proposed_claim": claim_conflict.proposed_claim,
+        "existing_claim": claim_conflict.existing_claim,
+        "controlling_source_ids": list(claim_conflict.controlling_source_ids),
+        "requires_independent_corroboration": True,
+    }
+    return research_proposals.ResearchMemoProposalPayloads(
+        memory_update={
+            **proposal_payloads.memory_update,
+            "decision_recommendation": abstention,
+            "conflicting_claim": conflict_metadata,
+        },
+        validation_plan=proposal_payloads.validation_plan,
+        decision={
+            **proposal_payloads.decision,
+            "decision_recommendation": abstention,
+            "conflicting_claim": conflict_metadata,
         },
         memory_update_input=proposal_payloads.memory_update_input,
         validation_plan_input=proposal_payloads.validation_plan_input,

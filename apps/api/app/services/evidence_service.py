@@ -1386,6 +1386,36 @@ def quarantine_source_for_recommendation_shift(
     source: EvidenceSource,
 ) -> source_provenance_service.SourceTrust:
     """Quarantine a retrievable source that alone causes a decision reversal."""
+    return _quarantine_source_for_post_ingestion_trust(
+        db,
+        auth,
+        source,
+        recommendation_shift_count=1,
+    )
+
+
+def quarantine_source_for_conflicting_claim(
+    db: Session,
+    auth: AuthContext,
+    source: EvidenceSource,
+) -> source_provenance_service.SourceTrust:
+    """Quarantine a source that alone introduces a conflicting supported claim."""
+    return _quarantine_source_for_post_ingestion_trust(
+        db,
+        auth,
+        source,
+        conflicting_claim_count=1,
+    )
+
+
+def _quarantine_source_for_post_ingestion_trust(
+    db: Session,
+    auth: AuthContext,
+    source: EvidenceSource,
+    *,
+    recommendation_shift_count: int = 0,
+    conflicting_claim_count: int = 0,
+) -> source_provenance_service.SourceTrust:
     metadata = dict(source.source_metadata or {})
     previous_trust = metadata.get("source_trust")
     duplicate_source_count = _trust_metadata_int(previous_trust, "duplicate_source_count")
@@ -1400,7 +1430,14 @@ def quarantine_source_for_recommendation_shift(
         approved_by=source.created_by,
         duplicate_source_count=duplicate_source_count,
         anomalous_embedding_cluster_count=anomalous_cluster_count,
-        recommendation_shift_count=1,
+        recommendation_shift_count=max(
+            recommendation_shift_count,
+            _trust_metadata_int(previous_trust, "recommendation_shift_count"),
+        ),
+        conflicting_claim_count=max(
+            conflicting_claim_count,
+            _trust_metadata_int(previous_trust, "conflicting_claim_count"),
+        ),
     )
     security_metadata = dict(metadata.get("security") or {})
     security_metadata["security_status"] = source_trust.security_status

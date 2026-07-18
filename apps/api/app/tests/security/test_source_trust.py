@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.db.models import AuditEvent, EvidenceChunk, EvidenceSource
 from app.features.evidence.source_provenance import (
     assess_recommendation_shift,
+    assess_single_source_claim_conflict,
     assess_source_trust,
 )
 from app.services import embedding_service
@@ -167,6 +169,60 @@ def test_single_new_source_recommendation_shift_is_detected(
     assert shift.detected is True
     assert shift.previous_recommendation == "proceed"
     assert shift.proposed_recommendation == "continue_research"
+
+
+def test_single_new_source_conflicting_claim_is_detected_and_quarantinable() -> None:
+    source_id = uuid.uuid4()
+    conflict = assess_single_source_claim_conflict(
+        proposed_claims=[
+            (
+                "Independent fitness coaches are not willing to pay for check-in automation.",
+                {source_id},
+            )
+        ],
+        existing_claims=[
+            "Independent fitness coaches are willing to pay for check-in automation.",
+        ],
+        newly_added_source_ids={source_id},
+    )
+    trust = assess_source_trust(
+        source_type="note",
+        text="One contradictory interview was added after prior research.",
+        metadata={},
+        approved_by=None,
+        conflicting_claim_count=1,
+    )
+
+    assert conflict.detected is True
+    assert conflict.controlling_source_ids == (str(source_id),)
+    assert conflict.existing_claim is not None
+    assert trust.security_status == "quarantined"
+    assert trust.conflicting_claim_count == 1
+    assert "conflicting_claim_single_source" in trust.signals
+
+
+def test_single_source_claim_conflict_ignores_unrelated_or_multi_source_claims() -> None:
+    first_source_id = uuid.uuid4()
+    second_source_id = uuid.uuid4()
+
+    unrelated = assess_single_source_claim_conflict(
+        proposed_claims=[("Coaches need faster customer support.", {first_source_id})],
+        existing_claims=["Independent fitness coaches are willing to pay for automation."],
+        newly_added_source_ids={first_source_id},
+    )
+    multi_source = assess_single_source_claim_conflict(
+        proposed_claims=[
+            (
+                "Independent fitness coaches are not willing to pay for automation.",
+                {first_source_id, second_source_id},
+            )
+        ],
+        existing_claims=["Independent fitness coaches are willing to pay for automation."],
+        newly_added_source_ids={first_source_id, second_source_id},
+    )
+
+    assert unrelated.detected is False
+    assert multi_source.detected is False
 
 
 def _create_project(client: TestClient) -> str:

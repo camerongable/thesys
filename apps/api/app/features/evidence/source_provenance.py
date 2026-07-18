@@ -90,6 +90,7 @@ class SourceTrust:
     anomalous_embedding_cluster_count: int
     signals: tuple[str, ...]
     recommendation_shift_count: int = 0
+    conflicting_claim_count: int = 0
 
     def metadata(self) -> dict[str, Any]:
         return {
@@ -105,6 +106,7 @@ class SourceTrust:
             "duplicate_source_count": self.duplicate_source_count,
             "anomalous_embedding_cluster_count": self.anomalous_embedding_cluster_count,
             "recommendation_shift_count": self.recommendation_shift_count,
+            "conflicting_claim_count": self.conflicting_claim_count,
             "signals": list(self.signals),
         }
 
@@ -114,6 +116,16 @@ class RecommendationShift:
     detected: bool
     previous_recommendation: str | None
     proposed_recommendation: str | None
+    controlling_source_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ClaimConflict:
+    """A high-confidence contradiction introduced by one newly added source."""
+
+    detected: bool
+    proposed_claim: str | None
+    existing_claim: str | None
     controlling_source_ids: tuple[str, ...]
 
 
@@ -141,6 +153,38 @@ def assess_recommendation_shift(
         previous_recommendation=previous,
         proposed_recommendation=proposed,
         controlling_source_ids=controlling_source_ids if detected else (),
+    )
+
+
+def assess_single_source_claim_conflict(
+    *,
+    proposed_claims: list[tuple[str, set[object]]],
+    existing_claims: list[str],
+    newly_added_source_ids: set[object],
+) -> ClaimConflict:
+    """Flag an opposite claim that is sourced only to one newly added source.
+
+    The heuristic is intentionally narrow: both claims must carry a clear, opposite
+    polarity and share at least three non-trivial terms with strong overlap. This
+    makes the detector a poisoning guard, not a general-purpose fact checker.
+    """
+    for proposed_claim, source_ids in proposed_claims:
+        if len(source_ids) != 1 or not source_ids <= newly_added_source_ids:
+            continue
+        for existing_claim in existing_claims:
+            if not _claims_conflict(proposed_claim, existing_claim):
+                continue
+            return ClaimConflict(
+                detected=True,
+                proposed_claim=proposed_claim,
+                existing_claim=existing_claim,
+                controlling_source_ids=tuple(sorted(str(source_id) for source_id in source_ids)),
+            )
+    return ClaimConflict(
+        detected=False,
+        proposed_claim=None,
+        existing_claim=None,
+        controlling_source_ids=(),
     )
 
 
@@ -262,6 +306,7 @@ def assess_source_trust(
     duplicate_source_count: int = 0,
     anomalous_embedding_cluster_count: int = 0,
     recommendation_shift_count: int = 0,
+    conflicting_claim_count: int = 0,
 ) -> SourceTrust:
     """Assess instruction and poisoning signals before a source becomes retrievable."""
     prompt_markers = detect_prompt_injection_markers(text)
@@ -280,6 +325,8 @@ def assess_source_trust(
         signals.append("anomalous_embedding_cluster")
     if recommendation_shift_count:
         signals.append("recommendation_shift_single_source")
+    if conflicting_claim_count:
+        signals.append("conflicting_claim_single_source")
     signals = sorted(set(signals))
 
     injection_score = min(
@@ -295,7 +342,8 @@ def assess_source_trust(
         + (0.2 if hidden_unicode else 0.0)
         + min(duplicate_source_count * 0.35, 0.8)
         + min(anomalous_embedding_cluster_count * 0.4, 0.8)
-        + min(recommendation_shift_count * 0.8, 0.8),
+        + min(recommendation_shift_count * 0.8, 0.8)
+        + min(conflicting_claim_count * 0.8, 0.8),
     )
     quarantined = injection_score >= 0.6 or poisoning_score >= 0.7
     provenance_type = _provenance_type(source_type, metadata)
@@ -323,6 +371,7 @@ def assess_source_trust(
         anomalous_embedding_cluster_count=anomalous_embedding_cluster_count,
         signals=tuple(signals),
         recommendation_shift_count=recommendation_shift_count,
+        conflicting_claim_count=conflicting_claim_count,
     )
 
 
@@ -358,6 +407,61 @@ def _recommendation_direction(value: str | None) -> str | None:
     if any(marker in normalized for marker in ("proceed", "build", "pilot")):
         return "proceed"
     return None
+
+
+_CLAIM_STOP_WORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "has",
+    "have",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "this",
+    "to",
+    "was",
+    "will",
+    "with",
+}
+_CLAIM_NEGATIONS = {"cannot", "neither", "never", "no", "not", "without", "wont"}
+
+
+def _claims_conflict(proposed_claim: str, existing_claim: str) -> bool:
+    proposed_terms = _claim_terms(proposed_claim)
+    existing_terms = _claim_terms(existing_claim)
+    if len(proposed_terms) < 3 or len(existing_terms) < 3:
+        return False
+    shared_terms = proposed_terms & existing_terms
+    if len(shared_terms) < 3:
+        return False
+    overlap = len(shared_terms) / min(len(proposed_terms), len(existing_terms))
+    return overlap >= 0.75 and _claim_polarity(proposed_claim) != _claim_polarity(existing_claim)
+
+
+def _claim_terms(value: str) -> set[str]:
+    return {
+        term
+        for term in re.findall(r"[a-z0-9]+", value.casefold())
+        if len(term) > 1 and term not in _CLAIM_STOP_WORDS and term not in _CLAIM_NEGATIONS
+    }
+
+
+def _claim_polarity(value: str) -> Literal["positive", "negative"]:
+    terms = set(re.findall(r"[a-z0-9]+", value.casefold()))
+    return "negative" if terms & _CLAIM_NEGATIONS else "positive"
 
 
 def _has_hidden_unicode(text: str) -> bool:
