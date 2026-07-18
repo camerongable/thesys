@@ -14,9 +14,12 @@ from app.db.models import (
     AssumptionEvidenceLink,
     Claim,
     ClaimEvidenceLink,
+    EvidenceChunk,
+    EvidenceSource,
     ProjectMemoryItem,
     ResearchSprint,
     Risk,
+    ToolInvocation,
 )
 from app.services.evidence_service import ParsedSource
 
@@ -24,6 +27,8 @@ from app.services.evidence_service import ParsedSource
 def _approved_research_sprint_with_evidence(
     client: TestClient,
     monkeypatch,
+    *,
+    prior_build_decision: bool = False,
 ) -> tuple[str, str]:
     monkeypatch.setenv("EXTERNAL_SEARCH_ENABLED", "true")
     monkeypatch.setenv("EXTERNAL_SEARCH_PROVIDER", "deterministic")
@@ -38,6 +43,17 @@ def _approved_research_sprint_with_evidence(
     )
     assert project_response.status_code == 201
     project_id = project_response.json()["id"]
+    if prior_build_decision:
+        decision_response = client.post(
+            f"/api/projects/{project_id}/decisions",
+            json={
+                "decision_type": "build",
+                "title": "Proceed with the existing wedge",
+                "rationale": "Prior decision based on the current project evidence.",
+                "expected_outcome": "Validate the wedge through a narrow build.",
+            },
+        )
+        assert decision_response.status_code == 201
     plan_response = client.post(
         f"/api/projects/{project_id}/research-sprints/plan",
         json={
@@ -143,6 +159,47 @@ def test_agentic_research_runs_multi_step_rag_and_writes_reviewable_memo(
     )
     assert body["claims"]
     assert body["citations"]
+
+
+def test_agentic_research_quarantines_a_single_source_recommendation_reversal(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint_with_evidence(
+        client,
+        monkeypatch,
+        prior_build_decision=True,
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/agentic-rag/run"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    shift = body["version"]["structured_content"]["recommendation_shift"]
+    source_id = shift["controlling_source_ids"][0]
+    source = db_session.scalar(
+        select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(source_id))
+    )
+    assert source is not None
+    assert source.ingestion_status == "quarantined"
+    assert source.source_metadata["source_trust"]["recommendation_shift_count"] == 1
+    assert (
+        "recommendation_shift_single_source" in source.source_metadata["source_trust"]["signals"]
+    )
+    assert (
+        db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == source.id))
+        is None
+    )
+    decision_proposal = db_session.scalar(
+        select(ToolInvocation).where(ToolInvocation.tool_name == "propose_decision")
+    )
+    assert decision_proposal is not None
+    proposal = decision_proposal.output_json["proposal"]
+    assert proposal["recommendation_shift"]["requires_independent_corroboration"] is True
+    assert proposal["decision_recommendation"].startswith("Do not change the decision")
 
     run = db_session.scalar(select(AIRun).where(AIRun.id == uuid.UUID(body["ai_run_id"])))
     assert run is not None

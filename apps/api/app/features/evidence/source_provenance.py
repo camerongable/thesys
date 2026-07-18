@@ -89,6 +89,7 @@ class SourceTrust:
     duplicate_source_count: int
     anomalous_embedding_cluster_count: int
     signals: tuple[str, ...]
+    recommendation_shift_count: int = 0
 
     def metadata(self) -> dict[str, Any]:
         return {
@@ -103,8 +104,44 @@ class SourceTrust:
             "last_verified_at": self.last_verified_at.isoformat(),
             "duplicate_source_count": self.duplicate_source_count,
             "anomalous_embedding_cluster_count": self.anomalous_embedding_cluster_count,
+            "recommendation_shift_count": self.recommendation_shift_count,
             "signals": list(self.signals),
         }
+
+
+@dataclass(frozen=True)
+class RecommendationShift:
+    detected: bool
+    previous_recommendation: str | None
+    proposed_recommendation: str | None
+    controlling_source_ids: tuple[str, ...]
+
+
+def assess_recommendation_shift(
+    *,
+    previous_recommendation: str | None,
+    proposed_recommendation: str,
+    selected_source_ids: set[object],
+    newly_added_source_ids: set[object],
+) -> RecommendationShift:
+    """Flag a decision reversal that a single newly added source alone supports."""
+
+    previous = _recommendation_direction(previous_recommendation)
+    proposed = _recommendation_direction(proposed_recommendation)
+    controlling_source_ids = tuple(sorted(str(source_id) for source_id in selected_source_ids))
+    detected = (
+        previous is not None
+        and proposed is not None
+        and previous != proposed
+        and len(selected_source_ids) == 1
+        and selected_source_ids <= newly_added_source_ids
+    )
+    return RecommendationShift(
+        detected=detected,
+        previous_recommendation=previous,
+        proposed_recommendation=proposed,
+        controlling_source_ids=controlling_source_ids if detected else (),
+    )
 
 
 def canonicalize_url(url: str) -> str:
@@ -224,6 +261,7 @@ def assess_source_trust(
     approved_by: object | None,
     duplicate_source_count: int = 0,
     anomalous_embedding_cluster_count: int = 0,
+    recommendation_shift_count: int = 0,
 ) -> SourceTrust:
     """Assess instruction and poisoning signals before a source becomes retrievable."""
     prompt_markers = detect_prompt_injection_markers(text)
@@ -240,6 +278,8 @@ def assess_source_trust(
         signals.append("duplicate_source_content")
     if anomalous_embedding_cluster_count >= ANOMALOUS_EMBEDDING_CLUSTER_SOURCE_THRESHOLD:
         signals.append("anomalous_embedding_cluster")
+    if recommendation_shift_count:
+        signals.append("recommendation_shift_single_source")
     signals = sorted(set(signals))
 
     injection_score = min(
@@ -254,7 +294,8 @@ def assess_source_trust(
         + 0.3 * sum(1 for count in poisoning_matches.values() if count)
         + (0.2 if hidden_unicode else 0.0)
         + min(duplicate_source_count * 0.35, 0.8)
-        + min(anomalous_embedding_cluster_count * 0.4, 0.8),
+        + min(anomalous_embedding_cluster_count * 0.4, 0.8)
+        + min(recommendation_shift_count * 0.8, 0.8),
     )
     quarantined = injection_score >= 0.6 or poisoning_score >= 0.7
     provenance_type = _provenance_type(source_type, metadata)
@@ -281,6 +322,7 @@ def assess_source_trust(
         duplicate_source_count=duplicate_source_count,
         anomalous_embedding_cluster_count=anomalous_embedding_cluster_count,
         signals=tuple(signals),
+        recommendation_shift_count=recommendation_shift_count,
     )
 
 
@@ -296,6 +338,26 @@ def _provenance_type(
     if source_type == "url":
         return "approved_url"
     return "user_upload"
+
+
+def _recommendation_direction(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.casefold()
+    if "kill" in normalized:
+        return "kill"
+    if "pause" in normalized:
+        return "pause"
+    if "pivot" in normalized:
+        return "pivot"
+    if any(
+        marker in normalized
+        for marker in ("continue research", "do not commit", "run validation")
+    ):
+        return "continue_research"
+    if any(marker in normalized for marker in ("proceed", "build", "pilot")):
+        return "proceed"
+    return None
 
 
 def _has_hidden_unicode(text: str) -> bool:

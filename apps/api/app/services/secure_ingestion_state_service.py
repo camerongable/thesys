@@ -64,7 +64,10 @@ _ALLOWED_TRANSITIONS = {
     },
     # Reprocessing a source is a new extraction attempt. Keep the complete
     # history rather than replacing the prior successful lifecycle.
-    SecureIngestionState.RETRIEVABLE: {SecureIngestionState.EXTRACTION_PENDING},
+    SecureIngestionState.RETRIEVABLE: {
+        SecureIngestionState.EXTRACTION_PENDING,
+        SecureIngestionState.QUARANTINED,
+    },
     SecureIngestionState.QUARANTINED: set(),
     SecureIngestionState.FAILED: {SecureIngestionState.EXTRACTION_PENDING},
 }

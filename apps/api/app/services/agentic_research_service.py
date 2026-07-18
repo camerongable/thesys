@@ -39,6 +39,7 @@ from app.db.models import (
     ClaimEvidenceLink,
     Competitor,
     CompetitorCandidate,
+    Decision,
     DiscoveredSource,
     EvidenceChunk,
     EvidenceSource,
@@ -61,11 +62,13 @@ from app.services import (
     ai_run_service,
     citation_verifier_service,
     context_service,
+    evidence_service,
     governance_service,
     langsmith_observability_service,
     memory_service,
     project_service,
     retrieval_service,
+    source_provenance_service,
     tool_service,
 )
 
@@ -1606,11 +1609,55 @@ def _write_research_memo_step(
         db.flush()
         artifact.current_version_id = version.id
         claims = _write_claims(db, auth, project, version, memo.claims)
+        recommendation_shift = _recommendation_shift(
+            db,
+            auth,
+            project.id,
+            memo.decision_recommendation,
+            selected_evidence,
+        )
+        if recommendation_shift.detected:
+            for source_id in recommendation_shift.controlling_source_ids:
+                source = db.get(EvidenceSource, uuid.UUID(source_id))
+                if source is not None:
+                    evidence_service.quarantine_source_for_recommendation_shift(db, auth, source)
+            content = dict(version.structured_content)
+            content["recommendation_shift"] = {
+                "previous_recommendation": recommendation_shift.previous_recommendation,
+                "proposed_recommendation": recommendation_shift.proposed_recommendation,
+                "controlling_source_ids": list(recommendation_shift.controlling_source_ids),
+                "action": "source_quarantined_pending_independent_corroboration",
+            }
+            version.structured_content = content
+            flag_modified(version, "structured_content")
+            governance_service.record_audit_event(
+                db,
+                auth,
+                event_type="recommendation_shift_detected",
+                actor_type="system",
+                project_id=project.id,
+                entity_type="artifact_version",
+                entity_id=version.id,
+                risk_level="high",
+                summary=(
+                    "A single newly added source attempted to reverse a decision recommendation."
+                ),
+                metadata={
+                    "previous_recommendation": recommendation_shift.previous_recommendation,
+                    "proposed_recommendation": recommendation_shift.proposed_recommendation,
+                    "controlling_source_ids": list(recommendation_shift.controlling_source_ids),
+                },
+            )
         proposal_payloads = _research_memo_proposal_payloads(
             memo,
             research_sprint_id=sprint.id,
             artifact_version_id=version.id,
         )
+        if recommendation_shift.detected:
+            proposal_payloads = _replace_recommendation_shift_proposals(
+                proposal_payloads,
+                recommendation_shift,
+            )
         memory_update_invocation = tool_service.create_proposal(
             db,
             auth,
@@ -2110,6 +2157,72 @@ def _evidence_bundles(results: list[EvidenceRetrievalResultRead]) -> list[dict[s
 
 _memory_update_preview = memo_rendering.memory_update_preview
 _research_memo_proposal_payloads = research_proposals.research_memo_proposal_payloads
+
+
+def _recommendation_shift(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    proposed_recommendation: str,
+    selected_evidence: list[EvidenceRetrievalResultRead],
+):
+    latest_decision = db.scalar(
+        select(Decision)
+        .where(
+            Decision.workspace_id == auth.workspace_id,
+            Decision.project_id == project_id,
+        )
+        .order_by(Decision.created_at.desc())
+        .limit(1)
+    )
+    selected_source_ids = {result.source_id for result in selected_evidence}
+    newly_added_source_ids: set[object] = set()
+    if latest_decision is not None and selected_source_ids:
+        newly_added_source_ids = set(
+            db.scalars(
+                select(EvidenceSource.id).where(
+                    EvidenceSource.workspace_id == auth.workspace_id,
+                    EvidenceSource.project_id == project_id,
+                    EvidenceSource.id.in_(selected_source_ids),
+                    EvidenceSource.created_at > latest_decision.created_at,
+                )
+            )
+        )
+    return source_provenance_service.assess_recommendation_shift(
+        previous_recommendation=latest_decision.decision_type if latest_decision else None,
+        proposed_recommendation=proposed_recommendation,
+        selected_source_ids=selected_source_ids,
+        newly_added_source_ids=newly_added_source_ids,
+    )
+
+
+def _replace_recommendation_shift_proposals(proposal_payloads, recommendation_shift):
+    abstention = (
+        "Do not change the decision from this source alone. Collect independent "
+        "corroborating evidence before making a recommendation."
+    )
+    shift_metadata = {
+        "previous_recommendation": recommendation_shift.previous_recommendation,
+        "proposed_recommendation": recommendation_shift.proposed_recommendation,
+        "controlling_source_ids": list(recommendation_shift.controlling_source_ids),
+        "requires_independent_corroboration": True,
+    }
+    return research_proposals.ResearchMemoProposalPayloads(
+        memory_update={
+            **proposal_payloads.memory_update,
+            "decision_recommendation": abstention,
+            "recommendation_shift": shift_metadata,
+        },
+        validation_plan=proposal_payloads.validation_plan,
+        decision={
+            **proposal_payloads.decision,
+            "decision_recommendation": abstention,
+            "recommendation_shift": shift_metadata,
+        },
+        memory_update_input=proposal_payloads.memory_update_input,
+        validation_plan_input=proposal_payloads.validation_plan_input,
+        decision_input=proposal_payloads.decision_input,
+    )
 
 
 def _research_sources(

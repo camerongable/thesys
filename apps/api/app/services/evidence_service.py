@@ -1380,6 +1380,50 @@ def _quarantine_source_for_trust(
     )
 
 
+def quarantine_source_for_recommendation_shift(
+    db: Session,
+    auth: AuthContext,
+    source: EvidenceSource,
+) -> source_provenance_service.SourceTrust:
+    """Quarantine a retrievable source that alone causes a decision reversal."""
+    metadata = dict(source.source_metadata or {})
+    previous_trust = metadata.get("source_trust")
+    duplicate_source_count = _trust_metadata_int(previous_trust, "duplicate_source_count")
+    anomalous_cluster_count = _trust_metadata_int(
+        previous_trust,
+        "anomalous_embedding_cluster_count",
+    )
+    source_trust = source_provenance_service.assess_source_trust(
+        source_type=source.source_type,
+        text=source.raw_text or source.summary or source.title or "",
+        metadata=metadata,
+        approved_by=source.created_by,
+        duplicate_source_count=duplicate_source_count,
+        anomalous_embedding_cluster_count=anomalous_cluster_count,
+        recommendation_shift_count=1,
+    )
+    security_metadata = dict(metadata.get("security") or {})
+    security_metadata["security_status"] = source_trust.security_status
+    source.source_metadata = _merge_metadata(
+        metadata,
+        {"security": security_metadata, "source_trust": source_trust.metadata()},
+    )
+    if source.credibility_score is not None:
+        source.credibility_score = min(
+            source.credibility_score,
+            Decimal(str(source_trust.trust_score)),
+        )
+    _quarantine_source_for_trust(db, auth, source, source_trust=source_trust)
+    return source_trust
+
+
+def _trust_metadata_int(metadata: object, key: str) -> int:
+    if not isinstance(metadata, dict):
+        return 0
+    value = metadata.get(key)
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
 def _find_ready_url_source(
     db: Session,
     auth: AuthContext,

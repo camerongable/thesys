@@ -5,7 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import AuditEvent, EvidenceChunk, EvidenceSource
-from app.features.evidence.source_provenance import assess_source_trust
+from app.features.evidence.source_provenance import (
+    assess_recommendation_shift,
+    assess_source_trust,
+)
 from app.services import embedding_service
 
 
@@ -137,6 +140,33 @@ def test_anomalous_embedding_cluster_is_quarantined_before_chunk_persistence(
         db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == sources[-1].id))
         is None
     )
+
+
+def test_single_new_source_recommendation_shift_is_detected(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = _create_project(client)
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={
+            "title": "One reversal source",
+            "text": "A single interview says the project should stop immediately.",
+        },
+    )
+    assert response.status_code == 201
+    source = db_session.scalar(select(EvidenceSource))
+    assert source is not None
+    shift = assess_recommendation_shift(
+        previous_recommendation="build",
+        proposed_recommendation="Do not commit to a broad build yet. Run validation first.",
+        selected_source_ids={source.id},
+        newly_added_source_ids={source.id},
+    )
+
+    assert shift.detected is True
+    assert shift.previous_recommendation == "proceed"
+    assert shift.proposed_recommendation == "continue_research"
 
 
 def _create_project(client: TestClient) -> str:

@@ -584,6 +584,12 @@ current verdict, next action, evidence health, validation, and decision state.
   assessment is insufficient; the same fail-closed response prevents provider
   invocation after insufficient or guardrail-filtered evidence in regular and
   streamed flows.
+- [x] Detect a research decision reversal that is supported by exactly one
+  source added after the prior recorded decision. The controlling source now
+  receives a high-risk recommendation-shift trust signal, is moved from
+  retrievable to quarantined with its chunks removed, and produces an
+  attributable audit event. The affected memory and decision proposals replace
+  the reversal with an explicit independent-corroboration requirement.
 
 ## Sprint 65 Verification
 
@@ -621,12 +627,20 @@ current verdict, next action, evidence health, validation, and decision state.
   passed (`428 passed, 1 skipped, 1 xfailed, 12 warnings`). Repository-root
   lint remains limited by 12 pre-existing line-length violations in historical
   Alembic migrations outside this sprint slice.
+- [x] One-source recommendation-shift checkpoint passed (`97 passed, 4
+  warnings`), covering source-trust scoring, secure ingestion lifecycle
+  transition, agentic-research decision-proposal abstention, and the existing
+  evidence, governance, and feature-boundary regressions.
+- [x] Application lint and compile checks passed, and the full backend suite
+  passed (`430 passed, 1 skipped, 1 xfailed, 12 warnings`). Repository-root
+  lint remains limited by 12 pre-existing line-length violations in historical
+  Alembic migrations outside this sprint slice.
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-add recommendation-shift poisoning detection, then continue the remaining
-secure-RAG parity and memory-poisoning acceptance work.
+detect conflicting claims introduced by one new source, then continue the
+remaining secure-RAG parity and memory-poisoning acceptance work.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
