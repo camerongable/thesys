@@ -159,6 +159,9 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Emit a credential-free, tenant-attributable cross-tenant-attempt event
   from the standalone workflow-run lookup, protecting AI execution and trace
   metadata without persisting the requested run ID.
+- [x] Emit credential-free, tenant-attributable cross-tenant-attempt events
+  from direct research-plan editing and research-sprint approval lookups, with
+  fixed reason codes and no persisted project, plan, or sprint IDs.
 - [ ] Add broader authorization-denial emitters as their corresponding
   direct-resource mutation/read flows are introduced or identified.
 
@@ -252,6 +255,8 @@ current verdict, next action, evidence health, validation, and decision state.
   full backend suite (`340 passed, 1 skipped, 3 xfailed, 3 warnings`).
 - [x] Standalone workflow-run scope-audit coverage passed with the full backend
   suite (`341 passed, 1 skipped, 3 xfailed, 3 warnings`).
+- [x] Direct research-plan and research-sprint scope-audit coverage passed with
+  the full backend suite (`342 passed, 1 skipped, 3 xfailed, 3 warnings`).
 - [ ] Run migration `0031_authentication_events` and its policy checks against
   the existing live-Postgres CI checkpoint. Local SQLite tests prove the model
   and offline migration contract but not a PostgreSQL RLS execution.

@@ -25,7 +25,7 @@ from app.ai.fallback_policy import (
 from app.ai.litellm_client import ChatMessage, LLMCompletion
 from app.ai.prompts import RESEARCH_SPRINT_PLANNING_PROMPT_VERSION
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
-from app.core.auth import AuthContext, require_permission
+from app.core.auth import AuthContext, record_cross_tenant_access_attempt, require_permission
 from app.core.config import Settings
 from app.db.models import (
     AIRun,
@@ -534,6 +534,7 @@ def _get_plan(
         )
     )
     if plan is None:
+        record_cross_tenant_access_attempt(db, auth, reason_code="research_plan_scope_denied")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Research plan not found.",
@@ -557,6 +558,7 @@ def _get_sprint(
         select(ResearchSprint).where(*filters).options(selectinload(ResearchSprint.plan))
     )
     if sprint is None:
+        record_cross_tenant_access_attempt(db, auth, reason_code="research_sprint_scope_denied")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Research sprint not found.",

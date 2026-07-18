@@ -75,6 +75,11 @@ The standalone workflow-run API protects AI execution and trace metadata with
 the same pattern. An out-of-workspace `run_id` returns `404 Workflow run not
 found` and records `workflow_run_scope_denied` without persisting that ID.
 
+Research-plan editing and research-sprint approval also use direct resource
+IDs. Their scoped lookup failures return the existing 404 responses and record
+fixed `research_plan_scope_denied` or `research_sprint_scope_denied` reasons
+without persisting the requested IDs.
+
 ## Database Roles And RLS
 
 | Role | Runtime use | Privileges |
