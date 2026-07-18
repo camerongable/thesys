@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.auth import (
     AuthContext,
@@ -35,7 +35,13 @@ from app.features.governance_tools import audit as tool_audit
 from app.features.governance_tools import registry as tool_registry
 from app.features.governance_tools import schema_guard
 from app.schemas.evidence import EvidenceRetrieveCreate
-from app.services import governance_service, memory_service, project_service, retrieval_service
+from app.services import (
+    evidence_service,
+    governance_service,
+    memory_service,
+    project_service,
+    retrieval_service,
+)
 
 RequestedBy = Literal["agent", "user", "system"]
 ToolDefinition = tool_registry.ToolDefinition
@@ -460,7 +466,7 @@ def _run_tool(
             "diagnostics": search.diagnostics.model_dump(mode="json"),
         }
     if definition.name == "list_project_sources":
-        return _list_project_sources(db, auth, project_id, research_sprint_id)
+        return _list_project_sources(db, auth, settings, project_id, research_sprint_id)
     if definition.name == "list_competitors":
         return _list_competitors(db, auth, project_id, research_sprint_id)
     if definition.name == "list_assumptions":
@@ -497,6 +503,7 @@ def _get_project_summary(db: Session, auth: AuthContext, project_id: uuid.UUID) 
 def _list_project_sources(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
     research_sprint_id: uuid.UUID | None,
 ) -> dict[str, Any]:
@@ -507,6 +514,7 @@ def _list_project_sources(
                 EvidenceSource.workspace_id == auth.workspace_id,
                 EvidenceSource.project_id == project_id,
             )
+            .options(selectinload(EvidenceSource.chunks))
             .order_by(EvidenceSource.created_at.desc())
             .limit(20)
         )
@@ -544,7 +552,11 @@ def _list_project_sources(
                 "source_type": source.source_type,
                 "classification": source.classification,
                 "ingestion_status": source.ingestion_status,
-                "summary": source.summary,
+                "summary": (
+                    source.summary
+                    if evidence_service.source_content_is_eligible(auth, settings, source)
+                    else None
+                ),
             }
             for source in evidence_sources
         ],
