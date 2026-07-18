@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException, UploadFile, status
 from pypdf import PdfReader
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.prompts import EVIDENCE_INGESTION_PROMPT_VERSION
@@ -23,7 +23,17 @@ from app.core.security import (
     validate_url_fetch_target,
     validate_url_response_content_type,
 )
-from app.db.models import EvidenceChunk, EvidenceSource
+from app.db.models import (
+    AssumptionEvidenceLink,
+    Claim,
+    ClaimEvidenceLink,
+    CompetitorCandidate,
+    CompetitorEvidenceLink,
+    DiscoveredSource,
+    EvidenceChunk,
+    EvidenceSource,
+    ProjectMemoryItem,
+)
 from app.features.evidence import extraction as evidence_extraction
 from app.schemas.evidence import EvidenceNoteCreate, EvidenceUrlCreate
 from app.services import (
@@ -553,6 +563,7 @@ def delete_source(
 ) -> None:
     source = get_source(db, auth, project_id, source_id)
     require_permission(auth, "write_project")
+    deletion_impact = _invalidate_source_derivatives(db, source)
     if source.object_storage_key:
         object_storage_service.delete_evidence_object(
             settings,
@@ -574,6 +585,28 @@ def delete_source(
             metadata={"storage_mode": settings.object_storage_mode},
         )
     db.delete(source)
+    db.flush()
+    remaining_chunks = db.scalar(
+        select(func.count()).select_from(EvidenceChunk).where(EvidenceChunk.source_id == source_id)
+    )
+    if remaining_chunks:
+        raise EvidenceIngestionError("Evidence deletion did not remove all retrievable chunks.")
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="evidence_source_deletion_propagated",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="evidence_source",
+        entity_id=source_id,
+        risk_level="high",
+        summary="Deleted evidence source and invalidated dependent derived data.",
+        metadata={
+            **deletion_impact,
+            "object_deleted": source.object_storage_key is not None,
+            "retrieval_revoked": True,
+        },
+    )
     db.commit()
 
 
@@ -1097,6 +1130,103 @@ def _merge_source_chunk_metadata(
         if isinstance(existing_security, dict) and isinstance(incoming_security, dict):
             merged["security"] = {**existing_security, **incoming_security}
         chunk.chunk_metadata = merged
+
+
+def _invalidate_source_derivatives(db: Session, source: EvidenceSource) -> dict[str, int]:
+    """Invalidate data that would otherwise retain support from a deleted source."""
+    source_claim_links = list(
+        db.scalars(
+            select(ClaimEvidenceLink).where(ClaimEvidenceLink.evidence_source_id == source.id)
+        )
+    )
+    linked_claim_ids = {link.claim_id for link in source_claim_links}
+    linked_claims = {
+        claim.id: claim
+        for claim in db.scalars(
+            select(Claim).where(Claim.id.in_(linked_claim_ids))
+        )
+    }
+    invalidated_claims: list[Claim] = []
+    for claim in linked_claims.values():
+        alternate_link = db.scalar(
+            select(ClaimEvidenceLink.id)
+            .where(
+                ClaimEvidenceLink.claim_id == claim.id,
+                ClaimEvidenceLink.evidence_source_id != source.id,
+            )
+            .limit(1)
+        )
+        if alternate_link is None:
+            claim.support_level = "unsupported"
+            invalidated_claims.append(claim)
+
+    db.execute(delete(ClaimEvidenceLink).where(ClaimEvidenceLink.evidence_source_id == source.id))
+    db.execute(
+        delete(AssumptionEvidenceLink).where(AssumptionEvidenceLink.evidence_source_id == source.id)
+    )
+    db.execute(
+        delete(CompetitorEvidenceLink).where(CompetitorEvidenceLink.evidence_source_id == source.id)
+    )
+    db.execute(
+        update(DiscoveredSource)
+        .where(DiscoveredSource.evidence_source_id == source.id)
+        .values(evidence_source_id=None)
+    )
+    candidates = list(
+        db.scalars(
+            select(CompetitorCandidate).where(
+                CompetitorCandidate.workspace_id == source.workspace_id,
+                CompetitorCandidate.project_id == source.project_id,
+            )
+        )
+    )
+    source_id = str(source.id)
+    candidate_reference_count = 0
+    for candidate in candidates:
+        references_source = (
+            candidate.evidence_source_id == source.id or source_id in candidate.source_ids
+        )
+        if not references_source:
+            continue
+        candidate_reference_count += 1
+        if candidate.evidence_source_id == source.id:
+            candidate.evidence_source_id = None
+        candidate.source_ids = [item for item in candidate.source_ids if item != source_id]
+
+    invalidated_version_ids = {
+        claim.artifact_version_id
+        for claim in invalidated_claims
+        if claim.artifact_version_id is not None
+    }
+    stale_memory_count = 0
+    for item in db.scalars(
+        select(ProjectMemoryItem).where(
+            ProjectMemoryItem.workspace_id == source.workspace_id,
+            ProjectMemoryItem.project_id == source.project_id,
+        )
+    ):
+        references_source = (
+            (item.source_entity_type == "evidence_source" and item.source_entity_id == source.id)
+            or (item.entity_type == "evidence_source" and item.entity_id == source.id)
+            or (
+                item.source_entity_type == "artifact_version"
+                and item.source_entity_id in invalidated_version_ids
+            )
+        )
+        if not references_source or item.status not in {"active", "proposed"}:
+            continue
+        item.status = "stale"
+        item.provenance_metadata = {**(item.provenance_metadata or {}), "evidence_deleted": True}
+        stale_memory_count += 1
+
+    chunk_count = len(source.chunks)
+    return {
+        "chunks_deleted": chunk_count,
+        "claim_links_deleted": len(source_claim_links),
+        "claims_invalidated": len(invalidated_claims),
+        "competitor_references_cleared": candidate_reference_count,
+        "memory_items_staled": stale_memory_count,
+    }
 
 
 def _merge_metadata(

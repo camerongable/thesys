@@ -304,10 +304,15 @@ current verdict, next action, evidence health, validation, and decision state.
   project-specific authenticated purpose; identical identifiers receive an
   independent token map per project, and only workspace owners can reverse a
   token through an attributable high-risk audit event.
+- [x] Propagate source deletion through private object removal, chunks and
+  embeddings, evidence links, discovery/candidate references, unsupported
+  claims, and memory derived from invalidated artifact versions. The transaction
+  verifies no chunk survives, thereby revoking retrieval eligibility, and emits
+  a redacted high-risk propagation audit event.
 - [ ] Add Presidio-backed detection and complete the remaining secure-ingestion
   state-machine and MIME/content coverage.
 - [ ] Extend classification routing to non-chat providers and complete
-  retention/deletion propagation coverage.
+  retention-policy coverage.
 
 ## Sprint 63 Verification
 
@@ -333,10 +338,13 @@ current verdict, next action, evidence health, validation, and decision state.
   and is the only Alembic head.
 - [x] Full backend regression passed (`355 passed, 1 skipped, 2 xfailed,
   5 warnings`) with repository-wide lint, compile, and whitespace checks clean.
+- [x] Source-deletion propagation checkpoint passed (`128 passed, 1 skipped,
+  2 xfailed, 3 warnings`), covering private object deletion, zero surviving
+  retrievable chunks, claim invalidation, memory staleness, and audit metadata.
 
 ## Next Sprint
 
-Continue V1 Sprint 63 with retention/deletion propagation and the remaining
+Continue V1 Sprint 63 with retention-policy coverage and the remaining
 provider-routing and ingestion-state hardening.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
