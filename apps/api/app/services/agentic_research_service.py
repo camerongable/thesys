@@ -41,7 +41,6 @@ from app.db.models import (
     CompetitorCandidate,
     Decision,
     DiscoveredSource,
-    EvidenceChunk,
     EvidenceSource,
     Project,
     ResearchSprint,
@@ -1262,7 +1261,7 @@ def _execute_tool_calls(
                 research_sprint_id=sprint_id,
                 requested_by="agent",
             )
-            source_results = _source_reader_results(db, auth, project_id)
+            source_results = _source_reader_results(db, auth, settings, project_id)
             retrieval_results.extend(source_results)
             completed_calls.append({**call, "result_count": len(source_results)})
         else:
@@ -1296,38 +1295,16 @@ _lookup_tool_payload = research_strategy.lookup_tool_payload
 def _source_reader_results(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
 ) -> list[EvidenceRetrievalResultRead]:
-    rows = db.execute(
-        select(EvidenceChunk, EvidenceSource)
-        .join(EvidenceSource, EvidenceSource.id == EvidenceChunk.source_id)
-        .where(
-            EvidenceChunk.workspace_id == auth.workspace_id,
-            EvidenceChunk.project_id == project_id,
-            EvidenceSource.workspace_id == auth.workspace_id,
-            EvidenceSource.project_id == project_id,
-            EvidenceSource.ingestion_status == "ready",
-        )
-        .order_by(EvidenceSource.ingested_at.desc().nullslast(), EvidenceChunk.chunk_index)
-        .limit(8)
-    ).all()
-    return [
-        EvidenceRetrievalResultRead(
-            source_id=source.id,
-            chunk_id=chunk.id,
-            title=source.title,
-            url=source.url,
-            source_type=source.source_type,
-            chunk_index=chunk.chunk_index,
-            text=chunk.text,
-            score=0.5,
-            semantic_score=0.0,
-            keyword_score=0.5,
-            metadata=chunk.chunk_metadata or {},
-            created_at=chunk.created_at,
-        )
-        for chunk, source in rows
-    ]
+    return retrieval_service.read_recent_evidence_results(
+        db,
+        auth,
+        settings,
+        project_id,
+        limit=8,
+    )
 
 
 def _select_evidence(

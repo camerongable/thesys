@@ -612,6 +612,10 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Apply the same source-content eligibility to governed project-source tools.
   Agent and MCP source listings keep source identity and security status but
   suppress summaries from quarantined or otherwise ineligible sources.
+- [x] Route LangGraph source-reader retrieval through a policy-backed recent
+  evidence path. It applies the shared SQL filters before ordering and repeats
+  the Python eligibility check, preventing quarantined, low-trust, restricted,
+  or retrieval-disabled chunks from entering research context.
 
 ## Sprint 65 Verification
 
@@ -675,12 +679,14 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Governed-tool/MCP source-listing checkpoint passed (`26 passed, 1 warning`)
   across tool-boundary, JSON-RPC adapter, and source-trust regressions, with
   changed-file lint and compile checks clean.
+- [x] LangGraph source-reader policy checkpoint passed (`9 passed, 1 warning`)
+  across retrieval-policy, agentic-research, and secure-ranking regressions,
+  with changed-file lint and compile checks clean.
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-audit LangGraph and trace/replay retrieval-path parity plus memory-poisoning
-acceptance work.
+audit trace/replay retrieval-path parity plus memory-poisoning acceptance work.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

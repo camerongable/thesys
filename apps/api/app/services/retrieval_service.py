@@ -138,6 +138,34 @@ def retrieve_evidence_results(
     return retrieve_evidence_search(db, auth, settings, project_id, payload).results
 
 
+def read_recent_evidence_results(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    *,
+    limit: int,
+) -> list[EvidenceRetrievalResultRead]:
+    """Read recent project chunks only after the shared pre-ranking policy passes."""
+    policy = RetrievalSecurityPolicy.for_auth(
+        auth,
+        minimum_source_trust_score=settings.retrieval_min_source_trust_score,
+    )
+    rows = db.execute(
+        select(EvidenceChunk, EvidenceSource)
+        .join(EvidenceSource, EvidenceSource.id == EvidenceChunk.source_id)
+        .where(*policy.sql_conditions(project_id))
+        .order_by(EvidenceSource.ingested_at.desc().nullslast(), EvidenceChunk.chunk_index)
+        .limit(max(limit * SQL_VECTOR_CANDIDATE_MULTIPLIER, limit))
+    ).all()
+    results = [
+        _serialize_result(chunk, source, score=0.5, semantic_score=0.0, keyword_score=0.5)
+        for chunk, source in rows
+        if policy.allows(source=source, chunk=chunk)
+    ]
+    return _apply_security_ranking(results)[:limit]
+
+
 def retrieve_evidence_search(
     db: Session,
     auth: AuthContext,

@@ -151,6 +151,36 @@ def test_cached_results_are_rechecked_after_source_quarantine(db_session: Sessio
     assert results == []
 
 
+def test_recent_evidence_reader_uses_the_shared_retrieval_policy(db_session: Session) -> None:
+    workspace_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    approved_source, approved_chunk = _source_and_chunk(
+        workspace_id=workspace_id,
+        project_id=project_id,
+        data_classification="internal",
+        credibility_score="0.7",
+    )
+    quarantined_source, quarantined_chunk = _source_and_chunk(
+        workspace_id=workspace_id,
+        project_id=project_id,
+        data_classification="internal",
+        credibility_score="0.9",
+        source_trust_status="quarantined",
+    )
+    db_session.add_all([approved_source, approved_chunk, quarantined_source, quarantined_chunk])
+    db_session.commit()
+
+    results = retrieval_service.read_recent_evidence_results(
+        db_session,
+        _auth(workspace_id, "editor"),
+        get_settings(),
+        project_id,
+        limit=8,
+    )
+
+    assert [result.chunk_id for result in results] == [approved_chunk.id]
+
+
 def _auth(workspace_id: uuid.UUID, role: str) -> SimpleNamespace:
     return SimpleNamespace(workspace_id=workspace_id, role=role)
 
