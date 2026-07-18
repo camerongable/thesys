@@ -467,10 +467,16 @@ current verdict, next action, evidence health, validation, and decision state.
   extraction now adds the trusted prompt boundary, file-content screening, and
   output checks before JSON parsing or evidence persistence. The former Sprint
   64 all-LLM-call invariant is now enforced rather than expected to fail.
+- [x] Require grounded guide citations to name an exact retrieved chunk and copy
+  an exact supporting quote from it. The server retains a citation as
+  `supported` only when that quote occurs in the cited chunk and shares at least
+  two substantive terms with the answer; invalid, stale source-ID-only, or
+  weakly related citations are withheld and surfaced as missing support. Mere
+  retrieval drilldowns are explicitly `weak`, and the guide prompt/cache version
+  is bumped to prevent legacy source-ID-only outputs from being replayed.
 - [ ] Complete the remaining Sprint 64 acceptance audit, including the explicit
-  embedding-provider scope, citation semantic-support verification, optional
-  classifier adapter runtime posture, and documented detector-unavailability
-  behavior before claiming the full gateway.
+  embedding-provider scope, optional classifier adapter runtime posture, and
+  documented detector-unavailability behavior before claiming the full gateway.
 
 ## Sprint 64 Verification
 
@@ -499,12 +505,15 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Multimodal and all-model-call checkpoint passed (`409 passed, 1 skipped,
   1 xfailed, 12 warnings`), including direct multimodal input/output blocking
   tests and the now-enforced Sprint 64 provider-boundary invariant.
+- [x] Citation semantic-support checkpoint passed (`409 passed, 1 skipped, 1
+  xfailed, 12 warnings`), including exact source/chunk/quote verification for
+  normal and streamed guide responses, plus rejected unrelated or missing-chunk
+  citations.
 
 ## Next Sprint
 
 Continue Sprint 64 with an acceptance audit of embedding-provider scope,
-citation support verification, optional classifier adapters, and detector
-failure behavior.
+optional classifier adapters, and detector-failure behavior.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

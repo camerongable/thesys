@@ -37,8 +37,10 @@ def grounded_guide_messages(
                 "validation, and decisions. "
                 f"{UNTRUSTED_RETRIEVED_CONTENT_RULE} "
                 "Do not claim to mutate project state. If a user asks for a "
-                "change, propose an existing action ID instead. Cite only source IDs from "
-                "the retrieved evidence list. Keep the answer concise and practical."
+                "change, propose an existing action ID instead. Every citation must include "
+                "a source_id, chunk_id, and an exact supporting_quote copied from that "
+                "retrieved chunk; omit citations you cannot support. Keep the answer concise "
+                "and practical."
             ),
         ),
         ChatMessage(

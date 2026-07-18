@@ -2676,6 +2676,42 @@ def test_guide_citation_helpers_are_feature_owned_and_service_compatible() -> No
     assert detail.region == {"page": 2, "kind": "table"}
     assert detail.quote_offsets == {"start": 3, "end": 21}
     assert detail.warnings == ["high_source_quality_risk"]
+    assert detail.verifier_status == "weak"
+
+    verified = guide_citations.verify_grounded_citations(
+        search_output,
+        "Founder interview evidence identifies a repeated workflow pain.",
+        [
+            {
+                "source_id": "source-1",
+                "chunk_id": "chunk-1",
+                "supporting_quote": "Founder interview evidence about a repeated workflow pain.",
+            },
+            {
+                "source_id": "source-1",
+                "chunk_id": "chunk-duplicate",
+                "supporting_quote": "Unrelated claim that does not appear in the chunk.",
+            },
+        ],
+    )
+
+    assert verified == [guide_citations.VerifiedCitation("source-1", "chunk-1")]
+    assert guide_citations.verify_grounded_citations(
+        search_output,
+        "A pricing experiment needs an urgent decision.",
+        [
+            {
+                "source_id": "source-1",
+                "chunk_id": "chunk-1",
+                "supporting_quote": "Founder interview evidence about a repeated workflow pain.",
+            },
+            {
+                "source_id": "source-1",
+                "chunk_id": "chunk-missing",
+                "supporting_quote": "Founder interview evidence about a repeated workflow pain.",
+            },
+        ],
+    ) == []
 
 
 def test_guide_grounding_helpers_are_feature_owned_and_service_compatible() -> None:
@@ -2729,12 +2765,28 @@ def test_guide_grounding_helpers_are_feature_owned_and_service_compatible() -> N
     )
     draft = guide_grounding.GroundedGuideAnswerDraft(
         answer="Use the retrieved signal, but keep the scope bounded.",
+        cited_evidence=[
+            guide_grounding.GroundedGuideCitation(
+                source_id="source-1",
+                chunk_id="chunk-1",
+                supporting_quote="Use the retrieved signal, but keep the scope bounded.",
+            )
+        ],
         cited_evidence_ids=["source-1", "source-outside-search"],
         assumption_ids=[f"assumption-{index}" for index in range(10)],
         confidence_level="medium",
         suggested_action_ids=["missing-action", "show_blocker_evidence"],
     )
     search = SimpleNamespace(
+        output={
+            "results": [
+                {
+                    "source_id": "source-1",
+                    "chunk_id": "chunk-1",
+                    "text": "Use the retrieved signal, but keep the scope bounded.",
+                }
+            ]
+        },
         cited_evidence_ids=["source-1"],
         retrieval_diagnostics={"context": {"selected_count": 1}},
     )
@@ -2761,6 +2813,7 @@ def test_guide_grounding_helpers_are_feature_owned_and_service_compatible() -> N
     assert response.recommended_action == actions[1]
     assert response.action_cards == [actions[1]]
     assert response.cited_evidence_ids == ["source-1"]
+    assert response.cited_chunk_ids == ["chunk-1"]
     assert [entity.id for entity in response.related_entities] == [
         str(project_id),
         "source-1",

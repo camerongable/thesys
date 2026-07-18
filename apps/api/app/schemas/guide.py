@@ -124,6 +124,7 @@ class GuideChatResponseRead(BaseModel):
     action_cards: list[GuideActionRead] = Field(default_factory=list)
     related_entities: list[GuideRelatedEntityRead] = Field(default_factory=list)
     cited_evidence_ids: list[str] = Field(default_factory=list)
+    cited_chunk_ids: list[str] = Field(default_factory=list)
     citation_details: list[GuideCitationDetailRead] = Field(default_factory=list)
     assumption_ids: list[str] = Field(default_factory=list)
     confidence_level: GuideConfidenceLevel = "unknown"

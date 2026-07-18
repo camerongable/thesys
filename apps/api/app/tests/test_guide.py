@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.ai.litellm_client import LLMCompletion
 from app.ai.structured_output import StructuredOutputResult
 from app.core.config import get_settings
-from app.db.models import AIRun, AIStep, ApprovalRequest, AuditEvent, ToolInvocation
+from app.db.models import AIRun, AIStep, ApprovalRequest, AuditEvent, EvidenceChunk, ToolInvocation
 from app.services import guide_service
 from app.services.identity_service import ensure_dev_identity
 
@@ -461,12 +461,13 @@ def test_guide_chat_stream_includes_citation_drilldowns(client: TestClient) -> N
     assert retrieval_payload["citation_details"][0]["excerpt"]
     assert retrieval_payload["citation_details"][0]["context_item_ids"]
     final_payload = events[-1][1]
-    assert final_payload["citation_details"][0]["verifier_status"] == "supported"
+    assert final_payload["citation_details"][0]["verifier_status"] == "weak"
 
 
 def test_guide_chat_stream_live_mode_streams_provider_answer_deltas(
     client: TestClient,
     monkeypatch,
+    db_session: Session,
 ) -> None:
     monkeypatch.setenv("LLM_STUB_MODE", "never")
     get_settings.cache_clear()
@@ -483,12 +484,26 @@ def test_guide_chat_stream_live_mode_streams_provider_answer_deltas(
     )
     assert source_response.status_code == 201
     source_id = source_response.json()["id"]
+    chunk_id = str(
+        db_session.scalar(
+            select(EvidenceChunk.id).where(EvidenceChunk.source_id == uuid.UUID(source_id))
+        )
+    )
 
     def fake_stream_complete(self, messages, **kwargs):
         content = json.dumps(
             {
-                "answer": "Provider streamed the supported answer.",
-                "cited_evidence_ids": [source_id],
+                "answer": "Coach check-in triage is supported by weekly review interviews.",
+                "cited_evidence": [
+                    {
+                        "source_id": source_id,
+                        "chunk_id": chunk_id,
+                        "supporting_quote": (
+                            "Coach check-in triage has strong evidence from weekly review "
+                            "interviews."
+                        ),
+                    }
+                ],
                 "assumption_ids": [],
                 "confidence_level": "medium",
                 "unsupported_or_missing_evidence": [],
@@ -510,7 +525,7 @@ def test_guide_chat_stream_live_mode_streams_provider_answer_deltas(
     assert response.status_code == 200
     events = _sse_events(body)
     deltas = [payload["text"] for event, payload in events if event == "answer_delta"]
-    assert "Provider streamed the supported answer." in "".join(deltas)
+    assert "Coach check-in triage is supported by weekly review interviews." in "".join(deltas)
     assert any(
         payload.get("source") == "provider"
         for event, payload in events
@@ -519,6 +534,8 @@ def test_guide_chat_stream_live_mode_streams_provider_answer_deltas(
     final_payload = events[-1][1]
     assert final_payload["used_llm"] is True
     assert final_payload["cited_evidence_ids"] == [source_id]
+    assert final_payload["cited_chunk_ids"] == [chunk_id]
+    assert final_payload["citation_details"][0]["verifier_status"] == "supported"
 
 
 def test_guide_chat_stream_blocks_indirect_injection_from_retrieved_evidence(
@@ -710,6 +727,7 @@ def test_guide_eval_reports_grounding_and_proposal_governance(
 def test_guide_chat_live_mode_uses_structured_grounded_answer(
     client: TestClient,
     monkeypatch,
+    db_session: Session,
 ) -> None:
     monkeypatch.setenv("LLM_STUB_MODE", "never")
     get_settings.cache_clear()
@@ -726,6 +744,11 @@ def test_guide_chat_live_mode_uses_structured_grounded_answer(
     )
     assert source_response.status_code == 201
     source_id = source_response.json()["id"]
+    chunk_id = str(
+        db_session.scalar(
+            select(EvidenceChunk.id).where(EvidenceChunk.source_id == uuid.UUID(source_id))
+        )
+    )
 
     def fake_generate_structured_output(settings, output_schema, messages, **kwargs):
         prompt_text = "\n".join(message.content for message in messages)
@@ -734,7 +757,16 @@ def test_guide_chat_live_mode_uses_structured_grounded_answer(
         assert "Earlier answer about coach check-ins." in prompt_text
         parsed = output_schema(
             answer="The strongest supported point is weekly check-in triage.",
-            cited_evidence_ids=[source_id, "not-a-real-source"],
+            cited_evidence=[
+                {
+                    "source_id": source_id,
+                    "chunk_id": chunk_id,
+                    "supporting_quote": (
+                        "Coach check-in triage is the strongest wedge because weekly reviews "
+                        "are slow."
+                    ),
+                }
+            ],
             assumption_ids=[],
             confidence_level="medium",
             unsupported_or_missing_evidence=[],
@@ -774,6 +806,8 @@ def test_guide_chat_live_mode_uses_structured_grounded_answer(
     body = response.json()
     assert body["used_llm"] is True
     assert body["cited_evidence_ids"] == [source_id]
+    assert body["cited_chunk_ids"] == [chunk_id]
+    assert body["citation_details"][0]["verifier_status"] == "supported"
     assert body["confidence_level"] == "medium"
     assert body["recommended_action"]["id"] == "show_blocker_evidence"
     assert all(action["id"] != "not_a_real_action" for action in body["action_cards"])

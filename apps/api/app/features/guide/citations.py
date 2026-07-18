@@ -1,19 +1,93 @@
-"""Citation drilldown shaping helpers for Ask Thesys."""
+"""Citation verification and drilldown shaping helpers for Ask Thesys."""
 
+import re
+from dataclasses import dataclass
 from typing import Any
 
 from app.schemas.guide import GuideCitationDetailRead
+
+_SUPPORT_TERM_PATTERN = re.compile(r"[a-z0-9][a-z0-9'-]{2,}")
+_SUPPORT_STOP_WORDS = {
+    "about",
+    "after",
+    "answer",
+    "because",
+    "could",
+    "does",
+    "from",
+    "guide",
+    "have",
+    "into",
+    "just",
+    "more",
+    "most",
+    "need",
+    "only",
+    "other",
+    "should",
+    "source",
+    "than",
+    "that",
+    "their",
+    "these",
+    "this",
+    "those",
+    "what",
+    "when",
+    "which",
+    "with",
+    "would",
+}
+
+
+@dataclass(frozen=True)
+class VerifiedCitation:
+    source_id: str
+    chunk_id: str
+
+
+def verify_grounded_citations(
+    search_output: dict[str, Any],
+    answer: str,
+    citations: list[dict[str, Any]],
+) -> list[VerifiedCitation]:
+    """Return only citations with an exact retrieved quote that supports the answer."""
+    retrieved = _retrieved_chunks(search_output)
+    answer_terms = _support_terms(answer)
+    verified: list[VerifiedCitation] = []
+    seen_sources: set[str] = set()
+    for citation in citations:
+        source_id = str(citation.get("source_id") or "")
+        chunk_id = str(citation.get("chunk_id") or "")
+        supporting_quote = str(citation.get("supporting_quote") or "").strip()
+        result = retrieved.get((source_id, chunk_id))
+        if not source_id or not chunk_id or not supporting_quote or result is None:
+            continue
+        text = str(result.get("text") or "")
+        if _normalized_text(supporting_quote) not in _normalized_text(text):
+            continue
+        if len(answer_terms & _support_terms(supporting_quote)) < 2:
+            continue
+        if source_id in seen_sources:
+            continue
+        seen_sources.add(source_id)
+        verified.append(VerifiedCitation(source_id=source_id, chunk_id=chunk_id))
+    return verified
 
 
 def citation_details_from_search(
     search_output: dict[str, Any],
     context_pack: dict[str, Any] | None,
     cited_evidence_ids: list[str],
+    *,
+    cited_chunk_ids: list[str] | None = None,
+    verifier_status: str = "weak",
 ) -> list[GuideCitationDetailRead]:
     results = search_output.get("results")
     if not isinstance(results, list):
         return []
     cited = set(cited_evidence_ids)
+    cited_chunks = set(cited_chunk_ids or [])
     context_item_ids = context_item_ids_by_source(context_pack)
     memory_ids = memory_ids_from_context_pack(context_pack)
     details: list[GuideCitationDetailRead] = []
@@ -23,6 +97,9 @@ def citation_details_from_search(
             continue
         source_id = str(result.get("source_id") or "")
         if not source_id or source_id not in cited or source_id in seen_sources:
+            continue
+        chunk_id = str(result.get("chunk_id") or "")
+        if cited_chunks and chunk_id not in cited_chunks:
             continue
         seen_sources.add(source_id)
         text = str(result.get("text") or "")
@@ -39,13 +116,13 @@ def citation_details_from_search(
         details.append(
             GuideCitationDetailRead(
                 source_id=source_id,
-                chunk_id=str(result.get("chunk_id")) if result.get("chunk_id") else None,
+                chunk_id=chunk_id or None,
                 title=str(result.get("title")) if result.get("title") else None,
                 url=str(result.get("url")) if result.get("url") else None,
                 source_type=str(result.get("source_type")) if result.get("source_type") else None,
                 excerpt=text[:600] if text else None,
                 score=optional_float(result.get("rerank_score") or result.get("score")),
-                verifier_status="supported",
+                verifier_status=verifier_status,
                 context_item_ids=context_item_ids.get(source_id, []),
                 memory_ids=memory_ids,
                 metadata=metadata,
@@ -66,6 +143,29 @@ def citation_details_from_search(
             )
         )
     return details
+
+
+def _retrieved_chunks(search_output: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    results = search_output.get("results")
+    if not isinstance(results, list):
+        return {}
+    return {
+        (str(result.get("source_id") or ""), str(result.get("chunk_id") or "")): result
+        for result in results
+        if isinstance(result, dict) and result.get("source_id") and result.get("chunk_id")
+    }
+
+
+def _normalized_text(value: str) -> str:
+    return " ".join(value.casefold().split())
+
+
+def _support_terms(value: str) -> set[str]:
+    return {
+        match.group(0)
+        for match in _SUPPORT_TERM_PATTERN.finditer(value.casefold())
+        if match.group(0) not in _SUPPORT_STOP_WORDS
+    }
 
 
 def citation_extraction_metadata(metadata: dict[str, Any]) -> dict[str, Any]:

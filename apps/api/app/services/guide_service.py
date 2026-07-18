@@ -648,6 +648,8 @@ def _stream_grounded_chat_response(
             search.output,
             response.context_pack,
             response.cited_evidence_ids,
+            cited_chunk_ids=response.cited_chunk_ids,
+            verifier_status="supported",
         )
         if answer_streamed and emitted_answer_chars < len(response.answer):
             for chunk in _answer_delta_chunks(response.answer[emitted_answer_chars:]):
@@ -1132,6 +1134,8 @@ def _grounded_chat_response(
             search.output,
             response.context_pack,
             response.cited_evidence_ids,
+            cited_chunk_ids=response.cited_chunk_ids,
+            verifier_status="supported",
         )
         completion = result.completion
         ai_run_service.complete_step(
