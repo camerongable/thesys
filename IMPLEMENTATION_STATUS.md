@@ -315,8 +315,13 @@ current verdict, next action, evidence health, validation, and decision state.
   and chunk metadata now retain per-representation expiry, migration `0035`
   makes PII-map expiry durable, and workspace-scoped cleanup removes expired PII
   maps and routes expired evidence through full deletion propagation.
-- [ ] Add Presidio-backed detection and complete the remaining secure-ingestion
-  state-machine and MIME/content coverage.
+- [x] Integrate Presidio analyzer and anonymizer rule recognizers with the
+  deterministic credential/identifier scanner. Extended identifiers such as
+  SSNs, IBANs, bank accounts, passports, and IP addresses now contribute to
+  classification and redaction without an implicit NLP-model download.
+- [ ] Complete the remaining secure-ingestion state-machine and parser/content
+  limits, including password-protected files, active PDF content, decompression
+  limits, and page/extraction resource bounds.
 - [x] Require extension, declared MIME, and independently detected content MIME
   to agree before any upload reaches malware scanning, storage, or parsing.
   `python-magic` is the primary detector; an unavailable binding falls back to
@@ -380,6 +385,10 @@ current verdict, next action, evidence health, validation, and decision state.
   xfailed, 6 warnings`), covering mismatch rejection before scanner/storage,
   detector unavailability, scanner quarantine, evidence ingestion, and source
   security metadata.
+- [x] Presidio-backed PII checkpoint passed (`134 passed, 1 skipped, 2 xfailed,
+  3 warnings`), covering rule-based extended identifiers, deterministic secret
+  handling, redaction before embeddings and providers, and secure evidence
+  ingestion.
 
 ## Next Sprint
 

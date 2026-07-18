@@ -38,6 +38,18 @@ def test_data_protection_detects_and_sanitizes_restricted_content() -> None:
     assert "[REDACTED_SECRET]" in protected.text
 
 
+def test_presidio_detects_and_anonymizes_extended_identifier_types() -> None:
+    text = "The applicant SSN is 219-09-9999 and IBAN is GB82 WEST 1234 5698 7654 32."
+
+    protected = data_protection_service.create_searchable_copy(text)
+
+    assert protected.data_classification.value == "restricted"
+    assert {"US_SSN", "IBAN_CODE"} <= set(protected.pii_entity_types)
+    assert "219-09-9999" not in protected.text
+    assert "GB82 WEST 1234 5698 7654 32" not in protected.text
+    assert protected.text.count("[REDACTED_SECRET]") == 2
+
+
 def test_note_pii_is_sanitized_before_persistence_and_embedding(
     client: TestClient,
     db_session: Session,

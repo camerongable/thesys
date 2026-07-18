@@ -72,6 +72,15 @@ registry and its tests in the same pull request.
 5. Unknown data is treated as `confidential` until classified. Unknown content
    with likely credentials or direct identifiers is treated as `restricted`.
 
+## Detection pipeline
+
+The ingestion and provider-redaction paths combine deterministic credential and
+common-identifier recognizers with Presidio rule recognizers for extended
+identifier formats such as SSNs, IBANs, bank accounts, passports, and IP
+addresses. Presidio runs against a local blank tokenizer for this baseline, so
+the application never downloads an NLP model at request time. Its spans are
+merged with the deterministic results before classification and anonymization.
+
 ## Provider decisions
 
 Before external egress, the caller must know the effective classification,
