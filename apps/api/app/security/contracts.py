@@ -239,9 +239,9 @@ SECURITY_INVARIANTS: tuple[SecurityInvariant, ...] = (
         "No restricted data may be sent to an unapproved provider.",
         "partial",
         62,
-        "Data-type provider policies and provider egress allowlists.",
-        "test_restricted_data_types_define_provider_policy",
-        "Runtime payload classification is not yet centralized.",
+        "Data-type policies, provider egress allowlists, and sanitized LiteLLM payload routing.",
+        "test_restricted_provider_routing",
+        "Non-chat provider adapters and centralized gateway enforcement remain Sprint 64 work.",
     ),
     SecurityInvariant(
         "SEC-INV-06",

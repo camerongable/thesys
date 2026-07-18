@@ -5,7 +5,7 @@ import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from app.core.redaction import SECRET_VALUE_PATTERNS
+from app.core.redaction import SECRET_VALUE_PATTERNS, redact_payload
 from app.security.contracts import DataClassification
 
 SANITIZATION_VERSION = "v1"
@@ -94,8 +94,11 @@ class DataProtectionService:
     def redact_for_model(self, text: str, *, project_id: uuid.UUID | None = None) -> str:
         return self.create_searchable_copy(text, project_id=project_id).text
 
-    def redact_for_trace(self, text: str, *, project_id: uuid.UUID | None = None) -> str:
-        return self.create_searchable_copy(text, project_id=project_id).text
+    def redact_for_trace(self, value: object, *, project_id: uuid.UUID | None = None) -> object:
+        return self._redact_trace_value(
+            redact_payload(value, redact_emails=True, max_string_length=2000),
+            project_id=project_id,
+        )
 
     def create_searchable_copy(
         self,
@@ -175,6 +178,18 @@ class DataProtectionService:
                 continue
             selected.append(detection)
         return selected
+
+    def _redact_trace_value(self, value: object, *, project_id: uuid.UUID | None) -> object:
+        if isinstance(value, dict):
+            return {
+                str(key): self._redact_trace_value(item, project_id=project_id)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._redact_trace_value(item, project_id=project_id) for item in value]
+        if isinstance(value, str):
+            return self.create_searchable_copy(value, project_id=project_id).text
+        return value
 
 
 data_protection_service = DataProtectionService()

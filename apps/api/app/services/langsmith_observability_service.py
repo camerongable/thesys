@@ -16,9 +16,9 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
 from app.core.config import Settings
-from app.core.redaction import redact_payload
 from app.db.models import AIRun, AIStep, ArtifactVersion, Project, ResearchSprint
 from app.security.secrets import SecretName, SecretProviderError, has_secret, resolve_secret
+from app.services.data_protection_service import data_protection_service
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +212,7 @@ def complete_trace(
         client.update_run(
             trace.trace_id,
             outputs=_sanitize({"summary": output_summary, "metrics": metrics or {}}),
-            error=error,
+            error=_sanitize(error) if error else None,
             end_time=datetime.now(UTC),
         )
     except Exception:  # pragma: no cover - best-effort external telemetry
@@ -271,11 +271,23 @@ def _safe_create_run(
             error=error,
             start_time=datetime.now(UTC),
             end_time=datetime.now(UTC),
-            extra={"metadata": _sanitize(metadata)},
+            extra={
+                "metadata": _sanitize(
+                    {**metadata, "data_classification": _classification(inputs, outputs)}
+                )
+            },
         )
     except Exception:  # pragma: no cover - best-effort external telemetry
         logger.warning("LangSmith trace upload failed for %s.", name)
 
 
 def _sanitize(value: Any, *, key: str | None = None) -> Any:
-    return redact_payload(value, key=key, redact_emails=True, max_string_length=2000)
+    del key
+    return data_protection_service.redact_for_trace(value)
+
+
+def _classification(inputs: dict[str, Any], outputs: dict[str, Any] | None) -> str:
+    values = [str(inputs), str(outputs or {})]
+    classifications = [data_protection_service.classify_text(value) for value in values]
+    order = {"public": 0, "internal": 1, "confidential": 2, "restricted": 3}
+    return max(classifications, key=lambda item: order[item.value]).value

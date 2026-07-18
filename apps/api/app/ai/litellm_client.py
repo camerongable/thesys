@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import Settings
 from app.security.secrets import SecretName, SecretProviderError, resolve_secret
+from app.services import model_data_policy_service
 from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
@@ -63,9 +64,14 @@ class LiteLLMClient:
         """Call chat completions and normalize the response for observability."""
         payload: dict[str, Any] = {
             "model": model or self.settings.litellm_model,
-            "messages": [message.model_dump() for message in messages],
             "temperature": temperature,
         }
+        decision = model_data_policy_service.prepare_model_payload(
+            provider="litellm",
+            model=str(payload["model"]),
+            messages=[message.model_dump() for message in messages],
+        )
+        payload["messages"] = decision.messages
         if response_format_json:
             payload["response_format"] = {"type": "json_object"}
         if max_tokens is not None:
@@ -122,10 +128,15 @@ class LiteLLMClient:
         """Yield OpenAI-compatible streaming content deltas from LiteLLM."""
         payload: dict[str, Any] = {
             "model": model or self.settings.litellm_model,
-            "messages": [message.model_dump() for message in messages],
             "temperature": temperature,
             "stream": True,
         }
+        decision = model_data_policy_service.prepare_model_payload(
+            provider="litellm",
+            model=str(payload["model"]),
+            messages=[message.model_dump() for message in messages],
+        )
+        payload["messages"] = decision.messages
         if response_format_json:
             payload["response_format"] = {"type": "json_object"}
         if max_tokens is not None:

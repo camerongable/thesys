@@ -295,12 +295,16 @@ current verdict, next action, evidence health, validation, and decision state.
   configuration. Disabled, unavailable, and infected scanner outcomes create a
   metadata-only quarantined source plus a high-risk audit event before object
   storage, parsing, chunking, or embedding.
+- [x] Add deterministic LiteLLM provider policy that classifies each outbound
+  chat payload and sends a redacted/tokenized representation when it contains
+  PII or restricted values. Trace payloads and errors now redact the same PII
+  classes, secrets, and sensitive keys before LangSmith export.
 - [ ] Add Presidio-backed detection, encrypted project-local reidentification
   mappings, and separately authorized reidentification.
 - [ ] Enforce the remaining secure-ingestion state machine, malware quarantine,
   and MIME/content scanning.
-- [ ] Add provider classification routing, trace redaction, retention policy,
-  and deletion propagation coverage.
+- [ ] Extend classification routing to non-chat providers, add encrypted
+  reidentification maps, and complete retention/deletion propagation coverage.
 
 ## Sprint 63 Verification
 
@@ -315,6 +319,8 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Upload quarantine checkpoint passed (`36 passed, 5 warnings`), covering
   unavailable and infected scanners, no object/chunk persistence, and existing
   clean upload behavior.
+- [x] Provider/trace sanitization checkpoint passed (`35 passed, 1 warning`),
+  including a captured LiteLLM HTTP request with PII and API keys removed.
 
 ## Next Sprint
 
