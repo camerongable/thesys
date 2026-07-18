@@ -28,6 +28,8 @@ from app.db.models import (
     ClaimEvidenceLink,
     CompetitorCandidate,
     CompetitorEvidenceLink,
+    Decision,
+    DecisionLink,
     DiscoveredSource,
     EvidenceChunk,
     EvidenceSource,
@@ -1637,6 +1639,29 @@ def _invalidate_source_derivatives(db: Session, source: EvidenceSource) -> dict[
             candidate.evidence_source_id = None
         candidate.source_ids = [item for item in candidate.source_ids if item != source_id]
 
+    decision_links = list(
+        db.scalars(
+            select(DecisionLink).where(
+                DecisionLink.linked_type == "evidence",
+                DecisionLink.linked_id == source.id,
+            )
+        )
+    )
+    linked_decision_ids = {link.decision_id for link in decision_links}
+    decisions_requiring_review = 0
+    if linked_decision_ids:
+        review_due = datetime.now(UTC).date()
+        for decision in db.scalars(select(Decision).where(Decision.id.in_(linked_decision_ids))):
+            if decision.review_date is None or decision.review_date > review_due:
+                decision.review_date = review_due
+            decisions_requiring_review += 1
+        db.execute(
+            delete(DecisionLink).where(
+                DecisionLink.linked_type == "evidence",
+                DecisionLink.linked_id == source.id,
+            )
+        )
+
     invalidated_version_ids = {
         claim.artifact_version_id
         for claim in invalidated_claims
@@ -1678,6 +1703,8 @@ def _invalidate_source_derivatives(db: Session, source: EvidenceSource) -> dict[
         "claim_links_deleted": len(source_claim_links),
         "claims_invalidated": len(invalidated_claims),
         "competitor_references_cleared": candidate_reference_count,
+        "decision_links_deleted": len(decision_links),
+        "decisions_requiring_review": decisions_requiring_review,
         "memory_items_staled": stale_memory_count,
     }
 

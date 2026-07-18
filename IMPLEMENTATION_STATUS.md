@@ -596,6 +596,11 @@ current verdict, next action, evidence health, validation, and decision state.
   not trigger it. A detected source is quarantined and de-chunked before the
   memo version persists; its claim is retained only as unsupported without
   citations, and memory/decision proposals require independent corroboration.
+- [x] Propagate evidence deletion into recorded decision dependencies. Removed
+  evidence links now bring the affected decision review date forward, preserving
+  its history while ensuring recommendation guidance is recalculated without the
+  deleted support. The deletion audit records the invalidated links and decisions
+  requiring review alongside stale claims and memory.
 
 ## Sprint 65 Verification
 
@@ -647,11 +652,14 @@ current verdict, next action, evidence health, validation, and decision state.
   passed, 1 skipped, 1 xfailed, 12 warnings`). Repository-root lint remains
   limited by 12 pre-existing line-length violations in historical Alembic
   migrations outside this sprint slice.
+- [x] Source-deletion decision-dependency checkpoint passed (`27 passed, 1
+  warning`) across source deletion, evidence, and decision regressions, with
+  changed-file lint and compile checks clean.
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-continue the remaining secure-RAG parity and memory-poisoning acceptance work.
+audit remaining retrieval-path parity and memory-poisoning acceptance work.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

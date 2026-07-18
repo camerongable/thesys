@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -10,6 +11,8 @@ from app.db.models import (
     AuditEvent,
     Claim,
     ClaimEvidenceLink,
+    Decision,
+    DecisionLink,
     EvidenceChunk,
     EvidenceSource,
     ProjectMemoryItem,
@@ -93,6 +96,22 @@ def test_source_deletion_removes_retrieval_and_invalidates_derivatives(
             evidence_chunk_id=chunk.id,
         )
     )
+    decision = Decision(
+        workspace_id=source.workspace_id,
+        project_id=source.project_id,
+        decision_type="build",
+        title="Build check-in synthesis",
+        review_date=(datetime.now(UTC) + timedelta(days=14)).date(),
+    )
+    db_session.add(decision)
+    db_session.flush()
+    db_session.add(
+        DecisionLink(
+            decision_id=decision.id,
+            linked_type="evidence",
+            linked_id=source.id,
+        )
+    )
     db_session.commit()
 
     deleted = client.delete(f"/api/projects/{project_id}/evidence/{source_id}")
@@ -114,11 +133,17 @@ def test_source_deletion_removes_retrieval_and_invalidates_derivatives(
     stored_provenance_linked_memory = db_session.scalar(
         select(ProjectMemoryItem).where(ProjectMemoryItem.id == provenance_linked_memory.id)
     )
+    stored_decision = db_session.scalar(select(Decision).where(Decision.id == decision.id))
     assert stored_claim is not None and stored_claim.support_level == "unsupported"
     assert stored_memory is not None and stored_memory.status == "stale"
     assert stored_provenance_linked_memory is not None
     assert stored_provenance_linked_memory.status == "stale"
     assert stored_provenance_linked_memory.provenance_metadata["requires_reverification"] is True
+    assert stored_decision is not None
+    assert stored_decision.review_date == datetime.now(UTC).date()
+    assert db_session.scalar(
+        select(DecisionLink).where(DecisionLink.decision_id == decision.id)
+    ) is None
 
     retrieval = client.post(
         f"/api/projects/{project_id}/evidence/retrieve",
@@ -139,6 +164,8 @@ def test_source_deletion_removes_retrieval_and_invalidates_derivatives(
         "claim_links_deleted": 1,
         "claims_invalidated": 1,
         "competitor_references_cleared": 0,
+        "decision_links_deleted": 1,
+        "decisions_requiring_review": 1,
         "memory_items_staled": 2,
         "object_deleted": False,
         "retrieval_revoked": True,
