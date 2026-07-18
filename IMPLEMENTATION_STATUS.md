@@ -275,6 +275,35 @@ current verdict, next action, evidence health, validation, and decision state.
   live-Postgres CI checkpoint. Local tests prove the application behavior and
   offline migration contract but not live PostgreSQL RLS enforcement.
 
+## Sprint 63 Progress
+
+- [x] Add a deterministic `DataProtectionService` that identifies emails, phone
+  numbers, credit-card-like values, credential-bearing URLs, API keys/access
+  tokens, and person names; assigns an internal/confidential/restricted data
+  classification; and produces tokenized or redacted searchable text.
+- [x] Ensure note text is never committed to `EvidenceSource.raw_text` before
+  protection. Source titles, persisted searchable text, summaries, chunk text,
+  and embedding inputs now use the sanitized representation.
+- [x] Attach source and chunk security metadata, including data classification,
+  PII status/entity types, approval state, sanitization version, and vector
+  retrieval eligibility. Preserve sanitized line layout for deterministic PDF
+  table provenance while using normalized sanitized text for chunks.
+- [ ] Add Presidio-backed detection, encrypted project-local reidentification
+  mappings, and separately authorized reidentification.
+- [ ] Enforce the full secure-ingestion state machine, malware quarantine and
+  MIME/content scanning, and retrieval denial for unscanned or unapproved
+  sources.
+- [ ] Add provider classification routing, trace redaction, retention policy,
+  and deletion propagation coverage.
+
+## Sprint 63 Verification
+
+- [x] Focused PII sanitization plus evidence ingestion tests passed (`16
+  passed, 1 warning`), including an assertion that raw names, emails, and API
+  keys reach neither persisted chunks nor embedding inputs.
+- [x] Source discovery and upload-security checkpoint passed (`47 passed,
+  3 warnings`), including PDF table-extraction regression coverage.
+
 ## Next Sprint
 
 Continue V1 Sprint 62 with the remaining service-level cross-tenant matrix and

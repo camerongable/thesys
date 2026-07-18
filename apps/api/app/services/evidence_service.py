@@ -36,6 +36,7 @@ from app.services import (
     source_provenance_service,
 )
 from app.services.common import workflow as workflow_utils
+from app.services.data_protection_service import data_protection_service
 
 ParsedSource = evidence_extraction.ParsedSource
 _chunk_text = evidence_extraction.chunk_text
@@ -136,8 +137,9 @@ def add_note_source(
         workspace_id=auth.workspace_id,
         project_id=project_id,
         source_type=payload.source_type,
-        title=payload.title.strip(),
-        raw_text=_normalize_text(payload.text),
+        title=data_protection_service.redact_for_model(
+            payload.title.strip(), project_id=project_id
+        ),
         source_date=payload.source_date,
         ingestion_status="processing",
         created_by=auth.user_id,
@@ -150,7 +152,7 @@ def add_note_source(
         auth,
         settings,
         source,
-        text=source.raw_text or "",
+        text=payload.text,
         title=source.title,
         content_type="text/plain",
     )
@@ -746,7 +748,7 @@ def _process_source_text(
         auth,
         workflow_type="evidence_ingestion",
         prompt_version=EVIDENCE_INGESTION_PROMPT_VERSION,
-        input_summary=(title or source.url or str(source.id))[:500],
+        input_summary=str(source.id),
         project_id=source.project_id,
         model_provider=settings.embedding_provider,
         model_name=settings.embedding_model,
@@ -764,6 +766,10 @@ def _process_source_text(
     started = perf_counter()
 
     try:
+        protected_source_text = data_protection_service.create_searchable_copy(
+            text,
+            project_id=source.project_id,
+        )
         normalized = _normalize_text(text)
         if not normalized:
             raise EvidenceIngestionError("Evidence source did not contain extractable text.")
@@ -772,7 +778,8 @@ def _process_source_text(
                 f"Extracted text exceeds {settings.max_extracted_text_chars} character limit."
             )
 
-        chunks = _chunk_text(normalized)
+        searchable_text = _normalize_text(protected_source_text.text)
+        chunks = _chunk_text(searchable_text)
         if not chunks:
             raise EvidenceIngestionError("Evidence source did not produce chunks.")
 
@@ -791,18 +798,28 @@ def _process_source_text(
             or base_metadata.get("text_extraction")
             or "normalized_text"
         )
+        source_security_metadata = {
+            "data_classification": protected_source_text.data_classification.value,
+            "pii_status": protected_source_text.pii_status,
+            "pii_entity_types": list(protected_source_text.pii_entity_types),
+            "security_status": "approved",
+            "classification_status": "approved",
+            "malware_status": "not_scanned",
+            "sanitization_version": protected_source_text.sanitization_version,
+        }
         processed_metadata = _merge_metadata(
             source.source_metadata or {},
             _merge_metadata(
                 base_metadata,
                 source_provenance_service.extraction_artifacts(
-                    text=text,
+                    text=protected_source_text.text,
                     metadata=base_metadata,
                     extraction_method=extraction_method,
                 ),
             ),
         )
-        prompt_markers = source_provenance_service.detect_prompt_injection_markers(normalized)
+        processed_metadata["security"] = source_security_metadata
+        prompt_markers = source_provenance_service.detect_prompt_injection_markers(searchable_text)
         if prompt_markers:
             processed_metadata["prompt_injection_markers"] = prompt_markers
 
@@ -840,10 +857,16 @@ def _process_source_text(
                 return existing
 
         db.execute(delete(EvidenceChunk).where(EvidenceChunk.source_id == source.id))
-        source.title = _truncate(title or source.title or source.url or "Untitled evidence", 500)
-        source.raw_text = normalized
-        source.summary = _summarize(normalized)
-        source.classification = _classify(source.source_type, source.title, normalized)
+        source.title = _truncate(
+            data_protection_service.redact_for_model(
+                title or source.title or source.url or "Untitled evidence",
+                project_id=source.project_id,
+            ),
+            500,
+        )
+        source.raw_text = searchable_text
+        source.summary = _summarize(searchable_text)
+        source.classification = _classify(source.source_type, source.title, searchable_text)
         source.ingested_at = datetime.now(UTC)
         source.credibility_score = source_provenance_service.adjusted_credibility_score(
             source_type=source.source_type,
@@ -880,16 +903,26 @@ def _process_source_text(
                 char_end=chunk_info.char_end,
                 chunk_index=index,
             )
+            chunk_security_metadata = {
+                "data_classification": protected_source_text.data_classification.value,
+                "pii_status": protected_source_text.pii_status,
+                "retrieval_allowed": True,
+                "sanitization_version": protected_source_text.sanitization_version,
+                "source_security_status": "approved",
+            }
             chunk_metadata = _merge_metadata(
-                {
-                    "source_title": source.title,
-                    "source_type": source.source_type,
-                    "url": source.url,
-                    "content_hash": content_hash,
-                    "source_metadata": source.source_metadata or {},
-                    **embedding_service.embedding_metadata(settings),
-                },
-                _merge_metadata(source.source_metadata, quote_provenance),
+                _merge_metadata(
+                    {
+                        "source_title": source.title,
+                        "source_type": source.source_type,
+                        "url": source.url,
+                        "content_hash": content_hash,
+                        "source_metadata": source.source_metadata or {},
+                        **embedding_service.embedding_metadata(settings),
+                    },
+                    _merge_metadata(source.source_metadata, quote_provenance),
+                ),
+                {"security": chunk_security_metadata},
             )
             chunk = EvidenceChunk(
                 workspace_id=source.workspace_id,
