@@ -481,8 +481,16 @@ current verdict, next action, evidence health, validation, and decision state.
   memory writes, records redacted detector-only metadata, and emits
   `guardrail_service_unavailable` before the guide can invoke proposals or
   retrieval.
-- [ ] Complete the remaining Sprint 64 acceptance audit, including the explicit
-  embedding-provider scope before claiming the full gateway.
+- [x] Explicitly scope LiteLLM embeddings as a non-generative provider boundary.
+  Embedding transit uses a dedicated `embedding` policy helper for
+  classification and PII/secret redaction, then credential, egress, and vector
+  dimension controls; it does not receive a synthetic prompt or output guard
+  because it returns only vectors and cannot create a claim, tool call, memory
+  write, or authorization decision. The security invariant enumerates the
+  distinct chat and embedding HTTP boundaries to prevent policy drift.
+- [x] Complete the Sprint 64 acceptance audit: all generative model boundaries
+  use `GuardrailGateway`, while the documented, tested embedding exception uses
+  the non-generative provider policy contract.
 
 ## Sprint 64 Verification
 
@@ -518,10 +526,13 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Detector-unavailability checkpoint passed: the selected optional adapter
   restricts tools and memory writes, guide proposal/retrieval is withheld, and
   `guardrail_service_unavailable` is recorded without request content.
+- [x] Embedding-provider scope checkpoint passed: non-generating provider policy
+  coverage, PII/secret-redaction coverage, and the static chat-versus-embedding
+  boundary invariant passed.
 
 ## Next Sprint
 
-Continue Sprint 64 with an acceptance audit of embedding-provider scope.
+Begin Sprint 65 secure RAG, vector isolation, and memory-poisoning defense.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

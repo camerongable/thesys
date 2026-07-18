@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Literal
 
 from app.security.contracts import DataClassification
 from app.services.data_protection_service import data_protection_service
@@ -32,6 +32,31 @@ class ProviderTextDecision:
     original_data_classification: DataClassification
     outbound_data_classification: DataClassification
     text: str
+
+
+@dataclass(frozen=True)
+class EmbeddingProviderScope:
+    """Controls for non-generative vectorization provider requests."""
+
+    purpose: Literal["embedding"]
+    generates_content: bool
+    requires_guardrail_gateway: bool
+    required_controls: tuple[str, ...]
+
+
+EMBEDDING_PROVIDER_SCOPE = EmbeddingProviderScope(
+    purpose="embedding",
+    generates_content=False,
+    requires_guardrail_gateway=False,
+    required_controls=(
+        "data_classification",
+        "pii_and_secret_redaction",
+        "provider_model_policy",
+        "credential_resolution",
+        "egress_policy",
+        "vector_dimension_validation",
+    ),
+)
 
 
 class ModelDataPolicyError(ValueError):
@@ -135,6 +160,21 @@ def prepare_provider_text(
         original_data_classification=original_classification,
         outbound_data_classification=outbound_classification,
         text=sanitized,
+    )
+
+
+def prepare_embedding_provider_text(
+    *,
+    provider: str,
+    model: str,
+    text: str,
+) -> ProviderTextDecision:
+    """Prepare text for vectorization without treating it as an instruction prompt."""
+    return prepare_provider_text(
+        provider=provider,
+        model=model,
+        text=text,
+        purpose=EMBEDDING_PROVIDER_SCOPE.purpose,
     )
 
 

@@ -147,11 +147,10 @@ def _embed_with_litellm(settings: Settings, text: str) -> list[float]:
     except SecretProviderError:
         raise EmbeddingProviderError("LiteLLM embedding credentials are unavailable.") from None
     try:
-        decision = model_data_policy_service.prepare_provider_text(
+        decision = model_data_policy_service.prepare_embedding_provider_text(
             provider="litellm",
             model=settings.embedding_model,
             text=text,
-            purpose="embedding",
         )
     except model_data_policy_service.ModelDataPolicyError as exc:
         raise EmbeddingProviderError(str(exc)) from None

@@ -491,7 +491,7 @@ def test_sources_require_classification_before_retrieval() -> None:
     assert "is_chunk_retrievable" in reembedding
 
 
-def test_all_llm_calls_route_through_guardrail_gateway() -> None:
+def test_all_generative_model_calls_route_through_guardrail_gateway() -> None:
     provider_boundaries = [
         path
         for path in (REPO_ROOT / "apps/api/app").rglob("*.py")
@@ -512,6 +512,22 @@ def test_all_llm_calls_route_through_guardrail_gateway() -> None:
         REPO_ROOT / "apps/api/app/services/multimodal_extraction_service.py"
     ).read_text()
     assert "evaluate_retrieved_content" in multimodal_source
+
+
+def test_embedding_provider_boundary_uses_non_generating_scope_contract() -> None:
+    provider_boundaries = [
+        path
+        for path in (REPO_ROOT / "apps/api/app").rglob("*.py")
+        if "tests" not in path.parts and "/v1/embeddings" in path.read_text()
+    ]
+
+    assert {path.relative_to(REPO_ROOT).as_posix() for path in provider_boundaries} == {
+        "apps/api/app/services/embedding_service.py",
+    }
+    source = provider_boundaries[0].read_text()
+    assert "prepare_embedding_provider_text" in source
+    assert "enforce_provider_egress_policy" in source
+    assert "GuardrailGateway" not in source
 
 
 @pytest.mark.xfail(strict=True, reason="Sprint 67 will add complete durable-workflow budgets.")

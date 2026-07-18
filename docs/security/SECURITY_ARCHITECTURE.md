@@ -31,6 +31,7 @@ central gates in this target flow.
 | API to database | Project state, evidence metadata, vectors, memory, audit | Non-owner `thesys_api` or `thesys_worker` role plus transaction-local principal | Service workspace scope and forced RLS `USING`/`WITH CHECK` policy | Confidential/restricted | TLS target plus AES-256-GCM envelope encryption for restricted reversible fields | Mutations and denied policy decisions | Missing/stale tenant context returns no rows and rejects writes; invalid ciphertext fails authentication | Cross-tenant query, SQL injection, operator access |
 | API to object storage | Uploaded files and derived artifacts | Closed-registry application credential | Resource authorization plus workspace/project/source key policy | Confidential/restricted | Required TLS plus verified AES256/KMS server-side encryption | Redacted upload, download grant/denial, and deletion metadata | Deny unsafe key, type, scope, bucket controls, URL, or credential | Object overwrite, public bucket, malicious file, stale signed URL |
 | API to LiteLLM | Prompts, context, structured-output schema | Application virtual key | Provider/model/classification policy | Public to restricted | TLS | Provider, model, classification, cost; no raw secret | Deny unapproved provider or data class | Data exfiltration, model substitution, overspend |
+| API to LiteLLM embeddings | Sanitized evidence/query text and numeric vector response | Application virtual key | Embedding provider/model policy, data classification, secret/PII redaction, credential and egress policy, vector dimension validation | Public to confidential after redaction | TLS | Provider, model, version, dimension, timestamp, and error metadata; no raw text | Deny policy, credential, egress, or dimension failure; never create a prompt/tool/memory decision | Sensitive-vector transit, model substitution, poisoned or malformed vector |
 | LiteLLM to model provider | Provider request/response | Provider-scoped credential | LiteLLM route and allowlist | Same as request payload | TLS | Provider/model/cost metadata | Fail closed or approved deterministic fallback | Credential compromise, retention, response injection |
 | API to external search provider | Search query and result metadata | Search API credential | Query classification and provider policy | Public/internal by default | TLS | Provider, query hash, cost | Deny restricted query or unapproved host | Query leakage, poisoned results, cost abuse |
 | API to fetched URL | URL, headers, response body | Application fetcher | Scheme, DNS/IP, port, redirect, MIME, size policy | Public input; confidential after project annotation | TLS when source supports it | Fetch target, status, denial reason | Quarantine/fail source; never follow unsafe redirect | SSRF, DNS rebinding, oversized response, poisoning |
@@ -82,6 +83,23 @@ provider/model allowlists, egress host policy, and purpose. Restricted data is
 local-only unless an explicitly approved restricted-data provider policy exists.
 The provider decision and denial reason are auditable metadata; secrets and raw
 restricted payloads are not.
+
+### Generative versus embedding scope
+
+`/v1/chat/completions` calls and direct multimodal extraction are generative
+invocations. They can interpret instructions and produce content, so every one
+must pass through `GuardrailGateway` for input, prompt-boundary, and output
+controls.
+
+`/v1/embeddings` is explicitly non-generative. It only accepts text and returns
+a numeric vector; it cannot receive a trusted system prompt, produce a claim,
+choose a tool, change authorization, or write memory. The embedding path must
+therefore use `prepare_embedding_provider_text` instead of `GuardrailGateway`:
+the helper enforces the `embedding` provider purpose, data classification, and
+PII/secret redaction, while the service separately resolves credentials,
+enforces provider egress, and validates vector dimensions. A static invariant
+enumerates both HTTP provider boundaries so a future endpoint cannot silently
+inherit the wrong contract.
 
 ## Security telemetry
 
