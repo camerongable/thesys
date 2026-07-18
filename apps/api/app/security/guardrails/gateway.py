@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
+from xml.sax.saxutils import escape
 
 from app.core.config import Settings
 from app.security.guardrails.classifiers import (
@@ -59,10 +60,10 @@ class GuardrailGateway:
                 source_id=source_id,
             ),
         )
-        escaped = decision.detection.normalized_text.replace("</untrusted_retrieved_content>", "")
+        escaped = escape(decision.detection.normalized_text)
         wrapped = (
-            f'<untrusted_retrieved_content source_id="{source_id}" '
-            f'source_type="{source_type}" trust_score="{trust_score:.3f}">\n'
+            f'<untrusted_retrieved_content source_id="{_xml_attribute(source_id)}" '
+            f'source_type="{_xml_attribute(source_type)}" trust_score="{trust_score:.3f}">\n'
             f"{escaped}\n</untrusted_retrieved_content>"
         )
         return RetrievedContentEvaluation(decision=decision, wrapped_content=wrapped)
@@ -128,3 +129,7 @@ def _blocked_detail(detection: DetectionResult) -> str:
 
 def _allow_http(settings: Settings) -> bool:
     return settings.environment.casefold() in {"local", "development", "test"}
+
+
+def _xml_attribute(value: str) -> str:
+    return escape(value, {'"': "&quot;", "'": "&apos;"})

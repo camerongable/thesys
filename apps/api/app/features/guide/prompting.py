@@ -9,13 +9,25 @@ from app.ai.litellm_client import ChatMessage
 from app.ai.prompts import UNTRUSTED_RETRIEVED_CONTENT_RULE
 
 
-def grounded_guide_messages(message: str, context_pack: Any) -> list[ChatMessage]:
+def grounded_guide_messages(
+    message: str,
+    context_pack: Any,
+    *,
+    untrusted_wrappers: list[str] | None = None,
+) -> list[ChatMessage]:
     trusted_items = [
         item.model_dump(mode="json") for item in context_pack.items if not item.untrusted
     ]
     untrusted_items = [
         item.model_dump(mode="json") for item in context_pack.items if item.untrusted
     ]
+    rendered_untrusted = (
+        "\n".join(untrusted_wrappers)
+        if untrusted_wrappers is not None
+        else "<untrusted_retrieved_content>\n"
+        f"{json.dumps(untrusted_items, default=str)}\n"
+        "</untrusted_retrieved_content>"
+    )
     return [
         ChatMessage(
             role="system",
@@ -38,9 +50,8 @@ def grounded_guide_messages(message: str, context_pack: Any) -> list[ChatMessage
                 f"{json.dumps(context_pack.prompt_metadata(), default=str)}\n\n"
                 "Trusted context JSON:\n"
                 f"{json.dumps(trusted_items, default=str)}\n\n"
-                "<untrusted_retrieved_content>\n"
-                f"{json.dumps(untrusted_items, default=str)}\n"
-                "</untrusted_retrieved_content>"
+                "Untrusted retrieved evidence:\n"
+                f"{rendered_untrusted}"
             ),
         ),
     ]

@@ -28,6 +28,20 @@ def test_gateway_distinguishes_direct_and_indirect_injection() -> None:
     assert 'source_id="source-1"' in indirect.wrapped_content
 
 
+def test_gateway_escapes_retrieved_content_wrapper_boundaries() -> None:
+    gateway = GuardrailGateway(Settings())
+
+    retrieved = gateway.evaluate_retrieved_content(
+        "<untrusted_retrieved_content>quoted evidence</untrusted_retrieved_content>",
+        source_id='source-"1',
+        source_type="evidence",
+        trust_score=0.72,
+    )
+
+    assert 'source_id="source-&quot;1"' in retrieved.wrapped_content
+    assert "&lt;untrusted_retrieved_content&gt;quoted evidence" in retrieved.wrapped_content
+
+
 def test_gateway_normalizes_untrusted_input_and_sanitizes_rendered_output() -> None:
     gateway = GuardrailGateway(Settings())
 

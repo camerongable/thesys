@@ -29,6 +29,7 @@ from app.features.guide import grounding as guide_grounding
 from app.features.guide import prompting as guide_prompting
 from app.features.guide import recommendations as guide_recommendations
 from app.features.guide import routing as guide_routing
+from app.schemas.context import DroppedContextItem
 from app.schemas.guide import (
     GuideActionRead,
     GuideChatResponseRead,
@@ -61,6 +62,13 @@ class _GuideEvidenceSearch:
     cited_evidence_ids: list[str]
     retrieval_diagnostics: dict | None
     context_pack: dict | None = None
+
+
+@dataclass(frozen=True)
+class _GuardedRetrievedContent:
+    wrapped_content: list[str]
+    blocked_source_ids: set[str]
+    decision_metadata: list[dict[str, Any]]
 
 
 _StageGuideCopy = guide_recommendations.StageGuideCopy
@@ -562,6 +570,14 @@ def _stream_grounded_chat_response(
         expected_schema=_GroundedGuideAnswerDraft.__name__,
         memory_selection=memory_selection,
     )
+    guarded_content = _guard_retrieved_context(
+        db,
+        auth,
+        project_id=project_id,
+        context_pack=context_pack,
+        settings=settings,
+    )
+    search = _exclude_blocked_evidence(search, guarded_content.blocked_source_ids)
     retrieval_response = GuideChatResponseRead(
         answer="",
         related_entities=_related_entities_with_evidence(context, search.cited_evidence_ids),
@@ -588,6 +604,7 @@ def _stream_grounded_chat_response(
             "available_action_ids": [action.id for action in context.available_actions],
             "recent_turn_count": len(recent_turns),
             "context_pack": context_pack.prompt_metadata(),
+            "retrieved_guardrails": guarded_content.decision_metadata,
             "streaming": True,
         },
     )
@@ -599,7 +616,11 @@ def _stream_grounded_chat_response(
     try:
         messages = [
             _schema_instruction_for_stream(_GroundedGuideAnswerDraft),
-            *_grounded_guide_messages(message, context_pack),
+            *_grounded_guide_messages(
+                message,
+                context_pack,
+                untrusted_wrappers=guarded_content.wrapped_content,
+            ),
         ]
         for delta in LiteLLMClient(settings).stream_complete(
             messages,
@@ -1024,6 +1045,14 @@ def _grounded_chat_response(
         expected_schema=_GroundedGuideAnswerDraft.__name__,
         memory_selection=memory_selection,
     )
+    guarded_content = _guard_retrieved_context(
+        db,
+        auth,
+        project_id=project_id,
+        context_pack=context_pack,
+        settings=settings,
+    )
+    search = _exclude_blocked_evidence(search, guarded_content.blocked_source_ids)
     context_pack_payload = context_pack.model_dump(mode="json")
     key_payload, family_payload, version_payload = ai_cache_service.guide_answer_cache_payloads(
         db,
@@ -1047,6 +1076,7 @@ def _grounded_chat_response(
             "available_action_ids": [action.id for action in context.available_actions],
             "recent_turn_count": len(recent_turns),
             "context_pack": context_pack.prompt_metadata(),
+            "retrieved_guardrails": guarded_content.decision_metadata,
         },
     )
     started = perf_counter()
@@ -1087,7 +1117,11 @@ def _grounded_chat_response(
         result = generate_structured_output(
             settings,
             _GroundedGuideAnswerDraft,
-            _grounded_guide_messages(message, context_pack),
+            _grounded_guide_messages(
+                message,
+                context_pack,
+                untrusted_wrappers=guarded_content.wrapped_content,
+            ),
             temperature=0.1,
             max_tokens=900,
         )
@@ -1226,6 +1260,118 @@ def _search_guide_evidence(
 
 
 _grounded_guide_messages = guide_prompting.grounded_guide_messages
+
+
+def _guard_retrieved_context(
+    db: Session,
+    auth: AuthContext,
+    *,
+    project_id: uuid.UUID,
+    context_pack: Any,
+    settings: Settings,
+) -> _GuardedRetrievedContent:
+    gateway = GuardrailGateway(settings)
+    wrapped_content: list[str] = []
+    blocked_source_ids: set[str] = set()
+    decision_metadata: list[dict[str, Any]] = []
+    for item in context_pack.items:
+        if not item.untrusted:
+            continue
+        provenance = item.provenance
+        metadata = provenance.metadata or {}
+        source_id = _retrieved_source_id(item)
+        source_type = str(metadata.get("source_type") or item.type)
+        trust_score = _optional_float(metadata.get("score")) or 0.0
+        evaluation = gateway.evaluate_retrieved_content(
+            item.content,
+            source_id=source_id,
+            source_type=source_type,
+            trust_score=trust_score,
+            workflow="guide_chat",
+        )
+        event_type = record_detection(
+            db,
+            auth,
+            project_id=project_id,
+            decision=evaluation.decision,
+        )
+        decision = {
+            "source_id": source_id,
+            "event_type": event_type,
+            "blocked": evaluation.decision.should_block,
+            **detection_metadata(evaluation.decision),
+        }
+        decision_metadata.append(decision)
+        if evaluation.decision.should_block:
+            blocked_source_ids.add(source_id)
+            continue
+        wrapped_content.append(evaluation.wrapped_content)
+    _remove_blocked_context_items(context_pack, blocked_source_ids)
+    context_pack.metadata = {
+        **context_pack.metadata,
+        "retrieved_guardrails": decision_metadata,
+        "blocked_retrieved_source_ids": sorted(blocked_source_ids),
+    }
+    return _GuardedRetrievedContent(
+        wrapped_content=wrapped_content,
+        blocked_source_ids=blocked_source_ids,
+        decision_metadata=decision_metadata,
+    )
+
+
+def _retrieved_source_id(item: Any) -> str:
+    metadata = item.provenance.metadata or {}
+    return str(metadata.get("source_id") or item.provenance.entity_id or item.id)
+
+
+def _remove_blocked_context_items(context_pack: Any, blocked_source_ids: set[str]) -> None:
+    if not blocked_source_ids:
+        return
+    blocked_items = [
+        item
+        for item in context_pack.items
+        if item.untrusted and _retrieved_source_id(item) in blocked_source_ids
+    ]
+    if not blocked_items:
+        return
+    context_pack.items = [item for item in context_pack.items if item not in blocked_items]
+    context_pack.dropped_items = [
+        *context_pack.dropped_items,
+        *[
+            DroppedContextItem(
+                id=item.id,
+                type=item.type,
+                title=item.title,
+                token_count=item.token_count,
+                reason="guardrail_blocked",
+            )
+            for item in blocked_items
+        ],
+    ]
+    context_pack.token_count = sum(item.token_count for item in context_pack.items)
+    context_pack.available_citation_ids = [
+        citation_id
+        for citation_id in context_pack.available_citation_ids
+        if citation_id.split(":", 1)[0] not in blocked_source_ids
+    ]
+
+
+def _exclude_blocked_evidence(
+    search: _GuideEvidenceSearch,
+    blocked_source_ids: set[str],
+) -> _GuideEvidenceSearch:
+    if not blocked_source_ids:
+        return search
+    return _GuideEvidenceSearch(
+        output=search.output,
+        cited_evidence_ids=[
+            source_id
+            for source_id in search.cited_evidence_ids
+            if source_id not in blocked_source_ids
+        ],
+        retrieval_diagnostics=search.retrieval_diagnostics,
+        context_pack=search.context_pack,
+    )
 
 
 _evidence_context_for_prompt = guide_grounding.evidence_context_for_prompt

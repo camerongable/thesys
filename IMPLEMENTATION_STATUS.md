@@ -450,9 +450,13 @@ current verdict, next action, evidence health, validation, and decision state.
   context, or model processing. Actionable detections now create redacted,
   attributable guardrail audit events and record decision-only evidence in the
   AI step; restricted guide requests receive a safe response without tools.
-- [ ] Integrate retrieved-content provenance and decisions, rendering surfaces,
-  and all remaining provider boundaries before claiming the full Sprint 64
-  gateway.
+- [x] Evaluate each retrieved Ask Thesys evidence item at its provenance
+  boundary, emit decision-only audit/AI-step metadata, XML-escape allowed
+  source wrappers, and quarantine blocked sources before prompt construction,
+  cache payload generation, response context, or citation verification in both
+  regular and SSE flows.
+- [ ] Integrate guardrails with remaining rendering surfaces and model-provider
+  boundaries before claiming the full Sprint 64 gateway.
 
 ## Sprint 64 Verification
 
@@ -464,11 +468,15 @@ current verdict, next action, evidence health, validation, and decision state.
   1 skipped, 2 xfailed, 12 warnings`), including regular and SSE requests that
   confirm direct injections create `prompt_injection_detected` events and cannot
   invoke proposal or retrieval tools.
+- [x] Retrieved-content guardrail checkpoint passed (`404 passed, 1 skipped, 2
+  xfailed, 12 warnings`), including regular and SSE indirect-injection tests
+  that verify quarantined source text cannot reach a provider prompt or become
+  a citation, response-context item, or cache input.
 
 ## Next Sprint
 
-Continue Sprint 64 by expanding the central gateway across retrieved-content
-provenance, rendering, and remaining provider boundaries.
+Continue Sprint 64 by extending the central gateway to rendering surfaces and
+remaining model-provider boundaries.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
