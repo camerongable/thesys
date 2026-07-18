@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from app.db.models import ProjectMemoryItem
+from app.features.memory import security_policy
 
 
 @dataclass(frozen=True)
@@ -30,15 +31,12 @@ def memory_exclusion_reason(
 ) -> str | None:
     if item.memory_type not in allowed_types:
         return "memory_type_not_allowed_for_workflow"
-    if item.expires_at is not None and item.expires_at <= now:
-        return "expired"
-    if item.status == "active":
-        return None
-    if item.status == "stale" and include_stale_history:
-        return None
     if item.status == "proposed":
         return "pending_human_review"
-    return f"status_{item.status}"
+    recall_reason = security_policy.memory_recall_exclusion_reason(item, now=now)
+    if recall_reason is not None:
+        return recall_reason
+    return None
 
 
 def excluded(item: ProjectMemoryItem, reason: str) -> dict[str, Any]:

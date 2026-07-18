@@ -51,6 +51,7 @@ from app.features.memory import compaction as memory_compaction
 from app.features.memory import context_pack as memory_context_pack
 from app.features.memory import inspection as memory_inspection
 from app.features.memory import review as memory_review
+from app.features.memory import security_policy as memory_security_policy
 from app.features.memory import selection_policy as memory_selection_policy
 from app.features.research import (
     citation_audit,
@@ -1124,7 +1125,6 @@ def test_memory_context_pack_helpers_are_feature_owned_and_service_compatible() 
     assert context_service._selection_value is memory_context_pack.selection_value
     assert context_service._memory_value is memory_context_pack.memory_value
     assert context_service._estimate_tokens is memory_context_pack.estimate_tokens
-
     items = memory_context_pack.memory_items(memory_selection, base_priority=18)
     assert items[0].id == "memory-memory-1"
     assert items[0].type == "memory"
@@ -1158,6 +1158,26 @@ def test_memory_context_pack_helpers_are_feature_owned_and_service_compatible() 
     )
     assert len(long_title_item.title) == 200
     assert memory_context_pack.estimate_tokens("") == 1
+
+
+def test_memory_security_policy_normalizes_secure_recall_metadata() -> None:
+    metadata = memory_security_policy.secure_memory_metadata(
+        {"origin": "agent", "trust_score": "0.8"},
+        content={"claim": "proof"},
+        summary="Proof claim",
+        source_entity_type="evidence_source",
+        source_entity_id="source-1",
+        write_policy="approval_required",
+    )
+
+    assert metadata["policy_version"] == "secure-memory:v1"
+    assert metadata["source_ids"] == ["source-1"]
+    assert metadata["requires_human_approval"] is True
+    assert memory_security_policy.requires_memory_proposal(
+        metadata,
+        source_entity_type="evidence_source",
+        status_value="active",
+    )
 
 
 def test_context_evidence_item_helpers_are_feature_owned_and_service_compatible() -> None:
@@ -1360,7 +1380,7 @@ def test_memory_selection_policy_helpers_are_feature_owned_and_service_compatibl
         allowed_types={"episodic"},
         include_stale_history=True,
         now=now,
-    ) is None
+    ) == "status_stale"
     assert memory_selection_policy.excluded(proposed, "pending_human_review") == {
         "id": uuid.UUID(int=1),
         "memory_type": "preference",

@@ -551,6 +551,13 @@ current verdict, next action, evidence health, validation, and decision state.
   reranking. It drops explicitly unsafe metadata and records source-risk and
   cross-source duplicate penalties, preventing a small duplicate cluster from
   dominating synthesis context.
+- [x] Normalize every memory write with a versioned secure-memory record:
+  origin, source IDs, content hash, trust/security status, approval state,
+  contradiction references, and verification time. Evidence-derived agent
+  memory cannot become active directly; it is proposed for approval. Memory
+  recall is fail-closed for missing security metadata and returns only active,
+  approved, sufficiently trusted records with an Inspect-visible exclusion
+  reason for every rejected item.
 
 ## Sprint 65 Verification
 
@@ -565,12 +572,15 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Duplicate-flooding and secure-ranking checkpoint passed (`55 passed, 1
   warning`); repository-wide lint and the full backend suite passed (`419
   passed, 1 skipped, 1 xfailed, 12 warnings`).
+- [x] Secure-memory write/recall checkpoint passed (`91 passed, 1 xfailed, 1
+  warning`); repository-wide lint and the full backend suite passed (`422
+  passed, 1 skipped, 1 xfailed, 12 warnings`).
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
 add anomalous-embedding and recommendation-shift poisoning detection, then
-harden the memory write, conflict, recall, and source-invalidation paths.
+harden memory conflict, expiry, and source-invalidation paths.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

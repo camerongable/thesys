@@ -66,6 +66,11 @@ central gates in this target flow.
   event. Repeated identical source bodies become a duplicate-flooding signal;
   approved candidate rankings also subtract source-risk and cross-source
   duplicate penalties before reranking and context assembly.
+- Durable memory writes normalize a versioned record of origin, source IDs,
+  content hash, trust, security status, approval state, conflict references, and
+  verification time. Evidence-derived agent memory is a proposal, not active
+  state; recall admits only active, approved, sufficiently trusted records and
+  gives Inspect an explicit exclusion reason for every denial.
 - Model output failing schema, citation, or DLP validation is rejected or safely
   regenerated; it is never executed as policy.
 - Approval timeout, cancellation, or mismatch leaves the proposed mutation

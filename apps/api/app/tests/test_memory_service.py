@@ -90,7 +90,93 @@ def test_project_memory_redacts_secret_values_before_persistence(
     assert sentinel not in item.title
     assert sentinel not in item.summary
     assert item.content == {"api_key": "[redacted]", "safe": "visible"}
-    assert item.provenance_metadata == {"authorization": "[redacted]"}
+    assert item.provenance_metadata["authorization"] == "[redacted]"
+    assert item.provenance_metadata["policy_version"] == "secure-memory:v1"
+    assert item.provenance_metadata["content_hash"]
+    assert item.provenance_metadata["origin"] == "user"
+    assert item.provenance_metadata["security_status"] == "approved"
+
+
+def test_evidence_derived_agent_memory_requires_approval_before_recall(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    source_id = uuid.uuid4()
+
+    item = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="semantic",
+        write_policy="approval_required",
+        title="Retrieved recommendation",
+        summary="A retrieved source claims coach demand is immediate.",
+        content={"claim": "coach demand is immediate"},
+        source_entity_type="evidence_source",
+        source_entity_id=source_id,
+        provenance_metadata={"origin": "agent", "trust_score": 0.8},
+    )
+    db_session.commit()
+
+    assert item.status == "proposed"
+    assert item.provenance_metadata["source_ids"] == [str(source_id)]
+    assert memory_service.select_memory_for_workflow(
+        db_session,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+    ) == []
+
+    approved = memory_service.approve_memory_proposal(db_session, auth, project_id, item.id)
+    assert approved.status == "active"
+    assert approved.provenance_metadata["approved_at"]
+    assert approved.provenance_metadata["security_status"] == "approved"
+    selected = memory_service.select_memory_for_workflow(
+        db_session,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+    )
+    assert [candidate.id for candidate in selected] == [item.id]
+
+
+def test_low_trust_memory_is_excluded_from_recall_with_reason(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    item = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="project",
+        write_policy="direct",
+        title="Weak source",
+        summary="This unsupported signal should not enter context.",
+        content={"signal": "weak"},
+        provenance_metadata={"trust_score": 0.1},
+    )
+    db_session.commit()
+
+    selection = memory_service.select_memory_for_context(
+        db_session,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+    )
+    assert selection.selected == []
+    assert selection.excluded == [
+        {
+            "id": item.id,
+            "memory_type": "project",
+            "status": "active",
+            "title": "Weak source",
+            "reason": "memory_trust_below_threshold",
+        }
+    ]
 
 
 def test_memory_explanation_and_duplicate_merge(

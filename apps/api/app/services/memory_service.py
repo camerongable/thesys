@@ -20,11 +20,12 @@ from app.db.models import Assumption, ProjectMemoryItem, Risk
 from app.features.memory import compaction as memory_compaction
 from app.features.memory import inspection as memory_inspection
 from app.features.memory import review as memory_review
+from app.features.memory import security_policy as memory_security_policy
 from app.features.memory import selection_policy as memory_selection_policy
 from app.schemas.memory import MemoryType, MemoryWritePolicy
 from app.services import governance_service, project_service
 
-ACTIVE_MEMORY_STATUSES = {"active", "proposed"}
+ACTIVE_MEMORY_STATUSES = {"active"}
 WORKFLOW_MEMORY_TYPES: dict[str, set[str]] = {
     "assumption_extraction": {"semantic", "project", "preference"},
     "guide_chat": {"working", "semantic", "project", "preference"},
@@ -78,9 +79,20 @@ def list_memory(
                 ProjectMemoryItem.expires_at > datetime.now(UTC),
             ),
         )
-    return list(
-        db.scalars(stmt.order_by(ProjectMemoryItem.updated_at.desc()).limit(min(limit, 100)))
+    items = db.scalars(
+        stmt.order_by(ProjectMemoryItem.updated_at.desc()).limit(min(limit, 100))
     )
+    if include_stale:
+        return list(items)
+    return [
+        item
+        for item in items
+        if memory_security_policy.memory_recall_exclusion_reason(
+            item,
+            now=datetime.now(UTC),
+        )
+        is None
+    ]
 
 
 def select_memory_for_workflow(
@@ -97,7 +109,7 @@ def select_memory_for_workflow(
         {"semantic", "project", "episodic", "preference"},
     )
     project_service.get_project(db, auth, project_id)
-    return list(
+    items = list(
         db.scalars(
             select(ProjectMemoryItem)
             .where(
@@ -114,6 +126,15 @@ def select_memory_for_workflow(
             .limit(min(limit, 100))
         )
     )
+    return [
+        item
+        for item in items
+        if memory_security_policy.memory_recall_exclusion_reason(
+            item,
+            now=datetime.now(UTC),
+        )
+        is None
+    ]
 
 
 def select_memory_for_context(
@@ -252,7 +273,20 @@ def upsert_memory_item(
     safe_title = redact_text(title, redact_emails=True)
     safe_summary = redact_text(summary, redact_emails=True)
     safe_content = redact_payload(content, redact_emails=True)
-    safe_provenance = redact_payload(provenance_metadata or {}, redact_emails=True)
+    safe_provenance = memory_security_policy.secure_memory_metadata(
+        redact_payload(provenance_metadata or {}, redact_emails=True),
+        content=safe_content,
+        summary=safe_summary,
+        source_entity_type=source_entity_type,
+        source_entity_id=source_entity_id,
+        write_policy=write_policy,
+    )
+    if memory_security_policy.requires_memory_proposal(
+        safe_provenance,
+        source_entity_type=source_entity_type,
+        status_value=status_value,
+    ):
+        status_value = "proposed"
     existing = None
     if entity_type and entity_id:
         existing = db.scalar(
@@ -402,6 +436,14 @@ def approve_memory_proposal(
         user_id=auth.user_id,
         reviewed_at=reviewed_at,
     )
+    item.provenance_metadata = memory_security_policy.secure_memory_metadata(
+        item.provenance_metadata,
+        content=item.content,
+        summary=item.summary,
+        source_entity_type=item.source_entity_type,
+        source_entity_id=item.source_entity_id,
+        write_policy=item.write_policy,
+    )
     governance_service.record_audit_event(
         db,
         auth,
@@ -474,6 +516,8 @@ def upsert_from_assumption(
         "source": source_entity_type,
         "source_entity_id": str(source_entity_id),
         "approval_required": True,
+        "origin": "derived",
+        "trusted_projection": True,
     }
     provenance_metadata.update(source_metadata or {})
     return upsert_memory_item(
@@ -517,6 +561,8 @@ def upsert_from_risk(
         "source": source_entity_type,
         "source_entity_id": str(source_entity_id),
         "approval_required": True,
+        "origin": "derived",
+        "trusted_projection": True,
     }
     provenance_metadata.update(source_metadata or {})
     return upsert_memory_item(
