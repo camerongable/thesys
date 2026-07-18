@@ -1202,6 +1202,12 @@ def _sanitize_metadata_for_storage(
     if isinstance(value, tuple):
         return tuple(_sanitize_metadata_for_storage(item, project_id=project_id) for item in value)
     if isinstance(value, str):
+        try:
+            uuid.UUID(value)
+        except ValueError:
+            pass
+        else:
+            return value
         return data_protection_service.redact_for_model(value, project_id=project_id)
     return value
 

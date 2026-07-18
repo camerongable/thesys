@@ -10,6 +10,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings
+from app.security.guardrails import GuardrailBlockedError, GuardrailGateway
 from app.security.secrets import SecretName, SecretProviderError, resolve_secret
 from app.services import model_data_policy_service
 from app.services.security_policy_service import (
@@ -66,10 +67,11 @@ class LiteLLMClient:
             "model": model or self.settings.litellm_model,
             "temperature": temperature,
         }
-        decision = model_data_policy_service.prepare_model_payload(
-            provider="litellm",
+        gateway = GuardrailGateway(self.settings)
+        decision = self._prepare_payload(
+            gateway,
             model=str(payload["model"]),
-            messages=[message.model_dump() for message in messages],
+            messages=messages,
         )
         payload["messages"] = decision.messages
         if response_format_json:
@@ -102,10 +104,14 @@ class LiteLLMClient:
             raise LiteLLMClientError(
                 "LiteLLM response did not match chat completions format."
             ) from exc
+        try:
+            safe_output = gateway.evaluate_model_output(str(content))
+        except GuardrailBlockedError as exc:
+            raise LiteLLMClientError("LiteLLM output blocked by guardrail.") from exc
 
         usage = body.get("usage") or {}
         return LLMCompletion(
-            content=content,
+            content=safe_output.text,
             model_provider="litellm",
             model_name=str(body.get("model") or payload["model"]),
             prompt_tokens=usage.get("prompt_tokens"),
@@ -131,10 +137,11 @@ class LiteLLMClient:
             "temperature": temperature,
             "stream": True,
         }
-        decision = model_data_policy_service.prepare_model_payload(
-            provider="litellm",
+        gateway = GuardrailGateway(self.settings)
+        decision = self._prepare_payload(
+            gateway,
             model=str(payload["model"]),
-            messages=[message.model_dump() for message in messages],
+            messages=messages,
         )
         payload["messages"] = decision.messages
         if response_format_json:
@@ -165,7 +172,12 @@ class LiteLLMClient:
                         except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
                             continue
                         if delta:
-                            yield str(delta)
+                            try:
+                                yield gateway.evaluate_model_output(str(delta)).text
+                            except GuardrailBlockedError as exc:
+                                raise LiteLLMClientError(
+                                    "LiteLLM stream output blocked by guardrail."
+                                ) from exc
         except httpx.HTTPStatusError as exc:
             raise LiteLLMClientError(
                 f"LiteLLM stream failed with status {exc.response.status_code}."
@@ -178,6 +190,26 @@ class LiteLLMClient:
             enforce_provider_egress_policy(self.settings, url)
         except ProviderEgressDeniedError as exc:
             raise LiteLLMClientError(f"LiteLLM provider egress denied: {exc}") from exc
+
+    def _prepare_payload(
+        self,
+        gateway: GuardrailGateway,
+        *,
+        model: str,
+        messages: Sequence[ChatMessage],
+    ) -> model_data_policy_service.ModelPayloadDecision:
+        try:
+            secured_messages = gateway.build_secure_prompt(
+                [message.model_dump() for message in messages],
+                workflow="litellm_chat_completion",
+            )
+        except GuardrailBlockedError as exc:
+            raise LiteLLMClientError("LiteLLM request blocked by guardrail.") from exc
+        return model_data_policy_service.prepare_model_payload(
+            provider="litellm",
+            model=model,
+            messages=secured_messages,
+        )
 
     def _api_key(self) -> str:
         try:

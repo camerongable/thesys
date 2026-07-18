@@ -53,7 +53,10 @@ def test_litellm_client_sends_sanitized_payload(monkeypatch) -> None:
         ]
     )
 
-    outbound = captured["json"]["messages"][0]["content"]
+    outbound_messages = captured["json"]["messages"]
+    outbound = "\n".join(message["content"] for message in outbound_messages)
+    assert outbound_messages[0]["role"] == "system"
+    assert "Security boundary:" in outbound_messages[0]["content"]
     assert "Jane Doe" not in outbound
     assert "jane.doe@example.com" not in outbound
     assert "sk-secretvalue123" not in outbound

@@ -432,10 +432,35 @@ current verdict, next action, evidence health, validation, and decision state.
   Markdown and `.log` uploads, and exclusion of PDF document metadata from
   searchable source metadata.
 
+## Sprint 64 Progress
+
+- [x] Add a central `app.security.guardrails` package with deterministic Unicode
+  normalization, invisible-character and encoded-payload inspection, direct and
+  indirect injection classification, jailbreak, prompt-extraction, tool-
+  manipulation, and exfiltration detection, plus explicit block/restriction
+  decisions that disable tools and memory writes.
+- [x] Route LiteLLM normal and streaming chat completions through the gateway.
+  Prompts now receive a non-secret trusted system boundary before provider
+  policy/redaction, high-risk prompts fail before HTTP client creation, and
+  unsafe model output is rejected before it reaches callers.
+- [x] Add common retrieved-content XML wrapping, conservative Markdown/HTML/link
+  sanitization, and citation membership validation primitives for subsequent
+  retrieval and rendering integrations.
+- [ ] Integrate guardrail detections with workflow-owned audit/security events,
+  retrieval provenance, tool/memory restrictions, rendering surfaces, and all
+  remaining provider boundaries before claiming the full Sprint 64 gateway.
+
+## Sprint 64 Verification
+
+- [x] Gateway, LiteLLM data-protection, guide, validation, source-discovery, and
+  full backend checkpoints passed (`399 passed, 1 skipped, 2 xfailed, 12
+  warnings`); repository-wide lint, compile, lock, and whitespace checks are
+  clean.
+
 ## Next Sprint
 
-Sprint 63 acceptance audit is complete. Begin Sprint 64's central prompt-
-injection, jailbreak, and output-guardrail gateway work.
+Continue Sprint 64 by attaching detections to audit events and expanding the
+central gateway across retrieval, rendering, and remaining provider boundaries.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
