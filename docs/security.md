@@ -4,6 +4,23 @@ Thesys treats the AI layer as a security boundary, not just a model-calling
 utility. The current branch includes controls for local development, portfolio
 demo use, and the production shape that a hosted version would need.
 
+## Security Contract
+
+The Sprint 61 security contract is maintained across:
+
+- [Threat model](security/THREAT_MODEL.md)
+- [Data classification](security/DATA_CLASSIFICATION.md)
+- [Control matrix](security/CONTROL_MATRIX.md)
+- [Security architecture and trust boundaries](security/SECURITY_ARCHITECTURE.md)
+- [Abuse cases](security/ABUSE_CASES.md)
+
+The code-owned data types, tenant paths, memory-write paths, and twelve security
+invariants live in `apps/api/app/security/contracts.py`. Automated checks in
+`apps/api/app/tests/security/test_security_invariants.py` keep the contract tied
+to mapped tables and governed tool/memory surfaces. The older
+`docs/THREAT_MODEL.md` remains a concise Sprint 54 implementation snapshot; the
+files above are authoritative for the Sprint 61-68 hardening phase.
+
 ## Auth And Authorization
 
 - `AUTH_MODE=dev` uses `X-Dev-User-*` headers for local-only identity setup.

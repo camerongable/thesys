@@ -518,6 +518,11 @@ Useful codepaths for AI reviewers:
 Developer docs:
 
 - [Repository navigation](docs/REPOSITORY_NAVIGATION.md)
+- [Security contract](docs/security/THREAT_MODEL.md)
+- [Data classification](docs/security/DATA_CLASSIFICATION.md)
+- [Security control matrix](docs/security/CONTROL_MATRIX.md)
+- [Security architecture](docs/security/SECURITY_ARCHITECTURE.md)
+- [Security abuse cases](docs/security/ABUSE_CASES.md)
 - [AI architecture](docs/AI_ARCHITECTURE.md)
 - [Context engineering](docs/CONTEXT_ENGINEERING.md)
 - [Memory system](docs/MEMORY_SYSTEM.md)

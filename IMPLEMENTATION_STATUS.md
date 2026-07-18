@@ -2,11 +2,14 @@
 
 ## Current Phase
 
-V1 Sprint 50 established the baseline AI engineering portfolio upgrade, and
-Sprints 51-60 are now the ordered gap-closure track. Sprint 41-50 should be read
-as partially complete implementation slices, not as fully complete against their
-original production-grade goals. The remaining gaps are explicitly owned by
-Sprints 51-60 in `IMPLEMENTATION_BRIEF.md` and `SPRINT_51_60_TODO.md`.
+V1 Sprints 51-60 closed the ordered AI engineering gap track. Sprint 61 now
+establishes the formal security contract for the V1 security-hardening phase:
+code-owned data classifications and security invariants, explicit tenant and
+memory-write paths, a threat model, trust-boundary architecture, control matrix,
+abuse cases, automated invariant checks, and a pull-request security checklist.
+Sprints 62-68 own the production identity, secure ingestion, centralized
+guardrails, secure RAG/memory, MCP/tool policy, monitoring/incident response,
+and adversarial CI controls identified as partial or planned by that contract.
 
 Thesys now demonstrates a stronger production-style AI architecture for a
 portfolio project:
@@ -42,6 +45,40 @@ cost, trace, and quality details stay in Inspect, Evidence, workflow trace,
 artifact structured content, and eval/check surfaces rather than new main
 dashboard cards. The homepage and main project workflow should remain focused on
 current verdict, next action, evidence health, validation, and decision state.
+
+## Sprint 61 Scope
+
+- [x] Add the code-owned `DataClassification` and provider-policy registry.
+- [x] Represent all twelve security invariants with status, owner sprint,
+  enforcement, test reference, and residual risk.
+- [x] Declare global and inherited tenant-table paths so new unscoped tables fail
+  an invariant check.
+- [x] Declare proposal, trusted-user, approved-projection, and trusted-service
+  memory mutation paths.
+- [x] Add the required threat model, data-classification guide, control matrix,
+  security architecture, and abuse-case documents under `docs/security/`.
+- [x] Add automated checks for the security registry, required documents and
+  trust boundaries, tenant paths, governed tools, memory writes, and audit paths.
+- [x] Keep production-auth, ingestion-classification, centralized-guardrail, and
+  complete durable-budget gaps visible as strict expected failures owned by
+  Sprints 62, 63, 64, and 67.
+- [x] Add the pull-request security-impact checklist and README/docs navigation.
+
+## Sprint 61 Verification
+
+- [x] `apps/api/.venv/bin/ruff check apps/api/app/security apps/api/app/tests/security`
+  passed.
+- [x] `apps/api/.venv/bin/python -m compileall apps/api/app/security apps/api/app/tests/security -q`
+  passed.
+- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/security/test_security_invariants.py -q`
+  passed (`8 passed, 4 xfailed`; expected gaps: Sprints 62, 63, 64, and 67).
+- [x] `cd apps/api && .venv/bin/pytest app/tests/security/test_security_invariants.py app/tests/test_security_governance.py app/tests/test_tool_boundary.py app/tests/test_mcp_adapter.py -q`
+  passed (`45 passed, 4 xfailed, 3 warnings`).
+- [x] `git diff --check` passed.
+
+## Next Sprint
+
+V1 Sprint 62: Production Identity, Tenant Isolation, Secrets, and Encryption.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
