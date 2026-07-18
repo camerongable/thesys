@@ -72,7 +72,19 @@ def test_source_deletion_removes_retrieval_and_invalidates_derivatives(
         title="Derived willingness-to-pay signal",
         summary="Derived from the evidence-backed memo.",
     )
-    db_session.add_all([claim, memory])
+    provenance_linked_memory = ProjectMemoryItem(
+        workspace_id=source.workspace_id,
+        project_id=source.project_id,
+        memory_type="semantic",
+        status="active",
+        write_policy="derived_read_only",
+        source_entity_type="research_sprint",
+        source_entity_id=uuid.uuid4(),
+        title="Source-linked recommendation",
+        summary="A durable recommendation linked through secure source provenance.",
+        provenance_metadata={"source_ids": [str(source.id)]},
+    )
+    db_session.add_all([claim, memory, provenance_linked_memory])
     db_session.flush()
     db_session.add(
         ClaimEvidenceLink(
@@ -99,8 +111,14 @@ def test_source_deletion_removes_retrieval_and_invalidates_derivatives(
     stored_memory = db_session.scalar(
         select(ProjectMemoryItem).where(ProjectMemoryItem.id == memory.id)
     )
+    stored_provenance_linked_memory = db_session.scalar(
+        select(ProjectMemoryItem).where(ProjectMemoryItem.id == provenance_linked_memory.id)
+    )
     assert stored_claim is not None and stored_claim.support_level == "unsupported"
     assert stored_memory is not None and stored_memory.status == "stale"
+    assert stored_provenance_linked_memory is not None
+    assert stored_provenance_linked_memory.status == "stale"
+    assert stored_provenance_linked_memory.provenance_metadata["requires_reverification"] is True
 
     retrieval = client.post(
         f"/api/projects/{project_id}/evidence/retrieve",
@@ -121,7 +139,7 @@ def test_source_deletion_removes_retrieval_and_invalidates_derivatives(
         "claim_links_deleted": 1,
         "claims_invalidated": 1,
         "competitor_references_cleared": 0,
-        "memory_items_staled": 1,
+        "memory_items_staled": 2,
         "object_deleted": False,
         "retrieval_revoked": True,
     }

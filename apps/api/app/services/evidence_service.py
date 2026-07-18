@@ -1479,6 +1479,7 @@ def _invalidate_source_derivatives(db: Session, source: EvidenceSource) -> dict[
             ProjectMemoryItem.project_id == source.project_id,
         )
     ):
+        provenance_source_ids = (item.provenance_metadata or {}).get("source_ids")
         references_source = (
             (item.source_entity_type == "evidence_source" and item.source_entity_id == source.id)
             or (item.entity_type == "evidence_source" and item.entity_id == source.id)
@@ -1486,11 +1487,19 @@ def _invalidate_source_derivatives(db: Session, source: EvidenceSource) -> dict[
                 item.source_entity_type == "artifact_version"
                 and item.source_entity_id in invalidated_version_ids
             )
+            or (
+                isinstance(provenance_source_ids, list)
+                and str(source.id) in {str(item_id) for item_id in provenance_source_ids}
+            )
         )
         if not references_source or item.status not in {"active", "proposed"}:
             continue
         item.status = "stale"
-        item.provenance_metadata = {**(item.provenance_metadata or {}), "evidence_deleted": True}
+        item.provenance_metadata = {
+            **(item.provenance_metadata or {}),
+            "evidence_deleted": True,
+            "requires_reverification": True,
+        }
         stale_memory_count += 1
 
     chunk_count = len(source.chunks)

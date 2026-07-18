@@ -73,6 +73,9 @@ central gates in this target flow.
   gives Inspect an explicit exclusion reason for every denial. A proposed
   conflicting update cannot overwrite active memory: both versions are linked
   for Inspect review, and only reviewer approval supersedes the prior version.
+  Source deletion invalidates both explicit source links and normalized
+  `source_ids` provenance, marks dependent memory stale and requiring
+  re-verification, and records the propagation audit event.
 - Model output failing schema, citation, or DLP validation is rejected or safely
   regenerated; it is never executed as policy.
 - Approval timeout, cancellation, or mismatch leaves the proposed mutation

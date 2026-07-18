@@ -564,6 +564,11 @@ current verdict, next action, evidence health, validation, and decision state.
   versions for review. Approval is the only path that supersedes the active
   version, preserving its history and recording the reviewer and resolution
   time.
+- [x] Extend source-deletion invalidation to the normalized secure-memory
+  `source_ids` provenance path as well as explicit source and artifact links.
+  A deleted source removes its retrieval chunks, invalidates dependent memory,
+  records `requires_reverification`, and includes every stale memory item in
+  the attributed deletion-propagation audit event.
 
 ## Sprint 65 Verification
 
@@ -584,12 +589,15 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Conflict-safe memory-version checkpoint passed (`92 passed, 1 xfailed, 1
   warning`); repository-wide lint and the full backend suite passed (`423
   passed, 1 skipped, 1 xfailed, 12 warnings`).
+- [x] Secure-memory source-invalidation checkpoint passed (`32 passed, 1
+  xfailed, 1 warning`); repository-wide lint and the full backend suite passed
+  (`423 passed, 1 skipped, 1 xfailed, 12 warnings`).
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
 add anomalous-embedding and recommendation-shift poisoning detection, then
-harden memory expiry and source-invalidation paths.
+harden memory expiry behavior.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
