@@ -553,6 +553,12 @@ class Settings(BaseSettings):
         default="https://smith.langchain.com",
         validation_alias="LANGSMITH_PUBLIC_URL_BASE",
     )
+    langsmith_provider_retention_days: int | None = Field(
+        default=None,
+        ge=1,
+        le=3650,
+        validation_alias="LANGSMITH_PROVIDER_RETENTION_DAYS",
+    )
     provider_egress_policy_enabled: bool = Field(
         default=True,
         validation_alias="PROVIDER_EGRESS_POLICY_ENABLED",
@@ -624,6 +630,10 @@ class Settings(BaseSettings):
         le=168,
         validation_alias="RETENTION_CLEANUP_INTERVAL_HOURS",
     )
+    temporal_namespace_retention_reconcile_enabled: bool = Field(
+        default=False,
+        validation_alias="TEMPORAL_NAMESPACE_RETENTION_RECONCILE_ENABLED",
+    )
 
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000"],
@@ -690,6 +700,14 @@ class Settings(BaseSettings):
             self.vault_address and self.vault_address.strip()
         ):
             raise ValueError("SECRET_PROVIDER=vault requires VAULT_ADDRESS.")
+
+        if self.langsmith_tracing and (
+            self.langsmith_provider_retention_days != self.retention_langsmith_trace_days
+        ):
+            raise ValueError(
+                "LANGSMITH_PROVIDER_RETENTION_DAYS must match "
+                "RETENTION_LANGSMITH_TRACE_DAYS when LANGSMITH_TRACING=true."
+            )
 
         if self.environment in {"staging", "production"}:
             expected_database_user = f"thesys_{self.database_runtime_role}"

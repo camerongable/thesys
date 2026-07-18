@@ -325,9 +325,12 @@ current verdict, next action, evidence health, validation, and decision state.
   schedule. Its global sweep chooses one active principal per workspace and
   fans out to the tenant-bound activity, so every destructive operation remains
   subject to that workspace's RLS context.
-- [ ] Configure provider-owned LangSmith/Temporal retention, add the separately
-  authorized unscoped pre-authentication-event cleanup path, and extend
-  classification routing to non-chat providers.
+- [x] Reconcile Temporal namespace history TTL to the configured policy before
+  worker startup, and require LangSmith deployments to attest that the external
+  project retention exactly matches the configured trace-retention policy before
+  tracing can be enabled.
+- [ ] Add the separately authorized unscoped pre-authentication-event cleanup
+  path and extend classification routing to non-chat providers.
 
 ## Sprint 63 Verification
 

@@ -6,6 +6,7 @@ from temporalio.worker import Worker
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.services.retention_provider_service import ensure_temporal_namespace_retention
 from app.services.retention_schedule_service import ensure_retention_cleanup_schedule
 from app.temporal.activities import (
     create_approval_request_activity,
@@ -59,6 +60,7 @@ async def run_worker() -> None:
     if client is None:
         raise RuntimeError("Temporal worker failed to initialize a client.")
 
+    await ensure_temporal_namespace_retention(client, settings)
     await ensure_retention_cleanup_schedule(client, settings)
 
     logger.info(

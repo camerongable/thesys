@@ -723,6 +723,9 @@ LANGSMITH_API_KEY=
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 LANGSMITH_PROJECT=thesys-local
 LANGSMITH_PUBLIC_URL_BASE=https://smith.langchain.com
+LANGSMITH_PROVIDER_RETENTION_DAYS=14
+RETENTION_TEMPORAL_HISTORY_DAYS=30
+TEMPORAL_NAMESPACE_RETENTION_RECONCILE_ENABLED=true
 ```
 
 ---
@@ -834,7 +837,12 @@ send traces to LangSmith, set:
 LANGSMITH_TRACING=true
 LANGSMITH_API_KEY=your_langsmith_key
 LANGSMITH_PROJECT=thesys-local
+LANGSMITH_PROVIDER_RETENTION_DAYS=14
 ```
+
+Set the LangSmith project's retention to the same configured number of days.
+The Temporal worker reconciles its namespace history TTL to
+`RETENTION_TEMPORAL_HISTORY_DAYS` when enabled.
 
 The research workflow records spans for planning, source discovery, competitor
 discovery, retrieval, synthesis, critique, memo generation, assumption updates,

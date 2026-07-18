@@ -30,6 +30,12 @@ timing, token, and cost fields while removing expired prompts, outputs, errors,
 local LangSmith references, and workspace-attributable audit/security events.
 Active session revocations and unscoped pre-authentication failures are
 intentionally excluded: the former remain authentication controls, and the
-latter require a separately authorized platform-maintenance path. External
-LangSmith and Temporal retention must still be configured in those providers;
-the application does not claim to delete provider-owned history itself.
+latter require a separately authorized platform-maintenance path.
+
+Temporal namespace history is reconciled to `RETENTION_TEMPORAL_HISTORY_DAYS`
+when `TEMPORAL_NAMESPACE_RETENTION_RECONCILE_ENABLED=true`; the worker fails
+startup if that configured reconciliation cannot be performed. LangSmith
+project retention is configured by the LangSmith administrator. When tracing is
+enabled, `LANGSMITH_PROVIDER_RETENTION_DAYS` must explicitly equal
+`RETENTION_LANGSMITH_TRACE_DAYS`, preventing the application from emitting
+traces when the deployment has not confirmed the provider setting.
