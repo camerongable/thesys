@@ -11,6 +11,7 @@ import httpx
 
 from app.core.config import Settings
 from app.security.secrets import SecretName, SecretProviderError, resolve_secret
+from app.services import model_data_policy_service
 from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
@@ -132,6 +133,23 @@ def _extract_with_litellm(
     if api_key is None:
         raise MultimodalExtractionError("LiteLLM multimodal extraction requires LITELLM_API_KEY.")
 
+    inspection_text = body.decode("utf-8", errors="ignore")
+    try:
+        model_data_policy_service.permit_binary_provider_payload(
+            provider="litellm",
+            model=settings.multimodal_extraction_model,
+            inspection_text=inspection_text,
+            purpose="multimodal_extraction",
+        )
+        safe_filename = model_data_policy_service.prepare_provider_text(
+            provider="litellm",
+            model=settings.multimodal_extraction_model,
+            text=filename,
+            purpose="multimodal_extraction",
+        ).text
+    except model_data_policy_service.ModelDataPolicyError as exc:
+        raise MultimodalExtractionError(str(exc)) from None
+
     url = f"{settings.litellm_base_url.rstrip('/')}/v1/chat/completions"
     try:
         enforce_provider_egress_policy(settings, url)
@@ -144,7 +162,7 @@ def _extract_with_litellm(
     encoded_body = base64.b64encode(body).decode("ascii")
     data_uri = f"data:{content_type};base64,{encoded_body}"
     media_part = (
-        {"type": "file", "file": {"filename": filename, "file_data": data_uri}}
+        {"type": "file", "file": {"filename": safe_filename, "file_data": data_uri}}
         if media_type == "pdf"
         else {"type": "image_url", "image_url": {"url": data_uri}}
     )
@@ -168,7 +186,7 @@ def _extract_with_litellm(
                     {
                         "type": "text",
                         "text": (
-                            f"Extract useful research evidence from {filename}. "
+                            f"Extract useful research evidence from {safe_filename}. "
                             f"Media type: {media_type}. Content type: {content_type}."
                         ),
                     },

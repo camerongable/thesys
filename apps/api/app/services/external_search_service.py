@@ -11,6 +11,7 @@ import httpx
 
 from app.core.config import Settings
 from app.security.secrets import SecretName, SecretProviderError, resolve_secret
+from app.services import model_data_policy_service
 from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
@@ -114,6 +115,19 @@ def _search_tavily(settings: Settings, queries: list[str]) -> list[ExternalSearc
     if api_key is None:
         raise ExternalSearchError("Tavily search requires TAVILY_API_KEY.")
 
+    try:
+        sanitized_queries = [
+            model_data_policy_service.prepare_provider_text(
+                provider="tavily",
+                model="search",
+                text=query,
+                purpose="external_search",
+            ).text
+            for query in queries
+        ]
+    except model_data_policy_service.ModelDataPolicyError as exc:
+        raise ExternalSearchError(str(exc)) from None
+
     endpoint = "https://api.tavily.com/search"
     try:
         enforce_provider_egress_policy(settings, endpoint)
@@ -127,7 +141,7 @@ def _search_tavily(settings: Settings, queries: list[str]) -> list[ExternalSearc
     }
     try:
         with httpx.Client(timeout=settings.external_search_timeout_seconds) as client:
-            for query in queries:
+            for query in sanitized_queries:
                 response = client.post(
                     endpoint,
                     headers=headers,

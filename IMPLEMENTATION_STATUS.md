@@ -333,7 +333,10 @@ current verdict, next action, evidence health, validation, and decision state.
   role-owned, worker-only PostgreSQL `SECURITY DEFINER` function. The scheduled
   retention workflow invokes it separately from tenant-bound cleanup, and it
   cannot delete active session-revocation controls.
-- [ ] Extend classification routing to non-chat providers.
+- [x] Extend purpose-aware classification routing to non-chat providers.
+  LiteLLM embeddings and Tavily searches send only their redacted text
+  representation, while live multimodal uploads deny files whose locally
+  inspectable bytes require redaction before raw provider transit.
 
 ## Sprint 63 Verification
 
@@ -365,11 +368,15 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Retention-policy checkpoint passed (`125 passed, 1 skipped, 2 xfailed,
   3 warnings`), including policy completeness, expiry metadata, scoped PII-map
   cleanup, expired-source propagation, and offline migration SQL for `0035`.
+- [x] Non-chat provider-routing checkpoint passed (`52 passed, 2 xfailed, 1
+  warning`), capturing outbound LiteLLM embedding and Tavily payloads after
+  redaction and proving detected sensitive multimodal bytes never create an
+  HTTP client.
 
 ## Next Sprint
 
-Continue V1 Sprint 63 with scheduled local-record retention cleanup and the
-remaining provider-routing and ingestion-state hardening.
+Continue V1 Sprint 63 with the remaining secure-ingestion state-machine and
+MIME/content coverage, then begin Sprint 64's central policy guardrail work.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

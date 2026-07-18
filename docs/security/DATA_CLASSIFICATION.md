@@ -80,6 +80,18 @@ classification or provider policy is a denial, not a fallback to unrestricted
 processing. Sprint 62 implements provider/tenant policy; Sprints 63-64 add
 payload-aware classification and DLP enforcement.
 
+### Current outbound routes
+
+- LiteLLM chat and embedding payloads pass through the same purpose-aware
+  policy and deterministic redaction before egress.
+- Tavily receives a separately policy-bound, redacted external-search query;
+  it is limited to `internal` data after sanitization.
+- Live LiteLLM multimodal extraction permits a raw file only when local
+  byte-level inspection and filename sanitization require no redaction.
+  Detected text identifiers or secrets deny the upload rather than sending a
+  partially sanitized file. Image-only and complex document detection remain
+  subject to the secure-ingestion MIME/OCR coverage work.
+
 ## Traces, caches, and deletion
 
 - LangSmith traces inherit the highest classification in their payload and must

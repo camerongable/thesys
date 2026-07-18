@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import AuthContext
 from app.core.config import Settings
 from app.security.secrets import SecretName, SecretProviderError, resolve_secret
+from app.services import model_data_policy_service
 from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
@@ -145,7 +146,16 @@ def _embed_with_litellm(settings: Settings, text: str) -> list[float]:
         api_key = resolve_secret(settings, SecretName.LITELLM_API_KEY)
     except SecretProviderError:
         raise EmbeddingProviderError("LiteLLM embedding credentials are unavailable.") from None
-    payload = {"model": settings.embedding_model, "input": text}
+    try:
+        decision = model_data_policy_service.prepare_provider_text(
+            provider="litellm",
+            model=settings.embedding_model,
+            text=text,
+            purpose="embedding",
+        )
+    except model_data_policy_service.ModelDataPolicyError as exc:
+        raise EmbeddingProviderError(str(exc)) from None
+    payload = {"model": settings.embedding_model, "input": decision.text}
     url = f"{settings.litellm_base_url.rstrip('/')}/v1/embeddings"
     try:
         enforce_provider_egress_policy(settings, url)

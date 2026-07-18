@@ -26,6 +26,14 @@ class ModelPayloadDecision:
     messages: list[dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class ProviderTextDecision:
+    policy: ModelDataPolicy
+    original_data_classification: DataClassification
+    outbound_data_classification: DataClassification
+    text: str
+
+
 class ModelDataPolicyError(ValueError):
     pass
 
@@ -43,7 +51,23 @@ _LITELLM_POLICY = ModelDataPolicy(
     maximum_data_classification=DataClassification.CONFIDENTIAL,
     allows_pii=False,
     allows_provider_retention=False,
-    approved_purposes=("guided_reasoning", "structured_extraction", "reranking"),
+    approved_purposes=(
+        "chat_completion",
+        "embedding",
+        "guided_reasoning",
+        "multimodal_extraction",
+        "reranking",
+        "structured_extraction",
+    ),
+)
+
+_TAVILY_POLICY = ModelDataPolicy(
+    provider="tavily",
+    model="search",
+    maximum_data_classification=DataClassification.INTERNAL,
+    allows_pii=False,
+    allows_provider_retention=False,
+    approved_purposes=("external_search",),
 )
 
 
@@ -55,15 +79,23 @@ def prepare_model_payload(
 ) -> ModelPayloadDecision:
     """Return the representation permitted to cross a model-provider boundary."""
     policy = resolve_policy(provider, model)
-    original_classification = _maximum_classification(
-        str(message.get("content") or "") for message in messages
+    decisions = [
+        prepare_provider_text(
+            provider=provider,
+            model=model,
+            text=str(message.get("content") or ""),
+            purpose="chat_completion",
+        )
+        for message in messages
+    ]
+    original_classification = max(
+        (decision.original_data_classification for decision in decisions),
+        default=DataClassification.INTERNAL,
+        key=_CLASSIFICATION_RANK.__getitem__,
     )
     sanitized_messages = [
-        {
-            **message,
-            "content": data_protection_service.redact_for_model(str(message.get("content") or "")),
-        }
-        for message in messages
+        {**message, "content": decision.text}
+        for message, decision in zip(messages, decisions, strict=True)
     ]
     outbound_classification = _maximum_classification(
         str(message["content"]) for message in sanitized_messages
@@ -80,9 +112,58 @@ def prepare_model_payload(
     )
 
 
+def prepare_provider_text(
+    *,
+    provider: str,
+    model: str,
+    text: str,
+    purpose: str,
+) -> ProviderTextDecision:
+    """Sanitize one text payload for an approved non-local provider purpose."""
+    policy = resolve_policy(provider, model)
+    if purpose not in policy.approved_purposes:
+        raise ModelDataPolicyError(f"Provider policy does not permit purpose: {purpose}.")
+    original_classification = _maximum_classification([text])
+    sanitized = data_protection_service.redact_for_model(text)
+    outbound_classification = _maximum_classification([sanitized])
+    if _CLASSIFICATION_RANK[outbound_classification] > _CLASSIFICATION_RANK[
+        policy.maximum_data_classification
+    ]:
+        raise ModelDataPolicyError("Provider policy does not permit this payload classification.")
+    return ProviderTextDecision(
+        policy=policy,
+        original_data_classification=original_classification,
+        outbound_data_classification=outbound_classification,
+        text=sanitized,
+    )
+
+
+def permit_binary_provider_payload(
+    *,
+    provider: str,
+    model: str,
+    inspection_text: str,
+    purpose: str,
+) -> ProviderTextDecision:
+    """Reject a raw binary upload whenever local inspection requires redaction."""
+    decision = prepare_provider_text(
+        provider=provider,
+        model=model,
+        text=inspection_text,
+        purpose=purpose,
+    )
+    if decision.text != inspection_text:
+        raise ModelDataPolicyError(
+            "Raw binary payload contains values that require redaction before provider transit."
+        )
+    return decision
+
+
 def resolve_policy(provider: str, model: str) -> ModelDataPolicy:
     if provider == "litellm":
         return replace(_LITELLM_POLICY, model=model)
+    if provider == "tavily":
+        return _TAVILY_POLICY
     raise ModelDataPolicyError(f"No data policy is configured for provider: {provider}.")
 
 
