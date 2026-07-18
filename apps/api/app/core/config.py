@@ -12,6 +12,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,
+        hide_input_in_errors=True,
     )
 
     app_name: str = "Thesys API"
@@ -20,6 +21,32 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("APP_ENV", "ENVIRONMENT"),
     )
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+    secret_provider: Literal["environment", "vault", "cloud"] = Field(
+        default="environment",
+        validation_alias="SECRET_PROVIDER",
+    )
+    vault_address: str | None = Field(default=None, validation_alias="VAULT_ADDRESS")
+    vault_mount_point: str = Field(default="secret", validation_alias="VAULT_MOUNT_POINT")
+    vault_secret_path_prefix: str = Field(
+        default="thesys",
+        validation_alias="VAULT_SECRET_PATH_PREFIX",
+    )
+    cloud_secret_region: str | None = Field(
+        default=None,
+        validation_alias="CLOUD_SECRET_REGION",
+    )
+    cloud_secret_id_prefix: str = Field(
+        default="thesys/",
+        validation_alias="CLOUD_SECRET_ID_PREFIX",
+    )
+    encryption_key_current_version: str = Field(
+        default="v1",
+        validation_alias="ENCRYPTION_KEY_CURRENT_VERSION",
+    )
+    encryption_key_secret_prefix: str = Field(
+        default="THESYS_ENCRYPTION_KEK",
+        validation_alias="ENCRYPTION_KEY_SECRET_PREFIX",
+    )
     auth_mode: Literal["dev", "jwt", "api_key", "oidc"] = Field(
         default="dev",
         validation_alias="AUTH_MODE",
@@ -29,7 +56,11 @@ class Settings(BaseSettings):
         validation_alias="DEV_AUTH_DEFAULT_EMAIL",
     )
     dev_auth_default_name: str = Field(default="Dev User", validation_alias="DEV_AUTH_DEFAULT_NAME")
-    auth_jwt_secret: str | None = Field(default=None, validation_alias="AUTH_JWT_SECRET")
+    auth_jwt_secret: str | None = Field(
+        default=None,
+        validation_alias="AUTH_JWT_SECRET",
+        repr=False,
+    )
     auth_jwt_issuer: str | None = Field(default=None, validation_alias="AUTH_JWT_ISSUER")
     auth_jwt_audience: str | None = Field(default=None, validation_alias="AUTH_JWT_AUDIENCE")
     auth_jwt_allowed_key_ids: Annotated[list[str], NoDecode] = Field(
@@ -101,7 +132,11 @@ class Settings(BaseSettings):
         default="http://localhost:4000",
         validation_alias="LITELLM_BASE_URL",
     )
-    litellm_api_key: str = Field(default="sk-local-dev", validation_alias="LITELLM_API_KEY")
+    litellm_api_key: str = Field(
+        default="sk-local-dev",
+        validation_alias="LITELLM_API_KEY",
+        repr=False,
+    )
     litellm_model: str = Field(default="dev-gpt-4o-mini", validation_alias="LITELLM_MODEL")
     litellm_timeout_seconds: float = Field(default=60.0, validation_alias="LITELLM_TIMEOUT_SECONDS")
     guide_chat_stream_timeout_seconds: float = Field(
@@ -155,16 +190,36 @@ class Settings(BaseSettings):
         ge=0.0,
         validation_alias="AI_WORKFLOW_DEFAULT_ESTIMATED_COST_USD",
     )
-    openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
-    anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
-    gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
+    openai_api_key: str | None = Field(
+        default=None,
+        validation_alias="OPENAI_API_KEY",
+        repr=False,
+    )
+    anthropic_api_key: str | None = Field(
+        default=None,
+        validation_alias="ANTHROPIC_API_KEY",
+        repr=False,
+    )
+    gemini_api_key: str | None = Field(
+        default=None,
+        validation_alias="GEMINI_API_KEY",
+        repr=False,
+    )
 
     s3_endpoint_url: str = Field(
         default="http://localhost:9000",
         validation_alias="S3_ENDPOINT_URL",
     )
-    s3_access_key_id: str = Field(default="minioadmin", validation_alias="S3_ACCESS_KEY_ID")
-    s3_secret_access_key: str = Field(default="minioadmin", validation_alias="S3_SECRET_ACCESS_KEY")
+    s3_access_key_id: str = Field(
+        default="minioadmin",
+        validation_alias="S3_ACCESS_KEY_ID",
+        repr=False,
+    )
+    s3_secret_access_key: str = Field(
+        default="minioadmin",
+        validation_alias="S3_SECRET_ACCESS_KEY",
+        repr=False,
+    )
     s3_bucket: str = Field(default="thesys-local", validation_alias="S3_BUCKET")
     object_storage_mode: Literal["local", "s3"] = Field(
         default="local",
@@ -357,7 +412,11 @@ class Settings(BaseSettings):
         le=120.0,
         validation_alias="EXTERNAL_SEARCH_TIMEOUT_SECONDS",
     )
-    tavily_api_key: str | None = Field(default=None, validation_alias="TAVILY_API_KEY")
+    tavily_api_key: str | None = Field(
+        default=None,
+        validation_alias="TAVILY_API_KEY",
+        repr=False,
+    )
     multimodal_extraction_provider: Literal["deterministic", "litellm"] = Field(
         default="deterministic",
         validation_alias="MULTIMODAL_EXTRACTION_PROVIDER",
@@ -383,7 +442,11 @@ class Settings(BaseSettings):
         validation_alias="MULTIMODAL_PDF_MIN_TEXT_CHARS",
     )
     langsmith_tracing: bool = Field(default=False, validation_alias="LANGSMITH_TRACING")
-    langsmith_api_key: str | None = Field(default=None, validation_alias="LANGSMITH_API_KEY")
+    langsmith_api_key: str | None = Field(
+        default=None,
+        validation_alias="LANGSMITH_API_KEY",
+        repr=False,
+    )
     langsmith_endpoint: str = Field(
         default="https://api.smith.langchain.com",
         validation_alias="LANGSMITH_ENDPOINT",
@@ -495,10 +558,31 @@ class Settings(BaseSettings):
     def normalize_auth_mode(cls, value: str) -> str:
         return value.strip().lower()
 
+    @field_validator("secret_provider", mode="before")
+    @classmethod
+    def normalize_secret_provider(cls, value: str) -> str:
+        return value.strip().lower()
+
     @model_validator(mode="after")
     def validate_security_configuration(self) -> "Settings":
         if self.auth_mode == "dev" and self.environment != "local":
             raise ValueError("AUTH_MODE=dev is permitted only when APP_ENV=local.")
+
+        if self.environment == "local" and self.secret_provider != "environment":
+            raise ValueError(
+                "Local development must use SECRET_PROVIDER=environment."
+            )
+        if self.environment in {"staging", "production"} and self.secret_provider not in {
+            "vault",
+            "cloud",
+        }:
+            raise ValueError(
+                "Hosted environments must use SECRET_PROVIDER=vault or cloud."
+            )
+        if self.secret_provider == "vault" and not (
+            self.vault_address and self.vault_address.strip()
+        ):
+            raise ValueError("SECRET_PROVIDER=vault requires VAULT_ADDRESS.")
 
         if self.environment in {"staging", "production"}:
             expected_database_user = f"thesys_{self.database_runtime_role}"
@@ -506,6 +590,15 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "Hosted DATABASE_URL must use the declared scoped runtime role."
                 )
+            self.auth_jwt_secret = None
+            self.litellm_api_key = ""
+            self.openai_api_key = None
+            self.anthropic_api_key = None
+            self.gemini_api_key = None
+            self.s3_access_key_id = ""
+            self.s3_secret_access_key = ""
+            self.tavily_api_key = None
+            self.langsmith_api_key = None
 
         if self.auth_mode != "oidc":
             return self
@@ -546,6 +639,8 @@ class Settings(BaseSettings):
         if self.llm_stub_mode == "always":
             return True
         if self.llm_stub_mode == "never":
+            return False
+        if self.secret_provider != "environment":
             return False
         provider_keys = [self.openai_api_key, self.anthropic_api_key, self.gemini_api_key]
         return not any(key for key in provider_keys if key and key.strip())

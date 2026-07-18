@@ -4,6 +4,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from app.core.config import Settings
+from app.security.secrets import SecretName, SecretProviderError, resolve_secret
 
 
 class ObjectStorageError(RuntimeError):
@@ -29,11 +30,16 @@ def _put_s3_object(
     body: bytes,
     content_type: str,
 ) -> str:
+    try:
+        access_key_id = resolve_secret(settings, SecretName.S3_ACCESS_KEY_ID)
+        secret_access_key = resolve_secret(settings, SecretName.S3_SECRET_ACCESS_KEY)
+    except SecretProviderError:
+        raise ObjectStorageError("Object storage credentials are unavailable.") from None
     client = boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint_url,
-        aws_access_key_id=settings.s3_access_key_id,
-        aws_secret_access_key=settings.s3_secret_access_key,
+        aws_access_key_id=access_key_id,
+        aws_secret_access_key=secret_access_key,
     )
     try:
         client.head_bucket(Bucket=settings.s3_bucket)

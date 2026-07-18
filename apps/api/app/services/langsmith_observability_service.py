@@ -18,6 +18,7 @@ from app.core.auth import AuthContext
 from app.core.config import Settings
 from app.core.redaction import redact_payload
 from app.db.models import AIRun, AIStep, ArtifactVersion, Project, ResearchSprint
+from app.security.secrets import SecretName, SecretProviderError, has_secret, resolve_secret
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def ensure_research_sprint_trace(
         attach_run_trace(db, run, trace_id, trace_url)
     db.flush()
 
-    if _langsmith_enabled(settings):
+    if langsmith_enabled(settings):
         _safe_create_run(
             settings,
             run_id=trace_id,
@@ -82,7 +83,7 @@ def ensure_research_sprint_trace(
     return TraceContext(
         trace_id=trace_id,
         trace_url=trace_url,
-        enabled=_langsmith_enabled(settings),
+        enabled=langsmith_enabled(settings),
         metadata=metadata,
     )
 
@@ -101,7 +102,7 @@ def ensure_run_trace(
     attach_run_trace(db, run, trace_id, trace_url)
     db.flush()
 
-    if _langsmith_enabled(settings):
+    if langsmith_enabled(settings):
         _safe_create_run(
             settings,
             run_id=trace_id,
@@ -115,7 +116,7 @@ def ensure_run_trace(
     return TraceContext(
         trace_id=trace_id,
         trace_url=trace_url,
-        enabled=_langsmith_enabled(settings),
+        enabled=langsmith_enabled(settings),
         metadata=metadata,
     )
 
@@ -204,15 +205,18 @@ def complete_trace(
     try:
         from langsmith import Client
 
-        client = Client(api_key=settings.langsmith_api_key, api_url=settings.langsmith_endpoint)
+        client = Client(
+            api_key=resolve_secret(settings, SecretName.LANGSMITH_API_KEY),
+            api_url=settings.langsmith_endpoint,
+        )
         client.update_run(
             trace.trace_id,
             outputs=_sanitize({"summary": output_summary, "metrics": metrics or {}}),
             error=error,
             end_time=datetime.now(UTC),
         )
-    except Exception as exc:  # pragma: no cover - best-effort external telemetry
-        logger.warning("LangSmith trace completion failed: %s", exc)
+    except Exception:  # pragma: no cover - best-effort external telemetry
+        logger.warning("LangSmith trace completion failed.")
 
 
 def sanitize_for_observability(value: Any) -> Any:
@@ -221,8 +225,14 @@ def sanitize_for_observability(value: Any) -> Any:
     return _sanitize(value)
 
 
-def _langsmith_enabled(settings: Settings) -> bool:
-    return bool(settings.langsmith_tracing and settings.langsmith_api_key)
+def langsmith_enabled(settings: Settings) -> bool:
+    if not settings.langsmith_tracing:
+        return False
+    try:
+        return has_secret(settings, SecretName.LANGSMITH_API_KEY)
+    except SecretProviderError:
+        logger.warning("LangSmith credentials are unavailable; tracing is disabled.")
+        return False
 
 
 def _trace_url(settings: Settings, trace_id: str) -> str:
@@ -246,7 +256,10 @@ def _safe_create_run(
     try:
         from langsmith import Client
 
-        client = Client(api_key=settings.langsmith_api_key, api_url=settings.langsmith_endpoint)
+        client = Client(
+            api_key=resolve_secret(settings, SecretName.LANGSMITH_API_KEY),
+            api_url=settings.langsmith_endpoint,
+        )
         client.create_run(
             name=name,
             run_type=run_type,
@@ -260,8 +273,8 @@ def _safe_create_run(
             end_time=datetime.now(UTC),
             extra={"metadata": _sanitize(metadata)},
         )
-    except Exception as exc:  # pragma: no cover - best-effort external telemetry
-        logger.warning("LangSmith trace upload failed for %s: %s", name, exc)
+    except Exception:  # pragma: no cover - best-effort external telemetry
+        logger.warning("LangSmith trace upload failed for %s.", name)
 
 
 def _sanitize(value: Any, *, key: str | None = None) -> Any:

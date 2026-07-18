@@ -66,6 +66,33 @@ def test_memory_types_are_filtered_and_stale_memory_is_excluded(
     assert stale.id not in {item.id for item in selected}
 
 
+def test_project_memory_redacts_secret_values_before_persistence(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    sentinel = "sk-memory-secret-value"
+
+    item = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="project",
+        write_policy="direct",
+        title=f"Credential {sentinel}",
+        summary=f"api_key={sentinel}",
+        content={"api_key": sentinel, "safe": "visible"},
+        provenance_metadata={"authorization": f"Bearer {sentinel}"},
+    )
+    db_session.flush()
+
+    assert sentinel not in item.title
+    assert sentinel not in item.summary
+    assert item.content == {"api_key": "[redacted]", "safe": "visible"}
+    assert item.provenance_metadata == {"authorization": "[redacted]"}
+
+
 def test_memory_explanation_and_duplicate_merge(
     client: TestClient,
     db_session: Session,

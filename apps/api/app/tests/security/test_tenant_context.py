@@ -86,6 +86,7 @@ def test_hosted_configuration_rejects_bootstrap_or_wrong_runtime_role() -> None:
         Settings(
             environment="production",
             auth_mode="api_key",
+            secret_provider="cloud",
             database_runtime_role="api",
             database_url="postgresql+psycopg://postgres:secret@db.example/thesys",
         )
@@ -93,6 +94,7 @@ def test_hosted_configuration_rejects_bootstrap_or_wrong_runtime_role() -> None:
     settings = Settings(
         environment="production",
         auth_mode="api_key",
+        secret_provider="cloud",
         database_runtime_role="worker",
         database_url="postgresql+psycopg://thesys_worker:secret@db.example/thesys",
     )

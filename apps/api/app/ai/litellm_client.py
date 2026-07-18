@@ -10,6 +10,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings
+from app.security.secrets import SecretName, SecretProviderError, resolve_secret
 from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
@@ -73,7 +74,7 @@ class LiteLLMClient:
         url = f"{self.settings.litellm_base_url.rstrip('/')}/v1/chat/completions"
         self._enforce_egress(url)
         headers = {
-            "Authorization": f"Bearer {self.settings.litellm_api_key}",
+            "Authorization": f"Bearer {self._api_key()}",
             "Content-Type": "application/json",
         }
 
@@ -82,12 +83,11 @@ class LiteLLMClient:
                 response = client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            detail = exc.response.text[:500]
             raise LiteLLMClientError(
-                f"LiteLLM request failed with status {exc.response.status_code}: {detail}"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise LiteLLMClientError(f"LiteLLM request failed: {exc}") from exc
+                f"LiteLLM request failed with status {exc.response.status_code}."
+            ) from None
+        except httpx.HTTPError:
+            raise LiteLLMClientError("LiteLLM request failed.") from None
 
         try:
             body = response.json()
@@ -134,7 +134,7 @@ class LiteLLMClient:
         url = f"{self.settings.litellm_base_url.rstrip('/')}/v1/chat/completions"
         self._enforce_egress(url)
         headers = {
-            "Authorization": f"Bearer {self.settings.litellm_api_key}",
+            "Authorization": f"Bearer {self._api_key()}",
             "Content-Type": "application/json",
         }
 
@@ -156,18 +156,25 @@ class LiteLLMClient:
                         if delta:
                             yield str(delta)
         except httpx.HTTPStatusError as exc:
-            detail = exc.response.text[:500]
             raise LiteLLMClientError(
-                f"LiteLLM stream failed with status {exc.response.status_code}: {detail}"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise LiteLLMClientError(f"LiteLLM stream failed: {exc}") from exc
+                f"LiteLLM stream failed with status {exc.response.status_code}."
+            ) from None
+        except httpx.HTTPError:
+            raise LiteLLMClientError("LiteLLM stream failed.") from None
 
     def _enforce_egress(self, url: str) -> None:
         try:
             enforce_provider_egress_policy(self.settings, url)
         except ProviderEgressDeniedError as exc:
             raise LiteLLMClientError(f"LiteLLM provider egress denied: {exc}") from exc
+
+    def _api_key(self) -> str:
+        try:
+            value = resolve_secret(self.settings, SecretName.LITELLM_API_KEY)
+        except SecretProviderError:
+            raise LiteLLMClientError("LiteLLM credentials are unavailable.") from None
+        assert value is not None
+        return value
 
 
 def _parse_cost_header(value: str | None) -> Decimal | None:

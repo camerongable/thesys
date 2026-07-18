@@ -15,6 +15,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext, require_permission
+from app.core.redaction import redact_payload, redact_text
 from app.db.models import Assumption, ProjectMemoryItem, Risk
 from app.features.memory import compaction as memory_compaction
 from app.features.memory import inspection as memory_inspection
@@ -248,6 +249,10 @@ def upsert_memory_item(
 ) -> ProjectMemoryItem:
     """Create or update a typed memory item under the project's governance model."""
     project_service.get_project(db, auth, project_id)
+    safe_title = redact_text(title, redact_emails=True)
+    safe_summary = redact_text(summary, redact_emails=True)
+    safe_content = redact_payload(content, redact_emails=True)
+    safe_provenance = redact_payload(provenance_metadata or {}, redact_emails=True)
     existing = None
     if entity_type and entity_id:
         existing = db.scalar(
@@ -269,10 +274,10 @@ def upsert_memory_item(
             entity_id=entity_id,
             source_entity_type=source_entity_type,
             source_entity_id=source_entity_id,
-            title=title[:255],
-            summary=summary,
-            content=content,
-            provenance_metadata=provenance_metadata or {},
+            title=safe_title[:255],
+            summary=safe_summary,
+            content=safe_content,
+            provenance_metadata=safe_provenance,
             confidence_score=confidence_score,
             status=status_value,
             expires_at=expires_at,
@@ -283,10 +288,10 @@ def upsert_memory_item(
         existing.write_policy = write_policy
         existing.source_entity_type = source_entity_type or existing.source_entity_type
         existing.source_entity_id = source_entity_id or existing.source_entity_id
-        existing.title = title[:255]
-        existing.summary = summary
-        existing.content = content
-        existing.provenance_metadata = provenance_metadata or existing.provenance_metadata
+        existing.title = safe_title[:255]
+        existing.summary = safe_summary
+        existing.content = safe_content
+        existing.provenance_metadata = safe_provenance or existing.provenance_metadata
         existing.confidence_score = confidence_score
         existing.status = status_value
         existing.expires_at = expires_at

@@ -16,6 +16,7 @@ from app.core.oidc import OIDCValidationError, verify_oidc_token
 from app.db.models import User, Workspace
 from app.db.session import get_db
 from app.db.tenant import bind_tenant_context
+from app.security.secrets import SecretName, SecretProviderError, resolve_secret
 from app.services.identity_service import (
     ensure_dev_identity,
     ensure_external_identity,
@@ -195,13 +196,15 @@ def _auth_from_jwt(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Bearer token required.",
         )
-    if not settings.auth_jwt_secret:
+    try:
+        jwt_secret = resolve_secret(settings, SecretName.AUTH_JWT_SECRET)
+    except SecretProviderError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AUTH_JWT_SECRET must be configured for AUTH_MODE=jwt.",
-        )
+        ) from None
 
-    claims = _verify_hs256_jwt(authorization.split(" ", 1)[1], settings)
+    claims = _verify_hs256_jwt(authorization.split(" ", 1)[1], settings, jwt_secret)
     subject = str(claims.get("sub") or "").strip()
     if not subject:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="JWT sub is required.")
@@ -283,7 +286,7 @@ def _auth_from_oidc(
     )
 
 
-def _verify_hs256_jwt(token: str, settings: Settings) -> dict:
+def _verify_hs256_jwt(token: str, settings: Settings, jwt_secret: str) -> dict:
     parts = token.split(".")
     if len(parts) != 3:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid JWT.")
@@ -303,9 +306,7 @@ def _verify_hs256_jwt(token: str, settings: Settings) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="JWT revoked.")
 
     signing_input = f"{parts[0]}.{parts[1]}".encode()
-    expected = hmac.new(
-        settings.auth_jwt_secret.encode("utf-8"), signing_input, hashlib.sha256
-    ).digest()
+    expected = hmac.new(jwt_secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
     try:
         supplied = _decode_base64url(parts[2])
     except Base64DecodeError as exc:

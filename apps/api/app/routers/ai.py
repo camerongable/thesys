@@ -21,6 +21,7 @@ from app.schemas.ai import (
     StructuredOutputTestCreate,
     StructuredOutputTestRead,
 )
+from app.security.secrets import SecretName, SecretProviderError, has_secret, resolve_secret
 from app.services import ai_run_service, project_service, security_policy_service
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -199,9 +200,12 @@ def _run_structured_output_test(
 
 
 def _provider_key_status(settings: Settings) -> AIProviderKeyStatus:
-    openai = _has_secret(settings.openai_api_key)
-    anthropic = _has_secret(settings.anthropic_api_key)
-    gemini = _has_secret(settings.gemini_api_key)
+    try:
+        openai = has_secret(settings, SecretName.OPENAI_API_KEY)
+        anthropic = has_secret(settings, SecretName.ANTHROPIC_API_KEY)
+        gemini = has_secret(settings, SecretName.GEMINI_API_KEY)
+    except SecretProviderError:
+        openai = anthropic = gemini = False
     return AIProviderKeyStatus(
         openai=openai,
         anthropic=anthropic,
@@ -209,16 +213,13 @@ def _provider_key_status(settings: Settings) -> AIProviderKeyStatus:
         any_present=openai or anthropic or gemini,
     )
 
-
-def _has_secret(value: str | None) -> bool:
-    return bool(value and value.strip())
-
-
 def _check_litellm_reachability(settings: Settings) -> LiteLLMReachabilityStatus:
     base_url = settings.litellm_base_url.rstrip("/")
     endpoint = f"{base_url}/health/liveliness"
-    headers = {"Authorization": f"Bearer {settings.litellm_api_key}"}
     try:
+        headers = {
+            "Authorization": f"Bearer {resolve_secret(settings, SecretName.LITELLM_API_KEY)}"
+        }
         security_policy_service.enforce_provider_egress_policy(settings, endpoint)
         with httpx.Client(timeout=min(settings.litellm_timeout_seconds, 3.0)) as client:
             response = client.get(endpoint, headers=headers)
@@ -227,15 +228,19 @@ def _check_litellm_reachability(settings: Settings) -> LiteLLMReachabilityStatus
             endpoint=endpoint,
             reachable=True,
             status_code=response.status_code,
-            error=None if response.status_code < 500 else response.text[:300],
+            error=None if response.status_code < 500 else "LiteLLM returned a server error.",
         )
-    except (httpx.HTTPError, security_policy_service.ProviderEgressDeniedError) as exc:
+    except (
+        httpx.HTTPError,
+        SecretProviderError,
+        security_policy_service.ProviderEgressDeniedError,
+    ):
         return LiteLLMReachabilityStatus(
             base_url=settings.litellm_base_url,
             endpoint=endpoint,
             reachable=False,
             status_code=None,
-            error=str(exc),
+            error="LiteLLM reachability check failed.",
         )
 
 

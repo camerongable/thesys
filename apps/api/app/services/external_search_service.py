@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.core.config import Settings
+from app.security.secrets import SecretName, SecretProviderError, resolve_secret
 from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
@@ -106,7 +107,11 @@ def diagnostics(batch: ExternalSearchBatch) -> dict[str, Any]:
 
 
 def _search_tavily(settings: Settings, queries: list[str]) -> list[ExternalSearchResult]:
-    if not settings.tavily_api_key or not settings.tavily_api_key.strip():
+    try:
+        api_key = resolve_secret(settings, SecretName.TAVILY_API_KEY, required=False)
+    except SecretProviderError:
+        raise ExternalSearchError("Tavily credentials are unavailable.") from None
+    if api_key is None:
         raise ExternalSearchError("Tavily search requires TAVILY_API_KEY.")
 
     endpoint = "https://api.tavily.com/search"
@@ -117,7 +122,7 @@ def _search_tavily(settings: Settings, queries: list[str]) -> list[ExternalSearc
 
     results: list[ExternalSearchResult] = []
     headers = {
-        "Authorization": f"Bearer {settings.tavily_api_key}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     try:

@@ -32,6 +32,7 @@ live in `apps/api/app/security/contracts.py`.
 | Decision records | Confidential | Approved provider | ValidationService |
 | API credentials | Restricted | Local only | PlatformSecurity |
 | OAuth credentials and refresh tokens | Restricted | Local only | PlatformSecurity |
+| Wrapped per-workspace data-encryption key | Restricted | Local only | PlatformSecurity |
 | System prompts | Confidential | Approved provider | AISafetyGateway |
 | Tool schemas | Confidential | Approved provider | ToolPolicyGateway |
 | MCP server registrations | Confidential | Local only | ToolPolicyGateway |

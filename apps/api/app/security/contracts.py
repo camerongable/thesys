@@ -123,6 +123,12 @@ DATA_TYPES: dict[str, ClassifiedDataType] = {
         ProviderPolicy.LOCAL_ONLY,
         "PlatformSecurity",
     ),
+    "workspace_data_key": ClassifiedDataType(
+        "Wrapped per-workspace data-encryption key",
+        DataClassification.RESTRICTED,
+        ProviderPolicy.LOCAL_ONLY,
+        "PlatformSecurity",
+    ),
     "system_prompts": ClassifiedDataType(
         "System prompts",
         DataClassification.CONFIDENTIAL,
@@ -330,6 +336,7 @@ RLS_DIRECT_TENANT_TABLES = frozenset(
         "validation_missions",
         "validation_result_interpretations",
         "wedge_options",
+        "workspace_data_keys",
     }
 )
 

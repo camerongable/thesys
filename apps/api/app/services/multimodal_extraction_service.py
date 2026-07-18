@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from app.core.config import Settings
+from app.security.secrets import SecretName, SecretProviderError, resolve_secret
 from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
@@ -122,7 +123,13 @@ def _extract_with_litellm(
     media_type: str,
 ) -> MultimodalExtraction:
     """Call a multimodal-capable LiteLLM chat model and normalize JSON output."""
-    if not settings.litellm_api_key.strip():
+    try:
+        api_key = resolve_secret(settings, SecretName.LITELLM_API_KEY, required=False)
+    except SecretProviderError:
+        raise MultimodalExtractionError(
+            "LiteLLM multimodal credentials are unavailable."
+        ) from None
+    if api_key is None:
         raise MultimodalExtractionError("LiteLLM multimodal extraction requires LITELLM_API_KEY.")
 
     url = f"{settings.litellm_base_url.rstrip('/')}/v1/chat/completions"
@@ -131,7 +138,7 @@ def _extract_with_litellm(
     except ProviderEgressDeniedError as exc:
         raise MultimodalExtractionError(f"LiteLLM multimodal egress denied: {exc}") from exc
     headers = {
-        "Authorization": f"Bearer {settings.litellm_api_key}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     encoded_body = base64.b64encode(body).decode("ascii")

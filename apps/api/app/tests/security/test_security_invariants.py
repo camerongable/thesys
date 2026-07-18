@@ -189,7 +189,10 @@ def test_rls_migration_forces_policies_and_scoped_role_grants(monkeypatch) -> No
 
     migration.upgrade()
 
-    assert set(migration.RLS_DIRECT_TABLES) == RLS_DIRECT_TENANT_TABLES
+    assert set(migration.RLS_DIRECT_TABLES) < RLS_DIRECT_TENANT_TABLES
+    assert RLS_DIRECT_TENANT_TABLES - set(migration.RLS_DIRECT_TABLES) == {
+        "workspace_data_keys"
+    }
     assert set(migration.RLS_INHERITED_TABLES) == RLS_INHERITED_TENANT_TABLES
     combined = "\n".join(statements)
     for table in (*migration.RLS_DIRECT_TABLES, *migration.RLS_INHERITED_TABLES):
@@ -214,6 +217,79 @@ def test_rls_migration_forces_policies_and_scoped_role_grants(monkeypatch) -> No
     for table in (*migration.RLS_DIRECT_TABLES, *migration.RLS_INHERITED_TABLES):
         assert f'DROP POLICY IF EXISTS workspace_isolation ON "{table}"' in statements
         assert f'ALTER TABLE "{table}" DISABLE ROW LEVEL SECURITY' in statements
+
+
+def test_workspace_data_key_migration_adds_forced_rls_and_scoped_grants(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0030_workspace_data_keys.py"
+    spec = importlib.util.spec_from_file_location("workspace_data_key_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "workspace_data_keys" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "workspace_data_keys" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "workspace_data_keys"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "WITH CHECK" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT, UPDATE, DELETE" in combined
+    assert "thesys_worker" in combined
+    assert "thesys_readonly" not in combined
+
+
+def test_application_credentials_are_read_only_through_secret_provider() -> None:
+    sensitive_settings = {
+        "auth_jwt_secret",
+        "litellm_api_key",
+        "openai_api_key",
+        "anthropic_api_key",
+        "gemini_api_key",
+        "s3_access_key_id",
+        "s3_secret_access_key",
+        "tavily_api_key",
+        "langsmith_api_key",
+    }
+    allowed_paths = {
+        REPO_ROOT / "apps/api/app/core/config.py",
+        REPO_ROOT / "apps/api/app/security/secrets.py",
+    }
+    approved_provider_consumers = {
+        "apps/api/app/ai/litellm_client.py",
+        "apps/api/app/core/auth.py",
+        "apps/api/app/routers/ai.py",
+        "apps/api/app/security/encryption.py",
+        "apps/api/app/services/embedding_service.py",
+        "apps/api/app/services/external_search_service.py",
+        "apps/api/app/services/langsmith_observability_service.py",
+        "apps/api/app/services/multimodal_extraction_service.py",
+        "apps/api/app/services/object_storage_service.py",
+    }
+    violations: list[str] = []
+    provider_consumers: set[str] = set()
+
+    for path in (REPO_ROOT / "apps/api/app").rglob("*.py"):
+        if path in allowed_paths or "tests" in path.parts:
+            continue
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr in sensitive_settings:
+                violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{node.attr}")
+            if isinstance(node, ast.ImportFrom) and node.module == "app.security.secrets":
+                provider_consumers.add(str(path.relative_to(REPO_ROOT)))
+
+    assert not violations, f"Credential settings bypass the secret provider: {violations}"
+    assert provider_consumers <= approved_provider_consumers
 
 
 def test_database_role_manifest_separates_runtime_and_migration_credentials() -> None:

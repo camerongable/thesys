@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
 from app.core.config import Settings
+from app.security.secrets import SecretName, SecretProviderError, resolve_secret
 from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
@@ -140,6 +141,10 @@ def deterministic_hash_embedding(dimension: int, text: str) -> list[float]:
 
 
 def _embed_with_litellm(settings: Settings, text: str) -> list[float]:
+    try:
+        api_key = resolve_secret(settings, SecretName.LITELLM_API_KEY)
+    except SecretProviderError:
+        raise EmbeddingProviderError("LiteLLM embedding credentials are unavailable.") from None
     payload = {"model": settings.embedding_model, "input": text}
     url = f"{settings.litellm_base_url.rstrip('/')}/v1/embeddings"
     try:
@@ -147,7 +152,7 @@ def _embed_with_litellm(settings: Settings, text: str) -> list[float]:
     except ProviderEgressDeniedError as exc:
         raise EmbeddingProviderError(f"LiteLLM embedding egress denied: {exc}") from exc
     headers = {
-        "Authorization": f"Bearer {settings.litellm_api_key}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     attempts = settings.embedding_retry_attempts + 1
@@ -166,12 +171,11 @@ def _embed_with_litellm(settings: Settings, text: str) -> list[float]:
                 raise EmbeddingProviderError("LiteLLM embedding response did not include a vector.")
             return [float(value) for value in vector]
         except httpx.HTTPStatusError as exc:
-            detail = exc.response.text[:500]
             last_error = EmbeddingProviderError(
-                f"LiteLLM embedding request failed with status {exc.response.status_code}: {detail}"
+                f"LiteLLM embedding request failed with status {exc.response.status_code}."
             )
-        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
-            last_error = EmbeddingProviderError(f"LiteLLM embedding request failed: {exc}")
+        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
+            last_error = EmbeddingProviderError("LiteLLM embedding request failed.")
 
         if attempt < attempts - 1:
             time.sleep(0.25 * (attempt + 1))

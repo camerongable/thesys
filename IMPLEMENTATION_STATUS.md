@@ -10,8 +10,9 @@ abuse cases, automated invariant checks, and a pull-request security checklist.
 Sprint 62 production identity work is now underway: OIDC/JWKS verification,
 principal-backed authorization context, strict active membership resolution,
 the production dev-auth startup guard, forced Postgres RLS, and scoped database
-roles are implemented. Sprints 62-68 own the remaining secrets/encryption,
-secure ingestion, centralized
+roles are implemented. Production secret providers and the workspace envelope
+encryption foundation are also implemented. Sprints 62-68 own the remaining
+object/session/auth-audit hardening, secure ingestion, centralized
 guardrails, secure RAG/memory, MCP/tool policy, monitoring/incident response,
 and adversarial CI controls identified as partial or planned by that contract.
 
@@ -94,8 +95,10 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Add persistent user status and migration `0028_production_identity`.
 - [x] Bind validated principals to transaction-local Postgres workspace/user
   settings and reapply them after every session transaction boundary.
-- [x] Enable and force RLS across all 38 currently modeled tenant tables,
-  including five child/link tables with inherited parent policies.
+- [x] Enable and force RLS across all 39 currently modeled tenant tables:
+  migration `0029_tenant_rls` covers the original 38, migration
+  `0030_workspace_data_keys` covers the restricted key table, and five
+  child/link tables use inherited parent policies.
 - [x] Separate migration, API, Temporal worker, and readonly database roles;
   hosted startup rejects a bootstrap or mismatched runtime username.
 - [x] Add direct wrong-tenant Postgres ORM coverage for projects, evidence,
@@ -105,7 +108,18 @@ current verdict, next action, evidence health, validation, and decision state.
   security-event surfaces land. There are no standalone `validation_plans` or
   `security_events` tables in the current schema; new tenant tables fail the RLS
   invariant until registered and migrated.
-- [ ] Add production secret providers and envelope encryption.
+- [x] Add environment, Vault KV v2, and AWS Secrets Manager providers; reject
+  environment-backed application secrets in staging and production, and route
+  all current API credential consumers through the closed secret-name registry.
+- [x] Add AES-256-GCM envelope encryption with random per-workspace DEKs,
+  versioned external wrapping keys, authenticated workspace/purpose context,
+  wrapping-key re-encryption, and forced RLS on `workspace_data_keys` via
+  migration `0030_workspace_data_keys`.
+- [x] Redact secret-shaped values at the durable project-memory write boundary;
+  audit, tool, trace, and public-error paths retain their existing shared
+  redaction controls. No current domain model stores OAuth refresh tokens,
+  connector credentials, reversible PII maps, or user provider credentials, so
+  those future fields must use `EncryptedValue` when introduced.
 - [ ] Harden object storage, browser/session policy, and auth audit events.
 
 ## Sprint 62 Identity Verification
@@ -138,9 +152,24 @@ current verdict, next action, evidence health, validation, and decision state.
   superuser/BYPASSRLS role, any policy is not forced, cross-tenant reads become
   visible, or wrong-tenant writes succeed.
 
+## Sprint 62 Secrets and Encryption Verification
+
+- [x] Focused provider-policy, Vault/cloud adapter, leakage, AES-GCM
+  round-trip/tamper/workspace/purpose, wrapping-key rotation, RLS invariant,
+  identity, tenant-context, and memory tests passed (`54 passed, 3 xfailed`).
+- [x] All current API credential reads were checked to route through
+  `app.security.secrets`; local settings/provider representations exclude raw
+  secret values.
+- [x] The full backend regression suite passed (`312 passed, 1 skipped,
+  3 xfailed, 3 warnings`).
+- [ ] Validate migration `0030_workspace_data_keys` against live Postgres as
+  part of the existing `RLS_TEST_DATABASE_URL` CI checkpoint.
+
 ## Next Sprint
 
-Continue V1 Sprint 62 with production secret providers and envelope encryption.
+Continue V1 Sprint 62 with object-storage security, browser/session headers,
+authentication and authorization audit events, and the remaining service-level
+cross-tenant matrix.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

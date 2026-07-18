@@ -333,6 +333,13 @@ child/link tables that inherit workspace scope. The API, Temporal worker,
 migration process, and readonly access use separate non-superuser database roles;
 application-level workspace predicates remain in place as defense in depth.
 
+Secret access is environment-gated: local development uses the environment
+provider, while staging and production require Vault or a cloud secret manager.
+Application credential consumers resolve closed, named secrets at the point of
+use. Restricted reversible fields can use AES-256-GCM envelope encryption with
+a random per-workspace data key; only the externally wrapped data key is stored,
+and its table is protected by the same forced RLS boundary.
+
 ---
 
 ## Architecture Overview

@@ -1074,7 +1074,7 @@ def _trace_from_sprint(
     return langsmith_observability_service.TraceContext(
         trace_id=trace_id,
         trace_url=trace_url,
-        enabled=bool(settings.langsmith_tracing and settings.langsmith_api_key),
+        enabled=langsmith_observability_service.langsmith_enabled(settings),
         metadata=metadata,
     )
 
