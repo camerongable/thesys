@@ -945,6 +945,11 @@ def _process_source_text(
             raise EvidenceIngestionError("Evidence source did not produce chunks.")
 
         content_hash = source_provenance_service.content_hash(normalized)
+        duplicate_source_count = _duplicate_content_source_count(
+            db,
+            source,
+            content_hash=content_hash,
+        )
         sanitized_metadata = _sanitize_metadata_for_storage(
             metadata or {},
             project_id=source.project_id,
@@ -1007,6 +1012,7 @@ def _process_source_text(
             text=searchable_text,
             metadata=processed_metadata,
             approved_by=source.created_by,
+            duplicate_source_count=duplicate_source_count,
         )
         source_security_metadata["security_status"] = source_trust.security_status
         processed_metadata["security"] = source_security_metadata
@@ -1333,6 +1339,28 @@ def _find_ready_url_source(
             EvidenceSource.ingestion_status == "ready",
         )
         .options(selectinload(EvidenceSource.chunks))
+    )
+
+
+def _duplicate_content_source_count(
+    db: Session,
+    source: EvidenceSource,
+    *,
+    content_hash: str,
+) -> int:
+    """Count prior identical source bodies without relying on a JSON dialect feature."""
+    candidates = db.scalars(
+        select(EvidenceSource).where(
+            EvidenceSource.workspace_id == source.workspace_id,
+            EvidenceSource.project_id == source.project_id,
+            EvidenceSource.id != source.id,
+            EvidenceSource.ingestion_status.in_(("processing", "ready", "quarantined")),
+        )
+    )
+    return sum(
+        1
+        for candidate in candidates
+        if (candidate.source_metadata or {}).get("content_hash") == content_hash
     )
 
 

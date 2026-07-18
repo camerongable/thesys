@@ -56,6 +56,38 @@ def test_source_trust_detects_hidden_unicode_and_external_search_provenance() ->
     assert trust.approved_at is None
 
 
+def test_repeated_identical_sources_are_quarantined_as_duplicate_flooding(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = _create_project(client)
+    payload = {
+        "title": "Repeated claim",
+        "text": "Fitness coaches need weekly check-in synthesis before client calls.",
+    }
+
+    responses = [
+        client.post(f"/api/projects/{project_id}/evidence/note", json=payload) for _ in range(3)
+    ]
+
+    assert [response.status_code for response in responses] == [201, 201, 201]
+    sources = list(db_session.scalars(select(EvidenceSource).order_by(EvidenceSource.created_at)))
+    assert [source.ingestion_status for source in sources] == ["ready", "ready", "quarantined"]
+    duplicate_counts = [
+        source.source_metadata["source_trust"]["duplicate_source_count"] for source in sources
+    ]
+    assert duplicate_counts == [
+        0,
+        1,
+        2,
+    ]
+    assert sources[-1].source_metadata["source_trust"]["security_status"] == "quarantined"
+    quarantined_chunk = db_session.scalar(
+        select(EvidenceChunk).where(EvidenceChunk.source_id == sources[-1].id)
+    )
+    assert quarantined_chunk is None
+
+
 def _create_project(client: TestClient) -> str:
     response = client.post(
         "/api/projects",

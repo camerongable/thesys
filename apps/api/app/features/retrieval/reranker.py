@@ -163,6 +163,10 @@ def _deterministic_rerank(
             + min(match_count / 4.0, 1.0) * 0.05
             + provider_rank_boost
         )
+        security_penalty = (
+            _metadata_float(result.metadata, "security_risk_penalty") or 0.0
+        ) + (_metadata_float(result.metadata, "duplicate_source_penalty") or 0.0)
+        rerank_score = max(0.0, rerank_score - security_penalty)
         if overlap == 0 and type_overlap == 0 and result.keyword_score == 0:
             rerank_score *= 0.6
         scored.append((round(min(rerank_score, 1.0), 6), result))

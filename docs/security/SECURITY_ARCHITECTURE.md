@@ -63,7 +63,9 @@ central gates in this target flow.
   injection, and poisoning scores plus review timestamps. Instruction-heavy,
   policy-override, tool-schema, system-message impersonation, or hidden-Unicode
   sources are quarantined before vector creation and emit a redacted audit
-  event.
+  event. Repeated identical source bodies become a duplicate-flooding signal;
+  approved candidate rankings also subtract source-risk and cross-source
+  duplicate penalties before reranking and context assembly.
 - Model output failing schema, citation, or DLP validation is rejected or safely
   regenerated; it is never executed as policy.
 - Approval timeout, cancellation, or mismatch leaves the proposed mutation

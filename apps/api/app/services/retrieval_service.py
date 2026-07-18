@@ -25,6 +25,7 @@ from app.features.retrieval import planning as retrieval_planning_feature
 from app.features.retrieval import reranker as retrieval_reranker_feature
 from app.features.retrieval import result_shaping as retrieval_result_shaping_feature
 from app.features.retrieval import scoring as retrieval_scoring_feature
+from app.features.retrieval import security_ranking as retrieval_security_ranking_feature
 from app.features.retrieval.security_policy import RetrievalSecurityPolicy
 from app.schemas.evidence import (
     EvidenceRetrievalResultRead,
@@ -429,8 +430,7 @@ def _retrieve_with_sql_vector_search(
         )
         scored.append(result.model_copy(update={"metadata": metadata}))
 
-    scored.sort(key=lambda result: (result.score, result.created_at), reverse=True)
-    return scored[: payload.top_k], filtered_count
+    return _apply_security_ranking(scored)[: payload.top_k], filtered_count
 
 
 def _retrieve_with_python_scoring(
@@ -555,6 +555,7 @@ _context_selection_reason = retrieval_context_selection_feature.context_selectio
 _quality_report = retrieval_context_selection_feature.quality_report
 _ndcg_proxy = retrieval_context_selection_feature.ndcg_proxy
 _combine_fallback_reasons = retrieval_context_selection_feature.combine_fallback_reasons
+_apply_security_ranking = retrieval_security_ranking_feature.apply_security_ranking
 
 
 def _metadata_float(metadata: dict[str, object], key: str) -> float | None:
@@ -763,8 +764,7 @@ def _score_candidates(
             )
         )
 
-    scored.sort(key=lambda result: (result.score, result.created_at), reverse=True)
-    return scored[:top_k]
+    return _apply_security_ranking(scored)[:top_k]
 
 
 def _serialize_result(
@@ -784,6 +784,8 @@ def _serialize_result(
         ):
             source_quality = source_metadata["source_quality"]
     reference_date = source.source_date or source.ingested_at or source.created_at
+    source_metadata = source.source_metadata or {}
+    source_trust = source_metadata.get("source_trust")
     metadata.update(
         {
             "source_classification": source.classification,
@@ -792,6 +794,8 @@ def _serialize_result(
             else None,
             "source_date": source.source_date.isoformat() if source.source_date else None,
             "source_ingested_at": source.ingested_at.isoformat() if source.ingested_at else None,
+            "source_content_hash": source_metadata.get("content_hash"),
+            "source_trust": source_trust if isinstance(source_trust, dict) else None,
             "domain": _domain_from_url(source.url),
             "freshness_score": _freshness_score(reference_date),
             "source_quality": source_quality if isinstance(source_quality, dict) else None,

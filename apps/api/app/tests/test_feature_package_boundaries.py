@@ -71,6 +71,7 @@ from app.features.retrieval import diagnostics as retrieval_diagnostics
 from app.features.retrieval import reranker
 from app.features.retrieval import result_shaping as retrieval_result_shaping
 from app.features.retrieval import scoring as retrieval_scoring
+from app.features.retrieval import security_ranking as retrieval_security_ranking
 from app.features.validation import generation as validation_generation
 from app.features.validation import result_interpretation
 from app.mcp import adapter as mcp_adapter
@@ -202,6 +203,9 @@ def test_retrieval_context_selection_helpers_are_feature_owned_and_service_compa
     assert retrieval_service._ndcg_proxy is retrieval_context_selection.ndcg_proxy
     assert retrieval_service._combine_fallback_reasons is (
         retrieval_context_selection.combine_fallback_reasons
+    )
+    assert retrieval_service._apply_security_ranking is (
+        retrieval_security_ranking.apply_security_ranking
     )
     assert retrieval_service._result_domain is retrieval_context_selection.result_domain
     assert retrieval_service._result_competitor_id is (

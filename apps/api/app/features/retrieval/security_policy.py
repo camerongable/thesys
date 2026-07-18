@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from app.core.auth import AuthContext
 
 
-RETRIEVAL_SECURITY_POLICY_VERSION = "v2"
+RETRIEVAL_SECURITY_POLICY_VERSION = "v3"
 
 _CLASSIFICATION_RANK = {
     DataClassification.PUBLIC: 0,

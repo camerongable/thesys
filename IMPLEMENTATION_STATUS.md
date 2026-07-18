@@ -545,6 +545,12 @@ current verdict, next action, evidence health, validation, and decision state.
   Instruction-heavy, system-message/policy/tool-schema, and hidden-Unicode
   content is quarantined before vector creation, emits an attributed audit
   event, and cannot pass the shared retrieval policy even if stale chunks exist.
+- [x] Treat repeated identical source bodies as a duplicate-flooding signal.
+  Repeated submissions are quarantined before vector creation; eligible results
+  pass a shared secure-ranking stage before SQL/Python candidate truncation and
+  reranking. It drops explicitly unsafe metadata and records source-risk and
+  cross-source duplicate penalties, preventing a small duplicate cluster from
+  dominating synthesis context.
 
 ## Sprint 65 Verification
 
@@ -556,11 +562,14 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Source-trust/quarantine checkpoint passed (`48 passed, 1 xfailed, 1
   warning`); repository-wide lint and the full backend suite passed (`417
   passed, 1 skipped, 1 xfailed, 12 warnings`).
+- [x] Duplicate-flooding and secure-ranking checkpoint passed (`55 passed, 1
+  warning`); repository-wide lint and the full backend suite passed (`419
+  passed, 1 skipped, 1 xfailed, 12 warnings`).
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-add duplicate/anomalous-embedding poisoning detection and secure ranking, then
+add anomalous-embedding and recommendation-shift poisoning detection, then
 harden the memory write, conflict, recall, and source-invalidation paths.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.

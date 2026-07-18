@@ -84,6 +84,7 @@ class SourceTrust:
     approved_by: str | None
     approved_at: datetime | None
     last_verified_at: datetime
+    duplicate_source_count: int
     signals: tuple[str, ...]
 
     def metadata(self) -> dict[str, Any]:
@@ -97,6 +98,7 @@ class SourceTrust:
             "approved_by": self.approved_by,
             "approved_at": self.approved_at.isoformat() if self.approved_at else None,
             "last_verified_at": self.last_verified_at.isoformat(),
+            "duplicate_source_count": self.duplicate_source_count,
             "signals": list(self.signals),
         }
 
@@ -216,6 +218,7 @@ def assess_source_trust(
     text: str,
     metadata: dict[str, Any],
     approved_by: object | None,
+    duplicate_source_count: int = 0,
 ) -> SourceTrust:
     """Assess instruction and poisoning signals before a source becomes retrievable."""
     prompt_markers = detect_prompt_injection_markers(text)
@@ -228,6 +231,8 @@ def assess_source_trust(
     signals.extend(name for name, count in poisoning_matches.items() if count)
     if hidden_unicode:
         signals.append("hidden_unicode")
+    if duplicate_source_count:
+        signals.append("duplicate_source_content")
     signals = sorted(set(signals))
 
     injection_score = min(
@@ -240,7 +245,8 @@ def assess_source_trust(
         1.0,
         0.2 * instruction_count
         + 0.3 * sum(1 for count in poisoning_matches.values() if count)
-        + (0.2 if hidden_unicode else 0.0),
+        + (0.2 if hidden_unicode else 0.0)
+        + min(duplicate_source_count * 0.35, 0.8),
     )
     quarantined = injection_score >= 0.6 or poisoning_score >= 0.7
     provenance_type = _provenance_type(source_type, metadata)
@@ -264,6 +270,7 @@ def assess_source_trust(
         approved_by=str(approved_by) if approved_by is not None and not quarantined else None,
         approved_at=now if not quarantined else None,
         last_verified_at=now,
+        duplicate_source_count=duplicate_source_count,
         signals=tuple(signals),
     )
 
