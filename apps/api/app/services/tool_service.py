@@ -10,7 +10,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import AuthContext, normalized_role, require_permission
+from app.core.auth import (
+    AuthContext,
+    normalized_role,
+    record_cross_tenant_access_attempt,
+    require_permission,
+)
 from app.core.config import Settings
 from app.core.redaction import redact_payload, redact_text
 from app.db.models import (
@@ -922,6 +927,11 @@ def _get_invocation(
         )
     )
     if invocation is None:
+        record_cross_tenant_access_attempt(
+            db,
+            auth,
+            reason_code="tool_invocation_scope_denied",
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tool invocation not found.",

@@ -27,7 +27,7 @@ from app.ai.prompts import (
     VALIDATION_RESULT_INTERPRETATION_PROMPT_VERSION,
 )
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
-from app.core.auth import AuthContext, require_permission
+from app.core.auth import AuthContext, record_cross_tenant_access_attempt, require_permission
 from app.core.config import Settings, get_settings
 from app.db.models import (
     AIRun,
@@ -1089,6 +1089,7 @@ def get_decision(
         .options(selectinload(Decision.links))
     )
     if decision is None:
+        record_cross_tenant_access_attempt(db, auth, reason_code="decision_scope_denied")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Decision not found.")
     return decision
 

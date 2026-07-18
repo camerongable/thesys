@@ -153,8 +153,11 @@ current verdict, next action, evidence health, validation, and decision state.
   `cross_tenant_access_attempt` from the shared project lookup on a scoped
   project denial. Forced RLS deliberately keeps unknown and out-of-workspace
   UUIDs indistinguishable, and the event stores neither requested UUID.
+- [x] Emit credential-free, tenant-attributable cross-tenant-attempt events
+  from direct decision retrieval and tool-invocation approval lookups, with
+  fixed reason codes and no persisted project, decision, or invocation IDs.
 - [ ] Add broader authorization-denial emitters as their corresponding
-  direct-resource mutation/read flows are introduced.
+  direct-resource mutation/read flows are introduced or identified.
 
 ## Sprint 62 Identity Verification
 
@@ -242,6 +245,8 @@ current verdict, next action, evidence health, validation, and decision state.
   coverage (`338 passed, 1 skipped, 3 xfailed, 3 warnings`).
 - [x] Shared project-scope audit coverage passed with the full backend suite
   (`339 passed, 1 skipped, 3 xfailed, 3 warnings`).
+- [x] Direct decision and tool-invocation scope-audit coverage passed with the
+  full backend suite (`340 passed, 1 skipped, 3 xfailed, 3 warnings`).
 - [ ] Run migration `0031_authentication_events` and its policy checks against
   the existing live-Postgres CI checkpoint. Local SQLite tests prove the model
   and offline migration contract but not a PostgreSQL RLS execution.
@@ -263,7 +268,8 @@ current verdict, next action, evidence health, validation, and decision state.
 ## Next Sprint
 
 Continue V1 Sprint 62 with the remaining service-level cross-tenant matrix and
-authorization-denial emitters for direct resource/mutation boundaries.
+authorization-denial emitters for the remaining direct resource/mutation
+boundaries.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

@@ -65,6 +65,12 @@ tenant-attributable `cross_tenant_access_attempt` with reason
 other-workspace UUIDs indistinguishable, so the event contains neither the
 requested identifier nor a claim that it belongs to another tenant.
 
+Direct decision and tool-invocation routes apply the same non-enumerating 404
+behavior when their resource IDs are outside the current workspace. They emit
+fixed `decision_scope_denied` or `tool_invocation_scope_denied` reasons through
+the same attributed `cross_tenant_access_attempt` event and never store either
+requested identifier.
+
 ## Database Roles And RLS
 
 | Role | Runtime use | Privileges |
