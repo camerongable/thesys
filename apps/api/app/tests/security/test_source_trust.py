@@ -49,6 +49,27 @@ def test_instruction_heavy_source_is_quarantined_before_embedding(
     assert audit.event_type == "evidence_source_quarantined"
     assert audit.event_metadata["injection_score"] == trust["injection_score"]
 
+    detail = client.get(f"/api/projects/{project_id}/evidence/{source.id}")
+    listing = client.get(f"/api/projects/{project_id}/evidence")
+
+    assert detail.status_code == 200
+    assert detail.json()["summary"] is None
+    assert detail.json()["text_preview"] is None
+    assert listing.status_code == 200
+    assert listing.json()["sources"][0]["summary"] is None
+    assert listing.json()["sources"][0]["text_preview"] is None
+
+    source.object_storage_key = "workspaces/test/projects/test/evidence/test/source.txt"
+    db_session.commit()
+    download = client.get(f"/api/projects/{project_id}/evidence/{source.id}/download")
+
+    assert download.status_code == 403
+    denied = db_session.scalar(
+        select(AuditEvent).where(AuditEvent.event_type == "evidence_source_content_access_denied")
+    )
+    assert denied is not None
+    assert denied.event_metadata == {"reason": "retrieval_policy_denied"}
+
 
 def test_source_trust_detects_hidden_unicode_and_external_search_provenance() -> None:
     trust = assess_source_trust(

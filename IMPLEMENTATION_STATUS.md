@@ -605,6 +605,10 @@ current verdict, next action, evidence health, validation, and decision state.
   policy before evidence enters context. A source quarantined, revoked, or no
   longer eligible after caching cannot be replayed; cache-hit context, quality,
   and sufficiency diagnostics are recomputed from the surviving evidence.
+- [x] Apply shared retrieval eligibility to evidence source content surfaces.
+  Ineligible sources retain operational metadata for review, but list/detail
+  responses withhold summaries, previews, and object keys; downloads are denied
+  and attributed until the source becomes eligible again.
 
 ## Sprint 65 Verification
 
@@ -662,12 +666,15 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Retrieval-cache policy-recheck checkpoint passed (`18 passed, 1 warning`)
   across policy, retrieval, and secure-ranking regressions, with changed-file
   lint and compile checks clean.
+- [x] Source-content eligibility checkpoint passed (`32 passed, 1 warning`) across
+  source trust, evidence, and object-storage regressions, with changed-file lint
+  and compile checks clean.
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-audit remaining source-detail, MCP, LangGraph, and trace/replay parity plus
-memory-poisoning acceptance work.
+audit MCP, LangGraph, and trace/replay retrieval-path parity plus memory-poisoning
+acceptance work.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

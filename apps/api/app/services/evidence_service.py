@@ -36,6 +36,7 @@ from app.db.models import (
     ProjectMemoryItem,
 )
 from app.features.evidence import extraction as evidence_extraction
+from app.features.retrieval.security_policy import RetrievalSecurityPolicy
 from app.schemas.evidence import EvidenceNoteCreate, EvidenceUrlCreate
 from app.services import (
     ai_run_service,
@@ -687,6 +688,24 @@ def prepare_source_download(
     source_id: uuid.UUID,
 ) -> object_storage_service.ObjectDownload:
     source = get_source(db, auth, project_id, source_id)
+    if not source_content_is_eligible(auth, settings, source):
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="evidence_source_content_access_denied",
+            actor_type="user",
+            project_id=project_id,
+            entity_type="evidence_source",
+            entity_id=source.id,
+            risk_level="medium",
+            summary="Denied evidence source content because retrieval policy did not allow it.",
+            metadata={"reason": "retrieval_policy_denied"},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Evidence source content is not available in its current security state.",
+        )
     if not source.object_storage_key:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -851,6 +870,19 @@ def serialize_source(source: EvidenceSource) -> dict[str, Any]:
         "chunk_count": len(source.chunks),
         "text_preview": _preview(source.raw_text),
     }
+
+
+def source_content_is_eligible(
+    auth: AuthContext,
+    settings: Settings,
+    source: EvidenceSource,
+) -> bool:
+    """Allow source text only when at least one current chunk is retrievable."""
+    policy = RetrievalSecurityPolicy.for_auth(
+        auth,
+        minimum_source_trust_score=settings.retrieval_min_source_trust_score,
+    )
+    return any(policy.allows(source=source, chunk=chunk) for chunk in source.chunks)
 
 
 def _chunk_needs_reembedding(chunk: EvidenceChunk, settings: Settings) -> bool:

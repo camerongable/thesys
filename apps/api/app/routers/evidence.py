@@ -30,8 +30,17 @@ DbDep = Annotated[Session, Depends(get_db)]
 EvidenceUploadFile = Annotated[UploadFile, File()]
 
 
-def serialize_source(source) -> EvidenceSourceRead:
-    return EvidenceSourceRead.model_validate(evidence_service.serialize_source(source))
+def serialize_source(source, *, include_content: bool = True) -> EvidenceSourceRead:
+    payload = evidence_service.serialize_source(source)
+    if not include_content:
+        payload.update(
+            {
+                "object_storage_key": None,
+                "summary": None,
+                "text_preview": None,
+            }
+        )
+    return EvidenceSourceRead.model_validate(payload)
 
 
 @router.get("", response_model=EvidenceSourceListRead)
@@ -39,9 +48,18 @@ def list_evidence_sources(
     project_id: uuid.UUID,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> EvidenceSourceListRead:
     sources = evidence_service.list_sources(db, auth, project_id)
-    return EvidenceSourceListRead(sources=[serialize_source(source) for source in sources])
+    return EvidenceSourceListRead(
+        sources=[
+            serialize_source(
+                source,
+                include_content=evidence_service.source_content_is_eligible(auth, settings, source),
+            )
+            for source in sources
+        ]
+    )
 
 
 @router.post("/url", response_model=EvidenceSourceRead, status_code=status.HTTP_201_CREATED)
@@ -229,9 +247,13 @@ def get_evidence_source(
     source_id: uuid.UUID,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> EvidenceSourceRead:
     source = evidence_service.get_source(db, auth, project_id, source_id)
-    return serialize_source(source)
+    return serialize_source(
+        source,
+        include_content=evidence_service.source_content_is_eligible(auth, settings, source),
+    )
 
 
 @router.get("/{source_id}/download", response_model=None)
