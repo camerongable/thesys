@@ -2,11 +2,12 @@ import uuid
 from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.oidc import oidc_external_auth_id
 from app.db.models import User, Workspace, WorkspaceMember
+from app.services import auth_audit_service
 
 if TYPE_CHECKING:
     from app.core.auth import AuthContext
@@ -220,6 +221,105 @@ def resolve_oidc_identity(
     )
 
 
+def update_workspace_member_role(
+    db: Session,
+    auth: "AuthContext",
+    *,
+    user_id: uuid.UUID,
+    role: str,
+) -> WorkspaceMember:
+    """Change a member role within the caller's workspace and audit the outcome."""
+
+    from app.core.auth import require_workspace_owner
+    from app.services import governance_service
+
+    require_workspace_owner(auth)
+    normalized_role = _normalize_role(role)
+    if normalized_role is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A workspace role is required.",
+        )
+
+    # Serialize membership role updates so the final workspace owner cannot be demoted.
+    db.scalar(select(Workspace).where(Workspace.id == auth.workspace_id).with_for_update())
+    membership = db.scalar(
+        select(WorkspaceMember).where(
+            WorkspaceMember.workspace_id == auth.workspace_id,
+            WorkspaceMember.user_id == user_id,
+        )
+    )
+    if membership is None:
+        _record_cross_tenant_member_attempt(db, auth, user_id)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace member not found.",
+        )
+
+    previous_role = membership.role
+    if previous_role == normalized_role:
+        return membership
+    if previous_role == "owner" and normalized_role != "owner":
+        owner_count = db.scalar(
+            select(func.count())
+            .select_from(WorkspaceMember)
+            .where(
+                WorkspaceMember.workspace_id == auth.workspace_id,
+                WorkspaceMember.role == "owner",
+            )
+        )
+        if owner_count == 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A workspace must retain at least one owner.",
+            )
+
+    membership.role = normalized_role
+    auth_audit_service.record_authentication_event(
+        db,
+        event_type="role_change",
+        authentication_method=auth.principal.authentication_method,
+        reason_code="workspace_member_role_updated",
+        workspace_id=auth.workspace_id,
+        user_id=auth.user_id,
+    )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workspace_member_role_changed",
+        actor_type="user",
+        entity_type="workspace_member",
+        entity_id=membership.id,
+        risk_level="high",
+        summary="Changed a workspace member role.",
+        metadata={"previous_role": previous_role, "new_role": normalized_role},
+    )
+    db.commit()
+    db.refresh(membership)
+    return membership
+
+
+def _record_cross_tenant_member_attempt(
+    db: Session,
+    auth: "AuthContext",
+    user_id: uuid.UUID,
+) -> None:
+    exists_outside_workspace = db.scalar(
+        select(WorkspaceMember.id).where(WorkspaceMember.user_id == user_id).limit(1)
+    )
+    if exists_outside_workspace is None:
+        return
+    auth_audit_service.record_authentication_event(
+        db,
+        event_type="cross_tenant_access_attempt",
+        authentication_method=auth.principal.authentication_method,
+        reason_code="workspace_member_outside_scope",
+        workspace_id=auth.workspace_id,
+        user_id=auth.user_id,
+    )
+    db.commit()
+
+
 def _normalize_role(role: str | None) -> str | None:
     if role is None or role.strip() == "":
         return None
@@ -227,6 +327,6 @@ def _normalize_role(role: str | None) -> str | None:
     if normalized not in VALID_DEV_ROLES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid dev auth role. Use owner, admin, editor, or viewer.",
+            detail="Invalid workspace role. Use owner, admin, editor, or viewer.",
         )
     return normalized

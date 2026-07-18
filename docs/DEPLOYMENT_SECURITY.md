@@ -51,6 +51,13 @@ authenticated request checks the digest before route handling, and successful
 self-revocation creates a `session_revoked` audit event. Service accounts and
 tokens without a `sid` or `jti` cannot use this endpoint.
 
+`PATCH /api/workspace/members/{user_id}/role` is owner-only and preserves at
+least one workspace owner. A successful change emits a fixed `role_change`
+authentication event attributed to the actor and a redacted governance event
+for the affected membership. Requests for a member outside the caller's
+workspace return the same 404 as an unknown member while recording a
+tenant-scoped `cross_tenant_access_attempt` without the target identifier.
+
 ## Database Roles And RLS
 
 | Role | Runtime use | Privileges |

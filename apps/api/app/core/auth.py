@@ -218,6 +218,15 @@ def require_permission(auth: AuthContext, permission: ProjectPermission) -> None
     )
 
 
+def require_workspace_owner(auth: AuthContext) -> None:
+    if normalized_role(auth.role) == "owner":
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Only workspace owners can manage workspace membership.",
+    )
+
+
 def _record_authentication_failure(
     db: Session,
     *,

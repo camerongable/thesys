@@ -143,8 +143,14 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Add self-service session revocation for OIDC `sid` or JWT `jti` identities:
   revocation stores only a tenant/user-scoped SHA-256 digest, emits
   `session_revoked`, and rejects subsequent use before it reaches a route.
-- [ ] Add role-change, cross-tenant-attempt, and broader authorization-denial
-  emitters when their corresponding mutation/resource flows are introduced.
+- [x] Add owner-only workspace member role changes with last-owner protection;
+  successful changes emit an attributable `role_change` authentication event
+  plus a target-membership governance event.
+- [x] Return a non-enumerating 404 and emit a credential-free,
+  tenant-attributable `cross_tenant_access_attempt` when an owner addresses a
+  member belonging only to another workspace.
+- [ ] Add broader authorization-denial emitters as their corresponding
+  mutation/resource flows are introduced.
 
 ## Sprint 62 Identity Verification
 
@@ -224,6 +230,12 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] OIDC session revocation tests passed (`42 passed, 3 xfailed`), covering
   endpoint behavior, hashed-only persistence, audit
   attribution, and denial on token reuse.
+- [x] Workspace member administration tests passed (`30 passed, 1 warning`
+  across focused auth-audit, OIDC, and role-administration coverage), including
+  owner-only role changes, last-owner protection, dual audit attribution, and
+  non-enumerating cross-tenant attempts.
+- [x] The full backend regression suite passed after role-administration audit
+  coverage (`338 passed, 1 skipped, 3 xfailed, 3 warnings`).
 - [ ] Run migration `0031_authentication_events` and its policy checks against
   the existing live-Postgres CI checkpoint. Local SQLite tests prove the model
   and offline migration contract but not a PostgreSQL RLS execution.
@@ -244,8 +256,8 @@ current verdict, next action, evidence health, validation, and decision state.
 
 ## Next Sprint
 
-Continue V1 Sprint 62 with role-change and cross-tenant-attempt audit emitters,
-then finish the remaining service-level cross-tenant matrix.
+Continue V1 Sprint 62 with the remaining service-level cross-tenant matrix and
+authorization-denial emitters for existing resource/mutation boundaries.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

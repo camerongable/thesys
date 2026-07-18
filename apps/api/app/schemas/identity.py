@@ -1,7 +1,10 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
+
+WorkspaceRole = Literal["owner", "admin", "editor", "viewer"]
 
 
 class UserRead(BaseModel):
@@ -25,3 +28,12 @@ class MeRead(BaseModel):
     user: UserRead
     workspace: WorkspaceRead
     role: str
+
+
+class WorkspaceMemberRoleUpdate(BaseModel):
+    role: WorkspaceRole
+
+
+class WorkspaceMemberRead(BaseModel):
+    user_id: uuid.UUID
+    role: WorkspaceRole
