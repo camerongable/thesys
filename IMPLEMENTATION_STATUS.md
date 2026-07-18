@@ -455,8 +455,12 @@ current verdict, next action, evidence health, validation, and decision state.
   source wrappers, and quarantine blocked sources before prompt construction,
   cache payload generation, response context, or citation verification in both
   regular and SSE flows.
-- [ ] Integrate guardrails with remaining rendering surfaces and model-provider
-  boundaries before claiming the full Sprint 64 gateway.
+- [x] Enforce an HTTPS-only browser URL policy in the shared Markdown renderer.
+  Rendered Markdown now turns unsafe destinations and all image destinations
+  into inert text, while approved links use `noopener noreferrer`.
+- [ ] Apply the browser URL policy to remaining direct metadata/citation anchors
+  and integrate guardrails with remaining model-provider boundaries before
+  claiming the full Sprint 64 gateway.
 
 ## Sprint 64 Verification
 
@@ -472,11 +476,18 @@ current verdict, next action, evidence health, validation, and decision state.
   xfailed, 12 warnings`), including regular and SSE indirect-injection tests
   that verify quarantined source text cannot reach a provider prompt or become
   a citation, response-context item, or cache input.
+- [x] Shared Markdown rendering policy test passed (`2 passed`), executing the
+  checked-in URL policy against permitted HTTPS and blocked `http`,
+  `javascript`, `data`, `file`, and `mailto` destinations. The broader web test
+  command remains unavailable because npm registry resets prevented dependency
+  installation and the two existing TypeScript-dependent tests cannot resolve
+  `typescript`.
 
 ## Next Sprint
 
-Continue Sprint 64 by extending the central gateway to rendering surfaces and
-remaining model-provider boundaries.
+Continue Sprint 64 by applying the browser URL policy to direct metadata and
+citation anchors, then extending the central gateway to remaining
+model-provider boundaries.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

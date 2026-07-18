@@ -1,3 +1,5 @@
+import { safeExternalUrl } from "@/lib/safe-external-url";
+
 type MarkdownBlock =
   | { type: "heading"; level: number; text: string }
   | { type: "paragraph"; text: string }
@@ -114,7 +116,7 @@ function parseMarkdown(markdown: string): MarkdownBlock[] {
 }
 
 function InlineMarkdown({ text }: { text: string }) {
-  const parts = text.split(/(\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*)/g);
+  const parts = text.split(/(!?\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*)/g);
   return (
     <>
       {parts.map((part, index) => {
@@ -135,17 +137,21 @@ function InlineMarkdown({ text }: { text: string }) {
             </code>
           );
         }
-        const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+        const link = part.match(/^(!?)\[([^\]]+)\]\(([^)]+)\)$/);
         if (link) {
+          const destination = safeExternalUrl(link[3]);
+          if (!destination || link[1] === "!") {
+            return link[2];
+          }
           return (
             <a
               className="text-primary hover:underline"
-              href={link[2]}
+              href={destination}
               key={`${part}-${index}`}
-              rel="noreferrer"
+              rel="noopener noreferrer"
               target="_blank"
             >
-              {link[1]}
+              {link[2]}
             </a>
           );
         }
