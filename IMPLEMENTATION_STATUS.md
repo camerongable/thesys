@@ -425,11 +425,17 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Image sanitization checkpoint passed (`156 passed, 1 skipped, 2 xfailed,
   12 warnings`), covering metadata removal before storage/provider transit,
   compressed-image rejection, evidence ingestion, and security boundaries.
+- [x] Sprint 63 acceptance audit and output-boundary checkpoint passed (`139
+  passed, 1 skipped, 2 xfailed, 9 warnings`), covering generated-summary
+  redaction in durable workflow state, provider-produced image captions and
+  metadata, pre-fetch URL-title sanitization, access-token detection, PII inside
+  Markdown and `.log` uploads, and exclusion of PDF document metadata from
+  searchable source metadata.
 
 ## Next Sprint
 
-Audit V1 Sprint 63 against its complete acceptance criteria, then begin Sprint
-64's central policy guardrail work.
+Sprint 63 acceptance audit is complete. Begin Sprint 64's central prompt-
+injection, jailbreak, and output-guardrail gateway work.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

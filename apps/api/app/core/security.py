@@ -33,7 +33,7 @@ class UploadValidationResult:
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _ALLOWED_UPLOADS: dict[str, tuple[str, set[str], set[str], set[str]]] = {
     "pdf": ("application/pdf", {".pdf"}, {"application/pdf"}, {"application/pdf"}),
-    "text": ("text/plain", {".txt"}, {"text/plain"}, {"text/plain"}),
+    "text": ("text/plain", {".log", ".txt"}, {"text/plain"}, {"text/plain"}),
     "markdown": (
         "text/markdown",
         {".md", ".markdown"},
@@ -122,7 +122,7 @@ def validate_upload(
         )
 
     raise SecurityValidationError(
-        "Only PDF, text, Markdown, PNG, JPG, JPEG, and WebP uploads are supported."
+        "Only PDF, text, log, Markdown, PNG, JPG, JPEG, and WebP uploads are supported."
     )
 
 

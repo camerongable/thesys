@@ -17,6 +17,7 @@ def _build_pdf(
     page_count: int = 1,
     encrypted: bool = False,
     active_content: bool = False,
+    metadata: dict[str, str] | None = None,
 ) -> bytes:
     writer = PdfWriter()
     for _ in range(page_count):
@@ -30,6 +31,8 @@ def _build_pdf(
                 NameObject("/JS"): TextStringObject("app.alert('unsafe')"),
             }
         )
+    if metadata:
+        writer.add_metadata(metadata)
     output = BytesIO()
     writer.write(output)
     return output.getvalue()
@@ -206,6 +209,43 @@ def test_bounded_pdf_parser_extracts_a_valid_document() -> None:
     extraction = secure_file_parser_service.extract_pdf(settings, body=_build_pdf())
 
     assert extraction.page_texts == [""]
+
+
+def test_pdf_document_metadata_pii_is_not_persisted(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = _build_pdf(
+        metadata={
+            "/Author": "Jane Doe",
+            "/Subject": "Contact jane.doe@example.com with api_key=sk-pdfsecret123.",
+        }
+    )
+    parser_result = secure_file_parser_service.extract_pdf(get_settings(), body=body)
+    assert parser_result.page_texts == [""]
+    monkeypatch.setattr(
+        secure_file_parser_service,
+        "extract_pdf",
+        lambda _settings, *, body: secure_file_parser_service.PDFExtraction(
+            page_texts=["A safe PDF research finding."]
+        ),
+    )
+    project_id = _create_project(client)
+
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/file",
+        files={"file": ("research.pdf", body, "application/pdf")},
+    )
+
+    assert response.status_code == 201
+    source = db_session.scalar(select(EvidenceSource))
+    chunk = db_session.scalar(select(EvidenceChunk))
+    assert source is not None and chunk is not None
+    for raw_value in ("Jane Doe", "jane.doe@example.com", "sk-pdfsecret123"):
+        assert raw_value not in str(source.source_metadata)
+        assert raw_value not in (source.raw_text or "")
+        assert raw_value not in chunk.text
 
 
 def _create_project(client: TestClient) -> str:

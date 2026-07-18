@@ -191,7 +191,11 @@ def add_url_source(
         workspace_id=auth.workspace_id,
         project_id=project_id,
         source_type="url",
-        title=payload.title.strip() if payload.title else None,
+        title=(
+            data_protection_service.redact_for_model(payload.title.strip(), project_id=project_id)
+            if payload.title
+            else None
+        ),
         url=canonical_url,
         ingestion_status="processing",
         created_by=auth.user_id,
@@ -261,8 +265,11 @@ def add_discovered_url_source(
     existing = _find_ready_url_source(db, auth, project_id, canonical_url)
     if existing is not None:
         if metadata:
-            existing.source_metadata = _merge_metadata(existing.source_metadata or {}, metadata)
-            _merge_source_chunk_metadata(db, existing, metadata)
+            sanitized_metadata = _sanitize_metadata_for_storage(metadata, project_id=project_id)
+            existing.source_metadata = _merge_metadata(
+                existing.source_metadata or {}, sanitized_metadata
+            )
+            _merge_source_chunk_metadata(db, existing, sanitized_metadata)
             db.commit()
         return get_source(db, auth, project_id, existing.id)
 
@@ -270,7 +277,11 @@ def add_discovered_url_source(
         workspace_id=auth.workspace_id,
         project_id=project_id,
         source_type="url",
-        title=title.strip() if title else None,
+        title=(
+            data_protection_service.redact_for_model(title.strip(), project_id=project_id)
+            if title
+            else None
+        ),
         url=canonical_url,
         source_date=datetime.now(UTC),
         ingestion_status="processing",
@@ -361,9 +372,12 @@ def add_discovered_url_snapshot(
         workspace_id=auth.workspace_id,
         project_id=project_id,
         source_type="url",
-        title=title.strip() if title else None,
+        title=(
+            data_protection_service.redact_for_model(title.strip(), project_id=project_id)
+            if title
+            else None
+        ),
         url=canonical_url,
-        raw_text=_normalize_text(text),
         ingestion_status="processing",
         created_by=auth.user_id,
     )
@@ -376,7 +390,7 @@ def add_discovered_url_snapshot(
         auth,
         settings,
         source,
-        text=source.raw_text or text,
+        text=text,
         title=source.title or canonical_url,
         content_type="text/plain",
         metadata={
@@ -934,13 +948,17 @@ def _process_source_text(
             raise EvidenceIngestionError("Evidence source did not produce chunks.")
 
         content_hash = source_provenance_service.content_hash(normalized)
+        sanitized_metadata = _sanitize_metadata_for_storage(
+            metadata or {},
+            project_id=source.project_id,
+        )
         base_metadata = _merge_metadata(
             {
                 "content_type": content_type,
                 "content_hash": content_hash,
                 "domain": source_provenance_service.source_domain(source.url),
             },
-            metadata,
+            sanitized_metadata,
         )
         extraction_method = str(
             base_metadata.get("extraction_method")
@@ -1030,7 +1048,13 @@ def _process_source_text(
             500,
         )
         source.raw_text = searchable_text
-        source.summary = _summarize(searchable_text)
+        source.summary = _truncate(
+            data_protection_service.redact_for_model(
+                _summarize(searchable_text),
+                project_id=source.project_id,
+            ),
+            500,
+        )
         source.classification = _classify(source.source_type, source.title, searchable_text)
         source.ingested_at = datetime.now(UTC)
         source.credibility_score = source_provenance_service.adjusted_credibility_score(
@@ -1160,6 +1184,28 @@ def _process_source_text(
         raise EvidenceIngestionError("Evidence source processing failed.") from exc
 
 
+def _sanitize_metadata_for_storage(
+    value: Any,
+    *,
+    project_id: uuid.UUID,
+) -> Any:
+    """Remove provider-produced sensitive strings before source metadata is persisted."""
+    if isinstance(value, dict):
+        return {
+            data_protection_service.redact_for_model(str(key), project_id=project_id): (
+                _sanitize_metadata_for_storage(item, project_id=project_id)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_metadata_for_storage(item, project_id=project_id) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_metadata_for_storage(item, project_id=project_id) for item in value)
+    if isinstance(value, str):
+        return data_protection_service.redact_for_model(value, project_id=project_id)
+    return value
+
+
 def _mark_source_failed(
     db: Session,
     source: EvidenceSource,
@@ -1180,9 +1226,14 @@ def _mark_source_failed(
             secure_ingestion_state_service.SecureIngestionState.FAILED,
         )
     source.ingestion_status = "failed"
-    source.ingestion_error = error[:2000]
+    source.ingestion_error = str(
+        data_protection_service.redact_for_trace(error, project_id=source.project_id)
+    )[:2000]
     if metadata:
-        source.source_metadata = _merge_metadata(source.source_metadata or {}, metadata)
+        source.source_metadata = _merge_metadata(
+            source.source_metadata or {},
+            _sanitize_metadata_for_storage(metadata, project_id=source.project_id),
+        )
     db.commit()
 
 
@@ -1633,6 +1684,9 @@ def _record_ingestion_security_event(
         entity_id=source_id,
         risk_level="medium",
         summary=summary,
-        metadata={"reason": reason, **metadata},
+        metadata=_sanitize_metadata_for_storage(
+            {"reason": reason, **metadata},
+            project_id=project_id,
+        ),
     )
     db.commit()
