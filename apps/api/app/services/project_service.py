@@ -7,8 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.auth import AuthContext, require_permission
-from app.db.models import Project, ProjectThesis
+from app.core.config import Settings
+from app.db.models import EvidenceSource, Project, ProjectThesis
 from app.schemas.projects import ProjectCreate, ProjectUpdate
+from app.services import object_storage_service
 
 
 def list_projects(db: Session, auth: AuthContext) -> list[Project]:
@@ -98,11 +100,50 @@ def update_project(
     return get_project(db, auth, project.id)
 
 
-def delete_project(db: Session, auth: AuthContext, project_id: uuid.UUID) -> None:
-    """Delete a project after permission and workspace checks."""
+def delete_project(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+) -> None:
+    """Delete a project and its private evidence objects."""
 
     require_permission(auth, "delete_project")
     project = get_project(db, auth, project_id)
+    stored_sources = list(
+        db.scalars(
+            select(EvidenceSource).where(
+                EvidenceSource.workspace_id == auth.workspace_id,
+                EvidenceSource.project_id == project_id,
+                EvidenceSource.object_storage_key.is_not(None),
+            )
+        )
+    )
+    # Imported here because governance event reads depend on project_service.
+    from app.services import governance_service
+
+    for source in stored_sources:
+        object_storage_service.delete_evidence_object(
+            settings,
+            workspace_id=auth.workspace_id,
+            project_id=project_id,
+            source_id=source.id,
+            key=source.object_storage_key or "",
+        )
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="object_deleted",
+            actor_type="user",
+            entity_type="evidence_source",
+            entity_id=source.id,
+            risk_level="medium",
+            summary="Deleted a private evidence object with its project.",
+            metadata={
+                "storage_mode": settings.object_storage_mode,
+                "deleted_project_id": str(project_id),
+            },
+        )
     db.delete(project)
     db.commit()
 

@@ -52,13 +52,23 @@ def test_identity_configuration_rejects_dev_auth_outside_local() -> None:
         Settings(environment="production", auth_mode="dev")
 
     with pytest.raises(ValidationError, match="OIDC_ISSUER"):
-        Settings(environment="production", auth_mode="oidc", secret_provider="cloud")
+        Settings(
+            environment="production",
+            auth_mode="oidc",
+            secret_provider="cloud",
+            object_storage_mode="s3",
+            s3_endpoint_url="https://s3.example.com",
+            s3_verify_bucket_security=True,
+        )
 
     with pytest.raises(ValidationError, match="approved asymmetric algorithms"):
         Settings(
             environment="production",
             auth_mode="oidc",
             secret_provider="cloud",
+            object_storage_mode="s3",
+            s3_endpoint_url="https://s3.example.com",
+            s3_verify_bucket_security=True,
             oidc_issuer=ISSUER,
             oidc_audience=AUDIENCE,
             oidc_jwks_url=JWKS_URL,

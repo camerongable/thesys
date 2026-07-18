@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.ai.prompts import EVIDENCE_INGESTION_PROMPT_VERSION
 from app.common import metadata as metadata_utils
-from app.core.auth import AuthContext
+from app.core.auth import AuthContext, require_permission
 from app.core.config import Settings
 from app.core.security import (
     SecurityValidationError,
@@ -377,6 +377,7 @@ def add_file_source(
 ) -> EvidenceSource:
     """Validate and ingest an uploaded evidence file."""
     project_service.get_project(db, auth, project_id)
+    require_permission(auth, "write_project")
     body = upload.file.read()
     try:
         upload_validation = validate_upload(
@@ -409,17 +410,35 @@ def add_file_source(
 
     filename = upload_validation.filename
     content_type = upload_validation.content_type
-    storage_key = (
-        f"workspaces/{auth.workspace_id}/projects/{project_id}/evidence/{uuid.uuid4()}-{filename}"
-    )
-    object_storage_service.put_object(
-        settings,
-        key=storage_key,
-        body=body,
-        content_type=content_type,
-    )
+    source_id = uuid.uuid4()
+    try:
+        storage_key = object_storage_service.put_evidence_object(
+            settings,
+            workspace_id=auth.workspace_id,
+            project_id=project_id,
+            source_id=source_id,
+            filename=filename,
+            body=body,
+            content_type=content_type,
+        )
+    except object_storage_service.ObjectStorageError:
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="object_storage_write_denied",
+            actor_type="user",
+            project_id=project_id,
+            entity_type="evidence_source",
+            entity_id=source_id,
+            risk_level="medium",
+            summary="Evidence object storage failed closed.",
+            metadata={"content_type": content_type, "size_bytes": len(body)},
+        )
+        db.commit()
+        raise EvidenceIngestionError("File evidence ingestion failed.") from None
 
     source = EvidenceSource(
+        id=source_id,
         workspace_id=auth.workspace_id,
         project_id=project_id,
         source_type="file",
@@ -429,6 +448,22 @@ def add_file_source(
         created_by=auth.user_id,
     )
     db.add(source)
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="object_stored",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="evidence_source",
+        entity_id=source_id,
+        risk_level="low",
+        summary="Stored a private evidence object.",
+        metadata={
+            "content_type": content_type,
+            "size_bytes": len(body),
+            "storage_mode": settings.object_storage_mode,
+        },
+    )
     db.commit()
     db.refresh(source)
 
@@ -486,12 +521,101 @@ def reprocess_source(
 def delete_source(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
     source_id: uuid.UUID,
 ) -> None:
     source = get_source(db, auth, project_id, source_id)
+    require_permission(auth, "write_project")
+    if source.object_storage_key:
+        object_storage_service.delete_evidence_object(
+            settings,
+            workspace_id=auth.workspace_id,
+            project_id=project_id,
+            source_id=source.id,
+            key=source.object_storage_key,
+        )
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="object_deleted",
+            actor_type="user",
+            project_id=project_id,
+            entity_type="evidence_source",
+            entity_id=source.id,
+            risk_level="medium",
+            summary="Deleted a private evidence object.",
+            metadata={"storage_mode": settings.object_storage_mode},
+        )
     db.delete(source)
     db.commit()
+
+
+def prepare_source_download(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    source_id: uuid.UUID,
+) -> object_storage_service.ObjectDownload:
+    source = get_source(db, auth, project_id, source_id)
+    if not source.object_storage_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Evidence source has no stored object.",
+        )
+    content_type = str(
+        (source.source_metadata or {}).get("content_type") or "application/octet-stream"
+    )
+    try:
+        download = object_storage_service.prepare_evidence_download(
+            settings,
+            workspace_id=auth.workspace_id,
+            project_id=project_id,
+            source_id=source.id,
+            key=source.object_storage_key,
+            filename=source.title or "evidence-download",
+            content_type=content_type,
+        )
+    except object_storage_service.ObjectStorageError:
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="signed_url_denied",
+            actor_type="user",
+            project_id=project_id,
+            entity_type="evidence_source",
+            entity_id=source.id,
+            risk_level="medium",
+            summary="Denied an evidence object download.",
+            metadata={"storage_mode": settings.object_storage_mode},
+        )
+        db.commit()
+        raise
+
+    event_type = (
+        "signed_url_created"
+        if download.storage_mode == "s3"
+        else "object_download_authorized"
+    )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type=event_type,
+        actor_type="user",
+        project_id=project_id,
+        entity_type="evidence_source",
+        entity_id=source.id,
+        risk_level="low",
+        summary="Authorized an evidence object download.",
+        metadata={
+            "storage_mode": download.storage_mode,
+            "expires_at": download.expires_at.isoformat(),
+            "content_type": download.content_type,
+        },
+    )
+    db.commit()
+    return download
 
 
 def reembed_evidence(

@@ -61,6 +61,25 @@ RLS_TEST_DATABASE_URL=postgresql+psycopg://thesys_api:<password>@<host>/<databas
   .venv/bin/pytest app/tests/security/test_postgres_rls.py -q
 ```
 
+## Object Storage
+
+Hosted profiles require `OBJECT_STORAGE_MODE=s3`, an HTTPS
+`S3_ENDPOINT_URL`, disabled application bucket creation, and
+`S3_VERIFY_BUCKET_SECURITY=true`. Startup configuration and the first storage
+operation fail closed if these requirements are absent. Runtime verification
+requires all public-access blocks, bucket-owner-enforced object ownership,
+configured AES256 or KMS default encryption, the configured workspace-prefix
+retention rule, and a bucket policy denying insecure transport.
+
+Evidence keys are scoped as
+`workspaces/{workspace_id}/projects/{project_id}/sources/{source_id}/...`.
+Application authorization loads that exact tenant resource before issuing a
+GET URL, and presigns expire in 30-900 seconds. Writes set explicit content type,
+safe attachment disposition, and server-side encryption without object ACLs.
+Source and project deletion remove stored objects and record redacted audit
+metadata. Bucket provisioning is an infrastructure responsibility in hosted
+environments; `S3_AUTO_CREATE_BUCKET=true` is only for local MinIO setup.
+
 ## Provider Egress And SSRF Controls
 
 Security boundaries:
@@ -137,6 +156,8 @@ THESYS_EVAL_REPORT_DIR=/tmp/thesys-eval-report-s60 LLM_STUB_MODE=always python3 
 
 - OIDC/JWKS provider operations, hosted key rotation runbooks, and managed
   tenant membership are production hardening work.
-- Object-storage backup/restore is documented, but local V1 may not persist
-  screenshots/page artifacts.
+- Private evidence-object controls have deterministic coverage, but live
+  production-bucket policy and local MinIO auto-configuration checks remain
+  deployment-owner verification. Local V1 may not persist screenshots/page
+  artifacts.
 - Hosted smoke checks require deployed infrastructure and seeded demo data.

@@ -34,6 +34,7 @@ from app.schemas.wedges import WedgeActionRead, WedgeOptionListRead
 from app.services import (
     guide_service,
     nudge_service,
+    object_storage_service,
     project_overview_service,
     project_service,
     security_policy_service,
@@ -393,6 +394,13 @@ def delete_project(
     project_id: uuid.UUID,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> Response:
-    project_service.delete_project(db, auth, project_id)
+    try:
+        project_service.delete_project(db, auth, settings, project_id)
+    except object_storage_service.ObjectStorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Project evidence deletion is unavailable.",
+        ) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

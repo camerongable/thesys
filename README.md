@@ -340,6 +340,14 @@ use. Restricted reversible fields can use AES-256-GCM envelope encryption with
 a random per-workspace data key; only the externally wrapped data key is stored,
 and its table is protected by the same forced RLS boundary.
 
+Evidence objects use workspace/project/source-scoped keys. Hosted deployments
+must use HTTPS S3-compatible storage and verify private access, bucket-owner
+enforcement, server-side AES256/KMS encryption, retention, and an insecure-
+transport deny policy before completing storage operations. Downloads are
+authorized before short-lived presigning and use explicit safe response headers;
+object writes, download grants/denials, and deletions are audited without
+persisting signed URLs or raw storage keys.
+
 ---
 
 ## Architecture Overview

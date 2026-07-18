@@ -2,6 +2,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContextDep, SettingsDep
@@ -17,7 +18,12 @@ from app.schemas.evidence import (
     ReembedEvidenceRead,
     ReembedFailureRead,
 )
-from app.services import evidence_service, retrieval_service, security_policy_service
+from app.services import (
+    evidence_service,
+    object_storage_service,
+    retrieval_service,
+    security_policy_service,
+)
 
 router = APIRouter(prefix="/api/projects/{project_id}/evidence", tags=["evidence"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -228,6 +234,50 @@ def get_evidence_source(
     return serialize_source(source)
 
 
+@router.get("/{source_id}/download", response_model=None)
+def download_evidence_source(
+    project_id: uuid.UUID,
+    source_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> Response:
+    try:
+        download = evidence_service.prepare_source_download(
+            db,
+            auth,
+            settings,
+            project_id,
+            source_id,
+        )
+    except object_storage_service.ObjectStorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Evidence object download is unavailable.",
+        ) from exc
+
+    headers = {
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if download.url is not None:
+        return RedirectResponse(
+            download.url,
+            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+            headers=headers,
+        )
+    if download.local_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Evidence object download is unavailable.",
+        )
+    return FileResponse(
+        download.local_path,
+        media_type=download.content_type,
+        headers={**headers, "Content-Disposition": download.content_disposition},
+    )
+
+
 @router.post("/{source_id}/reprocess", response_model=EvidenceSourceRead)
 def reprocess_evidence_source(
     project_id: uuid.UUID,
@@ -267,6 +317,13 @@ def delete_evidence_source(
     source_id: uuid.UUID,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> Response:
-    evidence_service.delete_source(db, auth, project_id, source_id)
+    try:
+        evidence_service.delete_source(db, auth, settings, project_id, source_id)
+    except object_storage_service.ObjectStorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Evidence object deletion is unavailable.",
+        ) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

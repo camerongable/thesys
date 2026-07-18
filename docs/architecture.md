@@ -22,6 +22,9 @@ Sprint 4 adds the first RAG foundation:
 - Evidence sources are ingested through URL, note, and file endpoints.
 - Uploaded files are stored through the object storage boundary. Docker uses
   MinIO/S3 mode; tests and local non-Docker runs can use local filesystem mode.
+- Evidence object keys include workspace, project, and source scope. Hosted S3
+  mode verifies private bucket controls, encryption, retention, and TLS policy;
+  downloads require resource authorization before short-lived presigning.
 - Parsed text is normalized, summarized, classified, chunked, embedded, and
   stored in Postgres/pgvector.
 - Retrieval is project/workspace-scoped and supports semantic, keyword, and

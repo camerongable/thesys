@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import Annotated, Literal
+from urllib.parse import urlparse
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -221,6 +222,31 @@ class Settings(BaseSettings):
         repr=False,
     )
     s3_bucket: str = Field(default="thesys-local", validation_alias="S3_BUCKET")
+    s3_auto_create_bucket: bool = Field(
+        default=False,
+        validation_alias="S3_AUTO_CREATE_BUCKET",
+    )
+    s3_verify_bucket_security: bool = Field(
+        default=False,
+        validation_alias="S3_VERIFY_BUCKET_SECURITY",
+    )
+    s3_server_side_encryption: Literal["AES256", "aws:kms"] = Field(
+        default="AES256",
+        validation_alias="S3_SERVER_SIDE_ENCRYPTION",
+    )
+    s3_kms_key_id: str | None = Field(default=None, validation_alias="S3_KMS_KEY_ID")
+    s3_presigned_url_ttl_seconds: int = Field(
+        default=300,
+        ge=30,
+        le=900,
+        validation_alias="S3_PRESIGNED_URL_TTL_SECONDS",
+    )
+    s3_retention_days: int = Field(
+        default=30,
+        ge=1,
+        le=3650,
+        validation_alias="S3_RETENTION_DAYS",
+    )
     object_storage_mode: Literal["local", "s3"] = Field(
         default="local",
         validation_alias="OBJECT_STORAGE_MODE",
@@ -590,6 +616,17 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "Hosted DATABASE_URL must use the declared scoped runtime role."
                 )
+            endpoint = urlparse(self.s3_endpoint_url)
+            if self.object_storage_mode != "s3":
+                raise ValueError("Hosted environments must use OBJECT_STORAGE_MODE=s3.")
+            if endpoint.scheme != "https" or not endpoint.netloc:
+                raise ValueError("Hosted S3_ENDPOINT_URL must use HTTPS.")
+            if endpoint.username or endpoint.password:
+                raise ValueError("S3_ENDPOINT_URL must not contain credentials.")
+            if self.s3_auto_create_bucket:
+                raise ValueError("Hosted application roles must not create S3 buckets.")
+            if not self.s3_verify_bucket_security:
+                raise ValueError("Hosted S3 bucket security verification is required.")
             self.auth_jwt_secret = None
             self.litellm_api_key = ""
             self.openai_api_key = None

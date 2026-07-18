@@ -10,11 +10,12 @@ abuse cases, automated invariant checks, and a pull-request security checklist.
 Sprint 62 production identity work is now underway: OIDC/JWKS verification,
 principal-backed authorization context, strict active membership resolution,
 the production dev-auth startup guard, forced Postgres RLS, and scoped database
-roles are implemented. Production secret providers and the workspace envelope
-encryption foundation are also implemented. Sprints 62-68 own the remaining
-object/session/auth-audit hardening, secure ingestion, centralized
-guardrails, secure RAG/memory, MCP/tool policy, monitoring/incident response,
-and adversarial CI controls identified as partial or planned by that contract.
+roles are implemented. Production secret providers, the workspace envelope
+encryption foundation, and tenant-scoped private object storage are also
+implemented. Sprints 62-68 own the remaining session/auth-audit hardening,
+secure ingestion, centralized guardrails, secure RAG/memory, MCP/tool policy,
+monitoring/incident response, and adversarial CI controls identified as partial
+or planned by that contract.
 
 Thesys now demonstrates a stronger production-style AI architecture for a
 portfolio project:
@@ -104,8 +105,9 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Add direct wrong-tenant Postgres ORM coverage for projects, evidence,
   chunks/vector retrieval, memory, approvals, tools, decisions, and
   research/trace/workflow metadata. The test is environment-gated locally.
-- [ ] Complete service-boundary cross-tenant coverage as signed object URL and
-  security-event surfaces land. There are no standalone `validation_plans` or
+- [ ] Complete service-boundary cross-tenant coverage as security-event surfaces
+  land. Wrong-workspace signed-object URL requests are now covered and cannot
+  reach the presigner. There are no standalone `validation_plans` or
   `security_events` tables in the current schema; new tenant tables fail the RLS
   invariant until registered and migrated.
 - [x] Add environment, Vault KV v2, and AWS Secrets Manager providers; reject
@@ -120,7 +122,13 @@ current verdict, next action, evidence health, validation, and decision state.
   redaction controls. No current domain model stores OAuth refresh tokens,
   connector credentials, reversible PII maps, or user provider credentials, so
   those future fields must use `EncryptedValue` when introduced.
-- [ ] Harden object storage, browser/session policy, and auth audit events.
+- [x] Harden object storage with tenant/project/source key scopes, private-bucket
+  verification, public ACL denial, explicit content type and safe download
+  disposition, AES256/KMS server-side encryption, short presign lifetimes,
+  authorization before presign, TLS enforcement, retention policy checks, and
+  durable upload/download/deletion audit metadata without URLs or raw keys.
+- [ ] Add browser/session policy and complete authentication/authorization audit
+  events.
 
 ## Sprint 62 Identity Verification
 
@@ -165,11 +173,27 @@ current verdict, next action, evidence health, validation, and decision state.
 - [ ] Validate migration `0030_workspace_data_keys` against live Postgres as
   part of the existing `RLS_TEST_DATABASE_URL` CI checkpoint.
 
+## Sprint 62 Object Storage Verification
+
+- [x] Focused object-storage, evidence, project, OIDC, tenant-context, and
+  secret-provider tests passed (`61 passed, 1 warning`).
+- [x] The full backend regression suite passed (`323 passed, 1 skipped,
+  3 xfailed, 3 warnings`).
+- [x] Wrong-workspace download tests prove authorization occurs before presign;
+  source and project deletion tests prove tenant-scoped object removal and
+  deletion-audit persistence.
+- [x] Hosted configuration fails closed unless S3 mode, HTTPS, disabled runtime
+  bucket creation, and live bucket-control verification are configured.
+- [ ] Run the S3 security contract against a production-equivalent bucket and
+  the local auto-configuration path against MinIO. This workstation does not
+  have Docker, Podman, or cloud object-storage credentials, so those live checks
+  remain deployment-owner verification.
+
 ## Next Sprint
 
-Continue V1 Sprint 62 with object-storage security, browser/session headers,
-authentication and authorization audit events, and the remaining service-level
-cross-tenant matrix.
+Continue V1 Sprint 62 with browser/session headers, authentication and
+authorization audit events, and the remaining service-level cross-tenant
+matrix.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
