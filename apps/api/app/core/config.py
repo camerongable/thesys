@@ -395,6 +395,24 @@ class Settings(BaseSettings):
         le=1000.0,
         validation_alias="MAX_PDF_DECOMPRESSION_RATIO",
     )
+    max_image_pixels: int = Field(
+        default=20_000_000,
+        ge=1_000,
+        le=100_000_000,
+        validation_alias="MAX_IMAGE_PIXELS",
+    )
+    max_image_decoded_bytes: int = Field(
+        default=80_000_000,
+        ge=1_000_000,
+        le=500_000_000,
+        validation_alias="MAX_IMAGE_DECODED_BYTES",
+    )
+    max_image_decompression_ratio: float = Field(
+        default=100.0,
+        ge=1.0,
+        le=1000.0,
+        validation_alias="MAX_IMAGE_DECOMPRESSION_RATIO",
+    )
     embedding_model: str = Field(
         default="deterministic-hash-embedding-1536",
         validation_alias="EMBEDDING_MODEL",

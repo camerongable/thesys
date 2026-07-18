@@ -497,7 +497,9 @@ def test_image_upload_uses_deterministic_multimodal_extraction_and_retrieval(
         select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(body["id"]))
     )
     assert source is not None
-    assert "weekly check-in pain" in (source.raw_text or "")
+    assert "Deterministic multimodal extraction" in (source.raw_text or "")
+    assert "weekly check-in pain" not in (source.raw_text or "")
+    assert source.source_metadata["image_security"]["image_sanitized"] is True
     chunk = db_session.scalar(
         select(EvidenceChunk).where(EvidenceChunk.source_id == source.id)
     )
@@ -506,7 +508,7 @@ def test_image_upload_uses_deterministic_multimodal_extraction_and_retrieval(
 
     retrieval_response = client.post(
         f"/api/projects/{project_id}/evidence/retrieve",
-        json={"query": "weekly check-in pain willingness to pay", "mode": "keyword"},
+        json={"query": "deterministic multimodal extraction evidence", "mode": "keyword"},
     )
 
     assert retrieval_response.status_code == 200

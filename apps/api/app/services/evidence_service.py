@@ -45,6 +45,7 @@ from app.services import (
     pseudonymization_service,
     retention_service,
     secure_file_parser_service,
+    secure_image_service,
     secure_ingestion_state_service,
     source_provenance_service,
 )
@@ -445,9 +446,17 @@ def add_file_source(
         )
         raise EvidenceIngestionError("File evidence ingestion failed.")
 
+    image_sanitization: secure_image_service.SanitizedImage | None = None
     try:
         pdf_extraction = _preflight_file_content(settings, content_type=content_type, body=body)
-    except EvidenceSecurityError as exc:
+        if multimodal_extraction_service.is_image_content(filename, content_type):
+            image_sanitization = secure_image_service.sanitize_image(
+                settings,
+                content_type=content_type,
+                body=body,
+            )
+            body = image_sanitization.body
+    except (EvidenceSecurityError, secure_image_service.ImageSecurityError) as exc:
         _record_ingestion_security_event(
             db,
             auth,
@@ -546,6 +555,7 @@ def add_file_source(
             content_type=content_type,
             body=body,
             pdf_extraction=pdf_extraction,
+            image_security_metadata=image_sanitization.metadata if image_sanitization else None,
         )
     except Exception as exc:
         _mark_source_failed(db, source, str(exc))
@@ -1417,6 +1427,7 @@ def _parse_file(
     content_type: str,
     body: bytes,
     pdf_extraction: secure_file_parser_service.PDFExtraction | None = None,
+    image_security_metadata: dict[str, int | str | bool] | None = None,
 ) -> ParsedSource:
     """Route supported uploads through text, PDF, image, or multimodal extraction."""
     lowered = filename.casefold()
@@ -1432,11 +1443,14 @@ def _parse_file(
             title=extraction.title or filename,
             text=extraction.text,
             content_type=content_type,
-            metadata=_image_upload_metadata(
-                filename=filename,
-                content_type=content_type,
-                body=body,
-                extraction_metadata=extraction.metadata,
+            metadata=_merge_metadata(
+                _image_upload_metadata(
+                    filename=filename,
+                    content_type=content_type,
+                    body=body,
+                    extraction_metadata=extraction.metadata,
+                ),
+                {"image_security": image_security_metadata} if image_security_metadata else None,
             ),
         )
 

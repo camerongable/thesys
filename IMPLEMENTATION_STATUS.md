@@ -335,8 +335,10 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Enforce a configurable PDF stream decompression-ratio limit inside the
   isolated parser worker. Every reachable encoded stream is checked before page
   text extraction, and an over-limit stream is rejected before object storage.
-- [ ] Complete the remaining image-side controls: compressed-image expansion
-  limits and metadata stripping before storage or provider transit.
+- [x] Decode allowed PNG/JPEG/WebP uploads through Pillow before storage,
+  reject animated, oversized, over-expanded, or malformed images, and re-encode
+  the safe pixel content without EXIF or ancillary metadata. The sanitized bytes
+  are the only image representation stored or sent to multimodal extraction.
 - [x] Require extension, declared MIME, and independently detected content MIME
   to agree before any upload reaches malware scanning, storage, or parsing.
   `python-magic` is the primary detector; an unavailable binding falls back to
@@ -420,11 +422,14 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] PDF decompression-ratio checkpoint passed (`153 passed, 1 skipped, 2
   xfailed, 11 warnings`), covering an over-limit compressed stream rejected
   before storage alongside the evidence and security boundary suite.
+- [x] Image sanitization checkpoint passed (`156 passed, 1 skipped, 2 xfailed,
+  12 warnings`), covering metadata removal before storage/provider transit,
+  compressed-image rejection, evidence ingestion, and security boundaries.
 
 ## Next Sprint
 
-Continue V1 Sprint 63 with image decompression safety and metadata stripping,
-then begin Sprint 64's central policy guardrail work.
+Audit V1 Sprint 63 against its complete acceptance criteria, then begin Sprint
+64's central policy guardrail work.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
