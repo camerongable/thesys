@@ -127,8 +127,11 @@ current verdict, next action, evidence health, validation, and decision state.
   disposition, AES256/KMS server-side encryption, short presign lifetimes,
   authorization before presign, TLS enforcement, retention policy checks, and
   durable upload/download/deletion audit metadata without URLs or raw keys.
-- [ ] Add browser/session policy and complete authentication/authorization audit
-  events.
+- [x] Add global browser security headers: strict API CSP with frame denial,
+  `nosniff`, no-referrer policy, denied sensitive browser capabilities, legacy
+  frame denial, and production HSTS. The API is explicitly stateless and
+  header-authenticated, so CORS does not enable browser credentials or cookies.
+- [ ] Complete authentication/authorization audit events.
 
 ## Sprint 62 Identity Verification
 
@@ -189,11 +192,19 @@ current verdict, next action, evidence health, validation, and decision state.
   have Docker, Podman, or cloud object-storage credentials, so those live checks
   remain deployment-owner verification.
 
+## Sprint 62 Browser Security Verification
+
+- [x] Browser-security and identity tests passed (`23 passed, 1 warning`),
+  including local API headers, CORS preflight without credentials, and
+  production HSTS behavior.
+- [x] The current API does not issue browser cookies. Any future cookie-based
+  session flow must add secure/HttpOnly/SameSite cookies, short lifetime,
+  rotation, logout invalidation, and CSRF protection before it is enabled.
+
 ## Next Sprint
 
-Continue V1 Sprint 62 with browser/session headers, authentication and
-authorization audit events, and the remaining service-level cross-tenant
-matrix.
+Continue V1 Sprint 62 with authentication and authorization audit events and
+the remaining service-level cross-tenant matrix.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

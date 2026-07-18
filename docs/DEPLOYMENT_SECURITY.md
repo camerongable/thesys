@@ -27,6 +27,15 @@ Production-like auth should use OIDC/JWKS rotation, token revocation, service
 account scopes, workspace membership checks, and audit attribution. Some of
 that shape exists in V1; managed OIDC/JWKS operations remain future owner work.
 
+The API is deliberately stateless: it authenticates with bearer or API-key
+headers and does not issue browser cookies. CORS must therefore keep
+`allow_credentials` disabled. Every API response carries a restrictive CSP with
+`frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+no-referrer`, a restrictive permissions policy, and `X-Frame-Options: DENY`.
+Production also sends HSTS for one year with subdomains. If a later web-auth flow
+uses cookies, it must introduce secure/HttpOnly/SameSite cookies, short session
+lifetime, rotation, logout invalidation, and CSRF validation as one design.
+
 ## Database Roles And RLS
 
 | Role | Runtime use | Privileges |

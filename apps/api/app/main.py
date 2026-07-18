@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 
 from app.ai.litellm_client import LiteLLMClientError
 from app.ai.structured_output import StructuredOutputError
+from app.core.browser_security import BrowserSecurityHeadersMiddleware
 from app.core.config import get_settings
 from app.core.errors import public_error_detail
 from app.core.logging import configure_logging
@@ -57,10 +58,12 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        # API auth is header-based; browser credentials would enable cookies without CSRF.
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(BrowserSecurityHeadersMiddleware, environment=settings.environment)
 
     app.include_router(health_router)
     app.include_router(me_router)

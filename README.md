@@ -348,6 +348,12 @@ authorized before short-lived presigning and use explicit safe response headers;
 object writes, download grants/denials, and deletions are audited without
 persisting signed URLs or raw storage keys.
 
+The API is stateless and uses authorization headers rather than browser cookies.
+Its CORS policy therefore does not enable browser credentials. API responses
+carry a restrictive CSP with frame denial, `nosniff`, no-referrer and permissions
+policies, and production HSTS. A future cookie-based session flow must add
+secure/HttpOnly/SameSite settings, rotation, revocation, and CSRF protection.
+
 ---
 
 ## Architecture Overview
