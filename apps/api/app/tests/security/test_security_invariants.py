@@ -104,6 +104,7 @@ def test_data_classification_registry_covers_sensitive_assets() -> None:
         "tool_schemas",
         "mcp_server_registrations",
         "audit_events",
+        "authentication_events",
         "langsmith_traces",
         "temporal_workflow_state",
         "model_provider_payload",
@@ -191,7 +192,8 @@ def test_rls_migration_forces_policies_and_scoped_role_grants(monkeypatch) -> No
 
     assert set(migration.RLS_DIRECT_TABLES) < RLS_DIRECT_TENANT_TABLES
     assert RLS_DIRECT_TENANT_TABLES - set(migration.RLS_DIRECT_TABLES) == {
-        "workspace_data_keys"
+        "authentication_events",
+        "workspace_data_keys",
     }
     assert set(migration.RLS_INHERITED_TABLES) == RLS_INHERITED_TENANT_TABLES
     combined = "\n".join(statements)
@@ -246,6 +248,35 @@ def test_workspace_data_key_migration_adds_forced_rls_and_scoped_grants(monkeypa
     assert "thesys_api" in combined and "SELECT, INSERT, UPDATE, DELETE" in combined
     assert "thesys_worker" in combined
     assert "thesys_readonly" not in combined
+
+
+def test_authentication_event_migration_limits_pre_authentication_writes(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0031_authentication_events.py"
+    spec = importlib.util.spec_from_file_location("authentication_event_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "authentication_events" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "authentication_events" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "authentication_events"' in combined
+    assert "workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid" in combined
+    assert "pre_authentication_failure_insert" in combined
+    assert "workspace_id IS NULL AND user_id IS NULL" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT" in combined
+    assert "thesys_worker" in combined and "thesys_readonly" in combined
 
 
 def test_application_credentials_are_read_only_through_secret_provider() -> None:

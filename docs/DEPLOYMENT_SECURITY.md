@@ -36,6 +36,14 @@ Production also sends HSTS for one year with subdomains. If a later web-auth flo
 uses cookies, it must introduce secure/HttpOnly/SameSite cookies, short session
 lifetime, rotation, logout invalidation, and CSRF validation as one design.
 
+Authentication outcomes use the immutable `authentication_events` table.
+Successful authentication events carry the resolved workspace/user IDs; failed
+pre-authentication events carry neither ID. The schema contains only a fixed
+event type, authentication method, fixed reason code, IDs, and timestamp, so it
+cannot persist bearer tokens, API keys, or arbitrary request metadata. Forced
+RLS scopes attributed events to their workspace, and a separate insert-only
+policy permits only null-identity pre-authentication failures.
+
 ## Database Roles And RLS
 
 | Role | Runtime use | Privileges |

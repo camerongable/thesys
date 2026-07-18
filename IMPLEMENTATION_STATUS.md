@@ -96,20 +96,22 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Add persistent user status and migration `0028_production_identity`.
 - [x] Bind validated principals to transaction-local Postgres workspace/user
   settings and reapply them after every session transaction boundary.
-- [x] Enable and force RLS across all 39 currently modeled tenant tables:
+- [x] Enable and force RLS across all 40 currently modeled tenant tables:
   migration `0029_tenant_rls` covers the original 38, migration
-  `0030_workspace_data_keys` covers the restricted key table, and five
-  child/link tables use inherited parent policies.
+  `0030_workspace_data_keys` covers the restricted key table, migration
+  `0031_authentication_events` covers immutable authentication outcomes, and
+  five child/link tables use inherited parent policies.
 - [x] Separate migration, API, Temporal worker, and readonly database roles;
   hosted startup rejects a bootstrap or mismatched runtime username.
 - [x] Add direct wrong-tenant Postgres ORM coverage for projects, evidence,
   chunks/vector retrieval, memory, approvals, tools, decisions, and
   research/trace/workflow metadata. The test is environment-gated locally.
-- [ ] Complete service-boundary cross-tenant coverage as security-event surfaces
-  land. Wrong-workspace signed-object URL requests are now covered and cannot
-  reach the presigner. There are no standalone `validation_plans` or
-  `security_events` tables in the current schema; new tenant tables fail the RLS
-  invariant until registered and migrated.
+- [ ] Complete service-boundary cross-tenant coverage as more authorization and
+  security-event surfaces land. Wrong-workspace signed-object URL requests are
+  now covered and cannot reach the presigner. There are no standalone
+  `validation_plans` or broad `security_events` tables in the current schema;
+  the scoped `authentication_events` table now covers current identity outcomes.
+  New tenant tables fail the RLS invariant until registered and migrated.
 - [x] Add environment, Vault KV v2, and AWS Secrets Manager providers; reject
   environment-backed application secrets in staging and production, and route
   all current API credential consumers through the closed secret-name registry.
@@ -131,7 +133,15 @@ current verdict, next action, evidence health, validation, and decision state.
   `nosniff`, no-referrer policy, denied sensitive browser capabilities, legacy
   frame denial, and production HSTS. The API is explicitly stateless and
   header-authenticated, so CORS does not enable browser credentials or cookies.
-- [ ] Complete authentication/authorization audit events.
+- [x] Add immutable, credential-free authentication events with forced RLS for
+  tenant-attributable events and a null-identity insert policy only for
+  pre-authentication failures. Successful authentication, missing/invalid
+  credentials, rejected bearer tokens, and denied OIDC identity/membership
+  resolution now emit durable `login_success`, `login_failure`,
+  `token_validation_failure`, or `workspace_access_denied` records.
+- [ ] Add role-change, session-revocation, cross-tenant-attempt, and broader
+  authorization-denial emitters when their corresponding mutation/resource
+  flows are introduced.
 
 ## Sprint 62 Identity Verification
 
@@ -173,8 +183,9 @@ current verdict, next action, evidence health, validation, and decision state.
   secret values.
 - [x] The full backend regression suite passed (`312 passed, 1 skipped,
   3 xfailed, 3 warnings`).
-- [ ] Validate migration `0030_workspace_data_keys` against live Postgres as
-  part of the existing `RLS_TEST_DATABASE_URL` CI checkpoint.
+- [ ] Validate migrations `0030_workspace_data_keys` and
+  `0031_authentication_events` against live Postgres as part of the existing
+  `RLS_TEST_DATABASE_URL` CI checkpoint.
 
 ## Sprint 62 Object Storage Verification
 
@@ -201,10 +212,24 @@ current verdict, next action, evidence health, validation, and decision state.
   session flow must add secure/HttpOnly/SameSite cookies, short lifetime,
   rotation, logout invalidation, and CSRF protection before it is enabled.
 
+## Sprint 62 Authentication Audit Verification
+
+- [x] Auth-audit, OIDC, and invariant tests passed (`39 passed, 3 xfailed,
+  1 warning`). Tests cover successful attribution, token-validation failure,
+  OIDC workspace denial, the absence of credential storage columns, and the
+  forced-RLS pre-auth insertion contract.
+- [ ] Run migration `0031_authentication_events` and its policy checks against
+  the existing live-Postgres CI checkpoint. Local SQLite tests prove the model
+  and offline migration contract but not a PostgreSQL RLS execution.
+- [x] The full backend regression suite passed (`331 passed, 1 skipped,
+  3 xfailed, 3 warnings`). `alembic heads` reports
+  `0031_authentication_events`; offline PostgreSQL SQL renders its checks,
+  forced RLS, pre-auth insert policy, and scoped runtime grants.
+
 ## Next Sprint
 
-Continue V1 Sprint 62 with authentication and authorization audit events and
-the remaining service-level cross-tenant matrix.
+Continue V1 Sprint 62 with session/role revocation audit flows and the remaining
+service-level cross-tenant matrix.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

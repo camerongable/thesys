@@ -58,6 +58,7 @@ established.
 | Threat | Actor | Assets | Current controls | Status | Residual risk / owner |
 | --- | --- | --- | --- | --- | --- |
 | Cross-tenant object access or retrieval | Malicious user/member | All project data | OIDC principal, workspace-scoped service queries, forced RLS, tenant-scoped object keys, authorization-before-presign test | Partial | Remaining service/security-event matrix coverage, Sprint 62 |
+| Credential replay or identity/membership denial | External attacker or stale identity | Accounts, workspace data, and audit trail | Immutable credential-free authentication outcomes, OIDC claim validation, active membership checks, forced RLS | Partial | Session revocation, role-change, and cross-tenant-attempt emitters remain Sprint 62 work |
 | Direct prompt injection | Authenticated user | Prompts, tools, memory | Structured prompts, output schemas, deterministic authorization | Partial | Central input/output gateway, Sprint 64 |
 | Indirect prompt injection | Malicious document/webpage | Tools, memory, provider payloads | Untrusted-content boundaries and source-risk metadata | Partial | Central detection/quarantine policy, Sprints 63-65 |
 | Jailbreak or policy bypass | Malicious user/source | Tool execution, data disclosure | Role gates, proposal tools, approvals, schema validation | Partial | Jailbreak classifier and output DLP, Sprint 64 |

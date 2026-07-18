@@ -354,6 +354,11 @@ carry a restrictive CSP with frame denial, `nosniff`, no-referrer and permission
 policies, and production HSTS. A future cookie-based session flow must add
 secure/HttpOnly/SameSite settings, rotation, revocation, and CSRF protection.
 
+Authentication outcomes are persisted separately from project audit history.
+They record only event and reason codes, authentication method, and internal
+workspace/user IDs when attribution is established; bearer tokens, API keys,
+and arbitrary request metadata are not accepted by the event model.
+
 ---
 
 ## Architecture Overview

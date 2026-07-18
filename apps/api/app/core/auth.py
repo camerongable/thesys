@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Annotated, Literal
 
 from fastapi import Depends, Header, HTTPException, status
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -17,6 +18,7 @@ from app.db.models import User, Workspace
 from app.db.session import get_db
 from app.db.tenant import bind_tenant_context
 from app.security.secrets import SecretName, SecretProviderError, resolve_secret
+from app.services import auth_audit_service
 from app.services.identity_service import (
     ensure_dev_identity,
     ensure_external_identity,
@@ -137,32 +139,49 @@ def get_current_auth_context(
     x_api_key: ApiKeyHeader = None,
 ) -> AuthContext:
     auth_mode = settings.auth_mode.strip().lower()
-    if auth_mode == "dev":
-        auth = ensure_dev_identity(
-            db,
-            email=x_dev_user_email or settings.dev_auth_default_email,
-            display_name=x_dev_user_name or settings.dev_auth_default_name,
-            role=x_dev_user_role,
-        )
-    else:
-        if x_dev_user_email or x_dev_user_name or x_dev_user_role:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Development auth headers are disabled outside AUTH_MODE=dev.",
+    try:
+        if auth_mode == "dev":
+            auth = ensure_dev_identity(
+                db,
+                email=x_dev_user_email or settings.dev_auth_default_email,
+                display_name=x_dev_user_name or settings.dev_auth_default_name,
+                role=x_dev_user_role,
             )
-        if auth_mode == "jwt":
-            auth = _auth_from_jwt(db, settings, authorization)
-        elif auth_mode == "api_key":
-            auth = _auth_from_api_key(db, settings, x_api_key)
-        elif auth_mode == "oidc":
-            auth = _auth_from_oidc(db, settings, authorization)
         else:
-            raise HTTPException(
-                status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                detail="Unsupported AUTH_MODE. Use dev, jwt, api_key, or oidc.",
-            )
+            if x_dev_user_email or x_dev_user_name or x_dev_user_role:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Development auth headers are disabled outside AUTH_MODE=dev.",
+                )
+            if auth_mode == "jwt":
+                auth = _auth_from_jwt(db, settings, authorization)
+            elif auth_mode == "api_key":
+                auth = _auth_from_api_key(db, settings, x_api_key)
+            elif auth_mode == "oidc":
+                auth = _auth_from_oidc(db, settings, authorization)
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                    detail="Unsupported AUTH_MODE. Use dev, jwt, api_key, or oidc.",
+                )
+    except HTTPException as exc:
+        _record_authentication_failure(
+            db,
+            auth_mode=auth_mode,
+            status_code=exc.status_code,
+            has_bearer_token=bool(authorization and authorization.lower().startswith("bearer ")),
+        )
+        raise
 
     bind_tenant_context(db, auth.principal)
+    _persist_authentication_event(
+        db,
+        event_type="login_success",
+        authentication_method=auth.principal.authentication_method,
+        reason_code="identity_verified",
+        workspace_id=auth.workspace_id,
+        user_id=auth.user_id,
+    )
     return auth
 
 
@@ -184,6 +203,57 @@ def require_permission(auth: AuthContext, permission: ProjectPermission) -> None
         status_code=status.HTTP_403_FORBIDDEN,
         detail="You do not have permission to perform this governed project action.",
     )
+
+
+def _record_authentication_failure(
+    db: Session,
+    *,
+    auth_mode: str,
+    status_code: int,
+    has_bearer_token: bool,
+) -> None:
+    if auth_mode in {"jwt", "oidc"} and status_code == status.HTTP_401_UNAUTHORIZED:
+        event_type = "token_validation_failure" if has_bearer_token else "login_failure"
+        reason_code = "token_rejected" if has_bearer_token else "credentials_missing"
+    elif auth_mode == "oidc" and status_code == status.HTTP_403_FORBIDDEN:
+        event_type = "workspace_access_denied"
+        reason_code = "identity_or_membership_denied"
+    else:
+        event_type = "login_failure"
+        reason_code = "identity_rejected"
+    _persist_authentication_event(
+        db,
+        event_type=event_type,
+        authentication_method=auth_mode,
+        reason_code=reason_code,
+    )
+
+
+def _persist_authentication_event(
+    db: Session,
+    *,
+    event_type: auth_audit_service.AuthenticationEventType,
+    authentication_method: auth_audit_service.AuthenticationMethod,
+    reason_code: str,
+    workspace_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+) -> None:
+    try:
+        auth_audit_service.record_authentication_event(
+            db,
+            event_type=event_type,
+            authentication_method=authentication_method,
+            reason_code=reason_code,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication audit is unavailable.",
+        ) from None
 
 
 def _auth_from_jwt(

@@ -27,7 +27,7 @@ central gates in this target flow.
 
 | Boundary | Data crossing | Expected identity | Authorization decision | Classification | Encryption | Audit | Failure behavior | Threat scenarios |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Browser to API | Header auth token, project input, files, actions | OIDC principal or service account | Signature/claims, active user, exact workspace membership, stored role | Internal to restricted | Hosted TLS; CSP/frame denial, nosniff, no-referrer, permissions policy, production HSTS | Auth failures and governed actions | Reject unauthenticated, invalid, stale, oversized, or unauthorized requests; no browser credentials/cookies | Session theft, IDOR, injection, resource abuse |
+| Browser to API | Header auth token, project input, files, actions | OIDC principal or service account | Signature/claims, active user, exact workspace membership, stored role | Internal to restricted | Hosted TLS; CSP/frame denial, nosniff, no-referrer, permissions policy, production HSTS | Immutable token-free authentication outcomes plus governed actions | Reject unauthenticated, invalid, stale, oversized, or unauthorized requests; no browser credentials/cookies | Session theft, IDOR, injection, resource abuse |
 | API to database | Project state, evidence metadata, vectors, memory, audit | Non-owner `thesys_api` or `thesys_worker` role plus transaction-local principal | Service workspace scope and forced RLS `USING`/`WITH CHECK` policy | Confidential/restricted | TLS target plus AES-256-GCM envelope encryption for restricted reversible fields | Mutations and denied policy decisions | Missing/stale tenant context returns no rows and rejects writes; invalid ciphertext fails authentication | Cross-tenant query, SQL injection, operator access |
 | API to object storage | Uploaded files and derived artifacts | Closed-registry application credential | Resource authorization plus workspace/project/source key policy | Confidential/restricted | Required TLS plus verified AES256/KMS server-side encryption | Redacted upload, download grant/denial, and deletion metadata | Deny unsafe key, type, scope, bucket controls, URL, or credential | Object overwrite, public bucket, malicious file, stale signed URL |
 | API to LiteLLM | Prompts, context, structured-output schema | Application virtual key | Provider/model/classification policy | Public to restricted | TLS | Provider, model, classification, cost; no raw secret | Deny unapproved provider or data class | Data exfiltration, model substitution, overspend |
@@ -59,10 +59,12 @@ central gates in this target flow.
 Most project-owned tables carry `workspace_id` directly. Small child/link tables
 inherit tenant scope through a required foreign key to a directly scoped parent.
 `GLOBAL_TABLES`, `IDENTITY_BOOTSTRAP_TABLES`, and `INHERITED_TENANT_TABLES` make
-exceptions explicit. Sprint 62 forces Postgres RLS across all 38 modeled tenant
+exceptions explicit. Sprint 62 forces Postgres RLS across all 40 modeled tenant
 tables and reapplies transaction-local principal settings whenever a session
 starts a new transaction. An invariant test fails when a new tenant table is
-not added to the RLS contract.
+not added to the RLS contract. Authentication events use a tightly limited
+null-identity insert policy before attribution is possible; these records remain
+invisible to tenant reads.
 
 ## Provider and data policy
 
