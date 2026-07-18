@@ -22,6 +22,7 @@ def secure_memory_metadata(
     source_entity_type: str | None,
     source_entity_id: object | None,
     write_policy: str,
+    expires_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Normalize the durable metadata required for secure memory recall."""
     normalized = dict(metadata or {})
@@ -45,6 +46,7 @@ def secure_memory_metadata(
             "source_ids": source_ids,
             "contradicts_memory_ids": conflicts,
             "last_verified_at": normalized.get("last_verified_at") or now,
+            "expires_at": _expiry_metadata(expires_at),
             "requires_human_approval": write_policy == "approval_required",
             "trusted_projection": bool(normalized.get("trusted_projection"))
             or origin == "user",
@@ -77,7 +79,7 @@ def memory_recall_exclusion_reason(item: Any, *, now: datetime) -> str | None:
     """Return an explainable denial reason for a durable-memory recall candidate."""
     if item.status != "active":
         return f"status_{item.status}"
-    if item.expires_at is not None and item.expires_at <= now:
+    if item.expires_at is not None and _as_utc(item.expires_at) <= _as_utc(now):
         return "expired"
     metadata = item.provenance_metadata or {}
     if metadata.get("policy_version") != SECURE_MEMORY_POLICY_VERSION:
@@ -125,3 +127,13 @@ def _bounded_score(value: object, *, default: float) -> float:
         return min(1.0, max(0.0, float(value)))
     except (TypeError, ValueError):
         return default
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _expiry_metadata(value: datetime | None) -> str | None:
+    return _as_utc(value).isoformat() if value is not None else None

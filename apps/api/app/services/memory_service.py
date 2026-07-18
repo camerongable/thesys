@@ -6,7 +6,7 @@ memory, and each workflow selects only the memory types it is allowed to use.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -26,6 +26,7 @@ from app.schemas.memory import MemoryType, MemoryWritePolicy
 from app.services import governance_service, project_service
 
 ACTIVE_MEMORY_STATUSES = {"active"}
+WORKING_MEMORY_TTL = timedelta(hours=8)
 WORKFLOW_MEMORY_TYPES: dict[str, set[str]] = {
     "assumption_extraction": {"semantic", "project", "preference"},
     "guide_chat": {"working", "semantic", "project", "preference"},
@@ -270,6 +271,7 @@ def upsert_memory_item(
 ) -> ProjectMemoryItem:
     """Create or update a typed memory item under the project's governance model."""
     project_service.get_project(db, auth, project_id)
+    expires_at = _effective_memory_expiry(memory_type, expires_at)
     safe_title = redact_text(title, redact_emails=True)
     safe_summary = redact_text(summary, redact_emails=True)
     safe_content = redact_payload(content, redact_emails=True)
@@ -280,6 +282,7 @@ def upsert_memory_item(
         source_entity_type=source_entity_type,
         source_entity_id=source_entity_id,
         write_policy=write_policy,
+        expires_at=expires_at,
     )
     if memory_security_policy.requires_memory_proposal(
         safe_provenance,
@@ -458,6 +461,7 @@ def approve_memory_proposal(
         source_entity_type=item.source_entity_type,
         source_entity_id=item.source_entity_id,
         write_policy=item.write_policy,
+        expires_at=item.expires_at,
     )
     resolution_metadata = {
         "conflict_resolved_by_user_id": str(auth.user_id),
@@ -829,6 +833,20 @@ def _link_memory_proposal_conflict(
     )
     active.provenance_metadata = active_metadata
     proposal.provenance_metadata = proposal_metadata
+
+
+def _effective_memory_expiry(
+    memory_type: MemoryType,
+    expires_at: datetime | None,
+) -> datetime | None:
+    if memory_type != "working":
+        return expires_at
+    latest_expiry = datetime.now(UTC) + WORKING_MEMORY_TTL
+    if expires_at is None:
+        return latest_expiry
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return min(expires_at, latest_expiry)
 
 
 def _conflicting_active_memory_items(

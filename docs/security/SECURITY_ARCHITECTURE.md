@@ -76,6 +76,8 @@ central gates in this target flow.
   Source deletion invalidates both explicit source links and normalized
   `source_ids` provenance, marks dependent memory stale and requiring
   re-verification, and records the propagation audit event.
+  Working memory has a bounded eight-hour TTL; expiry is persisted in the
+  secure record and prevents recall with an explicit Inspect exclusion.
 - Model output failing schema, citation, or DLP validation is rejected or safely
   regenerated; it is never executed as policy.
 - Approval timeout, cancellation, or mismatch leaves the proposed mutation

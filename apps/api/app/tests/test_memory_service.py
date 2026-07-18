@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -104,6 +105,7 @@ def test_evidence_derived_agent_memory_requires_approval_before_recall(
     project_id = uuid.UUID(_create_project(client))
     auth = _dev_auth(db_session, "owner")
     source_id = uuid.uuid4()
+    expiry = datetime.now(UTC) + timedelta(days=1)
 
     item = memory_service.upsert_memory_item(
         db_session,
@@ -117,6 +119,7 @@ def test_evidence_derived_agent_memory_requires_approval_before_recall(
         source_entity_type="evidence_source",
         source_entity_id=source_id,
         provenance_metadata={"origin": "agent", "trust_score": 0.8},
+        expires_at=expiry,
     )
     db_session.commit()
 
@@ -133,6 +136,7 @@ def test_evidence_derived_agent_memory_requires_approval_before_recall(
     assert approved.status == "active"
     assert approved.provenance_metadata["approved_at"]
     assert approved.provenance_metadata["security_status"] == "approved"
+    assert approved.provenance_metadata["expires_at"] == expiry.isoformat()
     selected = memory_service.select_memory_for_workflow(
         db_session,
         auth,
@@ -140,6 +144,61 @@ def test_evidence_derived_agent_memory_requires_approval_before_recall(
         workflow_type="guide_chat",
     )
     assert [candidate.id for candidate in selected] == [item.id]
+
+
+def test_working_memory_has_bounded_ttl_and_expired_memory_is_inspectable(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    now = datetime.now(UTC)
+    working = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="working",
+        write_policy="transient",
+        title="Current guide context",
+        summary="The current conversation is evaluating concierge validation.",
+        content={"topic": "concierge validation"},
+    )
+    expired = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="semantic",
+        write_policy="direct",
+        title="Expired finding",
+        summary="An outdated willingness-to-pay finding.",
+        content={"claim": "outdated finding"},
+        expires_at=now - timedelta(seconds=1),
+    )
+    db_session.commit()
+
+    assert working.expires_at is not None
+    metadata_expiry = datetime.fromisoformat(working.provenance_metadata["expires_at"])
+    last_verified_at = datetime.fromisoformat(working.provenance_metadata["last_verified_at"])
+    assert timedelta(0) < metadata_expiry - last_verified_at <= memory_service.WORKING_MEMORY_TTL
+    assert expired.expires_at is not None
+    assert expired.provenance_metadata["expires_at"] == (now - timedelta(seconds=1)).isoformat()
+    selected = memory_service.select_memory_for_workflow(
+        db_session,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+    )
+    assert [item.id for item in selected] == [working.id]
+    inspect = memory_service.inspect_memory(
+        db_session,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+    )
+    assert {item["id"] for item in inspect["selected_memory"]} == {str(working.id)}
+    assert {item["id"] for item in inspect["excluded_memory"] if item["reason"] == "expired"} == {
+        expired.id
+    }
 
 
 def test_conflicting_memory_proposal_preserves_active_version_until_approval(

@@ -19,7 +19,7 @@ Thesys stores durable project memory as domain objects, not as a long chat trans
 
 ## Governance
 
-Memory records include write policy, source entity, provenance metadata, status, confidence, expiration, and created-by fields. Agent-generated memory updates can be proposed and require approval before they are accepted as active project state.
+Memory records include write policy, source entity, provenance metadata, status, confidence, expiration, and created-by fields. Working memory receives a maximum eight-hour TTL; expired records are excluded from workflow context and remain visible in Inspect with their exclusion reason. Agent-generated memory updates can be proposed and require approval before they are accepted as active project state.
 
 ## Review Pointers
 
