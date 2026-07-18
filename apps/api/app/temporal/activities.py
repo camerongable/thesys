@@ -22,6 +22,7 @@ from app.db.models import (
     WorkspaceMember,
 )
 from app.db.session import SessionLocal
+from app.db.tenant import bind_tenant_context
 from app.services import (
     agentic_research_service,
     competitor_discovery_service,
@@ -337,8 +338,9 @@ def _run_db_activity_sync(
     with SessionLocal() as db:
         sprint: ResearchSprint | None = None
         try:
-            sprint = _get_sprint(db, uuid.UUID(str(payload["research_sprint_id"])))
             auth = _auth_from_payload(db, payload)
+            bind_tenant_context(db, auth.principal)
+            sprint = _get_sprint(db, uuid.UUID(str(payload["research_sprint_id"])))
             _update_sprint(sprint, status=sprint.status, current_step=step_name)
             db.commit()
             return fn(db, auth, settings, sprint)

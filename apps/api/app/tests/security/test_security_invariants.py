@@ -1,9 +1,11 @@
 import ast
+import importlib.util
 import inspect
 from importlib.util import find_spec
 from pathlib import Path
 
 import pytest
+import yaml
 
 from app.core.config import Settings
 from app.db.models import Base, EvidenceSource
@@ -11,8 +13,11 @@ from app.features.governance_tools.registry import list_tool_definitions
 from app.security.contracts import (
     DATA_TYPES,
     GLOBAL_TABLES,
+    IDENTITY_BOOTSTRAP_TABLES,
     INHERITED_TENANT_TABLES,
     MEMORY_WRITE_PATHS,
+    RLS_DIRECT_TENANT_TABLES,
+    RLS_INHERITED_TENANT_TABLES,
     SECURITY_INVARIANTS,
     DataClassification,
     ProviderPolicy,
@@ -139,6 +144,100 @@ def test_all_database_tables_have_a_tenant_path() -> None:
 
     assert not uncategorized, f"Tables without a declared tenant path: {uncategorized}"
     assert not broken_inherited_paths, f"Invalid inherited tenant paths: {broken_inherited_paths}"
+
+
+def test_all_tenant_tables_are_covered_by_rls() -> None:
+    direct_tenant_tables = {
+        table.name
+        for table in Base.metadata.tables.values()
+        if "workspace_id" in table.c and table.name not in IDENTITY_BOOTSTRAP_TABLES
+    }
+
+    assert direct_tenant_tables == RLS_DIRECT_TENANT_TABLES
+    assert set(INHERITED_TENANT_TABLES) == RLS_INHERITED_TENANT_TABLES
+    assert {
+        "projects",
+        "project_theses",
+        "evidence_sources",
+        "evidence_chunks",
+        "project_memory_items",
+        "research_sprints",
+        "research_plans",
+        "competitors",
+        "assumptions",
+        "validation_missions",
+        "experiment_results",
+        "decisions",
+        "tool_invocations",
+        "approval_requests",
+        "audit_events",
+    } <= RLS_DIRECT_TENANT_TABLES
+
+
+def test_rls_migration_forces_policies_and_scoped_role_grants(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0029_tenant_rls.py"
+    spec = importlib.util.spec_from_file_location("tenant_rls_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    assert set(migration.RLS_DIRECT_TABLES) == RLS_DIRECT_TENANT_TABLES
+    assert set(migration.RLS_INHERITED_TABLES) == RLS_INHERITED_TENANT_TABLES
+    combined = "\n".join(statements)
+    for table in (*migration.RLS_DIRECT_TABLES, *migration.RLS_INHERITED_TABLES):
+        assert f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY' in statements
+        assert f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY' in statements
+        assert f'CREATE POLICY workspace_isolation ON "{table}"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "WITH CHECK" in combined
+    assert "GRANT SELECT" in combined
+    assert "GRANT INSERT, UPDATE, DELETE" in combined
+    assert "thesys_api" in combined
+    assert "thesys_worker" in combined
+    assert "thesys_readonly" in combined
+    readonly_grants = "\n".join(
+        statement for statement in statements if "thesys_readonly" in statement
+    )
+    assert '"users"' not in readonly_grants
+    assert "GRANT INSERT, UPDATE, DELETE" not in readonly_grants
+
+    statements.clear()
+    migration.downgrade()
+    for table in (*migration.RLS_DIRECT_TABLES, *migration.RLS_INHERITED_TABLES):
+        assert f'DROP POLICY IF EXISTS workspace_isolation ON "{table}"' in statements
+        assert f'ALTER TABLE "{table}" DISABLE ROW LEVEL SECURITY' in statements
+
+
+def test_database_role_manifest_separates_runtime_and_migration_credentials() -> None:
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+    api = compose["services"]["api"]
+    worker = compose["services"]["temporal-worker"]
+    api_environment = api["environment"]
+    worker_environment = worker["environment"]
+
+    assert "thesys_api:" in api_environment["DATABASE_URL"]
+    assert "thesys_migration:" in api_environment["MIGRATION_DATABASE_URL"]
+    assert "unset MIGRATION_DATABASE_URL" in api["command"]
+    assert "exec uvicorn" in api["command"]
+    assert "thesys_worker:" in worker_environment["DATABASE_URL"]
+    assert api_environment["DATABASE_RUNTIME_ROLE"] == "api"
+    assert worker_environment["DATABASE_RUNTIME_ROLE"] == "worker"
+
+    bootstrap = (REPO_ROOT / "infra/postgres/init.sql").read_text()
+    assert "thesys_migration" in bootstrap and "BYPASSRLS" in bootstrap
+    for role in ("thesys_api", "thesys_worker", "thesys_readonly"):
+        assert role in bootstrap
+    assert bootstrap.count("NOBYPASSRLS") >= 3
+    assert "REVOKE CREATE ON SCHEMA public FROM PUBLIC" in bootstrap
+    assert "ALTER SCHEMA public OWNER TO thesys_migration" in bootstrap
 
 
 def test_mutating_tools_require_policy_and_approval() -> None:

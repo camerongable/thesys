@@ -3,6 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
@@ -84,8 +85,16 @@ class Settings(BaseSettings):
     )
 
     database_url: str = Field(
-        default="postgresql+psycopg://thesys:thesys@localhost:5432/thesys",
+        default="postgresql+psycopg://thesys_api:thesys-api-local@localhost:5432/thesys",
         validation_alias="DATABASE_URL",
+    )
+    migration_database_url: str | None = Field(
+        default=None,
+        validation_alias="MIGRATION_DATABASE_URL",
+    )
+    database_runtime_role: Literal["api", "worker", "readonly"] = Field(
+        default="api",
+        validation_alias="DATABASE_RUNTIME_ROLE",
     )
     redis_url: str = Field(default="redis://localhost:6379/0", validation_alias="REDIS_URL")
     litellm_base_url: str = Field(
@@ -487,9 +496,16 @@ class Settings(BaseSettings):
         return value.strip().lower()
 
     @model_validator(mode="after")
-    def validate_identity_configuration(self) -> "Settings":
+    def validate_security_configuration(self) -> "Settings":
         if self.auth_mode == "dev" and self.environment != "local":
             raise ValueError("AUTH_MODE=dev is permitted only when APP_ENV=local.")
+
+        if self.environment in {"staging", "production"}:
+            expected_database_user = f"thesys_{self.database_runtime_role}"
+            if make_url(self.database_url).username != expected_database_user:
+                raise ValueError(
+                    "Hosted DATABASE_URL must use the declared scoped runtime role."
+                )
 
         if self.auth_mode != "oidc":
             return self

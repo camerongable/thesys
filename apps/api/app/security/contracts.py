@@ -183,11 +183,11 @@ SECURITY_INVARIANTS: tuple[SecurityInvariant, ...] = (
     SecurityInvariant(
         "SEC-INV-01",
         "No request may return data outside the authenticated workspace.",
-        "partial",
+        "enforced",
         62,
-        "Workspace-scoped service queries and inherited tenant paths.",
-        "test_all_database_tables_have_a_tenant_path",
-        "Database row-level security is not enabled yet.",
+        "Workspace-scoped queries plus forced Postgres RLS on every tenant table.",
+        "test_all_tenant_tables_are_covered_by_rls",
+        "A live Postgres policy test remains environment-gated until CI provisions Postgres.",
     ),
     SecurityInvariant(
         "SEC-INV-02",
@@ -293,6 +293,46 @@ SECURITY_INVARIANTS: tuple[SecurityInvariant, ...] = (
 
 GLOBAL_TABLES = frozenset({"users", "workspaces"})
 
+IDENTITY_BOOTSTRAP_TABLES = frozenset({"users", "workspaces", "workspace_members"})
+
+RLS_DIRECT_TENANT_TABLES = frozenset(
+    {
+        "ai_cache_entries",
+        "ai_cache_events",
+        "ai_runs",
+        "approval_requests",
+        "artifact_versions",
+        "artifacts",
+        "assumptions",
+        "audit_events",
+        "claims",
+        "competitor_candidates",
+        "competitors",
+        "customer_segments",
+        "decisions",
+        "discovered_sources",
+        "evidence_chunks",
+        "evidence_sources",
+        "experiment_results",
+        "experiments",
+        "problems",
+        "project_intakes",
+        "project_memory_items",
+        "project_nudges",
+        "project_theses",
+        "projects",
+        "research_plans",
+        "research_sprints",
+        "risks",
+        "thesis_canvases",
+        "thesis_evolution_events",
+        "tool_invocations",
+        "validation_missions",
+        "validation_result_interpretations",
+        "wedge_options",
+    }
+)
+
 INHERITED_TENANT_TABLES: dict[str, tuple[str, str]] = {
     "ai_steps": ("ai_run_id", "ai_runs.id"),
     "assumption_evidence_links": ("assumption_id", "assumptions.id"),
@@ -300,6 +340,8 @@ INHERITED_TENANT_TABLES: dict[str, tuple[str, str]] = {
     "competitor_evidence_links": ("competitor_id", "competitors.id"),
     "decision_links": ("decision_id", "decisions.id"),
 }
+
+RLS_INHERITED_TENANT_TABLES = frozenset(INHERITED_TENANT_TABLES)
 
 
 MEMORY_WRITE_PATHS: dict[str, str] = {

@@ -327,6 +327,12 @@ verifies hashed service-account API keys for integration-style access. JWT key
 IDs, revoked JWT IDs, and revoked API-key
 hashes are configurable to model rotation and revocation behavior.
 
+Authenticated principals are also bound to transaction-local Postgres settings.
+Forced row-level security covers every currently modeled tenant table, including
+child/link tables that inherit workspace scope. The API, Temporal worker,
+migration process, and readonly access use separate non-superuser database roles;
+application-level workspace predicates remain in place as defense in depth.
+
 ---
 
 ## Architecture Overview
@@ -637,12 +643,14 @@ Example environment variables:
 
 ```bash
 # Application
-APP_ENV=development
+APP_ENV=local
 FRONTEND_URL=http://localhost:3000
 BACKEND_URL=http://localhost:8000
 
 # Database
-DATABASE_URL=postgresql+psycopg://thesys:thesys@localhost:5432/thesys
+DATABASE_RUNTIME_ROLE=api
+DATABASE_URL=postgresql+psycopg://thesys_api:thesys-api-local@localhost:5432/thesys
+MIGRATION_DATABASE_URL=postgresql+psycopg://thesys_migration:thesys-migration-local@localhost:5432/thesys
 
 # LLM / Model Gateway
 LLM_STUB_MODE=always

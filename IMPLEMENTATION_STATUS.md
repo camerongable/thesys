@@ -9,8 +9,9 @@ memory-write paths, a threat model, trust-boundary architecture, control matrix,
 abuse cases, automated invariant checks, and a pull-request security checklist.
 Sprint 62 production identity work is now underway: OIDC/JWKS verification,
 principal-backed authorization context, strict active membership resolution,
-and the production dev-auth startup guard are implemented. Sprints 62-68 own
-the remaining tenant isolation, secrets/encryption, secure ingestion, centralized
+the production dev-auth startup guard, forced Postgres RLS, and scoped database
+roles are implemented. Sprints 62-68 own the remaining secrets/encryption,
+secure ingestion, centralized
 guardrails, secure RAG/memory, MCP/tool policy, monitoring/incident response,
 and adversarial CI controls identified as partial or planned by that contract.
 
@@ -91,8 +92,19 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Require pre-provisioned, active OIDC users, exact workspace membership,
   and agreement with the database role; never provision from token claims.
 - [x] Add persistent user status and migration `0028_production_identity`.
-- [ ] Add Postgres RLS, transaction-local identity, database roles, and direct
-  cross-tenant ORM/database tests.
+- [x] Bind validated principals to transaction-local Postgres workspace/user
+  settings and reapply them after every session transaction boundary.
+- [x] Enable and force RLS across all 38 currently modeled tenant tables,
+  including five child/link tables with inherited parent policies.
+- [x] Separate migration, API, Temporal worker, and readonly database roles;
+  hosted startup rejects a bootstrap or mismatched runtime username.
+- [x] Add direct wrong-tenant Postgres ORM coverage for projects, evidence,
+  chunks/vector retrieval, memory, approvals, tools, decisions, and
+  research/trace/workflow metadata. The test is environment-gated locally.
+- [ ] Complete service-boundary cross-tenant coverage as signed object URL and
+  security-event surfaces land. There are no standalone `validation_plans` or
+  `security_events` tables in the current schema; new tenant tables fail the RLS
+  invariant until registered and migrated.
 - [ ] Add production secret providers and envelope encryption.
 - [ ] Harden object storage, browser/session policy, and auth audit events.
 
@@ -106,10 +118,29 @@ current verdict, next action, evidence health, validation, and decision state.
   `10/10`). `pip-audit`, Docker inventory, and the npm registry audit were
   unavailable and remained explicit non-strict warnings.
 
+## Sprint 62 Tenant Isolation Verification
+
+- [x] Focused tenant-context, RLS migration/role contract, and direct-Postgres
+  tests passed (`16 passed, 1 skipped, 3 xfailed, 1 warning`). The skip is the
+  live Postgres policy test; expected xfails remain owned by Sprints 63, 64,
+  and 67.
+- [x] The security plus project/evidence/memory/tool/MCP/Temporal checkpoint
+  passed (`101 passed, 1 skipped, 3 xfailed, 3 warnings`).
+- [x] `alembic upgrade 0028_production_identity:0029_tenant_rls --sql`
+  rendered all 38 forced RLS policies and scoped role grants with PostgreSQL
+  dialect output; `alembic heads` reports `0029_tenant_rls`.
+- [x] Focused ruff, compileall, lockfile synchronization, diff checks, and
+  conflict-marker checks passed.
+- [ ] Run `RLS_TEST_DATABASE_URL=<thesys_api-url> .venv/bin/pytest
+  app/tests/security/test_postgres_rls.py -q` on a migrated Postgres instance.
+  This workstation has no Postgres binaries, Docker, or Podman, so direct policy
+  execution could not run in this cycle. The test fails if the connection is a
+  superuser/BYPASSRLS role, any policy is not forced, cross-tenant reads become
+  visible, or wrong-tenant writes succeed.
+
 ## Next Sprint
 
-Continue V1 Sprint 62 with Postgres RLS, scoped database roles, and direct
-cross-tenant database tests.
+Continue V1 Sprint 62 with production secret providers and envelope encryption.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

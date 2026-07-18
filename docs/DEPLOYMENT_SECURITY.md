@@ -21,10 +21,45 @@ demo-safe, production-shaped, and still future owner work.
 | `dev` | Local headers can identify workspace/user/role. Must not be used for hosted production. |
 | `jwt` | Signed JWTs with issuer, audience, expiry, active key IDs, and revoked-token checks. |
 | `api_key` | SHA-256 hashed service keys with active/revoked key checks. |
+| `oidc` | Asymmetric JWT verification through JWKS followed by strict active user, workspace membership, and role resolution. |
 
 Production-like auth should use OIDC/JWKS rotation, token revocation, service
 account scopes, workspace membership checks, and audit attribution. Some of
 that shape exists in V1; managed OIDC/JWKS operations remain future owner work.
+
+## Database Roles And RLS
+
+| Role | Runtime use | Privileges |
+|---|---|---|
+| `thesys_migration` | Migration command only | Schema create/alter and `BYPASSRLS`; never inherited by API or worker |
+| `thesys_api` | FastAPI process | Identity and tenant-table DML; no schema create, ownership, superuser, or RLS bypass |
+| `thesys_worker` | Temporal worker | Identity reads and tenant-table DML; no identity mutation, schema create, ownership, superuser, or RLS bypass |
+| `thesys_readonly` | Operator/reporting access | `SELECT` only and still subject to tenant context/RLS |
+
+The API container runs Alembic with `MIGRATION_DATABASE_URL`, unsets that
+credential, and then execs Uvicorn with `DATABASE_URL` for `thesys_api`.
+Production deployments should run migrations as a separate job so migration
+credentials never enter the API container.
+
+The local passwords in `infra/postgres/init.sql` are development-only. Existing
+Docker volumes created before the role bootstrap must be recreated before using
+the new URLs:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+RLS is enabled and forced for all currently modeled tenant tables. API and
+worker sessions bind validated workspace/user IDs transaction-locally and
+reapply them after each commit or rollback. Run direct policy verification on a
+migrated Postgres instance:
+
+```bash
+cd apps/api
+RLS_TEST_DATABASE_URL=postgresql+psycopg://thesys_api:<password>@<host>/<database> \
+  .venv/bin/pytest app/tests/security/test_postgres_rls.py -q
+```
 
 ## Provider Egress And SSRF Controls
 

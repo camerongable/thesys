@@ -15,6 +15,7 @@ from app.core.config import Settings, get_settings
 from app.core.oidc import OIDCValidationError, verify_oidc_token
 from app.db.models import User, Workspace
 from app.db.session import get_db
+from app.db.tenant import bind_tenant_context
 from app.services.identity_service import (
     ensure_dev_identity,
     ensure_external_identity,
@@ -136,29 +137,32 @@ def get_current_auth_context(
 ) -> AuthContext:
     auth_mode = settings.auth_mode.strip().lower()
     if auth_mode == "dev":
-        return ensure_dev_identity(
+        auth = ensure_dev_identity(
             db,
             email=x_dev_user_email or settings.dev_auth_default_email,
             display_name=x_dev_user_name or settings.dev_auth_default_name,
             role=x_dev_user_role,
         )
+    else:
+        if x_dev_user_email or x_dev_user_name or x_dev_user_role:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Development auth headers are disabled outside AUTH_MODE=dev.",
+            )
+        if auth_mode == "jwt":
+            auth = _auth_from_jwt(db, settings, authorization)
+        elif auth_mode == "api_key":
+            auth = _auth_from_api_key(db, settings, x_api_key)
+        elif auth_mode == "oidc":
+            auth = _auth_from_oidc(db, settings, authorization)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Unsupported AUTH_MODE. Use dev, jwt, api_key, or oidc.",
+            )
 
-    if x_dev_user_email or x_dev_user_name or x_dev_user_role:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Development auth headers are disabled outside AUTH_MODE=dev.",
-        )
-    if auth_mode == "jwt":
-        return _auth_from_jwt(db, settings, authorization)
-    if auth_mode == "api_key":
-        return _auth_from_api_key(db, settings, x_api_key)
-    if auth_mode == "oidc":
-        return _auth_from_oidc(db, settings, authorization)
-
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Unsupported AUTH_MODE. Use dev, jwt, api_key, or oidc.",
-    )
+    bind_tenant_context(db, auth.principal)
+    return auth
 
 
 AuthContextDep = Annotated[AuthContext, Depends(get_current_auth_context)]

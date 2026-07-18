@@ -16,6 +16,7 @@ from app.core.auth import get_current_auth_context
 from app.core.config import Settings, get_settings
 from app.core.oidc import OIDCValidationError, oidc_external_auth_id, verify_oidc_token
 from app.db.models import User, Workspace, WorkspaceMember
+from app.db.tenant import get_bound_tenant_context
 from app.main import create_app
 
 ISSUER = "https://identity.example.com"
@@ -224,6 +225,10 @@ def test_oidc_auth_resolves_preprovisioned_membership_into_principal(
     assert auth.principal.authentication_method == "oidc"
     assert auth.principal.session_id == "session-123"
     assert auth.principal.token_id == "token-456"
+    tenant_context = get_bound_tenant_context(db_session)
+    assert tenant_context is not None
+    assert tenant_context.user_id == user.id
+    assert tenant_context.workspace_id == workspace.id
 
 
 def test_oidc_auth_never_provisions_from_token_claims(

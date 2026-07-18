@@ -46,6 +46,32 @@ authentication should use OIDC/JWKS and pre-provisioned membership. OIDC users
 are keyed by `oidc_external_auth_id(issuer, subject)`; account status and the
 database membership role are authoritative after token validation.
 
+## Database Tenant Isolation
+
+`bind_tenant_context` stores the validated principal on the SQLAlchemy session.
+For Postgres transactions it sets `app.workspace_id` and `app.user_id` with
+transaction-local `set_config` calls, equivalent to `SET LOCAL`. A session event
+reapplies both settings after every commit or rollback before the next query.
+
+Migration `0029_tenant_rls` enables and forces row-level security on all 38
+currently modeled tenant tables. Thirty-three tables compare their own
+`workspace_id`; five child/link tables authorize through their tenant-scoped
+parent. Missing context fails closed. Existing service-level workspace filters
+remain required.
+
+Database roles are separated:
+
+- `thesys_migration` owns schema changes and may bypass RLS; it is not a runtime
+  application role.
+- `thesys_api` and `thesys_worker` are non-superuser, non-owner,
+  `NOBYPASSRLS` roles with scoped table grants.
+- `thesys_readonly` receives `SELECT` only and remains subject to RLS.
+
+The local Postgres bootstrap uses development-only passwords. Hosted
+environments must provision independent managed credentials. Run the live
+direct-ORM policy test with `RLS_TEST_DATABASE_URL` pointing to a migrated
+database as `thesys_api`.
+
 ## Expensive Workflow Policy
 
 `security_policy_service.guarded_workflow` protects AI-heavy routes before they
@@ -133,4 +159,4 @@ are installed and network policy is stable.
 - Add token rotation/revocation tables for API keys and service accounts.
 - Add provider-specific response-size enforcement where SDKs expose streaming
   byte counters.
-- Add Postgres row-level security and separate application database roles.
+- Run the direct Postgres RLS suite in CI and hosted pre-deploy checks.

@@ -28,7 +28,7 @@ central gates in this target flow.
 | Boundary | Data crossing | Expected identity | Authorization decision | Classification | Encryption | Audit | Failure behavior | Threat scenarios |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Browser to API | Auth token, project input, files, actions | OIDC principal or service account | Signature/claims, active user, exact workspace membership, stored role | Internal to restricted | TLS in hosted environments | Auth failures and governed actions | Reject unauthenticated, invalid, stale, oversized, or unauthorized requests | Session theft, IDOR, injection, resource abuse |
-| API to database | Project state, evidence metadata, vectors, memory, audit | Application DB role | Workspace scope; RLS target in Sprint 62 | Confidential/restricted | TLS plus at-rest encryption target | Mutations and denied policy decisions | Roll back transaction; do not broaden query scope | Cross-tenant query, SQL injection, operator access |
+| API to database | Project state, evidence metadata, vectors, memory, audit | Non-owner `thesys_api` or `thesys_worker` role plus transaction-local principal | Service workspace scope and forced RLS `USING`/`WITH CHECK` policy | Confidential/restricted | TLS plus at-rest encryption target | Mutations and denied policy decisions | Missing/stale tenant context returns no rows and rejects writes | Cross-tenant query, SQL injection, operator access |
 | API to object storage | Uploaded files and derived artifacts | Scoped application credential | Workspace/object-key policy | Confidential/restricted | TLS; bucket/KMS target | Upload/delete/access metadata | Deny unsafe key, type, scope, or credential | Object overwrite, public bucket, malicious file |
 | API to LiteLLM | Prompts, context, structured-output schema | Application virtual key | Provider/model/classification policy | Public to restricted | TLS | Provider, model, classification, cost; no raw secret | Deny unapproved provider or data class | Data exfiltration, model substitution, overspend |
 | LiteLLM to model provider | Provider request/response | Provider-scoped credential | LiteLLM route and allowlist | Same as request payload | TLS | Provider/model/cost metadata | Fail closed or approved deterministic fallback | Credential compromise, retention, response injection |
@@ -58,9 +58,11 @@ central gates in this target flow.
 
 Most project-owned tables carry `workspace_id` directly. Small child/link tables
 inherit tenant scope through a required foreign key to a directly scoped parent.
-`GLOBAL_TABLES` and `INHERITED_TENANT_TABLES` make exceptions explicit, and the
-Sprint 61 invariant test fails when a new table has no declared tenant path.
-Sprint 62 adds database-enforced row-level security for the hosted posture.
+`GLOBAL_TABLES`, `IDENTITY_BOOTSTRAP_TABLES`, and `INHERITED_TENANT_TABLES` make
+exceptions explicit. Sprint 62 forces Postgres RLS across all 38 modeled tenant
+tables and reapplies transaction-local principal settings whenever a session
+starts a new transaction. An invariant test fails when a new tenant table is
+not added to the RLS contract.
 
 ## Provider and data policy
 

@@ -1535,6 +1535,7 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "pyyaml" },
     { name = "ruff" },
 ]
 
@@ -1554,6 +1555,7 @@ requires-dist = [
     { name = "pypdf", specifier = ">=5.0,<7.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3,<9.0" },
     { name = "python-multipart", specifier = ">=0.0.9,<1.0" },
+    { name = "pyyaml", marker = "extra == 'dev'", specifier = ">=6.0,<7.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8,<1.0" },
     { name = "sqlalchemy", specifier = ">=2.0,<3.0" },
     { name = "temporalio", specifier = ">=1.9,<2.0" },
