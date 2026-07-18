@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.auth import AuthContext
+from app.core.auth import AuthContext, record_cross_tenant_access_attempt
 from app.db.models import AIRun
 from app.services import project_service
 
@@ -20,6 +20,7 @@ def get_run(db: Session, auth: AuthContext, run_id: uuid.UUID) -> AIRun:
         .options(selectinload(AIRun.steps))
     )
     if run is None:
+        record_cross_tenant_access_attempt(db, auth, reason_code="workflow_run_scope_denied")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow run not found.")
     return run
 

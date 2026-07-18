@@ -156,6 +156,9 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Emit credential-free, tenant-attributable cross-tenant-attempt events
   from direct decision retrieval and tool-invocation approval lookups, with
   fixed reason codes and no persisted project, decision, or invocation IDs.
+- [x] Emit a credential-free, tenant-attributable cross-tenant-attempt event
+  from the standalone workflow-run lookup, protecting AI execution and trace
+  metadata without persisting the requested run ID.
 - [ ] Add broader authorization-denial emitters as their corresponding
   direct-resource mutation/read flows are introduced or identified.
 
@@ -247,6 +250,8 @@ current verdict, next action, evidence health, validation, and decision state.
   (`339 passed, 1 skipped, 3 xfailed, 3 warnings`).
 - [x] Direct decision and tool-invocation scope-audit coverage passed with the
   full backend suite (`340 passed, 1 skipped, 3 xfailed, 3 warnings`).
+- [x] Standalone workflow-run scope-audit coverage passed with the full backend
+  suite (`341 passed, 1 skipped, 3 xfailed, 3 warnings`).
 - [ ] Run migration `0031_authentication_events` and its policy checks against
   the existing live-Postgres CI checkpoint. Local SQLite tests prove the model
   and offline migration contract but not a PostgreSQL RLS execution.
@@ -268,8 +273,7 @@ current verdict, next action, evidence health, validation, and decision state.
 ## Next Sprint
 
 Continue V1 Sprint 62 with the remaining service-level cross-tenant matrix and
-authorization-denial emitters for the remaining direct resource/mutation
-boundaries.
+authorization-denial emitters for the remaining direct resource/mutation boundaries.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

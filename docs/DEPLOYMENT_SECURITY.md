@@ -71,6 +71,10 @@ fixed `decision_scope_denied` or `tool_invocation_scope_denied` reasons through
 the same attributed `cross_tenant_access_attempt` event and never store either
 requested identifier.
 
+The standalone workflow-run API protects AI execution and trace metadata with
+the same pattern. An out-of-workspace `run_id` returns `404 Workflow run not
+found` and records `workflow_run_scope_denied` without persisting that ID.
+
 ## Database Roles And RLS
 
 | Role | Runtime use | Privileges |
