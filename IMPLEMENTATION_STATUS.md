@@ -601,6 +601,10 @@ current verdict, next action, evidence health, validation, and decision state.
   its history while ensuring recommendation guidance is recalculated without the
   deleted support. The deletion audit records the invalidated links and decisions
   requiring review alongside stale claims and memory.
+- [x] Revalidate retrieval-plan cache hits against the current shared retrieval
+  policy before evidence enters context. A source quarantined, revoked, or no
+  longer eligible after caching cannot be replayed; cache-hit context, quality,
+  and sufficiency diagnostics are recomputed from the surviving evidence.
 
 ## Sprint 65 Verification
 
@@ -655,11 +659,15 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Source-deletion decision-dependency checkpoint passed (`27 passed, 1
   warning`) across source deletion, evidence, and decision regressions, with
   changed-file lint and compile checks clean.
+- [x] Retrieval-cache policy-recheck checkpoint passed (`18 passed, 1 warning`)
+  across policy, retrieval, and secure-ranking regressions, with changed-file
+  lint and compile checks clean.
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-audit remaining retrieval-path parity and memory-poisoning acceptance work.
+audit remaining source-detail, MCP, LangGraph, and trace/replay parity plus
+memory-poisoning acceptance work.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

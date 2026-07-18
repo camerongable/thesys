@@ -111,6 +111,46 @@ def test_python_fallback_uses_the_same_retrieval_security_policy(db_session: Ses
     assert [candidate.chunk.id for candidate in candidates] == [approved_chunk.id]
 
 
+def test_cached_results_are_rechecked_after_source_quarantine(db_session: Session) -> None:
+    workspace_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    source, chunk = _source_and_chunk(
+        workspace_id=workspace_id,
+        project_id=project_id,
+        data_classification="internal",
+        credibility_score="0.7",
+    )
+    db_session.add_all([source, chunk])
+    db_session.commit()
+    cached_result = retrieval_service._serialize_result(  # noqa: SLF001
+        chunk,
+        source,
+        score=0.9,
+        semantic_score=0.9,
+        keyword_score=0.2,
+    )
+
+    source.source_metadata = {
+        **source.source_metadata,
+        "source_trust": {
+            **source.source_metadata["source_trust"],
+            "security_status": "quarantined",
+        },
+    }
+    db_session.commit()
+
+    results = retrieval_service._revalidate_cached_results(  # noqa: SLF001
+        db_session,
+        _auth(workspace_id, "editor"),
+        get_settings(),
+        project_id,
+        EvidenceRetrieveCreate(query="approved evidence"),
+        [cached_result],
+    )
+
+    assert results == []
+
+
 def _auth(workspace_id: uuid.UUID, role: str) -> SimpleNamespace:
     return SimpleNamespace(workspace_id=workspace_id, role=role)
 

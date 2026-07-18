@@ -182,17 +182,41 @@ def retrieve_evidence_pipeline(
         diagnostics = RetrievalDiagnosticsRead.model_validate(
             cache_lookup.value["diagnostics"]
         )
-        diagnostics = diagnostics.model_copy(
-            update={
-                "query_latency_ms": int((perf_counter() - started) * 1000),
-                "cache": ai_cache_service.cache_event_diagnostics(cache_lookup.event),
-            }
-        )
-        results = [
+        cached_results = [
             EvidenceRetrievalResultRead.model_validate(result)
             for result in cache_lookup.value.get("results", [])
         ]
-        return RetrievalSearchResult(diagnostics=diagnostics, results=results)
+        results = _revalidate_cached_results(
+            db,
+            auth,
+            settings,
+            project_id,
+            payload,
+            cached_results,
+        )
+        assembled, context = assemble_context_results(settings, results, top_k=payload.top_k)
+        plan = diagnostics.query_plan or _plan_query(payload.query)
+        diagnostics = diagnostics.model_copy(
+            update={
+                "candidate_count": len(results),
+                "query_latency_ms": int((perf_counter() - started) * 1000),
+                "context": context,
+                "quality_report": _quality_report(
+                    selected=assembled,
+                    candidate_count=len(results),
+                    total_latency_ms=int((perf_counter() - started) * 1000),
+                    reranker_used=bool(
+                        diagnostics.reranker
+                        and diagnostics.reranker.enabled
+                        and not diagnostics.reranker.fallback_used
+                    ),
+                    token_count=context.token_count,
+                ),
+                "sufficiency": _assess_retrieval_sufficiency(assembled, plan),
+                "cache": ai_cache_service.cache_event_diagnostics(cache_lookup.event),
+            }
+        )
+        return RetrievalSearchResult(diagnostics=diagnostics, results=assembled)
 
     plan = _plan_query(payload.query)
     subqueries = plan.subqueries or [payload.query]
@@ -688,6 +712,49 @@ def _load_candidates(
         candidate
         for candidate in candidates
         if policy.allows(source=candidate.source, chunk=candidate.chunk)
+        and _matches_metadata_filters(candidate, payload)
+        and _matches_freshness(candidate.source, payload.freshness_days)
+    ]
+
+
+def _revalidate_cached_results(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    payload: EvidenceRetrieveCreate,
+    cached_results: list[EvidenceRetrievalResultRead],
+) -> list[EvidenceRetrievalResultRead]:
+    """Recheck persisted state before serving cached evidence into context."""
+    if not cached_results:
+        return []
+    chunk_ids = {result.chunk_id for result in cached_results}
+    source_ids = {result.source_id for result in cached_results}
+    rows = db.execute(
+        select(EvidenceChunk, EvidenceSource)
+        .join(EvidenceSource, EvidenceSource.id == EvidenceChunk.source_id)
+        .where(
+            EvidenceChunk.id.in_(chunk_ids),
+            EvidenceSource.id.in_(source_ids),
+            EvidenceChunk.workspace_id == auth.workspace_id,
+            EvidenceChunk.project_id == project_id,
+            EvidenceSource.workspace_id == auth.workspace_id,
+            EvidenceSource.project_id == project_id,
+        )
+    ).all()
+    candidates = {
+        (chunk.id, source.id): RetrievalCandidate(chunk=chunk, source=source)
+        for chunk, source in rows
+    }
+    policy = RetrievalSecurityPolicy.for_auth(
+        auth,
+        minimum_source_trust_score=settings.retrieval_min_source_trust_score,
+    )
+    return [
+        result
+        for result in cached_results
+        if (candidate := candidates.get((result.chunk_id, result.source_id))) is not None
+        and policy.allows(source=candidate.source, chunk=candidate.chunk)
         and _matches_metadata_filters(candidate, payload)
         and _matches_freshness(candidate.source, payload.freshness_days)
     ]
