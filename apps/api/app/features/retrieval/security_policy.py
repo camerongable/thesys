@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from app.core.auth import AuthContext
 
 
-RETRIEVAL_SECURITY_POLICY_VERSION = "v1"
+RETRIEVAL_SECURITY_POLICY_VERSION = "v2"
 
 _CLASSIFICATION_RANK = {
     DataClassification.PUBLIC: 0,
@@ -77,6 +77,10 @@ class RetrievalSecurityPolicy:
             EvidenceSource.source_metadata["security"]["data_classification"]
             .as_string()
             .in_(self.allowed_classifications),
+            EvidenceSource.source_metadata["source_trust"]["security_status"].as_string()
+            == "approved",
+            EvidenceSource.source_metadata["source_trust"]["trust_score"].as_float()
+            >= self.minimum_source_trust_score,
             EvidenceChunk.chunk_metadata["security"]["data_classification"]
             .as_string()
             .in_(self.allowed_classifications),
@@ -91,6 +95,7 @@ class RetrievalSecurityPolicy:
     def allows(self, *, source: EvidenceSource, chunk: EvidenceChunk) -> bool:
         """Mirror SQL eligibility checks for candidates handled in Python."""
         source_security = _security_metadata(source.source_metadata)
+        source_trust = _source_trust_metadata(source.source_metadata)
         chunk_security = _security_metadata(chunk.chunk_metadata)
         if source.workspace_id != self.workspace_id or chunk.workspace_id != self.workspace_id:
             return False
@@ -101,6 +106,14 @@ class RetrievalSecurityPolicy:
         if source_security.get("classification_status") != "approved":
             return False
         if not self._classification_allowed(source_security.get("data_classification")):
+            return False
+        if source_trust.get("security_status") != "approved":
+            return False
+        try:
+            trust_score = float(source_trust["trust_score"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        if trust_score < self.minimum_source_trust_score:
             return False
         if not self._classification_allowed(chunk_security.get("data_classification")):
             return False
@@ -127,3 +140,10 @@ def _security_metadata(metadata: object) -> dict[str, object]:
         return {}
     security = metadata.get("security")
     return security if isinstance(security, dict) else {}
+
+
+def _source_trust_metadata(metadata: object) -> dict[str, object]:
+    if not isinstance(metadata, dict):
+        return {}
+    source_trust = metadata.get("source_trust")
+    return source_trust if isinstance(source_trust, dict) else {}

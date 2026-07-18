@@ -58,6 +58,12 @@ central gates in this target flow.
   metadata. A deployment must wire and monitor exactly one optional adapter
   before relying on it as an additional classifier.
 - Unclassified sources remain quarantined and non-retrievable.
+- Every source must carry an approved, versioned source-trust record before it
+  can be embedded or retrieved. The record captures provenance, trust,
+  injection, and poisoning scores plus review timestamps. Instruction-heavy,
+  policy-override, tool-schema, system-message impersonation, or hidden-Unicode
+  sources are quarantined before vector creation and emit a redacted audit
+  event.
 - Model output failing schema, citation, or DLP validation is rejected or safely
   regenerated; it is never executed as policy.
 - Approval timeout, cancellation, or mismatch leaves the proposed mutation

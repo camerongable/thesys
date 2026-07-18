@@ -489,6 +489,8 @@ def test_sources_require_classification_before_retrieval() -> None:
 
     assert 'source_metadata["security"]["security_status"]' in retrieval_conditions
     assert 'source_metadata["security"]["classification_status"]' in retrieval_conditions
+    assert 'source_metadata["source_trust"]["security_status"]' in retrieval_conditions
+    assert 'source_metadata["source_trust"]["trust_score"]' in retrieval_conditions
     assert 'chunk_metadata["security"]["retrieval_allowed"]' in retrieval_conditions
     assert "RetrievalSecurityPolicy.for_auth" in retrieval_pipeline
     assert "is_source_approved" in reembedding

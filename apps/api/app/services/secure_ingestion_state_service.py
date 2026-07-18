@@ -46,10 +46,12 @@ _ALLOWED_TRANSITIONS = {
     SecureIngestionState.CLASSIFIED: {
         SecureIngestionState.PII_REVIEW_PENDING,
         SecureIngestionState.APPROVED_FOR_EMBEDDING,
+        SecureIngestionState.QUARANTINED,
         SecureIngestionState.FAILED,
     },
     SecureIngestionState.PII_REVIEW_PENDING: {
         SecureIngestionState.APPROVED_FOR_EMBEDDING,
+        SecureIngestionState.QUARANTINED,
         SecureIngestionState.FAILED,
     },
     SecureIngestionState.APPROVED_FOR_EMBEDDING: {

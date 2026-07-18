@@ -3,6 +3,7 @@
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from time import perf_counter
 from typing import Any
 
@@ -937,10 +938,6 @@ def _process_source_text(
                 source,
                 secure_ingestion_state_service.SecureIngestionState.PII_REVIEW_PENDING,
             )
-        secure_ingestion_state_service.transition(
-            source,
-            secure_ingestion_state_service.SecureIngestionState.APPROVED_FOR_EMBEDDING,
-        )
 
         searchable_text = _normalize_text(protected_source_text.text)
         chunks = _chunk_text(searchable_text)
@@ -1005,8 +1002,17 @@ def _process_source_text(
         prompt_markers = source_provenance_service.detect_prompt_injection_markers(searchable_text)
         if prompt_markers:
             processed_metadata["prompt_injection_markers"] = prompt_markers
+        source_trust = source_provenance_service.assess_source_trust(
+            source_type=source.source_type,
+            text=searchable_text,
+            metadata=processed_metadata,
+            approved_by=source.created_by,
+        )
+        source_security_metadata["security_status"] = source_trust.security_status
+        processed_metadata["security"] = source_security_metadata
+        processed_metadata["source_trust"] = source_trust.metadata()
 
-        if source.source_type == "url":
+        if source.source_type == "url" and source_trust.security_status == "approved":
             duplicate = _find_ready_source_by_content_hash(
                 db,
                 auth,
@@ -1062,6 +1068,10 @@ def _process_source_text(
             url=source.url,
             metadata=processed_metadata,
         )
+        source.credibility_score = min(
+            source.credibility_score,
+            Decimal(str(source_trust.trust_score)),
+        )
         source.source_metadata = _merge_metadata(
             processed_metadata,
             source_provenance_service.quality_metadata(
@@ -1073,6 +1083,37 @@ def _process_source_text(
                 credibility_score=source.credibility_score,
                 metadata=processed_metadata,
             ),
+        )
+        if source_trust.security_status != "approved":
+            _quarantine_source_for_trust(
+                db,
+                auth,
+                source,
+                source_trust=source_trust,
+            )
+            db.commit()
+            db.refresh(source)
+            source = get_source(db, auth, source.project_id, source.id)
+            workflow_utils.complete_zero_cost_step_and_run(
+                db,
+                run=run,
+                step=step,
+                output_json={
+                    "source_id": str(source.id),
+                    "chunk_count": 0,
+                    "security_status": source_trust.security_status,
+                    "source_trust": source_trust.metadata(),
+                },
+                latency_ms=int((perf_counter() - started) * 1000),
+                output_summary="Quarantined evidence source pending trust review.",
+                model_provider=settings.embedding_provider,
+                model_name=settings.embedding_model,
+            )
+            return source
+
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.APPROVED_FOR_EMBEDDING,
         )
         source.ingestion_status = "ready"
         source.ingestion_error = None
@@ -1162,6 +1203,7 @@ def _process_source_text(
                 "embedding_model": settings.embedding_model,
                 "embedding_dimension": settings.embedding_dimension,
                 "embedding_version": settings.embedding_version,
+                "source_trust": source_trust.metadata(),
             },
             latency_ms=latency_ms,
             output_summary=source.summary or "",
@@ -1241,6 +1283,39 @@ def _mark_source_failed(
             _sanitize_metadata_for_storage(metadata, project_id=source.project_id),
         )
     db.commit()
+
+
+def _quarantine_source_for_trust(
+    db: Session,
+    auth: AuthContext,
+    source: EvidenceSource,
+    *,
+    source_trust: source_provenance_service.SourceTrust,
+) -> None:
+    """Stop processing before embedding when source text trips poisoning controls."""
+    db.execute(delete(EvidenceChunk).where(EvidenceChunk.source_id == source.id))
+    secure_ingestion_state_service.transition(
+        source,
+        secure_ingestion_state_service.SecureIngestionState.QUARANTINED,
+    )
+    source.ingestion_status = "quarantined"
+    source.ingestion_error = "Evidence source quarantined pending trust review."
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="evidence_source_quarantined",
+        actor_type="system",
+        project_id=source.project_id,
+        entity_type="evidence_source",
+        entity_id=source.id,
+        risk_level="high",
+        summary="Quarantined evidence before embedding because source trust failed.",
+        metadata={
+            "injection_score": source_trust.injection_score,
+            "poisoning_score": source_trust.poisoning_score,
+            "signals": list(source_trust.signals),
+        },
+    )
 
 
 def _find_ready_url_source(

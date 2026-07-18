@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 EvidenceSourceType = Literal["url", "file", "note", "transcript", "manual"]
-EvidenceIngestionStatus = Literal["pending", "processing", "ready", "failed"]
+EvidenceIngestionStatus = Literal["pending", "processing", "ready", "failed", "quarantined"]
 RetrievalMode = Literal["semantic", "keyword", "hybrid"]
 
 

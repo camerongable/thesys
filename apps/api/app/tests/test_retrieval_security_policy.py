@@ -35,6 +35,13 @@ def test_retrieval_policy_matches_sql_and_python_candidate_eligibility(
         data_classification="internal",
         credibility_score="0.2",
     )
+    quarantined_source, quarantined_chunk = _source_and_chunk(
+        workspace_id=workspace_id,
+        project_id=project_id,
+        data_classification="internal",
+        credibility_score="0.9",
+        source_trust_status="quarantined",
+    )
     db_session.add_all(
         [
             approved_source,
@@ -43,6 +50,8 @@ def test_retrieval_policy_matches_sql_and_python_candidate_eligibility(
             restricted_chunk,
             low_trust_source,
             low_trust_chunk,
+            quarantined_source,
+            quarantined_chunk,
         ]
     )
     db_session.commit()
@@ -63,6 +72,7 @@ def test_retrieval_policy_matches_sql_and_python_candidate_eligibility(
     assert editor_policy.allows(source=approved_source, chunk=approved_chunk) is True
     assert editor_policy.allows(source=restricted_source, chunk=restricted_chunk) is False
     assert editor_policy.allows(source=low_trust_source, chunk=low_trust_chunk) is False
+    assert editor_policy.allows(source=quarantined_source, chunk=quarantined_chunk) is False
 
     owner_policy = RetrievalSecurityPolicy.for_auth(
         _auth(workspace_id, "owner"),
@@ -112,6 +122,7 @@ def _source_and_chunk(
     data_classification: str,
     credibility_score: str,
     retrieval_allowed: bool = True,
+    source_trust_status: str = "approved",
 ) -> tuple[EvidenceSource, EvidenceChunk]:
     source_id = uuid.uuid4()
     source_security = {
@@ -124,7 +135,13 @@ def _source_and_chunk(
         workspace_id=workspace_id,
         project_id=project_id,
         source_type="note",
-        source_metadata={"security": source_security},
+        source_metadata={
+            "security": source_security,
+            "source_trust": {
+                "security_status": source_trust_status,
+                "trust_score": float(credibility_score),
+            },
+        },
         ingestion_status="ready",
         credibility_score=Decimal(credibility_score),
     )

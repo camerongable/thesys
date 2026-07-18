@@ -2,10 +2,11 @@
 
 import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 TRACKING_QUERY_PARAMS = {
@@ -39,8 +40,24 @@ PROMPT_INJECTION_PATTERNS = {
     ),
 }
 
+_POISONING_PATTERNS = {
+    "policy_override": re.compile(
+        r"\b(override|bypass|disable|ignore)\s+(the\s+)?(policy|guardrail|safety|security)\b",
+        re.IGNORECASE,
+    ),
+    "tool_schema_reference": re.compile(
+        r"\b(tool\s*(schema|call|invocation)|function\s*call|mcp\s*(server|tool))\b",
+        re.IGNORECASE,
+    ),
+    "system_message_impersonation": re.compile(
+        r"\b(system|developer|assistant)\s*(message|instruction)\s*:",
+        re.IGNORECASE,
+    ),
+}
+
 SOURCE_QUALITY_POLICY_VERSION = "source-quality:v2"
 SNAPSHOT_POLICY_VERSION = "source-snapshot:v1"
+SOURCE_TRUST_POLICY_VERSION = "source-trust:v1"
 
 
 @dataclass(frozen=True)
@@ -48,6 +65,40 @@ class FetchFailureClassification:
     category: str
     retryable: bool
     risk_level: str
+
+
+@dataclass(frozen=True)
+class SourceTrust:
+    """Deterministic source-trust decision made before evidence is embedded."""
+
+    provenance_type: Literal[
+        "user_upload",
+        "approved_url",
+        "external_search",
+        "system_seed",
+    ]
+    trust_score: float
+    injection_score: float
+    poisoning_score: float
+    security_status: Literal["quarantined", "approved", "blocked"]
+    approved_by: str | None
+    approved_at: datetime | None
+    last_verified_at: datetime
+    signals: tuple[str, ...]
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "policy_version": SOURCE_TRUST_POLICY_VERSION,
+            "provenance_type": self.provenance_type,
+            "trust_score": self.trust_score,
+            "injection_score": self.injection_score,
+            "poisoning_score": self.poisoning_score,
+            "security_status": self.security_status,
+            "approved_by": self.approved_by,
+            "approved_at": self.approved_at.isoformat() if self.approved_at else None,
+            "last_verified_at": self.last_verified_at.isoformat(),
+            "signals": list(self.signals),
+        }
 
 
 def canonicalize_url(url: str) -> str:
@@ -157,6 +208,86 @@ def detect_prompt_injection_markers(text: str) -> list[str]:
         for marker, pattern in PROMPT_INJECTION_PATTERNS.items()
         if pattern.search(text)
     ]
+
+
+def assess_source_trust(
+    *,
+    source_type: str,
+    text: str,
+    metadata: dict[str, Any],
+    approved_by: object | None,
+) -> SourceTrust:
+    """Assess instruction and poisoning signals before a source becomes retrievable."""
+    prompt_markers = detect_prompt_injection_markers(text)
+    poisoning_matches = {
+        name: len(pattern.findall(text)) for name, pattern in _POISONING_PATTERNS.items()
+    }
+    instruction_count = len(prompt_markers) + sum(poisoning_matches.values())
+    hidden_unicode = _has_hidden_unicode(text)
+    signals = [*prompt_markers]
+    signals.extend(name for name, count in poisoning_matches.items() if count)
+    if hidden_unicode:
+        signals.append("hidden_unicode")
+    signals = sorted(set(signals))
+
+    injection_score = min(
+        1.0,
+        0.3 * len(prompt_markers)
+        + 0.12 * min(instruction_count, 4)
+        + (0.2 if hidden_unicode else 0.0),
+    )
+    poisoning_score = min(
+        1.0,
+        0.2 * instruction_count
+        + 0.3 * sum(1 for count in poisoning_matches.values() if count)
+        + (0.2 if hidden_unicode else 0.0),
+    )
+    quarantined = injection_score >= 0.6 or poisoning_score >= 0.7
+    provenance_type = _provenance_type(source_type, metadata)
+    base_trust = {
+        "user_upload": 0.75,
+        "approved_url": 0.65,
+        "external_search": 0.5,
+        "system_seed": 0.9,
+    }[provenance_type]
+    trust_score = round(max(0.0, base_trust - injection_score * 0.45 - poisoning_score * 0.35), 3)
+    now = datetime.now(UTC)
+    security_status: Literal["quarantined", "approved", "blocked"] = (
+        "quarantined" if quarantined else "approved"
+    )
+    return SourceTrust(
+        provenance_type=provenance_type,
+        trust_score=trust_score,
+        injection_score=round(injection_score, 3),
+        poisoning_score=round(poisoning_score, 3),
+        security_status=security_status,
+        approved_by=str(approved_by) if approved_by is not None and not quarantined else None,
+        approved_at=now if not quarantined else None,
+        last_verified_at=now,
+        signals=tuple(signals),
+    )
+
+
+def _provenance_type(
+    source_type: str,
+    metadata: dict[str, Any],
+) -> Literal["user_upload", "approved_url", "external_search", "system_seed"]:
+    origin = str(metadata.get("origin") or "")
+    if origin == "system_seed":
+        return "system_seed"
+    if origin == "source_discovery" and metadata.get("search_provider"):
+        return "external_search"
+    if source_type == "url":
+        return "approved_url"
+    return "user_upload"
+
+
+def _has_hidden_unicode(text: str) -> bool:
+    return any(
+        unicodedata.category(character) in {"Cf", "Cc"}
+        and character not in {"\n", "\r", "\t"}
+        for character in text
+    )
 
 
 def classify_fetch_failure(message: str) -> FetchFailureClassification:

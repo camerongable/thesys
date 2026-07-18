@@ -356,6 +356,9 @@ def test_url_ingestion_canonicalizes_and_records_page_provenance(
     assert body["metadata"]["canonical_url"] == "https://example.com/pricing"
     assert body["metadata"]["domain"] == "example.com"
     assert body["metadata"]["prompt_injection_markers"]
+    assert body["ingestion_status"] == "quarantined"
+    assert body["metadata"]["source_trust"]["security_status"] == "quarantined"
+    assert body["metadata"]["source_trust"]["injection_score"] >= 0.6
     assert body["metadata"]["source_quality"]["risk_level"] == "high"
     assert body["metadata"]["source_quality"]["policy_version"] == "source-quality:v2"
     assert body["metadata"]["source_quality"]["explanation"]
@@ -381,12 +384,7 @@ def test_url_ingestion_canonicalizes_and_records_page_provenance(
         select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(body["id"]))
     )
     assert source is not None
-    chunk = source.chunks[0]
-    assert chunk.chunk_metadata["source_metadata"]["source_quality"]["risk_level"] == "high"
-    assert chunk.chunk_metadata["extraction_method"] == "readable_html_parser_v3"
-    assert chunk.chunk_metadata["source_snapshot_id"] == body["metadata"]["source_snapshot_id"]
-    assert chunk.chunk_metadata["quote_offsets"]["normalized_char_start"] == 0
-    assert chunk.chunk_metadata["quote_provenance"]["artifact_type"] == "readability_text"
+    assert source.chunks == []
 
 
 def test_url_ingestion_dedupes_external_sources_by_content_hash(

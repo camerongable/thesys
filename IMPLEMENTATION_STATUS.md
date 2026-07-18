@@ -539,6 +539,12 @@ current verdict, next action, evidence health, validation, and decision state.
   threshold before ranking. The fallback path rechecks each returned candidate
   defensively, and retrieval caches are role-scoped and versioned by the policy
   and trust threshold.
+- [x] Add a versioned `source_trust` record at the pre-embedding evidence
+  boundary. It records provenance type, trust/injection/poisoning scores,
+  approval timestamps, security status, and non-sensitive risk signals.
+  Instruction-heavy, system-message/policy/tool-schema, and hidden-Unicode
+  content is quarantined before vector creation, emits an attributed audit
+  event, and cannot pass the shared retrieval policy even if stale chunks exist.
 
 ## Sprint 65 Verification
 
@@ -547,12 +553,15 @@ current verdict, next action, evidence health, validation, and decision state.
   approved, restricted, low-trust, and retrieval-blocked sources.
 - [x] Repository-wide backend lint passed and the complete backend suite passed
   (`415 passed, 1 skipped, 1 xfailed, 12 warnings`).
+- [x] Source-trust/quarantine checkpoint passed (`48 passed, 1 xfailed, 1
+  warning`); repository-wide lint and the full backend suite passed (`417
+  passed, 1 skipped, 1 xfailed, 12 warnings`).
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-add the source-trust/poisoning model and quarantine lifecycle, then harden the
-memory write, conflict, recall, and source-invalidation paths.
+add duplicate/anomalous-embedding poisoning detection and secure ranking, then
+harden the memory write, conflict, recall, and source-invalidation paths.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
