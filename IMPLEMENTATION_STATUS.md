@@ -530,9 +530,29 @@ current verdict, next action, evidence health, validation, and decision state.
   coverage, PII/secret-redaction coverage, and the static chat-versus-embedding
   boundary invariant passed.
 
+## Sprint 65 Progress
+
+- [x] Establish a shared `RetrievalSecurityPolicy` for evidence candidates.
+  The pgvector SQL and Python fallback paths now apply the same workspace and
+  project scope, approved source/classification state, chunk retrieval flag,
+  role-derived data-classification clearance, and configurable source-trust
+  threshold before ranking. The fallback path rechecks each returned candidate
+  defensively, and retrieval caches are role-scoped and versioned by the policy
+  and trust threshold.
+
+## Sprint 65 Verification
+
+- [x] Focused policy, invariant, and evidence regression coverage passed (`37
+  passed, 1 xfailed, 1 warning`), including SQL/Python eligibility parity for
+  approved, restricted, low-trust, and retrieval-blocked sources.
+- [x] Repository-wide backend lint passed and the complete backend suite passed
+  (`415 passed, 1 skipped, 1 xfailed, 12 warnings`).
+
 ## Next Sprint
 
-Begin Sprint 65 secure RAG, vector isolation, and memory-poisoning defense.
+Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
+add the source-trust/poisoning model and quarantine lifecycle, then harden the
+memory write, conflict, recall, and source-invalidation paths.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

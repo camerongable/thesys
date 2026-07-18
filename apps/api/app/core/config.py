@@ -534,6 +534,12 @@ class Settings(BaseSettings):
         le=1.0,
         validation_alias="RETRIEVAL_MIN_CONTEXT_SCORE",
     )
+    retrieval_min_source_trust_score: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        validation_alias="RETRIEVAL_MIN_SOURCE_TRUST_SCORE",
+    )
     external_search_enabled: bool = Field(
         default=False,
         validation_alias="EXTERNAL_SEARCH_ENABLED",

@@ -24,6 +24,7 @@ from app.db.models import (
     ProjectThesis,
     Risk,
 )
+from app.features.retrieval.security_policy import RETRIEVAL_SECURITY_POLICY_VERSION
 from app.schemas.evidence import EvidenceRetrieveCreate
 
 CacheType = Literal["embedding", "retrieval_plan", "rerank_result", "guide_answer"]
@@ -315,6 +316,7 @@ def retrieval_cache_payloads(
     family = {
         "workspace_id": str(auth.workspace_id),
         "project_id": str(project_id),
+        "principal_role": auth.role,
         "cache_type": "retrieval_plan",
         "query_hash": text_hash(payload.query),
         "mode": payload.mode,
@@ -579,6 +581,7 @@ def _not_expired(entry: AICacheEntry) -> bool:
 
 def _retrieval_settings(settings: Settings) -> dict[str, Any]:
     return {
+        "security_policy_version": RETRIEVAL_SECURITY_POLICY_VERSION,
         "vector_path": settings.retrieval_vector_path,
         "python_fallback_enabled": settings.retrieval_python_fallback_enabled,
         "text_search_enabled": settings.retrieval_text_search_enabled,
@@ -591,6 +594,7 @@ def _retrieval_settings(settings: Settings) -> dict[str, Any]:
         "max_chunks_per_source_type": settings.retrieval_max_chunks_per_source_type,
         "max_chunks_per_competitor": settings.retrieval_max_chunks_per_competitor,
         "min_context_score": settings.retrieval_min_context_score,
+        "min_source_trust_score": settings.retrieval_min_source_trust_score,
         "embedding_provider": settings.embedding_provider,
         "embedding_model": settings.embedding_model,
         "embedding_dimension": settings.embedding_dimension,

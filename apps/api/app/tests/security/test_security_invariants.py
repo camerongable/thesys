@@ -481,12 +481,16 @@ def test_production_auth_cannot_run_in_dev_header_mode() -> None:
 
 
 def test_sources_require_classification_before_retrieval() -> None:
-    retrieval_conditions = inspect.getsource(retrieval_service._base_conditions)
+    retrieval_conditions = inspect.getsource(
+        retrieval_service.RetrievalSecurityPolicy.sql_conditions
+    )
+    retrieval_pipeline = inspect.getsource(retrieval_service._base_conditions)
     reembedding = inspect.getsource(evidence_service.reembed_evidence)
 
     assert 'source_metadata["security"]["security_status"]' in retrieval_conditions
     assert 'source_metadata["security"]["classification_status"]' in retrieval_conditions
     assert 'chunk_metadata["security"]["retrieval_allowed"]' in retrieval_conditions
+    assert "RetrievalSecurityPolicy.for_auth" in retrieval_pipeline
     assert "is_source_approved" in reembedding
     assert "is_chunk_retrievable" in reembedding
 

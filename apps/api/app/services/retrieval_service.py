@@ -25,6 +25,7 @@ from app.features.retrieval import planning as retrieval_planning_feature
 from app.features.retrieval import reranker as retrieval_reranker_feature
 from app.features.retrieval import result_shaping as retrieval_result_shaping_feature
 from app.features.retrieval import scoring as retrieval_scoring_feature
+from app.features.retrieval.security_policy import RetrievalSecurityPolicy
 from app.schemas.evidence import (
     EvidenceRetrievalResultRead,
     EvidenceRetrieveCreate,
@@ -371,7 +372,7 @@ def _retrieve_with_sql_vector_search(
     payload: EvidenceRetrieveCreate,
     query_embedding: list[float],
 ) -> tuple[list[EvidenceRetrievalResultRead], int]:
-    conditions = _base_conditions(auth, project_id, payload)
+    conditions = _base_conditions(auth, settings, project_id, payload)
     conditions.extend(_postgres_metadata_conditions(payload))
     filtered_count = _filtered_count(db, conditions)
     if filtered_count == 0:
@@ -449,7 +450,7 @@ def _retrieve_with_python_scoring(
             payload.query,
             project_id=project_id,
         ).vector
-    candidates = _load_candidates(db, auth, project_id, payload)
+    candidates = _load_candidates(db, auth, settings, project_id, payload)
     return (
         _score_candidates(
             settings=settings,
@@ -598,22 +599,15 @@ _estimate_tokens = retrieval_context_selection_feature.estimate_tokens
 
 def _base_conditions(
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
     payload: EvidenceRetrieveCreate,
 ) -> list[object]:
-    conditions: list[object] = [
-        EvidenceChunk.workspace_id == auth.workspace_id,
-        EvidenceChunk.project_id == project_id,
-        EvidenceSource.workspace_id == auth.workspace_id,
-        EvidenceSource.project_id == project_id,
-        EvidenceSource.ingestion_status == "ready",
-        EvidenceSource.source_metadata["security"]["security_status"].as_string() == "approved",
-        EvidenceSource.source_metadata["security"]["classification_status"].as_string()
-        == "approved",
-        EvidenceChunk.chunk_metadata["security"]["retrieval_allowed"].as_boolean().is_(True),
-        EvidenceChunk.chunk_metadata["security"]["source_security_status"].as_string()
-        == "approved",
-    ]
+    policy = RetrievalSecurityPolicy.for_auth(
+        auth,
+        minimum_source_trust_score=settings.retrieval_min_source_trust_score,
+    )
+    conditions = policy.sql_conditions(project_id)
     if payload.source_types:
         conditions.append(EvidenceSource.source_type.in_(payload.source_types))
     if payload.created_after is not None:
@@ -671,20 +665,26 @@ def _filtered_count(db: Session, conditions: list[object]) -> int:
 def _load_candidates(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
     payload: EvidenceRetrieveCreate,
 ) -> list[RetrievalCandidate]:
     stmt: Select = (
         select(EvidenceChunk, EvidenceSource)
         .join(EvidenceSource, EvidenceSource.id == EvidenceChunk.source_id)
-        .where(*_base_conditions(auth, project_id, payload))
+        .where(*_base_conditions(auth, settings, project_id, payload))
     )
     rows = db.execute(stmt).all()
+    policy = RetrievalSecurityPolicy.for_auth(
+        auth,
+        minimum_source_trust_score=settings.retrieval_min_source_trust_score,
+    )
     candidates = [RetrievalCandidate(chunk=chunk, source=source) for chunk, source in rows]
     return [
         candidate
         for candidate in candidates
-        if _matches_metadata_filters(candidate, payload)
+        if policy.allows(source=candidate.source, chunk=candidate.chunk)
+        and _matches_metadata_filters(candidate, payload)
         and _matches_freshness(candidate.source, payload.freshness_days)
     ]
 
