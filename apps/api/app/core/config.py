@@ -614,6 +614,16 @@ class Settings(BaseSettings):
         ge=60,
         validation_alias="TEMPORAL_WORKFLOW_TIMEOUT_SECONDS",
     )
+    retention_cleanup_schedule_enabled: bool = Field(
+        default=False,
+        validation_alias="RETENTION_CLEANUP_SCHEDULE_ENABLED",
+    )
+    retention_cleanup_interval_hours: int = Field(
+        default=24,
+        ge=1,
+        le=168,
+        validation_alias="RETENTION_CLEANUP_INTERVAL_HOURS",
+    )
 
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000"],

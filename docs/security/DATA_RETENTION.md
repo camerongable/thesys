@@ -21,13 +21,15 @@ Raw and reversible restricted data use shorter defaults than redacted audit and
 security metadata. Expired evidence is deleted through the source-deletion
 propagation path, so objects, chunks, embeddings, derived evidence links, and
 dependent memory are removed together. Expired PII token maps are purged within
-their workspace. The Temporal worker exposes
-`run_workspace_retention_cleanup_activity` for a per-workspace maintenance
-schedule. It retains run status, timing, token, and cost fields while removing
-expired prompts, outputs, errors, local LangSmith references, and
-workspace-attributable audit/security events. Active session revocations and
-unscoped pre-authentication failures are intentionally excluded: the former
-remain authentication controls, and the latter require a separately authorized
-platform-maintenance path. External LangSmith and Temporal retention must still
-be configured in those providers; the application does not claim to delete
-provider-owned history itself.
+their workspace. When `RETENTION_CLEANUP_SCHEDULE_ENABLED=true`, the Temporal
+worker creates or reconciles the global `retention-cleanup-v1` schedule at the
+configured interval. Its workflow selects one active principal per workspace
+and invokes the tenant-bound cleanup activity separately for each workspace, so
+RLS remains in force for every destructive operation. It retains run status,
+timing, token, and cost fields while removing expired prompts, outputs, errors,
+local LangSmith references, and workspace-attributable audit/security events.
+Active session revocations and unscoped pre-authentication failures are
+intentionally excluded: the former remain authentication controls, and the
+latter require a separately authorized platform-maintenance path. External
+LangSmith and Temporal retention must still be configured in those providers;
+the application does not claim to delete provider-owned history itself.

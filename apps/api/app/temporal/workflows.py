@@ -76,6 +76,22 @@ class ResearchSprintWorkflow:
         return await _activity("finalize_sprint_activity", {**payload, "status": "completed"})
 
 
+@workflow.defn
+class RetentionCleanupWorkflow:
+    """Fan out a scheduled retention sweep without sharing a tenant context."""
+
+    @workflow.run
+    async def run(self) -> dict[str, int]:
+        payloads = await workflow.execute_activity(
+            "list_workspace_retention_cleanup_payloads_activity",
+            start_to_close_timeout=DEFAULT_ACTIVITY_TIMEOUT,
+            retry_policy=_retry_policy(),
+        )
+        for payload in payloads:
+            await _activity("run_workspace_retention_cleanup_activity", payload)
+        return {"workspaces_processed": len(payloads)}
+
+
 async def _activity(
     name: str,
     payload: dict[str, Any],
@@ -87,9 +103,13 @@ async def _activity(
         name,
         payload,
         start_to_close_timeout=timeout,
-        retry_policy=RetryPolicy(
-            initial_interval=timedelta(seconds=2),
-            maximum_interval=timedelta(seconds=30),
-            maximum_attempts=3,
-        ),
+        retry_policy=_retry_policy(),
+    )
+
+
+def _retry_policy() -> RetryPolicy:
+    return RetryPolicy(
+        initial_interval=timedelta(seconds=2),
+        maximum_interval=timedelta(seconds=30),
+        maximum_attempts=3,
     )

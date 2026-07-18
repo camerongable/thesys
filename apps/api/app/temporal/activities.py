@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session, selectinload
 from temporalio import activity
 
@@ -341,6 +341,35 @@ def _run_workspace_retention_cleanup_sync(payload: Payload) -> Payload:
         except Exception:
             db.rollback()
             raise
+
+
+@activity.defn(name="list_workspace_retention_cleanup_payloads_activity")
+async def list_workspace_retention_cleanup_payloads_activity() -> list[Payload]:
+    """Return active tenant principals for a worker-owned retention sweep."""
+    return await asyncio.to_thread(_list_workspace_retention_cleanup_payloads)
+
+
+def _list_workspace_retention_cleanup_payloads() -> list[Payload]:
+    with SessionLocal() as db:
+        return _retention_cleanup_payloads(db)
+
+
+def _retention_cleanup_payloads(db: Session) -> list[Payload]:
+    owner_first = case((WorkspaceMember.role == "owner", 0), else_=1)
+    memberships = db.execute(
+        select(WorkspaceMember.workspace_id, WorkspaceMember.user_id)
+        .join(User, User.id == WorkspaceMember.user_id)
+        .where(User.status == "active")
+        .order_by(WorkspaceMember.workspace_id, owner_first, WorkspaceMember.created_at)
+    ).all()
+    payloads: list[Payload] = []
+    seen_workspaces: set[uuid.UUID] = set()
+    for workspace_id, user_id in memberships:
+        if workspace_id in seen_workspaces:
+            continue
+        seen_workspaces.add(workspace_id)
+        payloads.append({"workspace_id": str(workspace_id), "user_id": str(user_id)})
+    return payloads
 
 
 async def _run_db_activity(

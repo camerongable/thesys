@@ -321,10 +321,13 @@ current verdict, next action, evidence health, validation, and decision state.
   redacts expired AI prompts, outputs, errors, and local LangSmith references
   while preserving run accounting, and deletes expired workspace-attributable
   audit/security events without deleting active session revocations.
-- [ ] Register one maintenance schedule per workspace, configure provider-owned
-  LangSmith/Temporal retention, add the separately authorized unscoped
-  pre-authentication-event cleanup path, and extend classification routing to
-  non-chat providers.
+- [x] Register and reconcile the worker-owned `retention-cleanup-v1` Temporal
+  schedule. Its global sweep chooses one active principal per workspace and
+  fans out to the tenant-bound activity, so every destructive operation remains
+  subject to that workspace's RLS context.
+- [ ] Configure provider-owned LangSmith/Temporal retention, add the separately
+  authorized unscoped pre-authentication-event cleanup path, and extend
+  classification routing to non-chat providers.
 
 ## Sprint 63 Verification
 
