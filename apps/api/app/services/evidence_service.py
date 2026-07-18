@@ -45,6 +45,7 @@ from app.services import (
     object_storage_service,
     project_service,
     pseudonymization_service,
+    retention_service,
     source_provenance_service,
 )
 from app.services.common import workflow as workflow_utils
@@ -883,6 +884,11 @@ def _process_source_text(
             "classification_status": "approved",
             "malware_status": malware_status,
             "sanitization_version": protected_source_text.sanitization_version,
+            "retention_expires_at": retention_service.expires_at(
+                settings,
+                retention_service.RetentionAsset.SANITIZED_TEXT,
+                created_at=source.created_at,
+            ).isoformat(),
         }
         processed_metadata = _merge_metadata(
             source.source_metadata or {},
@@ -896,6 +902,10 @@ def _process_source_text(
             ),
         )
         processed_metadata["security"] = source_security_metadata
+        processed_metadata["retention"] = retention_service.evidence_retention_metadata(
+            settings,
+            created_at=source.created_at,
+        )
         prompt_markers = source_provenance_service.detect_prompt_injection_markers(searchable_text)
         if prompt_markers:
             processed_metadata["prompt_injection_markers"] = prompt_markers
@@ -986,6 +996,11 @@ def _process_source_text(
                 "retrieval_allowed": True,
                 "sanitization_version": protected_source_text.sanitization_version,
                 "source_security_status": "approved",
+                "retention_expires_at": retention_service.expires_at(
+                    settings,
+                    retention_service.RetentionAsset.EMBEDDING,
+                    created_at=source.created_at,
+                ).isoformat(),
             }
             chunk_metadata = _merge_metadata(
                 _merge_metadata(

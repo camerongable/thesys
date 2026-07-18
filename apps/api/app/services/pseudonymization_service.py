@@ -15,7 +15,7 @@ from app.security.encryption import (
     EnvelopeEncryptionError,
     build_envelope_encryption_service,
 )
-from app.services import governance_service, project_service
+from app.services import governance_service, project_service, retention_service
 from app.services.data_protection_service import SanitizedText, data_protection_service
 
 _TOKEN_ENTITY_TYPES = frozenset({"EMAIL", "PERSON", "PHONE_NUMBER"})
@@ -84,6 +84,10 @@ def create_searchable_copy(
                     encrypted_value_nonce=encrypted.nonce,
                     encrypted_value_key_version=encrypted.key_version,
                     algorithm=encrypted.algorithm,
+                    retention_expires_at=retention_service.expires_at(
+                        settings,
+                        retention_service.RetentionAsset.PII_TOKEN_MAP,
+                    ),
                     created_by=auth.user_id,
                 )
             )

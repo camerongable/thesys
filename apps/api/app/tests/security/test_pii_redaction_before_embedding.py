@@ -75,7 +75,8 @@ def test_note_pii_is_sanitized_before_persistence_and_embedding(
         assert raw_value not in (source.raw_text or "")
         assert raw_value not in chunk.text
         assert all(raw_value not in embedded_text for embedded_text in embedded_texts)
-    assert source.source_metadata["security"] == {
+    security_metadata = source.source_metadata["security"]
+    assert security_metadata == {
         "data_classification": "restricted",
         "pii_status": "redacted",
         "pii_entity_types": ["API_KEY", "EMAIL", "PERSON"],
@@ -83,7 +84,9 @@ def test_note_pii_is_sanitized_before_persistence_and_embedding(
         "classification_status": "approved",
         "malware_status": "not_scanned",
         "sanitization_version": "v1",
+        "retention_expires_at": security_metadata["retention_expires_at"],
     }
+    assert security_metadata["retention_expires_at"]
     assert chunk.chunk_metadata["security"]["retrieval_allowed"] is True
 
 

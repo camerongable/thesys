@@ -309,10 +309,17 @@ current verdict, next action, evidence health, validation, and decision state.
   claims, and memory derived from invalidated artifact versions. The transaction
   verifies no chunk survives, thereby revoking retrieval eligibility, and emits
   a redacted high-risk propagation audit event.
+- [x] Define all Sprint 63 retention classes in a central configurable policy
+  registry: raw objects, sanitized text, embeddings, PII maps, model prompts and
+  outputs, LangSmith traces, audit/security events, and Temporal history. Source
+  and chunk metadata now retain per-representation expiry, migration `0035`
+  makes PII-map expiry durable, and workspace-scoped cleanup removes expired PII
+  maps and routes expired evidence through full deletion propagation.
 - [ ] Add Presidio-backed detection and complete the remaining secure-ingestion
   state-machine and MIME/content coverage.
-- [ ] Extend classification routing to non-chat providers and complete
-  retention-policy coverage.
+- [ ] Enforce scheduled retention cleanup for local model/audit/security records,
+  configure provider-owned LangSmith/Temporal retention, and extend
+  classification routing to non-chat providers.
 
 ## Sprint 63 Verification
 
@@ -341,11 +348,14 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Source-deletion propagation checkpoint passed (`128 passed, 1 skipped,
   2 xfailed, 3 warnings`), covering private object deletion, zero surviving
   retrievable chunks, claim invalidation, memory staleness, and audit metadata.
+- [x] Retention-policy checkpoint passed (`125 passed, 1 skipped, 2 xfailed,
+  3 warnings`), including policy completeness, expiry metadata, scoped PII-map
+  cleanup, expired-source propagation, and offline migration SQL for `0035`.
 
 ## Next Sprint
 
-Continue V1 Sprint 63 with retention-policy coverage and the remaining
-provider-routing and ingestion-state hardening.
+Continue V1 Sprint 63 with scheduled local-record retention cleanup and the
+remaining provider-routing and ingestion-state hardening.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

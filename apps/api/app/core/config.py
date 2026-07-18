@@ -247,6 +247,60 @@ class Settings(BaseSettings):
         le=3650,
         validation_alias="S3_RETENTION_DAYS",
     )
+    retention_sanitized_text_days: int = Field(
+        default=90,
+        ge=1,
+        le=3650,
+        validation_alias="RETENTION_SANITIZED_TEXT_DAYS",
+    )
+    retention_embedding_days: int = Field(
+        default=90,
+        ge=1,
+        le=3650,
+        validation_alias="RETENTION_EMBEDDING_DAYS",
+    )
+    retention_pii_token_map_days: int = Field(
+        default=30,
+        ge=1,
+        le=3650,
+        validation_alias="RETENTION_PII_TOKEN_MAP_DAYS",
+    )
+    retention_model_prompt_days: int = Field(
+        default=14,
+        ge=1,
+        le=3650,
+        validation_alias="RETENTION_MODEL_PROMPT_DAYS",
+    )
+    retention_model_output_days: int = Field(
+        default=30,
+        ge=1,
+        le=3650,
+        validation_alias="RETENTION_MODEL_OUTPUT_DAYS",
+    )
+    retention_langsmith_trace_days: int = Field(
+        default=14,
+        ge=1,
+        le=3650,
+        validation_alias="RETENTION_LANGSMITH_TRACE_DAYS",
+    )
+    retention_audit_event_days: int = Field(
+        default=365,
+        ge=1,
+        le=3650,
+        validation_alias="RETENTION_AUDIT_EVENT_DAYS",
+    )
+    retention_security_event_days: int = Field(
+        default=730,
+        ge=1,
+        le=3650,
+        validation_alias="RETENTION_SECURITY_EVENT_DAYS",
+    )
+    retention_temporal_history_days: int = Field(
+        default=30,
+        ge=1,
+        le=3650,
+        validation_alias="RETENTION_TEMPORAL_HISTORY_DAYS",
+    )
     object_storage_mode: Literal["local", "s3"] = Field(
         default="local",
         validation_alias="OBJECT_STORAGE_MODE",
