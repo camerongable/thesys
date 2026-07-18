@@ -371,6 +371,12 @@ class Settings(BaseSettings):
         le=2_000_000,
         validation_alias="MAX_EXTRACTED_TEXT_CHARS",
     )
+    max_pdf_pages: int = Field(
+        default=200,
+        ge=1,
+        le=10_000,
+        validation_alias="MAX_PDF_PAGES",
+    )
     embedding_model: str = Field(
         default="deterministic-hash-embedding-1536",
         validation_alias="EMBEDDING_MODEL",

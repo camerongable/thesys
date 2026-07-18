@@ -442,6 +442,26 @@ def add_file_source(
         raise EvidenceIngestionError("File evidence ingestion failed.")
 
     try:
+        _preflight_file_content(settings, content_type=content_type, body=body)
+    except EvidenceSecurityError as exc:
+        _record_ingestion_security_event(
+            db,
+            auth,
+            project_id=project_id,
+            source_id=None,
+            event_type="evidence_upload_rejected",
+            summary="Rejected unsafe evidence upload.",
+            reason=str(exc),
+            metadata={
+                "filename": filename,
+                "content_type": content_type,
+                "detected_content_type": detected_content_type,
+                "size_bytes": len(body),
+            },
+        )
+        raise EvidenceIngestionError("File evidence ingestion failed.") from exc
+
+    try:
         storage_key = object_storage_service.put_evidence_object(
             settings,
             workspace_id=auth.workspace_id,
@@ -1418,6 +1438,67 @@ def _parse_file(
     raise EvidenceIngestionError(
         "Only PDF, text, Markdown, PNG, JPG, JPEG, and WebP uploads are supported."
     )
+
+
+def _preflight_file_content(settings: Settings, *, content_type: str, body: bytes) -> None:
+    if content_type != "application/pdf":
+        return
+    try:
+        reader = PdfReader(BytesIO(body), strict=False)
+    except Exception as exc:
+        raise EvidenceSecurityError("PDF could not be parsed safely.") from exc
+    if reader.is_encrypted:
+        raise EvidenceSecurityError("Password-protected PDFs are not allowed.")
+    try:
+        contains_active_content = _pdf_contains_active_content(reader.trailer.get("/Root"))
+    except Exception as exc:
+        raise EvidenceSecurityError("PDF active content could not be inspected safely.") from exc
+    if contains_active_content:
+        raise EvidenceSecurityError("PDF active content is not allowed.")
+    try:
+        page_count = len(reader.pages)
+    except Exception as exc:
+        raise EvidenceSecurityError("PDF page structure could not be inspected safely.") from exc
+    if page_count > settings.max_pdf_pages:
+        raise EvidenceSecurityError(
+            f"PDF exceeds {settings.max_pdf_pages} page limit."
+        )
+
+
+def _pdf_contains_active_content(
+    value: object,
+    *,
+    seen: set[int] | None = None,
+    depth: int = 0,
+) -> bool:
+    active_keys = {
+        "/AA",
+        "/EmbeddedFiles",
+        "/JavaScript",
+        "/JS",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+    }
+    if depth > 64:
+        return True
+    seen = seen or set()
+    if hasattr(value, "get_object"):
+        value = value.get_object()
+    value_id = id(value)
+    if value_id in seen:
+        return False
+    seen.add(value_id)
+    if isinstance(value, dict):
+        if active_keys.intersection(str(key) for key in value):
+            return True
+        return any(
+            _pdf_contains_active_content(item, seen=seen, depth=depth + 1)
+            for item in value.values()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_pdf_contains_active_content(item, seen=seen, depth=depth + 1) for item in value)
+    return False
 
 
 def _validate_fetch_target(url: str, settings: Settings | None = None) -> None:

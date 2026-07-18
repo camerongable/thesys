@@ -493,8 +493,10 @@ def test_text_pdf_uses_pypdf_without_multimodal_fallback(
             )
 
     class FakePdfReader:
-        def __init__(self, body) -> None:
+        def __init__(self, body, **_kwargs) -> None:
             self.pages = [FakePage()]
+            self.is_encrypted = False
+            self.trailer = {}
 
     monkeypatch.setattr(evidence_service, "PdfReader", FakePdfReader)
     create_response = client.post("/api/projects", json={"name": "PDF evidence"})
@@ -545,8 +547,10 @@ def test_low_text_pdf_routes_to_multimodal_fallback_when_enabled(
             return ""
 
     class FakePdfReader:
-        def __init__(self, body) -> None:
+        def __init__(self, body, **_kwargs) -> None:
             self.pages = [FakePage()]
+            self.is_encrypted = False
+            self.trailer = {}
 
     def fake_extract(settings, *, filename: str, content_type: str, body: bytes, media_type: str):
         calls.append(

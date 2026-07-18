@@ -326,6 +326,9 @@ current verdict, next action, evidence health, validation, and decision state.
   to agree before any upload reaches malware scanning, storage, or parsing.
   `python-magic` is the primary detector; an unavailable binding falls back to
   the local `file` utility and rejects the upload when neither detector works.
+- [x] Preflight clean PDFs before object storage or extraction. Password-protected
+  files, active-content action trees, malformed inspection graphs, and files
+  exceeding the configurable page limit are rejected with a security audit event.
 - [x] Add a tenant-scoped Temporal maintenance activity for local retention. It
   redacts expired AI prompts, outputs, errors, and local LangSmith references
   while preserving run accounting, and deletes expired workspace-attributable
@@ -389,6 +392,9 @@ current verdict, next action, evidence health, validation, and decision state.
   3 warnings`), covering rule-based extended identifiers, deterministic secret
   handling, redaction before embeddings and providers, and secure evidence
   ingestion.
+- [x] PDF preflight checkpoint passed (`137 passed, 1 skipped, 2 xfailed, 6
+  warnings`), covering encrypted and active-content PDF denial before storage,
+  configurable page limits, malware quarantine, and normal PDF extraction.
 
 ## Next Sprint
 
