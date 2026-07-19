@@ -74,6 +74,7 @@ def configure_credential(
         credential.issuer = str(payload.issuer).rstrip("/")
         credential.audience = payload.audience.rstrip("/")
         credential.scopes = list(payload.scopes)
+        credential.client_id = payload.client_id
         credential.expires_at = None
         if payload.credential_type == "oauth_user_delegated":
             _store_encrypted(
@@ -188,6 +189,8 @@ def resolve_credential_material(
     auth: AuthContext,
     settings: Settings,
     registration: MCPServerRegistration,
+    *,
+    allow_expired_access_token: bool = False,
 ) -> MCPServerCredentialMaterial:
     """Decrypt only the credentials isolated to the reviewed target server."""
     if registration.workspace_id != auth.workspace_id:
@@ -199,7 +202,11 @@ def resolve_credential_material(
             detail="Remote MCP credentials are unavailable.",
         )
     expires_at = _stored_as_utc(credential.expires_at)
-    if expires_at is not None and expires_at <= datetime.now(UTC):
+    if (
+        not allow_expired_access_token
+        and expires_at is not None
+        and expires_at <= datetime.now(UTC)
+    ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Remote MCP credentials are unavailable.",
@@ -255,22 +262,53 @@ def resolve_validated_access_token(
     registration: MCPServerRegistration,
 ) -> SecretStr:
     """Return only a valid access token bound to the reviewed registration."""
-    material = resolve_credential_material(db, auth, settings, registration)
+    material = resolve_credential_material(
+        db,
+        auth,
+        settings,
+        registration,
+        allow_expired_access_token=True,
+    )
     if not _material_matches_registration(material, registration):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Remote MCP credentials are unavailable.",
         )
     try:
-        if material.credential_type == "oauth_user_delegated" and material.access_token is not None:
-            remote_mcp_token_service.validate_access_token(
+        if material.credential_type == "oauth_user_delegated":
+            if (
+                material.access_token is not None
+                and material.expires_at is not None
+                and material.expires_at > datetime.now(UTC)
+            ):
+                remote_mcp_token_service.validate_access_token(
+                    settings,
+                    access_token=material.access_token,
+                    issuer=material.issuer,
+                    audience=material.audience,
+                    required_scopes=material.scopes,
+                )
+                return material.access_token
+            if material.refresh_token is None or material.client_id is None:
+                raise remote_mcp_token_service.RemoteMcpTokenValidationError(
+                    "scoped_credentials_unavailable"
+                )
+            grant = remote_mcp_token_service.request_user_delegated_refresh_token(
                 settings,
-                access_token=material.access_token,
                 issuer=material.issuer,
                 audience=material.audience,
-                required_scopes=material.scopes,
+                scopes=material.scopes,
+                client_id=material.client_id,
+                refresh_token=material.refresh_token,
             )
-            return material.access_token
+            _persist_refreshed_user_delegated_credential(
+                db,
+                auth,
+                settings,
+                registration,
+                grant,
+            )
+            return grant.access_token
         if (
             material.credential_type == "oauth_client_credentials"
             and material.client_id is not None
@@ -302,6 +340,60 @@ def _material_matches_registration(
         registration.oauth_issuer is not None
         and material.issuer == registration.oauth_issuer.rstrip("/")
         and material.audience == _registration_audience(registration)
+    )
+
+
+def _persist_refreshed_user_delegated_credential(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    registration: MCPServerRegistration,
+    grant: remote_mcp_token_service.RemoteMcpOAuthTokenGrant,
+) -> None:
+    credential = _get_credential(db, auth.workspace_id, registration.id)
+    if credential is None or credential.credential_type != "oauth_user_delegated":
+        raise remote_mcp_token_service.RemoteMcpTokenValidationError(
+            "scoped_credentials_unavailable"
+        )
+    encryption = build_envelope_encryption_service(settings)
+    try:
+        _store_encrypted(
+            credential,
+            "access_token",
+            encryption.encrypt(
+                db,
+                workspace_id=auth.workspace_id,
+                plaintext=grant.access_token.get_secret_value(),
+                purpose=_credential_purpose(registration.id, "access-token"),
+            ),
+        )
+        if grant.refresh_token is not None:
+            _store_encrypted(
+                credential,
+                "refresh_token",
+                encryption.encrypt(
+                    db,
+                    workspace_id=auth.workspace_id,
+                    plaintext=grant.refresh_token.get_secret_value(),
+                    purpose=_credential_purpose(registration.id, "refresh-token"),
+                ),
+            )
+        credential.expires_at = grant.expires_at
+        db.flush()
+    except EnvelopeEncryptionError as exc:
+        raise remote_mcp_token_service.RemoteMcpTokenValidationError(
+            "credential_refresh_storage_unavailable"
+        ) from exc
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="mcp_server_credential_refreshed",
+        actor_type="user",
+        entity_type="mcp_server_registration",
+        entity_id=registration.id,
+        risk_level="high",
+        summary="Refreshed encrypted user-delegated MCP credentials.",
+        metadata={"credential_type": credential.credential_type},
     )
 
 

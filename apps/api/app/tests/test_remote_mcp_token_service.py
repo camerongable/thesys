@@ -342,6 +342,60 @@ def test_client_credentials_exchange_rejects_untrusted_endpoint_or_invalid_respo
     assert exc_info.value.reason_code == expected_reason
 
 
+def test_user_delegated_refresh_uses_public_client_binding_and_rotated_token(
+    monkeypatch,
+) -> None:
+    issuer = "https://issuer.example.test"
+    client = _Client(
+        [
+            _Response(
+                {
+                    "issuer": issuer,
+                    "jwks_uri": f"{issuer}/.well-known/jwks.json",
+                    "token_endpoint": f"{issuer}/oauth/token",
+                }
+            ),
+            _Response(
+                {
+                    "access_token": "refreshed-access-token",
+                    "refresh_token": "rotated-refresh-token",
+                    "token_type": "Bearer",
+                    "expires_in": 300,
+                }
+            ),
+        ]
+    )
+    validated: dict[str, object] = {}
+    monkeypatch.setattr(remote_mcp_token_service.httpx, "Client", lambda **_kwargs: client)
+    monkeypatch.setattr(
+        remote_mcp_token_service,
+        "validate_access_token",
+        lambda _settings, **kwargs: validated.update(kwargs),
+    )
+
+    grant = remote_mcp_token_service.request_user_delegated_refresh_token(
+        Settings(),
+        issuer=issuer,
+        audience="https://mcp.example.test",
+        scopes=("mcp.tools.read",),
+        client_id="delegated-client",
+        refresh_token=SecretStr("original-refresh-token"),
+    )
+
+    assert grant.access_token.get_secret_value() == "refreshed-access-token"
+    assert grant.refresh_token is not None
+    assert grant.refresh_token.get_secret_value() == "rotated-refresh-token"
+    assert client.requests[1][1]["data"] == {
+        "grant_type": "refresh_token",
+        "client_id": "delegated-client",
+        "refresh_token": "original-refresh-token",
+        "audience": "https://mcp.example.test",
+        "scope": "mcp.tools.read",
+    }
+    assert "Authorization" not in client.requests[1][1]["headers"]
+    assert validated["require_subject"] is True
+
+
 def _token(
     private_key,
     *,

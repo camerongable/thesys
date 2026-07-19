@@ -24,6 +24,13 @@ class RemoteMcpOAuthMetadata:
     token_endpoint: str | None
 
 
+@dataclass(frozen=True)
+class RemoteMcpOAuthTokenGrant:
+    access_token: SecretStr
+    refresh_token: SecretStr | None
+    expires_at: datetime
+
+
 class RemoteMcpTokenValidationError(ValueError):
     """A credential could not be safely presented to a reviewed MCP server."""
 
@@ -118,16 +125,62 @@ def request_client_credentials_access_token(
             payload = response.json()
     except (httpx.HTTPError, ValueError) as exc:
         raise RemoteMcpTokenValidationError("client_credentials_exchange_unavailable") from exc
-    access_token = _validated_token_response(payload)
+    grant = _validated_token_response(payload)
     validate_access_token(
         settings,
-        access_token=access_token,
+        access_token=grant.access_token,
         issuer=metadata.issuer,
         audience=audience,
         required_scopes=scopes,
         require_subject=False,
     )
-    return access_token
+    return grant.access_token
+
+
+def request_user_delegated_refresh_token(
+    settings: Settings,
+    *,
+    issuer: str,
+    audience: str,
+    scopes: tuple[str, ...],
+    client_id: str,
+    refresh_token: SecretStr,
+) -> RemoteMcpOAuthTokenGrant:
+    """Refresh a user grant only through the reviewed issuer's token endpoint."""
+    metadata = discover_oauth_metadata(settings, issuer=issuer, require_token_endpoint=True)
+    if metadata.token_endpoint is None:
+        raise RemoteMcpTokenValidationError("token_endpoint_unavailable")
+    try:
+        with httpx.Client(
+            timeout=settings.mcp_remote_review_timeout_seconds,
+            follow_redirects=False,
+            verify=True,
+        ) as client:
+            response = client.post(
+                metadata.token_endpoint,
+                headers={"Accept": "application/json"},
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": client_id,
+                    "refresh_token": refresh_token.get_secret_value(),
+                    "audience": audience,
+                    "scope": " ".join(scopes),
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise RemoteMcpTokenValidationError("user_delegated_refresh_unavailable") from exc
+    grant = _validated_token_response(payload)
+    validate_access_token(
+        settings,
+        access_token=grant.access_token,
+        issuer=metadata.issuer,
+        audience=audience,
+        required_scopes=scopes,
+        require_subject=True,
+    )
+    return grant
 
 
 def discover_oauth_metadata(
@@ -213,12 +266,13 @@ def _signing_key(jwks: dict[str, Any], key_id: str) -> jwt.PyJWK:
     return matching_keys[0]
 
 
-def _validated_token_response(payload: Any) -> SecretStr:
+def _validated_token_response(payload: Any) -> RemoteMcpOAuthTokenGrant:
     if not isinstance(payload, dict):
         raise RemoteMcpTokenValidationError("client_credentials_response_invalid")
     access_token = payload.get("access_token")
     token_type = payload.get("token_type")
     expires_in = payload.get("expires_in")
+    refresh_token = payload.get("refresh_token")
     if (
         not isinstance(access_token, str)
         or not access_token
@@ -229,9 +283,21 @@ def _validated_token_response(payload: Any) -> SecretStr:
         or isinstance(expires_in, bool)
         or expires_in <= 0
         or expires_in > int(MAX_ACCESS_TOKEN_LIFETIME.total_seconds())
+        or (
+            refresh_token is not None
+            and (
+                not isinstance(refresh_token, str)
+                or not refresh_token
+                or len(refresh_token) > 8192
+            )
+        )
     ):
         raise RemoteMcpTokenValidationError("client_credentials_response_invalid")
-    return SecretStr(access_token)
+    return RemoteMcpOAuthTokenGrant(
+        access_token=SecretStr(access_token),
+        refresh_token=SecretStr(refresh_token) if isinstance(refresh_token, str) else None,
+        expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
+    )
 
 
 def _validate_short_lived(claims: dict[str, Any]) -> None:

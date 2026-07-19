@@ -249,6 +249,7 @@ def test_enable_oauth_server_uses_only_validated_scoped_access_token(
                 "issuer": "https://issuer.example.test",
                 "audience": "https://mcp.example.test",
                 "scopes": ["mcp.tools.read"],
+                "client_id": "delegated-client",
                 "access_token": "encrypted-but-not-forwarded-directly",
                 "refresh_token": "encrypted-refresh-token",
                 "expires_at": (datetime.now(UTC) + timedelta(minutes=30)).isoformat(),

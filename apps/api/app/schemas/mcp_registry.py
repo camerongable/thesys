@@ -68,11 +68,17 @@ class MCPServerCredentialConfigure(BaseModel):
     @model_validator(mode="after")
     def validate_credential_shape(self) -> "MCPServerCredentialConfigure":
         if self.credential_type == "oauth_user_delegated":
-            if self.access_token is None or self.refresh_token is None or self.expires_at is None:
+            if (
+                self.access_token is None
+                or self.refresh_token is None
+                or self.expires_at is None
+                or self.client_id is None
+            ):
                 raise ValueError(
-                    "User-delegated credentials require access token, refresh token, and expiry."
+                    "User-delegated credentials require client ID, access token, "
+                    "refresh token, and expiry."
                 )
-            if self.client_id is not None or self.client_secret is not None:
+            if self.client_secret is not None:
                 raise ValueError("User-delegated credentials cannot include a client secret.")
         elif self.client_id is None or self.client_secret is None:
             raise ValueError(

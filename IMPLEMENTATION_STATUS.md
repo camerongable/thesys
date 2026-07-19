@@ -924,10 +924,17 @@ current verdict, next action, evidence health, validation, and decision state.
   host; the exchange uses HTTP Basic authentication, accepts only a bounded
   bearer response, persists no access token, and cryptographically validates
   the resulting registration-scoped JWT before use.
-- [ ] Implement the remaining Sprint 66 capability controls: add
-  user-delegated refresh, execute approved remote proposal and write tools
-  safely, implement SSE transport, then validate the live Compose policy bundle
-  with the OPA parser/runtime.
+- [x] Add user-delegated refresh-token rotation for reviewed remote MCP servers.
+  Credentials now bind a public OAuth client ID; after access expiry the app
+  sends only that registration's refresh grant to the reviewed issuer-host token
+  endpoint, validates the returned JWT, rotates encrypted access/refresh
+  material when provided, updates expiry, and emits a credential-free high-risk
+  audit event. The original OAuth 2.1 authorization-code-with-PKCE acquisition
+  flow remains to be implemented.
+- [ ] Implement the remaining Sprint 66 capability controls: add the initial
+  user-delegated OAuth 2.1 authorization-code-with-PKCE flow, execute approved
+  remote proposal and write tools safely, implement SSE transport, then validate
+  the live Compose policy bundle with the OPA parser/runtime.
 
 ## Sprint 66 Verification
 
