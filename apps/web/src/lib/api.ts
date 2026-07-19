@@ -1424,6 +1424,36 @@ export type AuditEvent = {
   created_at: string;
 };
 
+export type KillSwitchStatus = {
+  name: string;
+  enabled: boolean;
+  workspace_enabled: boolean;
+  environment_enabled: boolean;
+};
+
+export type MCPServerSecurityStatus = {
+  name: string;
+  enabled: boolean;
+  approved_version: string;
+  reviewed_at: string;
+};
+
+export type SecurityOverview = {
+  project_id: string;
+  generated_at: string;
+  high_or_critical_event_count: number;
+  blocked_prompt_attack_count: number;
+  denied_tool_count: number;
+  pending_high_risk_approval_count: number;
+  pii_redaction_count: number;
+  memory_quarantine_count: number;
+  anomalous_retrieval_count: number;
+  budget_alert_count: number;
+  active_workflow_count: number;
+  active_kill_switches: KillSwitchStatus[];
+  mcp_servers: MCPServerSecurityStatus[];
+};
+
 export type DemoSeedResult = {
   project: Project;
   created: boolean;
@@ -2089,6 +2119,10 @@ export function researchWedgeOptionLater(projectId: string, wedgeId: string) {
 
 export function getProjectOverview(projectId: string) {
   return apiFetch<ProjectOverview>(`/api/projects/${projectId}/overview`);
+}
+
+export function getProjectSecurityOverview(projectId: string) {
+  return apiFetch<SecurityOverview>(`/api/projects/${projectId}/security-overview`);
 }
 
 export function getIdeaReadiness(projectId: string) {

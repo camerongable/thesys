@@ -260,6 +260,14 @@ export function ProjectOverview() {
             Projects
           </Link>
           <div className="flex items-center gap-2">
+            <Link
+              aria-label="Open security overview"
+              className="inline-flex h-11 min-h-11 w-11 items-center justify-center rounded-md border border-border bg-card text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus sm:h-10 sm:min-h-10 sm:w-10"
+              href={`/projects/${projectId}/security`}
+              title="Security overview"
+            >
+              <ShieldAlert className="h-4 w-4" aria-hidden="true" />
+            </Link>
             <ThemeToggle />
             <ProjectExploreControl activeTab={activeTab} onOpen={openNavigationItem} />
           </div>

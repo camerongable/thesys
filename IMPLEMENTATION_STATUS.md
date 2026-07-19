@@ -1161,6 +1161,11 @@ current verdict, next action, evidence health, validation, and decision state.
   retrievals, budget alerts, active workflows, effective kill switches, and MCP
   status without receiving prompts, event summaries, attributes, URLs, or
   credentials.
+- [x] Build the admin-only Security Overview surface. The dedicated project
+  route consumes only the redacted aggregation endpoint and presents detection,
+  operations, containment, and MCP status in compact responsive rows with
+  loading, error/retry, and refresh states. A titled project-header icon opens
+  the route; raw event content is never rendered.
 
 ## Next Sprint
 
