@@ -17,6 +17,7 @@ MINIMUM_RECALL_TRUST_SCORE = 0.5
 WORKING_MEMORY_SESSION_SCOPE_KEY = "working_memory_session_scope"
 _EVIDENCE_ENTITY_TYPES = {"evidence_source", "evidence_chunk", "retrieved_evidence"}
 _PROCEDURAL_SOURCE_TYPES = {"code", "config"}
+_TRUSTED_PROJECTION_SOURCE_TYPES = {"artifact_version", "validation_interpretation"}
 _ORIGINS = {"user", "agent", "derived", "system"}
 _SECURITY_STATUSES = {"approved", "quarantined", "blocked"}
 
@@ -44,7 +45,12 @@ def secure_memory_metadata(
     source_ids = _source_ids(normalized.get("source_ids"), source_entity_type, source_entity_id)
     conflicts = _string_list(normalized.get("contradicts_memory_ids"))
     now = datetime.now(UTC).isoformat()
-    trusted_projection = bool(normalized.get("trusted_projection")) and origin == "derived"
+    trusted_projection = (
+        bool(normalized.get("trusted_projection"))
+        and origin == "derived"
+        and source_entity_type in _TRUSTED_PROJECTION_SOURCE_TYPES
+        and source_entity_id is not None
+    )
     normalized.update(
         {
             "policy_version": SECURE_MEMORY_POLICY_VERSION,
@@ -80,6 +86,8 @@ def requires_memory_proposal(
     if source_entity_type in _EVIDENCE_ENTITY_TYPES:
         return True
     if metadata.get("origin") == "agent":
+        return True
+    if metadata.get("origin") == "derived" and not metadata.get("trusted_projection"):
         return True
     return bool(
         metadata.get("requires_human_approval")

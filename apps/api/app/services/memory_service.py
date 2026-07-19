@@ -772,6 +772,8 @@ def upsert_from_risk(
             "status": risk.status,
         },
         provenance_metadata=provenance_metadata,
+        # Risk likelihood is not evidence confidence, so preserve uncertainty explicitly.
+        confidence_score=Decimal("0"),
     )
 
 

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import AuditEvent, ProjectMemoryItem, ToolInvocation
+from app.db.models import AuditEvent, ProjectMemoryItem, Risk, ToolInvocation
 from app.services import memory_service, tool_service
 from app.services.identity_service import ensure_dev_identity
 
@@ -189,6 +189,71 @@ def test_agent_memory_cannot_bypass_approval_with_direct_policy_or_projection(
         project_id,
         workflow_type="guide_chat",
     ) == []
+
+
+def test_derived_memory_cannot_claim_trusted_projection_from_arbitrary_source(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+
+    item = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="semantic",
+        write_policy="direct",
+        title="Forged derived conclusion",
+        summary="A generic caller cannot approve derived memory by declaration.",
+        content={"claim": "requires controlled projection"},
+        source_entity_type="guide_chat",
+        source_entity_id=uuid.uuid4(),
+        confidence_score=Decimal("0.7"),
+        provenance_metadata={"origin": "derived", "trusted_projection": True},
+    )
+    db_session.commit()
+
+    assert item.status == "proposed"
+    assert item.provenance_metadata["trusted_projection"] is False
+    assert memory_service.select_memory_for_workflow(
+        db_session,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+    ) == []
+
+
+def test_risk_projection_records_conservative_semantic_confidence(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    risk = Risk(
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        text="The proposed workflow may not have urgent demand.",
+        severity="high",
+        likelihood="unknown",
+        status="open",
+    )
+    db_session.add(risk)
+    db_session.flush()
+
+    item = memory_service.upsert_from_risk(
+        db_session,
+        auth,
+        project_id,
+        risk,
+        source_entity_type="artifact_version",
+        source_entity_id=uuid.uuid4(),
+    )
+    db_session.commit()
+
+    assert item.status == "active"
+    assert item.confidence_score == Decimal("0")
+    assert item.provenance_metadata["trusted_projection"] is True
 
 
 def test_low_trust_memory_requires_review_before_durable_recall(

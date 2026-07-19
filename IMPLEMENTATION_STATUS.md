@@ -605,6 +605,10 @@ current verdict, next action, evidence health, validation, and decision state.
   source provenance and confidence in the inclusive zero-to-one range; compacted
   semantic proposals retain their source-memory reference and conservatively
   use the lowest source confidence, treating missing confidence as zero.
+- [x] Restrict trusted derived-memory projections to the code-owned artifact-version
+  and validation-interpretation paths. Caller-declared projections from other
+  sources are proposal-only; risk projections provide explicit zero confidence
+  because risk likelihood is not evidence confidence.
 - [x] Enforce memory data-classification boundaries. Memory writes now persist a
   conservative classification, elevated when PII or secrets are detected; list,
   workflow selection, Inspect, direct lookup, compaction, conflicts, and
@@ -795,6 +799,9 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Pre-limit memory-recall checkpoint passed (`81 passed, 1 warning`) across
   memory-service, context-compiler, and feature-boundary coverage; changed-file
   compile checks and repository application lint passed.
+- [x] Trusted derived-projection checkpoint passed (`99 passed, 1 warning`) across
+  memory-service, context-compiler, feature-boundary, agentic-research, and
+  validation coverage; changed-file lint and compile checks passed.
 
 ## Next Sprint
 
