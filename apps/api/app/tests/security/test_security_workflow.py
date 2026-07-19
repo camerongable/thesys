@@ -16,6 +16,11 @@ def test_security_workflow_declares_pull_request_and_nightly_cadence() -> None:
         "schedule": [{"cron": "17 3 * * *"}],
     }
     assert workflow["permissions"] == {"contents": "read"}
+    assert workflow["jobs"]["osv"]["permissions"] == {
+        "actions": "read",
+        "contents": "read",
+        "security-events": "write",
+    }
     assert workflow["jobs"]["nightly-security"]["if"] == (
         "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
     )
