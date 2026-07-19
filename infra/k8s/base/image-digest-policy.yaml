@@ -1,0 +1,30 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: thesys-require-image-digest
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments"]
+  validations:
+    - expression: >-
+        object.metadata.namespace != 'thesys' ||
+        object.spec.template.spec.containers.all(container,
+          container.image.matches('^ghcr\\.io/thesys/.+@sha256:[a-f0-9]{64}$'))
+      message: Thesys workloads require a digest-pinned image from the trusted registry.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: thesys-require-image-digest
+spec:
+  policyName: thesys-require-image-digest
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: thesys

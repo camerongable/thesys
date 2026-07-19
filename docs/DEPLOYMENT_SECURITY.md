@@ -4,6 +4,16 @@ This document describes the current portfolio-project posture and the path to a
 production-like deployment. It is intentionally explicit about what is local,
 demo-safe, production-shaped, and still future owner work.
 
+## Kubernetes Baseline
+
+`infra/k8s/base` provides a restricted API and worker deployment baseline with
+separate service accounts, non-root and read-only filesystems, dropped
+capabilities, RuntimeDefault seccomp, resource limits, disruption budgets,
+default-deny networking, and digest-only image admission. A release must replace
+the intentionally non-deployable zero digest with a signed immutable image,
+provide `thesys-runtime` through the cluster secret store, and configure
+approved egress gateways for managed infrastructure and providers.
+
 ## Environment Profiles
 
 | Profile | Intended use | Auth | Providers | Notes |

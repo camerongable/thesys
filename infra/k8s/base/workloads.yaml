@@ -1,0 +1,155 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thesys-api
+  labels:
+    app.kubernetes.io/name: thesys-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thesys-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: thesys-api
+    spec:
+      serviceAccountName: thesys-api
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/thesys/thesys-api@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: APP_ENV
+              value: production
+            - name: AUTH_MODE
+              value: oidc
+            - name: DATABASE_RUNTIME_ROLE
+              value: api
+            - name: SECRET_PROVIDER
+              value: cloud
+            - name: OBJECT_STORAGE_MODE
+              value: s3
+            - name: S3_AUTO_CREATE_BUCKET
+              value: "false"
+            - name: S3_VERIFY_BUCKET_SECURITY
+              value: "true"
+          envFrom:
+            - secretRef:
+                name: thesys-runtime
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thesys-worker
+  labels:
+    app.kubernetes.io/name: thesys-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thesys-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: thesys-worker
+    spec:
+      serviceAccountName: thesys-worker
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: ghcr.io/thesys/thesys-api@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "app.temporal.worker"]
+          env:
+            - name: APP_ENV
+              value: production
+            - name: AUTH_MODE
+              value: oidc
+            - name: DATABASE_RUNTIME_ROLE
+              value: worker
+            - name: SECRET_PROVIDER
+              value: cloud
+            - name: OBJECT_STORAGE_MODE
+              value: s3
+            - name: S3_AUTO_CREATE_BUCKET
+              value: "false"
+            - name: S3_VERIFY_BUCKET_SECURITY
+              value: "true"
+          envFrom:
+            - secretRef:
+                name: thesys-runtime
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import app.temporal.worker"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi

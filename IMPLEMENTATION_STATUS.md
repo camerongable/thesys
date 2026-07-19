@@ -1318,6 +1318,10 @@ deployment-hardening requirements.
   Release evidence is correlated with red-team inventory, approved model/prompt
   registries, SBOM digest, image signature, scan findings, and the tenant, PII,
   prompt-injection, tool, and memory gates; missing or failing evidence blocks release.
+- [x] Replace the deferred Kubernetes placeholder with a restricted production base.
+  Separate API/worker identities, non-root/read-only/RuntimeDefault pods, dropped
+  capabilities, bounded writable storage, resource limits, PDBs, default-deny
+  networking, and digest-only image admission are all static-tested before cluster use.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
