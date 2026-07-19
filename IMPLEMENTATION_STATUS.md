@@ -1300,7 +1300,7 @@ deployment-hardening requirements.
   corpus cases. Its custom provider invokes the local Python guardrail target
   through `uv` and asserts only category/block decisions, never returning prompt
   text. The config, provider, assertion, and target are covered without requiring
-  Promptfoo installation; dependency pinning and CI execution remain next.
+  a local Promptfoo installation; CI invokes the exact `0.121.15` CLI version.
 - [x] Replace the wildcard provider policy with a reviewed approved-model registry.
   Every external provider call now requires an exact enabled
   `(provider, model, purpose)` approval carrying data-classification and security-eval
@@ -1310,6 +1310,10 @@ deployment-hardening requirements.
   The registry covers every active version and the shared retrieved-content safety
   rule with immutable content hashes and security-evaluation metadata. AI runs reject
   an unapproved or modified prompt before persistence and before a model call can begin.
+- [x] Add the pull-request and nightly security workflow. PRs now enforce locked
+  Python/JavaScript installs, API and web checks, the Promptfoo fast suite, Bandit,
+  Semgrep, pip-audit, pnpm audit, Gitleaks, OSV scanning, and CycloneDX SBOM
+  generation; nightly runs the deterministic red-team, budget, and PII regressions.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

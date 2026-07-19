@@ -1,0 +1,112 @@
+name: Security
+
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+env:
+  UV_LOCKED: "1"
+  PROMPTFOO_DISABLE_UPDATE: "true"
+
+jobs:
+  python-security:
+    name: Python security
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.14"
+      - run: uv sync --project apps/api --locked --all-extras
+      - run: uv run --project apps/api ruff check app
+      - run: uv run --project apps/api pytest app/tests/security
+      - run: uvx --from bandit==1.8.6 bandit -q -r apps/api/app
+      - run: uv export --project apps/api --locked --no-dev --output-file /tmp/api-requirements.txt
+      - run: uvx --from pip-audit==2.9.0 pip-audit --strict -r /tmp/api-requirements.txt
+      - run: uvx --from semgrep==1.130.0 semgrep scan --config auto --error apps/api/app
+
+  web-security:
+    name: Web security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter thesys-web test
+      - run: pnpm --filter thesys-web typecheck
+      - run: pnpm audit --audit-level=high
+
+  promptfoo-fast:
+    name: Promptfoo fast suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.14"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --project apps/api --locked --all-extras
+      - run: pnpm security:redteam:fast
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+
+  osv:
+    name: OSV scan
+    permissions:
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.8
+    with:
+      scan-args: |
+        --lockfile=apps/api/uv.lock
+        --lockfile=pnpm-lock.yaml
+      fail-on-vuln: true
+
+  sbom:
+    name: SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+
+  nightly-security:
+    name: Nightly security regression suite
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.14"
+      - run: uv sync --project apps/api --locked --all-extras
+      - run: uv run --project apps/api pytest app/tests/security/test_redteam_corpus.py app/tests/security/test_workflow_security_budget.py app/tests/security/test_pii_redaction_before_embedding.py
