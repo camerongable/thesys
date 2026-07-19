@@ -875,11 +875,18 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Enforce the external-MCP kill switch at the remote registration boundary.
   New remote server registrations now deny with a generic 403 and attributable
   policy-denial audit; existing registrations remain disabled by default. There
-  is no outbound remote-MCP execution path yet, and the later enablement work
+  is no outbound remote-MCP execution path yet, and any later invocation work
   must apply the same guard before it can open a connection.
-- [ ] Implement the remaining Sprint 66 capability controls: remote credential
-  isolation, registration enablement plus live schema/version-drift validation,
-  and then validate the live Compose policy bundle with the OPA parser/runtime.
+- [x] Add owner-reviewed streamable-HTTP remote-MCP enablement. A fresh review
+  verifies the pinned TLS certificate fingerprint, approved server version,
+  and complete compatible `tools/list` manifest before setting a registration
+  enabled; any unavailable, identity, version, or schema drift leaves it
+  disabled and records an attributable high-risk audit event. OAuth-backed and
+  SSE registrations remain disabled until their scoped credential and transport
+  implementations exist.
+- [ ] Implement the remaining Sprint 66 capability controls: per-server
+  credential isolation and the outbound remote-MCP invocation client, then
+  validate the live Compose policy bundle with the OPA parser/runtime.
 
 ## Sprint 66 Verification
 
@@ -924,14 +931,18 @@ current verdict, next action, evidence health, validation, and decision state.
   warning`) across MCP registration, MCP adapter, tool-boundary, control-plane,
   and security-invariant coverage; focused lint, compilation, and `git diff
   --check` passed.
+- [x] Remote-MCP enablement checkpoint passed (`65 passed, 1 xfailed, 1
+  warning`) across remote review, MCP registration, MCP adapter, tool-boundary,
+  control-plane, API-contract, and security-invariant coverage; focused lint,
+  compilation, and `git diff --check` passed.
 - [ ] The local workspace has no Docker CLI, so Compose graph validation and
   direct OPA/Rego parser validation remain part of the compose-backed
   enforcement checkpoint.
 
 ## Next Sprint
 
-Continue Sprint 66 by implementing reviewed remote-MCP enablement with live
-schema/version-drift validation and scoped credential isolation.
+Continue Sprint 66 by adding encrypted, per-server credential isolation before
+introducing outbound remote-MCP invocation.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

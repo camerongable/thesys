@@ -1,3 +1,4 @@
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
@@ -35,4 +36,16 @@ def register_mcp_server(
 ) -> MCPServerRegistrationRead:
     return MCPServerRegistrationRead.model_validate(
         mcp_registry_service.register_server(db, auth, settings, payload)
+    )
+
+
+@router.post("/{registration_id}/enable", response_model=MCPServerRegistrationRead)
+def enable_mcp_server(
+    registration_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> MCPServerRegistrationRead:
+    return MCPServerRegistrationRead.model_validate(
+        mcp_registry_service.enable_server(db, auth, settings, registration_id)
     )

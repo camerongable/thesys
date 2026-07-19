@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import AuditEvent, MCPServerRegistration
+from app.services import mcp_registry_service, remote_mcp_review_service
 
 
 def test_workspace_owner_registers_disabled_reviewed_mcp_server(
@@ -113,6 +114,109 @@ def test_external_mcp_kill_switch_blocks_remote_server_registration(
     )
     assert denial is not None
     assert denial.event_metadata["workflow_type"] == "external_mcp_registration"
+
+
+def test_workspace_owner_can_enable_a_live_reviewed_mcp_server(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MCP_SERVER_ALLOWED_HOSTS", "mcp.example.test")
+    get_settings.cache_clear()
+    try:
+        registration_response = client.post(
+            "/api/mcp/servers",
+            json={
+                "name": "Reviewed connector",
+                "base_url": "https://mcp.example.test/v1",
+                "transport": "streamable_http",
+                "server_fingerprint": "f" * 64,
+                "approved_version": "2026.07.18",
+                "allowed_tools": ["get_project_summary"],
+            },
+        )
+        registration_id = registration_response.json()["id"]
+        monkeypatch.setattr(
+            mcp_registry_service.remote_mcp_review_service,
+            "review_registration",
+            lambda _settings, _registration: remote_mcp_review_service.RemoteMcpReview(
+                server_name="reviewed-mcp",
+                server_version="2026.07.18",
+                certificate_fingerprint="f" * 64,
+                tool_count=1,
+            ),
+        )
+        response = client.post(f"/api/mcp/servers/{registration_id}/enable")
+    finally:
+        get_settings.cache_clear()
+
+    assert registration_response.status_code == 201
+    assert response.status_code == 200
+    assert response.json()["enabled"] is True
+    registration = db_session.scalar(
+        select(MCPServerRegistration).where(MCPServerRegistration.id == uuid.UUID(registration_id))
+    )
+    assert registration is not None
+    assert registration.enabled is True
+    audit = db_session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.event_type == "mcp_server_enabled",
+            AuditEvent.entity_id == registration.id,
+        )
+    )
+    assert audit is not None
+    assert audit.event_metadata["server_version"] == "2026.07.18"
+
+
+def test_schema_drift_disables_remote_mcp_server_during_enablement(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MCP_SERVER_ALLOWED_HOSTS", "mcp.example.test")
+    get_settings.cache_clear()
+    try:
+        registration_response = client.post(
+            "/api/mcp/servers",
+            json={
+                "name": "Drifted connector",
+                "base_url": "https://mcp.example.test/v1",
+                "transport": "streamable_http",
+                "server_fingerprint": "1" * 64,
+                "approved_version": "2026.07.18",
+                "allowed_tools": ["get_project_summary"],
+            },
+        )
+        registration_id = registration_response.json()["id"]
+
+        def _drifted_review(*_args, **_kwargs):
+            raise remote_mcp_review_service.RemoteMcpReviewError("tool_schema_drift")
+
+        monkeypatch.setattr(
+            mcp_registry_service.remote_mcp_review_service,
+            "review_registration",
+            _drifted_review,
+        )
+        response = client.post(f"/api/mcp/servers/{registration_id}/enable")
+    finally:
+        get_settings.cache_clear()
+
+    assert registration_response.status_code == 201
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Remote MCP server review failed; it remains disabled."}
+    registration = db_session.scalar(
+        select(MCPServerRegistration).where(MCPServerRegistration.id == uuid.UUID(registration_id))
+    )
+    assert registration is not None
+    assert registration.enabled is False
+    audit = db_session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.event_type == "mcp_server_review_failed",
+            AuditEvent.entity_id == registration.id,
+        )
+    )
+    assert audit is not None
+    assert audit.event_metadata["reason_code"] == "tool_schema_drift"
 
 
 def test_mcp_registration_rejects_unapproved_hosts_and_tools(

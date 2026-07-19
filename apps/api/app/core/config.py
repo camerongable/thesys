@@ -658,6 +658,12 @@ class Settings(BaseSettings):
         default_factory=list,
         validation_alias="MCP_SERVER_ALLOWED_HOSTS",
     )
+    mcp_remote_review_timeout_seconds: float = Field(
+        default=5.0,
+        ge=0.1,
+        le=30.0,
+        validation_alias="MCP_REMOTE_REVIEW_TIMEOUT_SECONDS",
+    )
     disable_all_agent_writes: bool = Field(
         default=False,
         validation_alias="DISABLE_ALL_AGENT_WRITES",

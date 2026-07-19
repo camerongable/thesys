@@ -1,6 +1,7 @@
 """Reviewed external MCP server registration boundary."""
 
 import re
+import uuid
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
@@ -8,12 +9,16 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import AuthContext, require_workspace_owner
+from app.core.auth import AuthContext, record_cross_tenant_access_attempt, require_workspace_owner
 from app.core.config import Settings
 from app.db.models import MCPServerRegistration
 from app.features.governance_tools import registry as tool_registry
 from app.schemas.mcp_registry import MCPServerRegistrationCreate
-from app.services import governance_service, security_policy_service
+from app.services import (
+    governance_service,
+    remote_mcp_review_service,
+    security_policy_service,
+)
 
 _FINGERPRINT_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
 
@@ -102,6 +107,66 @@ def register_server(
     return registration
 
 
+def enable_server(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    registration_id: uuid.UUID,
+) -> MCPServerRegistration:
+    """Enable a server only after a fresh identity and manifest review succeeds."""
+    require_workspace_owner(auth)
+    registration = _get_registration(db, auth, registration_id)
+    security_policy_service.enforce_external_mcp_allowed(
+        db,
+        auth,
+        settings,
+        operation="enablement",
+    )
+    try:
+        review = remote_mcp_review_service.review_registration(settings, registration)
+    except remote_mcp_review_service.RemoteMcpReviewError as exc:
+        registration.enabled = False
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="mcp_server_review_failed",
+            actor_type="user",
+            entity_type="mcp_server_registration",
+            entity_id=registration.id,
+            risk_level="high",
+            summary="Remote MCP server review failed and the server remains disabled.",
+            metadata={"reason_code": exc.reason_code},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Remote MCP server review failed; it remains disabled.",
+        ) from exc
+
+    registration.enabled = True
+    registration.reviewed_at = datetime.now(UTC)
+    registration.reviewed_by = auth.user_id
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="mcp_server_enabled",
+        actor_type="user",
+        entity_type="mcp_server_registration",
+        entity_id=registration.id,
+        risk_level="high",
+        summary=f"Enabled reviewed external MCP server {registration.name}.",
+        metadata={
+            "server_name": review.server_name,
+            "server_version": review.server_version,
+            "certificate_fingerprint": review.certificate_fingerprint,
+            "tool_count": review.tool_count,
+        },
+    )
+    db.commit()
+    db.refresh(registration)
+    return registration
+
+
 def _validated_server_url(value: str, settings: Settings) -> str:
     parsed = urlparse(value)
     host = parsed.hostname.casefold() if parsed.hostname else ""
@@ -119,6 +184,27 @@ def _validated_server_url(value: str, settings: Settings) -> str:
             detail="MCP server URL is not approved by the host and TLS policy.",
         )
     return value.rstrip("/")
+
+
+def _get_registration(
+    db: Session,
+    auth: AuthContext,
+    registration_id: uuid.UUID,
+) -> MCPServerRegistration:
+    registration = db.scalar(
+        select(MCPServerRegistration).where(
+            MCPServerRegistration.id == registration_id,
+            MCPServerRegistration.workspace_id == auth.workspace_id,
+        )
+    )
+    if registration is None:
+        record_cross_tenant_access_attempt(
+            db,
+            auth,
+            reason_code="mcp_server_registration_scope_denied",
+        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MCP server not found.")
+    return registration
 
 
 def _manifest_snapshot(definition: tool_registry.ToolDefinition) -> dict[str, object]:
