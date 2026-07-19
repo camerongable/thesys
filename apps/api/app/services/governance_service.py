@@ -15,6 +15,10 @@ from app.services import audit_chain_service, project_service
 
 ActorType = Literal["user", "agent", "system"]
 RiskLevel = Literal["low", "medium", "high"]
+_NORMALIZED_SECURITY_AUDIT_EVENT_TYPES = {
+    "security_policy_denied",
+    "evidence_source_content_access_denied",
+}
 ApprovalRequestType = Literal[
     "research_plan",
     "memory_update",
@@ -72,7 +76,7 @@ def record_audit_event(
     event.event_hash = audit_chain_service.calculate_event_hash(event, previous_event_hash)
     db.add(event)
     db.flush()
-    if risk_level == "high" or event_type == "security_policy_denied":
+    if risk_level == "high" or event_type in _NORMALIZED_SECURITY_AUDIT_EVENT_TYPES:
         from app.services import security_event_service
 
         security_event_service.record_from_audit_event(db, event)

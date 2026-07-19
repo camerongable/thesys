@@ -1072,6 +1072,12 @@ current verdict, next action, evidence health, validation, and decision state.
   configurable project-scoped threshold creates one high-severity
   `memory_contradiction_spike` alert with bounded count/window evidence while
   the conflicting proposal remains subject to existing human review.
+- [x] Normalize quarantined-content access attempts without changing the
+  existing retrieval-policy denial. A blocked source download now projects its
+  attributable, redacted audit record into the security stream at medium
+  severity, allowing the shared authorization-denial threshold to emit one
+  high-severity alert for repeated probes while retaining only count/window
+  evidence.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,
