@@ -1,12 +1,14 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import AuditEvent, MCPServerRegistration
-from app.services import mcp_registry_service, remote_mcp_review_service
+from app.services import mcp_credential_service, mcp_registry_service, remote_mcp_review_service
 
 
 def test_workspace_owner_registers_disabled_reviewed_mcp_server(
@@ -217,6 +219,68 @@ def test_schema_drift_disables_remote_mcp_server_during_enablement(
     )
     assert audit is not None
     assert audit.event_metadata["reason_code"] == "tool_schema_drift"
+
+
+def test_enable_oauth_server_uses_only_validated_scoped_access_token(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MCP_SERVER_ALLOWED_HOSTS", "mcp.example.test,issuer.example.test")
+    get_settings.cache_clear()
+    validated_token = SecretStr("validated-server-token")
+    try:
+        registration_response = client.post(
+            "/api/mcp/servers",
+            json={
+                "name": "Validated OAuth connector",
+                "base_url": "https://mcp.example.test/v1",
+                "transport": "streamable_http",
+                "server_fingerprint": "2" * 64,
+                "approved_version": "1.2.3",
+                "allowed_tools": [],
+                "oauth_issuer": "https://issuer.example.test",
+            },
+        )
+        registration_id = registration_response.json()["id"]
+        credential_response = client.put(
+            f"/api/mcp/servers/{registration_id}/credentials",
+            json={
+                "credential_type": "oauth_user_delegated",
+                "issuer": "https://issuer.example.test",
+                "audience": "https://mcp.example.test",
+                "scopes": ["mcp.tools.read"],
+                "access_token": "encrypted-but-not-forwarded-directly",
+                "refresh_token": "encrypted-refresh-token",
+                "expires_at": (datetime.now(UTC) + timedelta(minutes=30)).isoformat(),
+            },
+        )
+        monkeypatch.setattr(
+            mcp_credential_service,
+            "resolve_validated_access_token",
+            lambda *_args: validated_token,
+        )
+
+        def _review(_settings, _registration, *, authorization=None):
+            assert authorization is validated_token
+            return remote_mcp_review_service.RemoteMcpReview(
+                server_name="reviewed-mcp",
+                server_version="1.2.3",
+                certificate_fingerprint="2" * 64,
+                tool_count=0,
+            )
+
+        monkeypatch.setattr(
+            mcp_registry_service.remote_mcp_review_service,
+            "review_registration",
+            _review,
+        )
+        response = client.post(f"/api/mcp/servers/{registration_id}/enable")
+    finally:
+        get_settings.cache_clear()
+
+    assert registration_response.status_code == 201
+    assert credential_response.status_code == 200
+    assert response.status_code == 200
 
 
 def test_mcp_registration_rejects_unapproved_hosts_and_tools(

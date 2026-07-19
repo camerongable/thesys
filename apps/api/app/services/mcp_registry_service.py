@@ -129,7 +129,7 @@ def enable_server(
             from app.services import mcp_credential_service
 
             try:
-                material = mcp_credential_service.resolve_credential_material(
+                authorization = mcp_credential_service.resolve_validated_access_token(
                     db,
                     auth,
                     settings,
@@ -139,11 +139,6 @@ def enable_server(
                 raise remote_mcp_review_service.RemoteMcpReviewError(
                     "scoped_credentials_unavailable"
                 ) from exc
-            authorization = material.access_token
-            if authorization is None:
-                raise remote_mcp_review_service.RemoteMcpReviewError(
-                    "scoped_credentials_unavailable"
-                )
         review = remote_mcp_review_service.review_registration(
             settings,
             registration,
@@ -314,7 +309,7 @@ def _resolve_invocation_authorization(
     from app.services import mcp_credential_service
 
     try:
-        material = mcp_credential_service.resolve_credential_material(
+        return mcp_credential_service.resolve_validated_access_token(
             db,
             auth,
             settings,
@@ -324,9 +319,6 @@ def _resolve_invocation_authorization(
         raise remote_mcp_review_service.RemoteMcpReviewError(
             "scoped_credentials_unavailable"
         ) from exc
-    if material.access_token is None:
-        raise remote_mcp_review_service.RemoteMcpReviewError("scoped_credentials_unavailable")
-    return material.access_token
 
 
 def _validated_server_url(value: str, settings: Settings) -> str:

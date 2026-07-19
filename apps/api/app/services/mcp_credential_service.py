@@ -19,7 +19,7 @@ from app.security.encryption import (
     EnvelopeEncryptionError,
     build_envelope_encryption_service,
 )
-from app.services import governance_service, mcp_registry_service
+from app.services import governance_service, mcp_registry_service, remote_mcp_token_service
 
 MAX_USER_DELEGATED_TOKEN_LIFETIME = timedelta(hours=1)
 
@@ -246,6 +246,41 @@ def resolve_credential_material(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Remote MCP credentials are unavailable.",
         ) from exc
+
+
+def resolve_validated_access_token(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    registration: MCPServerRegistration,
+) -> SecretStr:
+    """Return only a valid, registration-scoped user-delegated access token."""
+    material = resolve_credential_material(db, auth, settings, registration)
+    if (
+        material.credential_type != "oauth_user_delegated"
+        or material.access_token is None
+        or registration.oauth_issuer is None
+        or material.issuer != registration.oauth_issuer.rstrip("/")
+        or material.audience != _registration_audience(registration)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Remote MCP credentials are unavailable.",
+        )
+    try:
+        remote_mcp_token_service.validate_access_token(
+            settings,
+            access_token=material.access_token,
+            issuer=material.issuer,
+            audience=material.audience,
+            required_scopes=material.scopes,
+        )
+    except remote_mcp_token_service.RemoteMcpTokenValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Remote MCP credentials are unavailable.",
+        ) from exc
+    return material.access_token
 
 
 def _validate_credential_binding(

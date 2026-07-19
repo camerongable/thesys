@@ -911,11 +911,17 @@ current verdict, next action, evidence health, validation, and decision state.
   persistence; any remote review or invocation failure disables the server.
   Remote proposal and write tools remain disabled until their approved-execution
   lifecycle is implemented.
+- [x] Cryptographically validate user-delegated remote-MCP access tokens before
+  they can reach a remote server. The verifier only fetches discovery/JWKS data
+  from the reviewed issuer host, requires an asymmetric signed JWT with a known
+  key, exact issuer/audience/scopes, subject, and at-most-one-hour lifetime.
+  Enablement and runtime use only this validated registration-scoped token;
+  opaque, symmetric, overlong, malformed, mismatched, and untrusted-JWKS tokens
+  fail closed without leaking token material.
 - [ ] Implement the remaining Sprint 66 capability controls: add
-  client-credentials token exchange and user-delegated refresh with
-  cryptographic issuer/audience validation, execute approved remote proposal
-  and write tools safely, then validate the live Compose policy bundle with the
-  OPA parser/runtime.
+  client-credentials token exchange and user-delegated refresh, execute
+  approved remote proposal and write tools safely, then validate the live
+  Compose policy bundle with the OPA parser/runtime.
 
 ## Sprint 66 Verification
 
