@@ -640,6 +640,16 @@ class Settings(BaseSettings):
         le=50_000_000,
         validation_alias="PROVIDER_EGRESS_MAX_RESPONSE_BYTES",
     )
+    opa_policy_url: str = Field(
+        default="http://localhost:8181",
+        validation_alias="OPA_POLICY_URL",
+    )
+    opa_policy_timeout_seconds: float = Field(
+        default=2.0,
+        ge=0.1,
+        le=30.0,
+        validation_alias="OPA_POLICY_TIMEOUT_SECONDS",
+    )
     security_rate_limit_enabled: bool = Field(
         default=True,
         validation_alias="SECURITY_RATE_LIMIT_ENABLED",

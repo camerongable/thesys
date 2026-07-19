@@ -26,6 +26,14 @@ services:
       timeout: 3s
       retries: 10
 
+  opa:
+    image: openpolicyagent/opa:0.67.0
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "/policies"]
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./policies:/policies:ro
+
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -153,6 +161,8 @@ services:
       LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-thesys-local}
       LANGSMITH_PUBLIC_URL_BASE: ${LANGSMITH_PUBLIC_URL_BASE:-https://smith.langchain.com}
       LANGSMITH_PROVIDER_RETENTION_DAYS: ${LANGSMITH_PROVIDER_RETENTION_DAYS:-14}
+      OPA_POLICY_URL: http://opa:8181
+      OPA_POLICY_TIMEOUT_SECONDS: ${OPA_POLICY_TIMEOUT_SECONDS:-2}
       TEMPORAL_ENABLED: ${TEMPORAL_ENABLED:-true}
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
@@ -175,6 +185,8 @@ services:
       litellm:
         condition: service_started
       temporal:
+        condition: service_started
+      opa:
         condition: service_started
 
   temporal-worker:
