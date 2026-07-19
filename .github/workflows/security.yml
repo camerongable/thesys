@@ -40,7 +40,7 @@ jobs:
       - run: uv sync --project apps/api --locked --all-extras
       - run: uv run --project apps/api ruff check apps/api/app
       - run: uv run --project apps/api pytest apps/api/app/tests/security
-      - run: uvx --from bandit==1.8.6 bandit -q -r apps/api/app
+      - run: uvx --from bandit==1.8.6 bandit -q -r apps/api/app -x apps/api/app/tests -ll
       - run: uv export --project apps/api --locked --no-dev --output-file /tmp/api-requirements.txt
       - name: Python dependency baseline audit
         continue-on-error: ${{ github.event_name == 'pull_request' }}

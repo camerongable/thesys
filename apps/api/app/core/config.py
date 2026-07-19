@@ -1,4 +1,6 @@
 from functools import lru_cache
+from pathlib import Path
+from tempfile import gettempdir
 from typing import Annotated, Literal
 from urllib.parse import urlparse
 
@@ -455,7 +457,7 @@ class Settings(BaseSettings):
         validation_alias="OBJECT_STORAGE_MODE",
     )
     local_object_storage_path: str = Field(
-        default="/tmp/thesys-object-storage",
+        default_factory=lambda: str(Path(gettempdir()) / "thesys-object-storage"),
         validation_alias="LOCAL_OBJECT_STORAGE_PATH",
     )
     max_upload_mb: int = Field(default=10, validation_alias="MAX_UPLOAD_MB")
