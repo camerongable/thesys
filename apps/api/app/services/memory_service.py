@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext, require_permission
@@ -29,7 +29,6 @@ from app.security.contracts import DataClassification
 from app.services import governance_service, project_service
 from app.services.data_protection_service import data_protection_service
 
-ACTIVE_MEMORY_STATUSES = {"active"}
 WORKING_MEMORY_TTL = timedelta(hours=8)
 EPISODIC_MEMORY_TTL = timedelta(days=30)
 WORKFLOW_MEMORY_TYPES: dict[str, set[str]] = {
@@ -95,11 +94,11 @@ def list_memory(
         stmt = stmt.where(ProjectMemoryItem.memory_type == memory_type)
     if not include_stale:
         stmt = stmt.where(
-            ProjectMemoryItem.status.in_(ACTIVE_MEMORY_STATUSES),
-            or_(
-                ProjectMemoryItem.expires_at.is_(None),
-                ProjectMemoryItem.expires_at > datetime.now(UTC),
-            ),
+            *memory_security_policy.memory_recall_sql_conditions(
+                now=datetime.now(UTC),
+                working_memory_session_scope=session_scope,
+                allowed_data_classifications=allowed_data_classifications,
+            )
         )
     items = db.scalars(
         stmt.order_by(ProjectMemoryItem.updated_at.desc()).limit(min(limit, 100))
@@ -153,10 +152,10 @@ def select_memory_for_workflow(
                 ProjectMemoryItem.workspace_id == auth.workspace_id,
                 ProjectMemoryItem.project_id == project_id,
                 ProjectMemoryItem.memory_type.in_(allowed_types),
-                ProjectMemoryItem.status == "active",
-                or_(
-                    ProjectMemoryItem.expires_at.is_(None),
-                    ProjectMemoryItem.expires_at > datetime.now(UTC),
+                *memory_security_policy.memory_recall_sql_conditions(
+                    now=datetime.now(UTC),
+                    working_memory_session_scope=session_scope,
+                    allowed_data_classifications=allowed_data_classifications,
                 ),
             )
             .order_by(ProjectMemoryItem.updated_at.desc())
@@ -213,8 +212,37 @@ def select_memory_for_context(
             session_scope=session_scope,
         )
     ]
+    eligible_items = list(
+        db.scalars(
+            select(ProjectMemoryItem)
+            .where(
+                ProjectMemoryItem.workspace_id == auth.workspace_id,
+                ProjectMemoryItem.project_id == project_id,
+                ProjectMemoryItem.memory_type.in_(allowed_types),
+                *memory_security_policy.memory_recall_sql_conditions(
+                    now=now,
+                    working_memory_session_scope=session_scope,
+                    allowed_data_classifications=allowed_data_classifications,
+                ),
+            )
+            .order_by(ProjectMemoryItem.updated_at.desc())
+            .limit(min(limit, 100))
+        )
+    )
     conflicts = detect_memory_conflicts(db, auth, project_id, mark=True, commit=False)
-    selected: list[ProjectMemoryItem] = []
+    selected = [
+        item
+        for item in eligible_items
+        if _memory_exclusion_reason(
+            item,
+            allowed_types=allowed_types,
+            include_stale_history=include_stale_history,
+            now=now,
+            working_memory_session_scope=session_scope,
+            allowed_data_classifications=allowed_data_classifications,
+        )
+        is None
+    ]
     excluded: list[dict[str, Any]] = []
     for item in all_items:
         reason = _memory_exclusion_reason(
@@ -227,10 +255,6 @@ def select_memory_for_context(
         )
         if reason is not None:
             excluded.append(_excluded(item, reason))
-            continue
-        selected.append(item)
-        if len(selected) >= min(limit, 100):
-            break
     return MemorySelection(
         selected=selected,
         excluded=excluded,

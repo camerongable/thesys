@@ -770,6 +770,65 @@ def test_low_trust_memory_requires_review_before_recall(
     ]
 
 
+def test_ineligible_memory_cannot_starve_recall_before_ordering_or_limits(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    eligible = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="project",
+        write_policy="direct",
+        title="Eligible project memory",
+        summary="This reviewed memory must remain available.",
+        content={"state": "eligible"},
+    )
+    eligible.updated_at = datetime.now(UTC) - timedelta(days=1)
+    unsafe_items = [
+        ProjectMemoryItem(
+            workspace_id=auth.workspace_id,
+            project_id=project_id,
+            memory_type="project",
+            status="active",
+            write_policy="direct",
+            title=f"Unsafe memory {index}",
+            summary="This blocked item must not consume a recall slot.",
+            content={},
+            provenance_metadata={
+                "policy_version": "secure-memory:v1",
+                "security_status": "blocked",
+                "trust_score": 1.0,
+                "data_classification": "confidential",
+                "requires_human_approval": False,
+            },
+            updated_at=datetime.now(UTC) + timedelta(seconds=index + 1),
+        )
+        for index in range(201)
+    ]
+    db_session.add_all(unsafe_items)
+    db_session.commit()
+
+    assert memory_service.list_memory(db_session, auth, project_id, limit=1) == [eligible]
+    assert memory_service.select_memory_for_workflow(
+        db_session,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+        limit=1,
+    ) == [eligible]
+    selection = memory_service.select_memory_for_context(
+        db_session,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+        limit=1,
+    )
+    assert selection.selected == [eligible]
+
+
 def test_memory_explanation_and_duplicate_merge(
     client: TestClient,
     db_session: Session,

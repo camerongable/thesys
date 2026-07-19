@@ -617,6 +617,11 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Gate low-trust memory at write time. A durable write below the same minimum
   trust threshold used by recall is proposal-only, so an unverified item cannot
   become active project memory merely by claiming an approved security status.
+- [x] Apply secure memory-recall predicates before ordering and limits. Active,
+  unexpired, approved, trusted, classification-cleared, approval-complete, and
+  session-scoped candidates are now SQL-filtered before list/workflow/context
+  selection, while the Python policy remains a defensive recheck with Inspect
+  exclusion reasons.
 - [x] Detect anomalous embedding clusters before evidence chunks are persisted.
   A distinct source whose candidate vectors nearly match two approved,
   different-content project sources receives an inspectable source-trust signal
@@ -787,6 +792,9 @@ current verdict, next action, evidence health, validation, and decision state.
   warning`) across deletion propagation, security invariants, evidence, and
   feature-boundary coverage; changed-file compile checks and repository
   application lint passed.
+- [x] Pre-limit memory-recall checkpoint passed (`81 passed, 1 warning`) across
+  memory-service, context-compiler, and feature-boundary coverage; changed-file
+  compile checks and repository application lint passed.
 
 ## Next Sprint
 

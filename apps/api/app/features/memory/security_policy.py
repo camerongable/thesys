@@ -7,6 +7,9 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import or_
+
+from app.db.models import ProjectMemoryItem
 from app.security.contracts import DataClassification
 
 SECURE_MEMORY_POLICY_VERSION = "secure-memory:v1"
@@ -241,6 +244,45 @@ def memory_recall_exclusion_reason(
     ):
         return "memory_approval_required"
     return None
+
+
+def memory_recall_sql_conditions(
+    *,
+    now: datetime,
+    working_memory_session_scope: str | None,
+    allowed_data_classifications: set[str] | None,
+) -> list[object]:
+    """Return fail-closed recall predicates for use before ordering and limits."""
+    metadata = ProjectMemoryItem.provenance_metadata
+    conditions: list[object] = [
+        ProjectMemoryItem.status == "active",
+        or_(ProjectMemoryItem.expires_at.is_(None), ProjectMemoryItem.expires_at > _as_utc(now)),
+        metadata["policy_version"].as_string() == SECURE_MEMORY_POLICY_VERSION,
+        metadata["security_status"].as_string() == "approved",
+        metadata["trust_score"].as_float() >= MINIMUM_RECALL_TRUST_SCORE,
+        or_(
+            metadata["requires_human_approval"].as_boolean().is_(False),
+            metadata["approved_at"].as_string().is_not(None),
+            metadata["trusted_projection"].as_boolean().is_(True),
+        ),
+    ]
+    if allowed_data_classifications is not None:
+        conditions.append(
+            metadata["data_classification"].as_string().in_(
+                sorted(allowed_data_classifications)
+            )
+        )
+    if working_memory_session_scope is None:
+        conditions.append(ProjectMemoryItem.memory_type != "working")
+    else:
+        conditions.append(
+            or_(
+                ProjectMemoryItem.memory_type != "working",
+                metadata[WORKING_MEMORY_SESSION_SCOPE_KEY].as_string()
+                == working_memory_session_scope,
+            )
+        )
+    return conditions
 
 
 def _default_origin(source_entity_type: str | None, write_policy: str) -> str:
