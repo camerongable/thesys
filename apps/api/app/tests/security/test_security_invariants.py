@@ -494,6 +494,19 @@ def test_memory_mutation_entrypoints_are_classified() -> None:
     assert detected_mutators <= MEMORY_WRITE_PATHS.keys()
     assert {"upsert_from_assumption", "upsert_from_risk"} <= MEMORY_WRITE_PATHS.keys()
     assert all(hasattr(memory_service, function_name) for function_name in MEMORY_WRITE_PATHS)
+    lifecycle_paths = {
+        "approve_memory_proposal",
+        "reject_memory_proposal",
+        "mark_stale",
+        "archive_memory",
+        "merge_duplicates",
+        "resolve_memory_conflict",
+    }
+    assert all(
+        "_authorize_opa_memory_lifecycle"
+        in inspect.getsource(getattr(memory_service, function_name))
+        for function_name in lifecycle_paths
+    )
 
 
 def test_externally_visible_tool_paths_emit_audit_events() -> None:

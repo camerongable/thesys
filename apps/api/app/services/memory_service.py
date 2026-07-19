@@ -71,6 +71,16 @@ _MEMORY_TYPE_BASE_CLASSIFICATION = {
     "procedural": DataClassification.CONFIDENTIAL,
 }
 _TRUSTED_DERIVED_PROJECTION = object()
+MemoryPolicySource = Literal["user", "agent", "system"]
+MemoryPolicyOperation = Literal[
+    "content_write",
+    "approve",
+    "reject",
+    "mark_stale",
+    "archive",
+    "merge_duplicates",
+    "resolve_conflict",
+]
 
 MemorySelection = memory_selection_policy.MemorySelection
 _memory_exclusion_reason = memory_selection_policy.memory_exclusion_reason
@@ -362,7 +372,7 @@ def upsert_memory_item(
     settings: Settings | None = None,
 ) -> ProjectMemoryItem:
     """Create or update a typed memory item under the project's governance model."""
-    project = project_service.get_project(db, auth, project_id)
+    project_service.get_project(db, auth, project_id)
     expires_at = _effective_memory_expiry(memory_type, expires_at)
     data_classification = _memory_data_classification(memory_type, title, summary, content)
     safe_title = redact_text(title, redact_emails=True)
@@ -441,13 +451,14 @@ def upsert_memory_item(
         db,
         auth,
         settings or get_settings(),
-        project,
+        project_id,
         memory_type=memory_type,
         write_policy=write_policy,
         status_value=status_value,
         source_entity_type=source_entity_type,
         source_entity_id=source_entity_id,
         provenance_metadata=safe_provenance,
+        operation="content_write",
     )
     if policy_decision is not None and policy_decision.requires_approval:
         status_value = "proposed"
@@ -513,24 +524,15 @@ def upsert_memory_item(
         existing.status = status_value
         existing.expires_at = expires_at
     db.flush()
-    if policy_decision is not None:
-        governance_service.record_audit_event(
-            db,
-            auth,
-            event_type="memory_write_authorized",
-            actor_type=_memory_audit_actor_type(safe_provenance),
-            project_id=project_id,
-            entity_type="project_memory_item",
-            entity_id=existing.id,
-            risk_level="medium",
-            summary=f"Authorized {memory_type} memory write.",
-            metadata={
-                "memory_type": memory_type,
-                "write_policy": write_policy,
-                "status": status_value,
-                "policy_decision": _opa_decision_metadata(policy_decision),
-            },
-        )
+    _record_opa_memory_authorization(
+        db,
+        auth,
+        project_id=project_id,
+        item=existing,
+        operation="content_write",
+        affected_records=1,
+        policy_decision=policy_decision,
+    )
     if conflicting_active is not None:
         _link_memory_proposal_conflict(
             project_id=project_id,
@@ -544,7 +546,7 @@ def _authorize_opa_memory_write(
     db: Session,
     auth: AuthContext,
     settings: Settings,
-    project: Any,
+    project_id: uuid.UUID,
     *,
     memory_type: MemoryType,
     write_policy: MemoryWritePolicy,
@@ -552,15 +554,22 @@ def _authorize_opa_memory_write(
     source_entity_type: str | None,
     source_entity_id: uuid.UUID | None,
     provenance_metadata: dict[str, Any],
+    operation: MemoryPolicyOperation,
+    affected_records: int = 1,
+    request_source: MemoryPolicySource | None = None,
+    memory_id: uuid.UUID | None = None,
 ) -> OpaPolicyDecision | None:
     """Authorize memory content changes before a record is created or updated."""
     if not opa_policy_enforced(settings):
         return None
 
     origin = str(provenance_metadata.get("origin") or "agent")
-    source = _opa_memory_request_source(
+    source = request_source or _opa_memory_request_source(
         origin,
         trusted_projection=bool(provenance_metadata.get("trusted_projection")),
+    )
+    data_classification = str(
+        provenance_metadata.get("data_classification", DataClassification.CONFIDENTIAL.value)
     )
     policy_input = {
         "principal": {
@@ -570,14 +579,16 @@ def _authorize_opa_memory_write(
             "authentication_method": auth.principal.authentication_method,
         },
         "project": {
-            "id": str(project.id),
-            "workspace_id": str(project.workspace_id),
-            "classification": provenance_metadata["data_classification"],
+            "id": str(project_id),
+            "workspace_id": str(auth.workspace_id),
+            "classification": data_classification,
         },
         "memory": {
             "memory_type": memory_type,
             "write_policy": write_policy,
             "requested_status": status_value,
+            "operation": operation,
+            "affected_records": affected_records,
             "source_entity_type": source_entity_type,
             "source_entity_id": str(source_entity_id) if source_entity_id is not None else None,
             "trusted_projection": bool(provenance_metadata.get("trusted_projection")),
@@ -585,7 +596,7 @@ def _authorize_opa_memory_write(
         "request": {
             "source": source,
             "workflow_id": provenance_metadata.get("workflow_id"),
-            "data_classification": provenance_metadata["data_classification"],
+            "data_classification": data_classification,
         },
     }
     try:
@@ -595,9 +606,13 @@ def _authorize_opa_memory_write(
         _audit_opa_memory_denial(
             db,
             auth,
-            project_id=project.id,
+            project_id=project_id,
             memory_type=memory_type,
             write_policy=write_policy,
+            operation=operation,
+            affected_records=affected_records,
+            memory_id=memory_id,
+            actor_type=source,
             reason="opa_policy_unavailable",
             detail=denial.detail,
             provenance_metadata=provenance_metadata,
@@ -605,14 +620,18 @@ def _authorize_opa_memory_write(
         db.commit()
         raise denial from exc
     try:
-        return require_opa_decision(decision)
+        approved_decision = require_opa_decision(decision)
     except HTTPException as exc:
         _audit_opa_memory_denial(
             db,
             auth,
-            project_id=project.id,
+            project_id=project_id,
             memory_type=memory_type,
             write_policy=write_policy,
+            operation=operation,
+            affected_records=affected_records,
+            memory_id=memory_id,
+            actor_type=source,
             reason="opa_policy_denied",
             detail=str(exc.detail),
             provenance_metadata=provenance_metadata,
@@ -620,13 +639,33 @@ def _authorize_opa_memory_write(
         )
         db.commit()
         raise
+    if affected_records > approved_decision.max_records:
+        detail = "Policy record limit does not permit this memory mutation."
+        _audit_opa_memory_denial(
+            db,
+            auth,
+            project_id=project_id,
+            memory_type=memory_type,
+            write_policy=write_policy,
+            operation=operation,
+            affected_records=affected_records,
+            memory_id=memory_id,
+            actor_type=source,
+            reason="opa_record_limit_exceeded",
+            detail=detail,
+            provenance_metadata=provenance_metadata,
+            policy_decision=approved_decision,
+        )
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+    return approved_decision
 
 
 def _opa_memory_request_source(
     origin: str,
     *,
     trusted_projection: bool,
-) -> Literal["user", "agent", "system"]:
+) -> MemoryPolicySource:
     if origin == "user":
         return "user"
     if origin == "system" or (origin == "derived" and trusted_projection):
@@ -636,7 +675,7 @@ def _opa_memory_request_source(
 
 def _memory_audit_actor_type(
     provenance_metadata: dict[str, Any],
-) -> Literal["user", "agent", "system"]:
+) -> MemoryPolicySource:
     return _opa_memory_request_source(
         str(provenance_metadata.get("origin") or "agent"),
         trusted_projection=bool(provenance_metadata.get("trusted_projection")),
@@ -650,6 +689,10 @@ def _audit_opa_memory_denial(
     project_id: uuid.UUID,
     memory_type: MemoryType,
     write_policy: MemoryWritePolicy,
+    operation: MemoryPolicyOperation,
+    affected_records: int,
+    memory_id: uuid.UUID | None,
+    actor_type: MemoryPolicySource,
     reason: str,
     detail: str | None,
     provenance_metadata: dict[str, Any],
@@ -659,18 +702,83 @@ def _audit_opa_memory_denial(
         db,
         auth,
         event_type="memory_write_denied",
-        actor_type=_memory_audit_actor_type(provenance_metadata),
+        actor_type=actor_type,
         project_id=project_id,
         entity_type="project_memory_item",
+        entity_id=memory_id,
         risk_level="medium",
         summary=f"Denied {memory_type} memory write.",
         metadata={
             "memory_type": memory_type,
             "write_policy": write_policy,
+            "operation": operation,
+            "affected_records": affected_records,
             "reason": reason,
             "detail": detail,
             "policy_decision": _opa_decision_metadata(policy_decision),
         },
+    )
+
+
+def _record_opa_memory_authorization(
+    db: Session,
+    auth: AuthContext,
+    *,
+    project_id: uuid.UUID,
+    item: ProjectMemoryItem,
+    operation: MemoryPolicyOperation,
+    affected_records: int,
+    policy_decision: OpaPolicyDecision | None,
+    actor_type: MemoryPolicySource | None = None,
+) -> None:
+    if policy_decision is None:
+        return
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="memory_write_authorized",
+        actor_type=actor_type or _memory_audit_actor_type(item.provenance_metadata or {}),
+        project_id=project_id,
+        entity_type="project_memory_item",
+        entity_id=item.id,
+        risk_level="medium",
+        summary=f"Authorized {operation} for {item.memory_type} memory.",
+        metadata={
+            "memory_type": item.memory_type,
+            "write_policy": item.write_policy,
+            "status": item.status,
+            "operation": operation,
+            "affected_records": affected_records,
+            "policy_decision": _opa_decision_metadata(policy_decision),
+        },
+    )
+
+
+def _authorize_opa_memory_lifecycle(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    item: ProjectMemoryItem,
+    *,
+    operation: MemoryPolicyOperation,
+    affected_records: int = 1,
+    settings: Settings | None = None,
+) -> OpaPolicyDecision | None:
+    return _authorize_opa_memory_write(
+        db,
+        auth,
+        settings or get_settings(),
+        project_id,
+        memory_type=item.memory_type,
+        write_policy=item.write_policy,
+        status_value=item.status,
+        source_entity_type=item.source_entity_type,
+        source_entity_id=item.source_entity_id,
+        provenance_metadata=item.provenance_metadata or {},
+        operation=operation,
+        affected_records=affected_records,
+        request_source="user",
+        memory_id=item.id,
     )
 
 
@@ -782,6 +890,8 @@ def approve_memory_proposal(
     auth: AuthContext,
     project_id: uuid.UUID,
     memory_id: uuid.UUID,
+    *,
+    settings: Settings | None = None,
 ) -> ProjectMemoryItem:
     """Promote proposed memory to active memory after human review."""
     require_permission(auth, "approve_memory_updates")
@@ -792,6 +902,16 @@ def approve_memory_proposal(
             detail="Only proposed memory can be approved.",
         )
     conflicting_active_items = _conflicting_active_memory_items(db, auth, project_id, item)
+    affected_records = 1 + len(conflicting_active_items)
+    policy_decision = _authorize_opa_memory_lifecycle(
+        db,
+        auth,
+        project_id,
+        item,
+        operation="approve",
+        affected_records=affected_records,
+        settings=settings,
+    )
     item.status = "active"
     reviewed_at = datetime.now(UTC)
     item.provenance_metadata = _reviewed_memory_metadata(
@@ -821,6 +941,16 @@ def approve_memory_proposal(
             **(active_item.provenance_metadata or {}),
             **resolution_metadata,
         }
+    _record_opa_memory_authorization(
+        db,
+        auth,
+        project_id=project_id,
+        item=item,
+        operation="approve",
+        affected_records=affected_records,
+        policy_decision=policy_decision,
+        actor_type="user",
+    )
     governance_service.record_audit_event(
         db,
         auth,
@@ -843,6 +973,8 @@ def reject_memory_proposal(
     auth: AuthContext,
     project_id: uuid.UUID,
     memory_id: uuid.UUID,
+    *,
+    settings: Settings | None = None,
 ) -> ProjectMemoryItem:
     """Archive proposed memory after human rejection while preserving auditability."""
     require_permission(auth, "approve_memory_updates")
@@ -852,6 +984,14 @@ def reject_memory_proposal(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only proposed memory can be rejected.",
         )
+    policy_decision = _authorize_opa_memory_lifecycle(
+        db,
+        auth,
+        project_id,
+        item,
+        operation="reject",
+        settings=settings,
+    )
     item.status = "archived"
     reviewed_at = datetime.now(UTC)
     item.provenance_metadata = _reviewed_memory_metadata(
@@ -859,6 +999,16 @@ def reject_memory_proposal(
         status="rejected",
         user_id=auth.user_id,
         reviewed_at=reviewed_at,
+    )
+    _record_opa_memory_authorization(
+        db,
+        auth,
+        project_id=project_id,
+        item=item,
+        operation="reject",
+        affected_records=1,
+        policy_decision=policy_decision,
+        actor_type="user",
     )
     governance_service.record_audit_event(
         db,
@@ -973,10 +1123,30 @@ def mark_stale(
     auth: AuthContext,
     project_id: uuid.UUID,
     memory_id: uuid.UUID,
+    *,
+    settings: Settings | None = None,
 ) -> ProjectMemoryItem:
     require_permission(auth, "approve_memory_updates")
     item = get_memory_item(db, auth, project_id, memory_id)
+    policy_decision = _authorize_opa_memory_lifecycle(
+        db,
+        auth,
+        project_id,
+        item,
+        operation="mark_stale",
+        settings=settings,
+    )
     item.status = "stale"
+    _record_opa_memory_authorization(
+        db,
+        auth,
+        project_id=project_id,
+        item=item,
+        operation="mark_stale",
+        affected_records=1,
+        policy_decision=policy_decision,
+        actor_type="user",
+    )
     db.commit()
     db.refresh(item)
     return item
@@ -987,10 +1157,30 @@ def archive_memory(
     auth: AuthContext,
     project_id: uuid.UUID,
     memory_id: uuid.UUID,
+    *,
+    settings: Settings | None = None,
 ) -> ProjectMemoryItem:
     require_permission(auth, "approve_memory_updates")
     item = get_memory_item(db, auth, project_id, memory_id)
+    policy_decision = _authorize_opa_memory_lifecycle(
+        db,
+        auth,
+        project_id,
+        item,
+        operation="archive",
+        settings=settings,
+    )
     item.status = "archived"
+    _record_opa_memory_authorization(
+        db,
+        auth,
+        project_id=project_id,
+        item=item,
+        operation="archive",
+        affected_records=1,
+        policy_decision=policy_decision,
+        actor_type="user",
+    )
     db.commit()
     db.refresh(item)
     return item
@@ -1003,15 +1193,37 @@ def merge_duplicates(
     *,
     keeper_id: uuid.UUID,
     duplicate_ids: list[uuid.UUID],
+    settings: Settings | None = None,
 ) -> ProjectMemoryItem:
     require_permission(auth, "approve_memory_updates")
     keeper = get_memory_item(db, auth, project_id, keeper_id)
-    for duplicate_id in duplicate_ids:
-        if duplicate_id == keeper_id:
-            continue
-        duplicate = get_memory_item(db, auth, project_id, duplicate_id)
+    duplicates = [
+        get_memory_item(db, auth, project_id, duplicate_id)
+        for duplicate_id in duplicate_ids
+        if duplicate_id != keeper_id
+    ]
+    policy_decision = _authorize_opa_memory_lifecycle(
+        db,
+        auth,
+        project_id,
+        keeper,
+        operation="merge_duplicates",
+        affected_records=1 + len(duplicates),
+        settings=settings,
+    )
+    for duplicate in duplicates:
         duplicate.status = "superseded"
         duplicate.superseded_by_id = keeper.id
+    _record_opa_memory_authorization(
+        db,
+        auth,
+        project_id=project_id,
+        item=keeper,
+        operation="merge_duplicates",
+        affected_records=1 + len(duplicates),
+        policy_decision=policy_decision,
+        actor_type="user",
+    )
     db.commit()
     db.refresh(keeper)
     return keeper
@@ -1092,11 +1304,22 @@ def resolve_memory_conflict(
     supersede_ids: list[uuid.UUID],
     archive_ids: list[uuid.UUID],
     reason: str,
+    settings: Settings | None = None,
 ) -> ProjectMemoryItem:
     """Resolve a memory conflict through explicit human-approved state changes."""
     require_permission(auth, "approve_memory_updates")
-    detect_memory_conflicts(db, auth, project_id, mark=True, commit=False)
     keeper = get_memory_item(db, auth, project_id, keeper_id)
+    affected_records = len({keeper_id, *supersede_ids, *archive_ids})
+    policy_decision = _authorize_opa_memory_lifecycle(
+        db,
+        auth,
+        project_id,
+        keeper,
+        operation="resolve_conflict",
+        affected_records=affected_records,
+        settings=settings,
+    )
+    detect_memory_conflicts(db, auth, project_id, mark=True, commit=False)
     _ensure_conflict_member(keeper, conflict_group_id)
     resolution_metadata = {
         "conflict_group_id": conflict_group_id,
@@ -1117,6 +1340,16 @@ def resolve_memory_conflict(
         _ensure_conflict_member(item, conflict_group_id)
         item.status = "archived"
         item.provenance_metadata = {**(item.provenance_metadata or {}), **resolution_metadata}
+    _record_opa_memory_authorization(
+        db,
+        auth,
+        project_id=project_id,
+        item=keeper,
+        operation="resolve_conflict",
+        affected_records=affected_records,
+        policy_decision=policy_decision,
+        actor_type="user",
+    )
     db.commit()
     db.refresh(keeper)
     return keeper

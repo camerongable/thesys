@@ -831,10 +831,16 @@ current verdict, next action, evidence health, validation, and decision state.
   while approval-required decisions force pending proposal status. Trusted
   derived projections and versioned code/config procedural memory retain their
   existing narrowly-scoped paths through explicit policy rules.
-- [ ] Route memory lifecycle mutations (approval, rejection, stale/archive,
-  merge, and conflict resolution) and the remaining privileged action surfaces
-  through their OPA decisions, then validate the live Compose policy bundle
-  with the OPA parser/runtime.
+- [x] Route memory lifecycle mutations (approval, rejection, stale/archive,
+  merge, and conflict resolution) through the same OPA decision. Lifecycle
+  operations declare their affected-record count; OPA limits multi-item
+  approval, merge, and conflict resolution before mutations, and every allowed
+  or denied lifecycle action is attributable to the reviewing user in audit
+  metadata.
+- [ ] Implement the remaining Sprint 66 capability controls: secure tool
+  manifests, approved MCP server registrations, scoped remote credentials, and
+  runtime kill switches; then validate the live Compose policy bundle with the
+  OPA parser/runtime.
 
 ## Sprint 66 Verification
 
@@ -844,14 +850,16 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Memory-policy, typed-memory, and feature-boundary checkpoint passed
   (`104 passed, 1 xfailed, 1 warning`); changed-file lint, compile checks, and
   `git diff --check` passed.
+- [x] Memory lifecycle OPA checkpoint passed (`66 passed, 1 xfailed, 1
+  warning`); changed-file lint, compile checks, and `git diff --check` passed.
 - [ ] The local workspace has no Docker CLI, so Compose graph validation and
   direct OPA/Rego parser validation remain part of the compose-backed
   enforcement checkpoint.
 
 ## Next Sprint
 
-Continue Sprint 66 by routing memory lifecycle mutations through the OPA
-memory-write decision and denying mutation when the sidecar is unavailable.
+Continue Sprint 66 by defining secure tool manifests and enforcing the
+locally-approved manifest before invocation.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
