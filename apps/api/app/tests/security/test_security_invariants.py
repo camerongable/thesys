@@ -21,6 +21,7 @@ from app.security.contracts import (
     DataClassification,
     ProviderPolicy,
 )
+from app.security.workflow_budget import WorkflowSecurityBudget
 from app.services import (
     evidence_service,
     memory_service,
@@ -801,15 +802,22 @@ def test_embedding_provider_boundary_uses_non_generating_scope_contract() -> Non
     assert "GuardrailGateway" not in source
 
 
-@pytest.mark.xfail(strict=True, reason="Sprint 67 will add complete durable-workflow budgets.")
 def test_durable_workflows_declare_complete_budgets() -> None:
     payload_source = inspect.getsource(temporal_research_service._workflow_payload)
     required_budget_fields = {
+        "max_model_calls",
+        "max_tool_calls",
+        "max_external_queries",
+        "max_retrieved_chunks",
         "max_tokens",
         "max_cost_usd",
         "max_duration_seconds",
-        "max_retrieval_calls",
-        "max_tool_calls",
+        "max_memory_proposals",
+        "max_structured_output_repairs",
+        "max_critique_loops",
     }
 
-    assert all(field in payload_source for field in required_budget_fields)
+    budget_payload = WorkflowSecurityBudget.from_settings(Settings()).as_payload()
+
+    assert required_budget_fields <= set(budget_payload)
+    assert "workflow_security_budget" in payload_source

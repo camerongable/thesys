@@ -65,9 +65,9 @@ current verdict, next action, evidence health, validation, and decision state.
   security architecture, and abuse-case documents under `docs/security/`.
 - [x] Add automated checks for the security registry, required documents and
   trust boundaries, tenant paths, governed tools, memory writes, and audit paths.
-- [x] Keep production-auth, ingestion-classification, centralized-guardrail, and
-  complete durable-budget gaps visible as strict expected failures owned by
-  Sprints 62, 63, 64, and 67.
+- [x] Promote production-auth, ingestion-classification, centralized-guardrail,
+  and complete durable-workflow-budget invariants from their initial expected
+  gaps into enforced checks as their owning Sprints 62, 63, 64, and 67 land.
 - [x] Add the pull-request security-impact checklist and README/docs navigation.
 
 ## Sprint 61 Verification
@@ -76,8 +76,9 @@ current verdict, next action, evidence health, validation, and decision state.
   passed.
 - [x] `apps/api/.venv/bin/python -m compileall apps/api/app/security apps/api/app/tests/security -q`
   passed.
-- [x] `apps/api/.venv/bin/pytest apps/api/app/tests/security/test_security_invariants.py -q`
-  passed (`8 passed, 4 xfailed`; expected gaps: Sprints 62, 63, 64, and 67).
+- [x] The security-invariant suite initially established expected gaps for
+  Sprints 62, 63, 64, and 67; each is now an enforced contract as its owning
+  security work completed.
 - [x] `cd apps/api && .venv/bin/pytest app/tests/security/test_security_invariants.py app/tests/test_security_governance.py app/tests/test_tool_boundary.py app/tests/test_mcp_adapter.py -q`
   passed (`45 passed, 4 xfailed, 3 warnings`).
 - [x] `git diff --check` passed.
