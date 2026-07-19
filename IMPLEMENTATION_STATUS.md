@@ -1319,6 +1319,11 @@ deployment-hardening requirements.
   Python/JavaScript installs, API and web checks, the Promptfoo fast suite, Bandit,
   Semgrep, pip-audit, pnpm audit, Gitleaks, OSV scanning, and CycloneDX SBOM
   generation; nightly runs the deterministic red-team, budget, and PII regressions.
+- [x] Require executable model and prompt evaluation coverage on every pull
+  request. The named gate runs registry approval, direct-injection, PII,
+  grounding, tool-policy, workflow budget, cost/latency reporting, and Promptfoo
+  fast regression suites; model or prompt edits therefore cannot merge without
+  the same bounded evaluation inputs being re-run.
 - [x] Add fail-closed `security-report.json` and `security-report.md` generation.
   Release evidence is correlated with red-team inventory, approved model/prompt
   registries, SBOM digest, image signature, scan findings, and the tenant, PII,

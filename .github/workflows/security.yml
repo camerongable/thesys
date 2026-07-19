@@ -65,6 +65,36 @@ jobs:
       - run: uv sync --project apps/api --locked --all-extras
       - run: pnpm security:redteam:fast
 
+  model-prompt-security-evals:
+    name: Model and prompt security evals
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          version: "0.8.14"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --project apps/api --locked --all-extras
+      - name: Quality, PII, grounding, tool, budget, and latency regressions
+        run: |
+          uv run --project apps/api pytest \
+            app/tests/security/test_approved_model_registry.py \
+            app/tests/security/test_approved_prompt_registry.py \
+            app/tests/security/test_guardrail_gateway.py \
+            app/tests/security/test_litellm_data_protection.py \
+            app/tests/security/test_workflow_security_budget.py \
+            app/tests/test_retrieval_quality_eval.py \
+            app/tests/test_demo_eval_workflows.py \
+            app/tests/test_tool_boundary.py
+      - name: Prompt and model adversarial regressions
+        run: pnpm security:redteam:fast
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest

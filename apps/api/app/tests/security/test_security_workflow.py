@@ -44,6 +44,30 @@ def test_security_workflow_covers_required_pull_request_gates() -> None:
         assert command in content
 
 
+def test_model_and_prompt_changes_run_named_security_evaluations() -> None:
+    workflow = yaml.safe_load(WORKFLOW_PATH.read_text())
+    job = workflow["jobs"]["model-prompt-security-evals"]
+    commands = "\n".join(
+        str(step.get("run", ""))
+        for step in job["steps"]
+        if isinstance(step, dict)
+    )
+
+    assert job["timeout-minutes"] == 20
+    for contract in (
+        "test_approved_model_registry.py",
+        "test_approved_prompt_registry.py",
+        "test_guardrail_gateway.py",
+        "test_litellm_data_protection.py",
+        "test_workflow_security_budget.py",
+        "test_retrieval_quality_eval.py",
+        "test_demo_eval_workflows.py",
+        "test_tool_boundary.py",
+        "pnpm security:redteam:fast",
+    ):
+        assert contract in commands
+
+
 def test_promptfoo_fast_command_uses_an_exact_cli_version() -> None:
     package_json = (REPO_ROOT / "package.json").read_text()
 
