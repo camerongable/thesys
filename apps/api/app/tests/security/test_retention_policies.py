@@ -191,10 +191,14 @@ def test_local_retention_cleanup_removes_expired_payloads_but_keeps_run_accounti
         user_id=source.created_by,
         event_type="retention_test",
         actor_type="system",
+        actor_identity="system:service",
+        policy_decision="recorded",
+        resource_identifier=f"project:{source.project_id}",
         summary="Expired audit record",
         risk_level="low",
         event_metadata={},
         created_at=expired_at,
+        event_hash="0" * 64,
     )
     expired_security = SecurityEvent(
         workspace_id=source.workspace_id,

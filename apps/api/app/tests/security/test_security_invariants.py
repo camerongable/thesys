@@ -270,6 +270,24 @@ def test_workspace_data_key_migration_adds_forced_rls_and_scoped_grants(monkeypa
     assert "thesys_readonly" not in combined
 
 
+def test_audit_chain_migration_backfills_hashes_and_protects_timestamps() -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0047_tamper_evident_audit_chain.py"
+    source = migration_path.read_text()
+
+    for column in (
+        "actor_identity",
+        "policy_decision",
+        "resource_identifier",
+        "previous_event_hash",
+        "event_hash",
+    ):
+        assert column in source
+    assert "sha256" in source
+    assert "ORDER BY workspace_id, created_at, id" in source
+    assert "audit_events_timestamp_immutable" in source
+    assert "audit event timestamps are immutable" in source
+
+
 def test_authentication_event_migration_limits_pre_authentication_writes(monkeypatch) -> None:
     migration_path = REPO_ROOT / "apps/api/alembic/versions/0031_authentication_events.py"
     spec = importlib.util.spec_from_file_location("authentication_event_migration", migration_path)

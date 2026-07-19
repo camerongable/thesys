@@ -196,12 +196,17 @@ def test_governance_tool_and_memory_route_contracts_preserve_public_keys(
         "user_id",
         "event_type",
         "actor_type",
+        "actor_identity",
+        "policy_decision",
+        "resource_identifier",
         "entity_type",
         "entity_id",
         "summary",
         "risk_level",
         "event_metadata",
         "created_at",
+        "previous_event_hash",
+        "event_hash",
     }
     assert audit_event["entity_id"] == invocation["id"]
     assert audit_event["event_metadata"] == {

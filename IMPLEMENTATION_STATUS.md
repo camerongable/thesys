@@ -1171,6 +1171,13 @@ current verdict, next action, evidence health, validation, and decision state.
   retain only artifact type and claim count, and increment
   `ai_unverified_claim_total` by that count without recording claim or citation
   content.
+- [x] Establish a per-workspace tamper-evident audit chain. Every new audit
+  record now includes immutable event time, normalized actor identity, policy
+  decision, and resource identifier; its SHA-256 digest covers all persisted
+  event fields plus the preceding workspace digest. Existing records are
+  backfilled in chronological order, concurrent Postgres appends are serialized
+  per workspace, and `python scripts/verify_audit_chain.py` independently
+  detects broken links, missing hashes, or modified records.
 - [x] Add the redacted, admin-only Security Overview data API. Project security
   administrators can aggregate high/critical events, blocked attacks, denied
   tools, pending high-risk approvals, PII redactions, quarantines, anomalous

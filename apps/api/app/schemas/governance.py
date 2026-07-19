@@ -30,12 +30,17 @@ class AuditEventRead(BaseModel):
     user_id: uuid.UUID | None
     event_type: str
     actor_type: AuditActorType
+    actor_identity: str
+    policy_decision: str
+    resource_identifier: str
     entity_type: str | None
     entity_id: uuid.UUID | None
     summary: str
     risk_level: GovernanceRiskLevel | None
     event_metadata: dict[str, object]
     created_at: datetime
+    previous_event_hash: str | None
+    event_hash: str
 
 
 class AuditEventListRead(BaseModel):

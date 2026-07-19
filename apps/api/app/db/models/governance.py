@@ -43,6 +43,9 @@ class AuditEvent(UUIDPrimaryKeyMixin, Base):
     )
     event_type: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     actor_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    actor_identity: Mapped[str] = mapped_column(String(160), nullable=False)
+    policy_decision: Mapped[str] = mapped_column(String(40), nullable=False)
+    resource_identifier: Mapped[str] = mapped_column(String(200), nullable=False)
     entity_type: Mapped[str | None] = mapped_column(String(80), index=True)
     entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), index=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
@@ -58,6 +61,8 @@ class AuditEvent(UUIDPrimaryKeyMixin, Base):
         default=lambda: datetime.now(UTC),
         nullable=False,
     )
+    previous_event_hash: Mapped[str | None] = mapped_column(String(64))
+    event_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
 
 
 class ApprovalRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
