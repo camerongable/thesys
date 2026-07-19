@@ -45,7 +45,7 @@ jobs:
       - name: Python dependency baseline audit
         continue-on-error: ${{ github.event_name == 'pull_request' }}
         run: uvx --from pip-audit==2.9.0 pip-audit --strict -r /tmp/api-requirements.txt
-      - run: uvx --from semgrep==1.130.0 semgrep scan --config auto --error apps/api/app
+      - run: uvx --with 'setuptools<81' --from semgrep==1.130.0 semgrep scan --config auto --error apps/api/app
 
   web-security:
     name: Web security
