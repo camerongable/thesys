@@ -31,6 +31,12 @@ def test_security_workflow_declares_pull_request_and_nightly_cadence() -> None:
         }
     assert workflow["jobs"]["osv-pr"]["if"] == "github.event_name == 'pull_request'"
     assert workflow["jobs"]["osv-full"]["if"] == "github.event_name != 'pull_request'"
+    dependency_audit = next(
+        step
+        for step in workflow["jobs"]["python-security"]["steps"]
+        if step.get("name") == "Python dependency baseline audit"
+    )
+    assert dependency_audit["continue-on-error"] == "${{ github.event_name == 'pull_request' }}"
     assert workflow["jobs"]["nightly-security"]["if"] == (
         "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
     )
@@ -94,14 +100,14 @@ def test_model_and_prompt_changes_run_named_security_evaluations() -> None:
 
     assert job["timeout-minutes"] == 20
     for contract in (
-        "test_approved_model_registry.py",
-        "test_approved_prompt_registry.py",
-        "test_guardrail_gateway.py",
-        "test_litellm_data_protection.py",
-        "test_workflow_security_budget.py",
-        "test_retrieval_quality_eval.py",
-        "test_demo_eval_workflows.py",
-        "test_tool_boundary.py",
+        "apps/api/app/tests/security/test_approved_model_registry.py",
+        "apps/api/app/tests/security/test_approved_prompt_registry.py",
+        "apps/api/app/tests/security/test_guardrail_gateway.py",
+        "apps/api/app/tests/security/test_litellm_data_protection.py",
+        "apps/api/app/tests/security/test_workflow_security_budget.py",
+        "apps/api/app/tests/test_retrieval_quality_eval.py",
+        "apps/api/app/tests/test_demo_eval_workflows.py",
+        "apps/api/app/tests/test_tool_boundary.py",
         "pnpm security:redteam:fast",
     ):
         assert contract in commands

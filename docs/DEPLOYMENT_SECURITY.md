@@ -215,7 +215,9 @@ and verified digest signature for every release image.
 Pull requests use OSV's base-branch comparison workflow and fail only when they
 introduce a new known dependency vulnerability. Scheduled or manually dispatched
 security runs retain the full OSV baseline scan so pre-existing dependency debt
-remains visible outside the PR signal.
+remains visible outside the PR signal. `pip-audit` is advisory on pull requests
+while that baseline is remediated, but remains blocking on scheduled/manual full
+security runs.
 
 Nightly security also runs the full deterministic Promptfoo corpus, broad API
 security regressions, local API/web image scans, and a Trivy scan of

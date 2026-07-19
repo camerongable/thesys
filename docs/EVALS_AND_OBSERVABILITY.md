@@ -25,6 +25,11 @@ a pull-request branch, use **Actions -> Security -> Run workflow**, select the
 branch, and leave `run_garak` disabled unless the protected Garak target secrets
 are intentionally configured for that run.
 
+Python `pip-audit` remains visible on pull requests but is advisory while the
+recorded dependency baseline is remediated. It remains blocking on scheduled and
+manual full-security runs; OSV's PR comparison blocks newly introduced known
+vulnerabilities in either lockfile.
+
 ## Quality Gate Commands
 
 Aggregate local gate:
