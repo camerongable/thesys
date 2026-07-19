@@ -1066,6 +1066,12 @@ current verdict, next action, evidence health, validation, and decision state.
   project-scoped threshold opens one high-severity `provider_failure_spike`
   alert with count/window evidence, while the existing provider-error metric
   continues to count each failed request.
+- [x] Detect project-memory contradiction spikes at the conflict-linking
+  boundary. Every newly paired active/proposed conflict emits a redacted,
+  medium-severity memory event with only the conflicting-record count; a
+  configurable project-scoped threshold creates one high-severity
+  `memory_contradiction_spike` alert with bounded count/window evidence while
+  the conflicting proposal remains subject to existing human review.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,

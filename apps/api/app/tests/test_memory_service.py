@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.db.models import AuditEvent, ProjectMemoryItem, Risk, ToolInvocation
+from app.db.models import AuditEvent, ProjectMemoryItem, Risk, SecurityEvent, ToolInvocation
 from app.features.policy.opa import OpaPolicyDecision, OpaPolicyUnavailableError
 from app.services import memory_service, tool_service
 from app.services.identity_service import ensure_dev_identity
@@ -1203,6 +1203,12 @@ def test_conflicting_memory_proposal_preserves_active_version_until_approval(
     assert active.provenance_metadata["conflict_group_id"] == (
         proposal.provenance_metadata["conflict_group_id"]
     )
+    contradiction_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.event_type == "memory_contradiction_detected")
+    )
+    assert contradiction_event is not None
+    assert contradiction_event.attributes == {"conflicting_memory_count": 2}
+    assert contradiction_event.project_id == project_id
 
     inspect = memory_service.inspect_memory(
         db_session,

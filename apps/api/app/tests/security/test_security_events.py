@@ -317,6 +317,56 @@ def test_repeated_provider_failures_create_one_provider_spike_alert(
     get_settings.cache_clear()
 
 
+def test_repeated_memory_contradictions_create_one_spike_alert(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SECURITY_MEMORY_CONTRADICTION_SPIKE_THRESHOLD", "3")
+    get_settings.cache_clear()
+    project = client.post("/api/projects", json={"name": "Memory contradictions"}).json()
+    project_id = uuid.UUID(project["id"])
+    auth = ensure_dev_identity(
+        db_session,
+        email="dev@thesys.local",
+        display_name="Dev User",
+    )
+
+    for _ in range(4):
+        security_event_service.record_security_event(
+            db_session,
+            workspace_id=auth.workspace_id,
+            project_id=project_id,
+            user_id=auth.user_id,
+            event_type="memory_contradiction_detected",
+            severity="medium",
+            source="memory",
+            summary="A proposed memory record conflicts with active project memory.",
+            attributes={"conflicting_memory_count": 2},
+        )
+    db_session.commit()
+
+    escalations = list(
+        db_session.scalars(
+            select(SecurityEvent).where(SecurityEvent.event_type == "memory_contradiction_spike")
+        )
+    )
+    alerts = list(
+        db_session.scalars(
+            select(SecurityAlert)
+            .join(SecurityEvent, SecurityAlert.security_event_id == SecurityEvent.id)
+            .where(SecurityEvent.event_type == "memory_contradiction_spike")
+        )
+    )
+
+    assert len(escalations) == 1
+    assert escalations[0].severity == "high"
+    assert escalations[0].attributes == {"observed_count": 3, "window_seconds": 900}
+    assert len(alerts) == 1
+    assert alerts[0].severity == "high"
+    get_settings.cache_clear()
+
+
 def test_project_security_overview_aggregates_redacted_operational_state(
     client: TestClient,
     db_session: Session,

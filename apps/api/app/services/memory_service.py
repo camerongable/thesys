@@ -39,6 +39,7 @@ from app.services import (
     governance_service,
     kill_switch_service,
     project_service,
+    security_event_service,
     security_policy_service,
 )
 from app.services.data_protection_service import data_protection_service
@@ -548,6 +549,8 @@ def upsert_memory_item(
     )
     if conflicting_active is not None:
         _link_memory_proposal_conflict(
+            db=db,
+            auth=auth,
             project_id=project_id,
             active=conflicting_active,
             proposal=existing,
@@ -1462,6 +1465,8 @@ def _ensure_conflict_member(item: ProjectMemoryItem, conflict_group_id: str) -> 
 
 def _link_memory_proposal_conflict(
     *,
+    db: Session,
+    auth: AuthContext,
     project_id: uuid.UUID,
     active: ProjectMemoryItem,
     proposal: ProjectMemoryItem,
@@ -1493,6 +1498,17 @@ def _link_memory_proposal_conflict(
     )
     active.provenance_metadata = active_metadata
     proposal.provenance_metadata = proposal_metadata
+    security_event_service.record_security_event(
+        db,
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        user_id=auth.user_id,
+        event_type="memory_contradiction_detected",
+        severity="medium",
+        source="memory",
+        summary="A proposed memory record conflicts with active project memory.",
+        attributes={"conflicting_memory_count": 2},
+    )
 
 
 def _effective_memory_expiry(
