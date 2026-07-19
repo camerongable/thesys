@@ -207,6 +207,42 @@ def record_provider_prompt_pii(
     context.db.commit()
 
 
+def record_model_output_secret(*, secret_entity_types: tuple[str, ...]) -> None:
+    """Record a model-output secret only when a workflow can be attributed."""
+    context = _workflow_budget_context.get()
+    if context is None:
+        return
+    entity_types = sorted(
+        {
+            entity_type[:80]
+            for entity_type in secret_entity_types
+            if isinstance(entity_type, str) and entity_type
+        }
+    )[:20]
+    if not entity_types:
+        return
+    sprint, _ = _locked_sprint_and_budget(context)
+    from app.services import security_event_service
+
+    security_event_service.record_security_event(
+        context.db,
+        workspace_id=context.auth.workspace_id,
+        project_id=context.project_id,
+        user_id=context.auth.user_id,
+        temporal_workflow_id=sprint.temporal_workflow_id,
+        event_type="secret_detected_in_model_output",
+        severity="high",
+        source="workflow",
+        summary="A secret was redacted from a model provider response.",
+        attributes={
+            "provider": "litellm",
+            "detected_entity_types": entity_types,
+        },
+        settings=context.settings,
+    )
+    context.db.commit()
+
+
 def reserve_structured_output_repair() -> None:
     context = _workflow_budget_context.get()
     if context is None:

@@ -118,3 +118,109 @@ def test_litellm_client_reports_bounded_http_failure_metadata(monkeypatch) -> No
         client.complete([ChatMessage(role="user", content="Return a safe response.")])
 
     assert recorded == [{"failure_kind": "http_status", "status_code": 503}]
+
+
+def test_litellm_client_redacts_and_reports_secrets_in_model_output(monkeypatch) -> None:
+    recorded: list[dict[str, object]] = []
+
+    class FakeResponse:
+        headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, Any]:
+            return {
+                "model": "enterprise-model",
+                "choices": [
+                    {"message": {"content": "Use api_key=sk-outputsecret123 for testing."}}
+                ],
+                "usage": {},
+            }
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> "FakeClient":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, _url: str, **_kwargs: object) -> FakeResponse:
+            return FakeResponse()
+
+    monkeypatch.setattr(litellm_client.httpx, "Client", FakeClient)
+    monkeypatch.setattr(
+        litellm_client,
+        "record_model_output_secret",
+        lambda **kwargs: recorded.append(kwargs),
+    )
+    completion = LiteLLMClient(
+        Settings(
+            llm_stub_mode="never",
+            litellm_api_key="test-key",
+            provider_egress_policy_enabled=False,
+        )
+    ).complete([ChatMessage(role="user", content="Return a safe response.")])
+
+    assert "sk-outputsecret123" not in completion.content
+    assert "[REDACTED_SECRET]" in completion.content
+    assert "sk-outputsecret123" not in str(completion.raw_response)
+    assert recorded == [{"secret_entity_types": ("API_KEY",)}]
+
+
+def test_litellm_client_redacts_and_reports_secrets_in_streamed_output(monkeypatch) -> None:
+    recorded: list[dict[str, object]] = []
+
+    class FakeResponse:
+        headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_lines(self):
+            yield 'data: {"choices":[{"delta":{"content":"sk-"}}]}'
+            yield 'data: {"choices":[{"delta":{"content":"outputsecret123"}}]}'
+            yield "data: [DONE]"
+
+    class StreamContext:
+        def __enter__(self) -> FakeResponse:
+            return FakeResponse()
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> "FakeClient":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def stream(self, *_args: object, **_kwargs: object) -> StreamContext:
+            return StreamContext()
+
+    monkeypatch.setattr(litellm_client.httpx, "Client", FakeClient)
+    monkeypatch.setattr(
+        litellm_client,
+        "record_model_output_secret",
+        lambda **kwargs: recorded.append(kwargs),
+    )
+    output = list(
+        LiteLLMClient(
+            Settings(
+                llm_stub_mode="never",
+                litellm_api_key="test-key",
+                provider_egress_policy_enabled=False,
+            )
+        ).stream_complete([ChatMessage(role="user", content="Return a safe response.")])
+    )
+
+    assert "sk-outputsecret123" not in "".join(output)
+    assert "[REDACTED_SECRET]" in "".join(output)
+    assert recorded == [{"secret_entity_types": ("API_KEY",)}]

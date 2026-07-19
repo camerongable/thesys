@@ -12,12 +12,17 @@ from pydantic import BaseModel, Field
 from app.core.config import Settings
 from app.security.guardrails import GuardrailBlockedError, GuardrailGateway
 from app.security.secrets import SecretName, SecretProviderError, resolve_secret
-from app.services import model_data_policy_service, security_metrics_service
+from app.services import (
+    model_data_policy_service,
+    security_metrics_service,
+)
+from app.services.data_protection_service import data_protection_service
 from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
 )
 from app.services.workflow_budget_service import (
+    record_model_output_secret,
     record_model_usage,
     record_provider_failure,
     record_provider_prompt_pii,
@@ -25,6 +30,7 @@ from app.services.workflow_budget_service import (
 )
 
 ChatRole = Literal["system", "user", "assistant"]
+_STREAM_OUTPUT_HOLDBACK_CHARS = 256
 
 
 class ChatMessage(BaseModel):
@@ -133,7 +139,7 @@ class LiteLLMClient:
             total_cost=total_cost,
         )
         try:
-            safe_output = gateway.evaluate_model_output(str(content))
+            safe_output = self._safe_model_output(gateway, str(content))
         except GuardrailBlockedError as exc:
             raise LiteLLMClientError("LiteLLM output blocked by guardrail.") from exc
 
@@ -145,7 +151,7 @@ class LiteLLMClient:
             completion_tokens=usage.get("completion_tokens"),
             total_tokens=usage.get("total_tokens"),
             total_cost=total_cost,
-            raw_response=body,
+            raw_response=_redacted_response_body(body),
             used_stub=False,
         )
 
@@ -192,6 +198,8 @@ class LiteLLMClient:
             with httpx.Client(timeout=self.settings.litellm_timeout_seconds) as client:
                 with client.stream("POST", url, headers=headers, json=payload) as response:
                     response.raise_for_status()
+                    output_secret_reported = False
+                    pending_output = ""
                     for line in response.iter_lines():
                         if not line or not line.startswith("data:"):
                             continue
@@ -204,12 +212,48 @@ class LiteLLMClient:
                         except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
                             continue
                         if delta:
+                            pending_output += str(delta)
+                            if len(pending_output) <= _STREAM_OUTPUT_HOLDBACK_CHARS:
+                                continue
                             try:
-                                yield gateway.evaluate_model_output(str(delta)).text
+                                secret_entity_types = (
+                                    data_protection_service.detect_secret_entity_types(
+                                        pending_output
+                                    )
+                                )
+                                if secret_entity_types:
+                                    safe_delta, output_secret_reported = self._safe_stream_delta(
+                                        gateway,
+                                        pending_output,
+                                        output_secret_reported=output_secret_reported,
+                                    )
+                                    pending_output = ""
+                                    yield safe_delta
+                                    continue
+                                flush_output = pending_output[:-_STREAM_OUTPUT_HOLDBACK_CHARS]
+                                pending_output = pending_output[-_STREAM_OUTPUT_HOLDBACK_CHARS:]
+                                safe_delta, output_secret_reported = self._safe_stream_delta(
+                                    gateway,
+                                    flush_output,
+                                    output_secret_reported=output_secret_reported,
+                                )
+                                yield safe_delta
                             except GuardrailBlockedError as exc:
                                 raise LiteLLMClientError(
                                     "LiteLLM stream output blocked by guardrail."
                                 ) from exc
+                    if pending_output:
+                        try:
+                            safe_delta, _ = self._safe_stream_delta(
+                                gateway,
+                                pending_output,
+                                output_secret_reported=output_secret_reported,
+                            )
+                            yield safe_delta
+                        except GuardrailBlockedError as exc:
+                            raise LiteLLMClientError(
+                                "LiteLLM stream output blocked by guardrail."
+                            ) from exc
                     record_model_usage(
                         total_tokens=None,
                         total_cost=_parse_cost_header(
@@ -262,6 +306,28 @@ class LiteLLMClient:
             messages=secured_messages,
         )
 
+    def _safe_model_output(self, gateway: GuardrailGateway, content: str):
+        secret_entity_types = data_protection_service.detect_secret_entity_types(content)
+        if secret_entity_types:
+            record_model_output_secret(secret_entity_types=secret_entity_types)
+            content = data_protection_service.redact_for_model(content)
+        return gateway.evaluate_model_output(content)
+
+    def _safe_stream_delta(
+        self,
+        gateway: GuardrailGateway,
+        delta: str,
+        *,
+        output_secret_reported: bool,
+    ) -> tuple[str, bool]:
+        secret_entity_types = data_protection_service.detect_secret_entity_types(delta)
+        if secret_entity_types:
+            if not output_secret_reported:
+                record_model_output_secret(secret_entity_types=secret_entity_types)
+                output_secret_reported = True
+            delta = data_protection_service.redact_for_model(delta)
+        return gateway.evaluate_model_output(delta).text, output_secret_reported
+
     def _api_key(self) -> str:
         try:
             value = resolve_secret(self.settings, SecretName.LITELLM_API_KEY)
@@ -278,3 +344,8 @@ def _parse_cost_header(value: str | None) -> Decimal | None:
         return Decimal(value)
     except InvalidOperation:
         return None
+
+
+def _redacted_response_body(body: dict[str, Any]) -> dict[str, Any]:
+    redacted = data_protection_service.redact_for_trace(body)
+    return redacted if isinstance(redacted, dict) else {}

@@ -39,6 +39,7 @@ _RESTRICTED_ENTITY_TYPES = frozenset(
         "US_SSN",
     }
 )
+_SECRET_ENTITY_TYPES = frozenset({"ACCESS_TOKEN", "API_KEY", "URL_CREDENTIAL"})
 
 _EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 _PHONE_PATTERN = re.compile(
@@ -283,6 +284,17 @@ class DataProtectionService:
                 detections.append(PIIDetection(entity_type, match.start(), match.end()))
         detections.extend(self._presidio.detect(text))
         return self._non_overlapping(detections)
+
+    def detect_secret_entity_types(self, text: str) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                {
+                    detection.entity_type
+                    for detection in self.detect_pii(text)
+                    if detection.entity_type in _SECRET_ENTITY_TYPES
+                }
+            )
+        )
 
     def redact_for_model(self, text: str, *, project_id: uuid.UUID | None = None) -> str:
         return self.create_searchable_copy(text, project_id=project_id).text

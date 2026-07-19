@@ -1128,6 +1128,10 @@ current verdict, next action, evidence health, validation, and decision state.
   upload and record one correlated medium-severity workflow event per trace with
   bounded entity categories and count only. Trace payloads and error values
   remain redacted before transmission.
+- [x] Detect and redact secrets in model output at the shared LiteLLM completion
+  and streaming boundaries. Secret-bearing output and retained provider response
+  bodies are redacted before caller use; attributed workflows emit a high-severity
+  event and alert with only bounded entity categories.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,

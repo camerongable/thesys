@@ -369,6 +369,61 @@ def test_provider_bound_prompt_pii_is_recorded_without_prompt_content(
     assert "sk-secretvalue123" not in str(event.attributes)
 
 
+def test_model_output_secret_creates_a_high_security_alert(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project = client.post("/api/projects", json={"name": "Model output secrets"}).json()
+    project_id = uuid.UUID(project["id"])
+    plan_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Exercise model output secret monitoring."},
+    )
+    assert plan_response.status_code == 200
+    sprint = db_session.get(ResearchSprint, uuid.UUID(plan_response.json()["sprint"]["id"]))
+    assert sprint is not None
+    sprint.temporal_workflow_id = "model-output-secret-workflow"
+    db_session.commit()
+    auth = ensure_dev_identity(
+        db_session,
+        email="dev@thesys.local",
+        display_name="Dev User",
+    )
+
+    with workflow_budget_service.workflow_budget_scope(
+        db_session,
+        auth,
+        get_settings(),
+        project_id=project_id,
+        research_sprint_id=sprint.id,
+    ):
+        workflow_budget_service.record_model_output_secret(
+            secret_entity_types=("API_KEY",),
+        )
+
+    event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.event_type == "secret_detected_in_model_output")
+    )
+    alert = db_session.scalar(
+        select(SecurityAlert)
+        .join(
+            SecurityEvent,
+            SecurityAlert.security_event_id == SecurityEvent.id,
+        )
+        .where(SecurityEvent.event_type == "secret_detected_in_model_output")
+    )
+
+    assert event is not None
+    assert event.project_id == project_id
+    assert event.temporal_workflow_id == "model-output-secret-workflow"
+    assert event.severity == "high"
+    assert event.source == "workflow"
+    assert event.attributes == {"provider": "litellm", "detected_entity_types": ["API_KEY"]}
+    assert alert is not None
+    assert alert.security_event_id == event.id
+    assert alert.severity == "high"
+
+
 def test_repeated_memory_contradictions_create_one_spike_alert(
     client: TestClient,
     db_session: Session,
