@@ -90,6 +90,13 @@ class SanitizedText:
     sanitization_version: str = SANITIZATION_VERSION
 
 
+@dataclass(frozen=True)
+class TracePayloadInspection:
+    value: object
+    pii_entity_types: tuple[str, ...]
+    redacted_value_count: int
+
+
 class PresidioPIIAdapter:
     """Run Presidio's local rule recognizers without an implicit model download."""
 
@@ -284,6 +291,42 @@ class DataProtectionService:
         return self._redact_trace_value(
             redact_payload(value, redact_emails=True, max_string_length=2000),
             project_id=project_id,
+        )
+
+    def inspect_trace_payload(
+        self,
+        value: object,
+        *,
+        project_id: uuid.UUID | None = None,
+    ) -> TracePayloadInspection:
+        pii_entity_types: set[str] = set()
+        redacted_value_count = 0
+
+        def inspect(item: object) -> None:
+            nonlocal redacted_value_count
+            if isinstance(item, dict):
+                for nested in item.values():
+                    inspect(nested)
+            elif isinstance(item, (list, tuple, set)):
+                for nested in item:
+                    inspect(nested)
+            elif isinstance(item, str):
+                try:
+                    uuid.UUID(item)
+                except ValueError:
+                    pass
+                else:
+                    return
+                protected = self.create_searchable_copy(item, project_id=project_id)
+                if protected.pii_entity_types:
+                    pii_entity_types.update(protected.pii_entity_types)
+                    redacted_value_count += 1
+
+        inspect(value)
+        return TracePayloadInspection(
+            value=self.redact_for_trace(value, project_id=project_id),
+            pii_entity_types=tuple(sorted(pii_entity_types)),
+            redacted_value_count=redacted_value_count,
         )
 
     def create_searchable_copy(

@@ -464,6 +464,8 @@ def run_agentic_research(
         langsmith_observability_service.complete_trace(
             settings,
             trace,
+            db=db,
+            run=run,
             error="Agentic research failed.",
         )
         raise
@@ -471,7 +473,13 @@ def run_agentic_research(
         sprint.status = "failed"
         db.commit()
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise AgenticResearchWorkflowError("Agentic research failed.") from exc
 
     completion = completion_holder.get("completion")
@@ -604,6 +612,8 @@ def approve_research_memo(
     langsmith_observability_service.complete_trace(
         settings,
         trace,
+        db=db,
+        run=run,
         output_summary="Research memo approved and memory updates written.",
         metrics={
             "assumptions_written": len(memory_summary.get("assumption_ids", [])),
@@ -731,6 +741,8 @@ def reject_research_memo(
     langsmith_observability_service.complete_trace(
         settings,
         trace,
+        db=db,
+        run=run,
         output_summary="Research memo memory updates rejected by human reviewer.",
         metrics={"memory_updates_written": 0},
     )

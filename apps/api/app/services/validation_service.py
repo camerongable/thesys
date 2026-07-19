@@ -336,7 +336,13 @@ def extract_assumptions_and_risks(
                 error=str(exc),
             )
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise
     except Exception as exc:
         if step is not None:
@@ -352,7 +358,13 @@ def extract_assumptions_and_risks(
                 error=str(exc),
             )
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise ValidationWorkflowError("Assumption extraction failed.") from exc
 
     run = ai_run_service.complete_run(
@@ -368,6 +380,8 @@ def extract_assumptions_and_risks(
     langsmith_observability_service.complete_trace(
         settings,
         trace,
+        db=db,
+        run=run,
         output_summary=f"Created or updated {len(assumptions)} assumptions and {len(risks)} risks.",
         metrics={"assumption_count": len(assumptions), "risk_count": len(risks)},
     )
@@ -697,7 +711,13 @@ def interpret_validation_results(
                 error=str(exc),
             )
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise
     except Exception as exc:
         if step is not None:
@@ -713,7 +733,13 @@ def interpret_validation_results(
                 error=str(exc),
             )
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise ValidationWorkflowError("Validation result interpretation failed.") from exc
 
     run = ai_run_service.complete_run(
@@ -730,6 +756,8 @@ def interpret_validation_results(
     langsmith_observability_service.complete_trace(
         settings,
         trace,
+        db=db,
+        run=run,
         output_summary=interpretation.signal_summary[:1000],
         metrics={
             "proposed_confidence_delta": float(interpretation.proposed_confidence_delta),
@@ -921,7 +949,13 @@ def generate_validation_plan(
                 error=str(exc),
             )
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise
     except Exception as exc:
         if step is not None:
@@ -937,7 +971,13 @@ def generate_validation_plan(
                 error=str(exc),
             )
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise ValidationWorkflowError("Validation plan generation failed.") from exc
 
     run = ai_run_service.complete_run(
@@ -953,6 +993,8 @@ def generate_validation_plan(
     langsmith_observability_service.complete_trace(
         settings,
         trace,
+        db=db,
+        run=run,
         output_summary=draft.summary[:1000],
         metrics={"experiment_count": len(experiments)},
     )

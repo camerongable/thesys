@@ -12,11 +12,12 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
 from app.core.config import Settings
-from app.db.models import AIRun, AIStep, ArtifactVersion, Project, ResearchSprint
+from app.db.models import AIRun, AIStep, ArtifactVersion, Project, ResearchSprint, SecurityEvent
 from app.security.secrets import SecretName, SecretProviderError, has_secret, resolve_secret
 from app.services.data_protection_service import data_protection_service
 
@@ -67,6 +68,18 @@ def ensure_research_sprint_trace(
     db.flush()
 
     if langsmith_enabled(settings):
+        _record_trace_payload_pii(
+            db,
+            settings,
+            run=run,
+            trace_id=trace_id,
+            payload={
+                "inputs": {
+                    "objective": sprint.plan.objective,
+                    "research_questions": sprint.plan.research_questions,
+                }
+            },
+        )
         _safe_create_run(
             settings,
             run_id=trace_id,
@@ -103,6 +116,13 @@ def ensure_run_trace(
     db.flush()
 
     if langsmith_enabled(settings):
+        _record_trace_payload_pii(
+            db,
+            settings,
+            run=run,
+            trace_id=trace_id,
+            payload={"inputs": {"input_summary": run.input_summary}},
+        )
         _safe_create_run(
             settings,
             run_id=trace_id,
@@ -175,6 +195,17 @@ def record_step_span(
             "model_provider": run.model_provider,
             "model_name": run.model_name,
         }
+        _record_trace_payload_pii(
+            db,
+            settings,
+            run=run,
+            trace_id=trace.trace_id,
+            payload={
+                "inputs": input_json or {},
+                "outputs": output_json or {},
+                "error": error,
+            },
+        )
         _safe_create_run(
             settings,
             run_id=span_id,
@@ -194,6 +225,8 @@ def complete_trace(
     settings: Settings,
     trace: TraceContext,
     *,
+    db: Session,
+    run: AIRun,
     output_summary: str | None = None,
     error: str | None = None,
     metrics: dict[str, int | float | str | Decimal | None] | None = None,
@@ -202,6 +235,13 @@ def complete_trace(
 
     if not trace.enabled:
         return
+    _record_trace_payload_pii(
+        db,
+        settings,
+        run=run,
+        trace_id=trace.trace_id,
+        payload={"summary": output_summary, "metrics": metrics or {}, "error": error},
+    )
     try:
         from langsmith import Client
 
@@ -268,7 +308,7 @@ def _safe_create_run(
             project_name=settings.langsmith_project,
             inputs=_sanitize(inputs),
             outputs=_sanitize(outputs or {}),
-            error=error,
+            error=_sanitize(error) if error else None,
             start_time=datetime.now(UTC),
             end_time=datetime.now(UTC),
             extra={
@@ -279,6 +319,54 @@ def _safe_create_run(
         )
     except Exception:  # pragma: no cover - best-effort external telemetry
         logger.warning("LangSmith trace upload failed for %s.", name)
+
+
+def _record_trace_payload_pii(
+    db: Session,
+    settings: Settings,
+    *,
+    run: AIRun | None,
+    trace_id: str,
+    payload: object,
+) -> None:
+    if run is None:
+        return
+    inspection = data_protection_service.inspect_trace_payload(
+        payload,
+        project_id=run.project_id,
+    )
+    if not inspection.pii_entity_types:
+        return
+    existing = db.scalar(
+        select(SecurityEvent.id).where(
+            SecurityEvent.workspace_id == run.workspace_id,
+            SecurityEvent.ai_run_id == run.id,
+            SecurityEvent.langsmith_trace_id == trace_id,
+            SecurityEvent.event_type == "pii_redaction_in_trace_payload",
+        )
+    )
+    if existing is not None:
+        return
+    from app.services import security_event_service
+
+    security_event_service.record_security_event(
+        db,
+        workspace_id=run.workspace_id,
+        project_id=run.project_id,
+        user_id=run.created_by,
+        ai_run_id=run.id,
+        langsmith_trace_id=trace_id,
+        event_type="pii_redaction_in_trace_payload",
+        severity="medium",
+        source="workflow",
+        summary="Redacted sensitive entities before a trace provider request.",
+        attributes={
+            "trace_destination": "langsmith",
+            "pii_entity_types": list(inspection.pii_entity_types[:20]),
+            "redacted_value_count": min(inspection.redacted_value_count, 100),
+        },
+        settings=settings,
+    )
 
 
 def _sanitize(value: Any, *, key: str | None = None) -> Any:
