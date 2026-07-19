@@ -246,7 +246,8 @@ def test_bucket_auto_creation_only_handles_missing_bucket(
 ) -> None:
     access_denied = FakeS3Client(head_error=_client_error("AccessDenied", 403))
     monkeypatch.setattr(object_storage_service, "_s3_client", lambda _settings: access_denied)
-    settings = Settings(object_storage_mode="s3", s3_auto_create_bucket=True)
+    settings = Settings(OBJECT_STORAGE_MODE="s3", S3_AUTO_CREATE_BUCKET=True)
+    assert settings.object_storage_mode == "s3"
 
     with pytest.raises(object_storage_service.ObjectStorageError, match="unavailable"):
         object_storage_service.put_evidence_object(
@@ -493,14 +494,17 @@ def test_project_deletion_removes_objects_and_preserves_audit(
 
 
 def _secure_s3_settings() -> Settings:
-    return Settings(
-        object_storage_mode="s3",
-        s3_endpoint_url="https://s3.example.com",
-        s3_bucket="private-bucket",
-        s3_verify_bucket_security=True,
-        s3_retention_days=45,
-        s3_presigned_url_ttl_seconds=120,
+    settings = Settings(
+        OBJECT_STORAGE_MODE="s3",
+        S3_ENDPOINT_URL="https://s3.example.com",
+        S3_BUCKET="private-bucket",
+        S3_VERIFY_BUCKET_SECURITY=True,
+        S3_RETENTION_DAYS=45,
+        S3_PRESIGNED_URL_TTL_SECONDS=120,
     )
+    assert settings.object_storage_mode == "s3"
+    assert settings.s3_verify_bucket_security is True
+    return settings
 
 
 def _call(client: FakeS3Client, name: str) -> dict:
