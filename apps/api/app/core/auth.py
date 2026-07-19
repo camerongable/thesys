@@ -241,6 +241,7 @@ def record_cross_tenant_access_attempt(
     auth: AuthContext,
     *,
     reason_code: str,
+    project_id: uuid.UUID | None = None,
 ) -> None:
     """Persist an attributed, credential-free scope-denial event."""
 
@@ -251,6 +252,7 @@ def record_cross_tenant_access_attempt(
         reason_code=reason_code,
         workspace_id=auth.workspace_id,
         user_id=auth.user_id,
+        project_id=project_id,
     )
 
 
@@ -286,6 +288,7 @@ def _persist_authentication_event(
     reason_code: str,
     workspace_id: uuid.UUID | None = None,
     user_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> None:
     try:
         auth_audit_service.record_authentication_event(
@@ -296,18 +299,32 @@ def _persist_authentication_event(
             workspace_id=workspace_id,
             user_id=user_id,
         )
-        if event_type == "cross_tenant_access_attempt" and reason_code == "project_scope_denied":
+        scope_denial_security_events: dict[str, tuple[str, Literal["medium", "high"], str]] = {
+            "project_scope_denied": (
+                "cross_project_access_denied",
+                "medium",
+                "Project access was denied outside the active workspace scope.",
+            ),
+            "evidence_source_scope_denied": (
+                "cross_tenant_source_id_access",
+                "high",
+                "Evidence source access was denied outside the active workspace scope.",
+            ),
+        }
+        scope_denial_security_event = scope_denial_security_events.get(reason_code)
+        if event_type == "cross_tenant_access_attempt" and scope_denial_security_event:
             from app.services import security_event_service
 
+            security_event_type, severity, summary = scope_denial_security_event
             security_event_service.record_security_event(
                 db,
                 workspace_id=workspace_id,
-                project_id=None,
+                project_id=project_id,
                 user_id=user_id,
-                event_type="cross_project_access_denied",
-                severity="medium",
+                event_type=security_event_type,
+                severity=severity,
                 source="auth",
-                summary="Project access was denied outside the active workspace scope.",
+                summary=summary,
                 attributes={"reason_code": reason_code},
             )
         db.commit()

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.ai.prompts import EVIDENCE_INGESTION_PROMPT_VERSION
 from app.common import metadata as metadata_utils
-from app.core.auth import AuthContext, require_permission
+from app.core.auth import AuthContext, record_cross_tenant_access_attempt, require_permission
 from app.core.config import Settings
 from app.core.security import (
     SecurityValidationError,
@@ -139,6 +139,12 @@ def get_source(
         .options(selectinload(EvidenceSource.chunks))
     )
     if source is None:
+        record_cross_tenant_access_attempt(
+            db,
+            auth,
+            reason_code="evidence_source_scope_denied",
+            project_id=project_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Evidence source not found.",
