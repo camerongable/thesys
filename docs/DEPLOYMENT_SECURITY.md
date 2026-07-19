@@ -48,6 +48,10 @@ headers and does not issue browser cookies. CORS must therefore keep
 `allow_credentials` disabled. Every API response carries a restrictive CSP with
 `frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy:
 no-referrer`, a restrictive permissions policy, and `X-Frame-Options: DENY`.
+Every API response also carries an `X-Request-ID`: a client-supplied canonical
+UUID is preserved, while malformed values are replaced. The request ID is added
+to audit records produced during that request and therefore to their normalized
+security events, without accepting arbitrary client strings as audit metadata.
 Production also sends HSTS for one year with subdomains. If a later web-auth flow
 uses cookies, it must introduce secure/HttpOnly/SameSite cookies, short session
 lifetime, rotation, logout invalidation, and CSRF validation as one design.

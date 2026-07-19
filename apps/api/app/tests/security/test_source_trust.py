@@ -93,7 +93,13 @@ def test_instruction_heavy_source_is_quarantined_before_embedding(
         select(AuditEvent).where(AuditEvent.event_type == "evidence_source_content_access_denied")
     )
     assert denied is not None
-    assert denied.event_metadata == {"reason": "retrieval_policy_denied"}
+    assert denied.event_metadata == {
+        "reason": "retrieval_policy_denied",
+        "request_id": denied.event_metadata["request_id"],
+    }
+    assert (
+        str(uuid.UUID(denied.event_metadata["request_id"])) == denied.event_metadata["request_id"]
+    )
     denied_event = db_session.scalar(
         select(SecurityEvent).where(
             SecurityEvent.audit_event_id == denied.id,

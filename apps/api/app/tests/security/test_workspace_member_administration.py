@@ -50,7 +50,15 @@ def test_workspace_owner_updates_member_role_and_records_attributable_audit_even
     assert governance_event.workspace_id == workspace_id
     assert governance_event.user_id == owner_id
     assert governance_event.entity_id == membership.id
-    assert governance_event.event_metadata == {"previous_role": "viewer", "new_role": "admin"}
+    assert governance_event.event_metadata == {
+        "previous_role": "viewer",
+        "new_role": "admin",
+        "request_id": governance_event.event_metadata["request_id"],
+    }
+    assert (
+        str(uuid.UUID(governance_event.event_metadata["request_id"]))
+        == governance_event.event_metadata["request_id"]
+    )
 
 
 def test_non_owner_cannot_update_workspace_member_role(

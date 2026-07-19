@@ -1050,6 +1050,11 @@ current verdict, next action, evidence health, validation, and decision state.
   tool, and MCP high-risk paths become queryable by workspace owners and admins
   through the governed project endpoint. Retention now purges the correct event
   type with the worker's narrowly scoped delete grant.
+- [x] Propagate a trusted API request correlation identifier. The API now emits
+  an `X-Request-ID` UUID for every response, accepts only canonical UUID input,
+  and adds that ID at the shared audit boundary. Normalized security events
+  inherit the same value, linking the request, immutable audit record, event,
+  and alert without recording arbitrary client-provided metadata.
 - [x] Add actionable high-severity alerting and the first anomaly detection.
   Every high or critical security event now opens a tenant/RLS-scoped alert with
   a disposition lifecycle for later incident handling. Repeated blocked prompt

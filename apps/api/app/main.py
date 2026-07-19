@@ -8,6 +8,7 @@ from app.core.browser_security import BrowserSecurityHeadersMiddleware
 from app.core.config import get_settings
 from app.core.errors import public_error_detail
 from app.core.logging import configure_logging
+from app.core.request_correlation import RequestCorrelationMiddleware
 from app.routers.ai import router as ai_router
 from app.routers.artifacts import router as artifacts_router
 from app.routers.assumptions import router as assumptions_router
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(BrowserSecurityHeadersMiddleware, environment=settings.environment)
+    app.add_middleware(RequestCorrelationMiddleware)
 
     app.include_router(health_router)
     app.include_router(me_router)

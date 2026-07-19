@@ -417,7 +417,12 @@ def test_distinct_evidence_downloads_detect_one_mass_export_attempt(
     assert len(export_events) == 1
     event = export_events[0]
     assert event.risk_level == "high"
-    assert event.event_metadata == {"distinct_source_count": 3, "window_seconds": 900}
+    assert event.event_metadata == {
+        "distinct_source_count": 3,
+        "request_id": event.event_metadata["request_id"],
+        "window_seconds": 900,
+    }
+    assert str(uuid.UUID(event.event_metadata["request_id"])) == event.event_metadata["request_id"]
     assert all(source_id not in str(event.__dict__) for source_id in source_ids)
     security_event = db_session.scalar(
         select(SecurityEvent).where(SecurityEvent.audit_event_id == event.id)
@@ -482,7 +487,9 @@ def test_project_deletion_removes_objects_and_preserves_audit(
     assert event.event_metadata == {
         "storage_mode": "s3",
         "deleted_project_id": project_id,
+        "request_id": event.event_metadata["request_id"],
     }
+    assert str(uuid.UUID(event.event_metadata["request_id"])) == event.event_metadata["request_id"]
 
 
 def _secure_s3_settings() -> Settings:

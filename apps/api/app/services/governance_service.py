@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext, require_permission
 from app.core.redaction import redact_payload, redact_text
+from app.core.request_context import current_request_id
 from app.db.models import ApprovalRequest, AuditEvent
 from app.services import audit_chain_service, project_service
 
@@ -48,6 +49,9 @@ def record_audit_event(
     """Record a redacted audit event without committing the surrounding transaction."""
     _lock_workspace_audit_chain(db, auth.workspace_id)
     created_at = datetime.now(UTC)
+    event_metadata = dict(metadata or {})
+    if request_id := current_request_id():
+        event_metadata.setdefault("request_id", request_id)
     event = AuditEvent(
         id=uuid.uuid4(),
         workspace_id=auth.workspace_id,
@@ -63,7 +67,7 @@ def record_audit_event(
         entity_id=entity_id,
         summary=redact_text(summary, redact_emails=True),
         risk_level=risk_level,
-        event_metadata=redact_payload(metadata or {}, redact_emails=True),
+        event_metadata=redact_payload(event_metadata, redact_emails=True),
         created_at=created_at,
     )
     previous_event_hash = db.scalar(

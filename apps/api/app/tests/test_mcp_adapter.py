@@ -352,7 +352,12 @@ def test_mcp_jsonrpc_proposal_matches_http_approval_and_audit_contracts(
     assert denial_audit.event_metadata == {
         "tool_name": "propose_memory_update",
         "status": "rejected",
+        "request_id": denial_audit.event_metadata["request_id"],
     }
+    assert (
+        str(uuid.UUID(denial_audit.event_metadata["request_id"]))
+        == denial_audit.event_metadata["request_id"]
+    )
 
 
 def test_mcp_jsonrpc_preserves_ids_and_tool_schema_parity(client: TestClient) -> None:

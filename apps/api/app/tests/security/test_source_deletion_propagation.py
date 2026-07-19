@@ -179,6 +179,8 @@ def test_source_deletion_removes_retrieval_and_invalidates_derivatives(
         "decisions_requiring_review": 1,
         "memory_items_staled": 2,
         "object_deleted": False,
+        "request_id": event.event_metadata["request_id"],
         "retrieval_revoked": True,
         "tombstone_id": str(tombstone.id),
     }
+    assert str(uuid.UUID(event.event_metadata["request_id"])) == event.event_metadata["request_id"]

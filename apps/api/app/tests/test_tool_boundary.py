@@ -914,7 +914,10 @@ def test_research_sprint_tool_budget_denies_before_a_new_invocation(
             auth,
             uuid.UUID(project_id),
             "propose_memory_update",
-            {},
+            {
+                "summary": "Attempt a valid proposal after the tool budget is exhausted.",
+                "research_sprint_id": str(sprint_id),
+            },
             research_sprint_id=sprint_id,
         )
 
@@ -1581,7 +1584,12 @@ def test_tool_proposal_rejection_resolves_approval_and_writes_audit_event(
     assert audit_event.event_metadata == {
         "tool_name": "propose_research_plan",
         "status": "rejected",
+        "request_id": audit_event.event_metadata["request_id"],
     }
+    assert (
+        str(uuid.UUID(audit_event.event_metadata["request_id"]))
+        == audit_event.event_metadata["request_id"]
+    )
 
 
 def test_agentic_research_tools_audit_reads_and_gate_memory_updates(

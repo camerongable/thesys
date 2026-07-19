@@ -20,7 +20,14 @@ from app.core.security import (
     validate_url_fetch_target,
     validate_url_response_content_type,
 )
-from app.db.models import AIRun, ApprovalRequest, AuditEvent, EvidenceSource, ToolInvocation
+from app.db.models import (
+    AIRun,
+    ApprovalRequest,
+    AuditEvent,
+    EvidenceSource,
+    SecurityEvent,
+    ToolInvocation,
+)
 from app.schemas.security import KillSwitchUpdate
 from app.services import (
     kill_switch_service,
@@ -372,10 +379,12 @@ def test_authenticated_api_rate_limit_denies_before_route_work(
     security_policy_service.reset_policy_state()
 
     first = client.get("/api/projects")
-    denied = client.get("/api/projects")
+    request_id = str(uuid.uuid4())
+    denied = client.get("/api/projects", headers={"X-Request-ID": request_id})
 
     assert first.status_code == 200
     assert denied.status_code == 429
+    assert denied.headers["X-Request-ID"] == request_id
     audit = db_session.scalar(
         select(AuditEvent)
         .where(AuditEvent.event_type == "security_policy_denied")
@@ -383,7 +392,22 @@ def test_authenticated_api_rate_limit_denies_before_route_work(
     )
     assert audit is not None
     assert audit.event_metadata["workflow_type"] == "authenticated_api_request"
+    assert audit.event_metadata["request_id"] == request_id
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.request_id == request_id
     get_settings.cache_clear()
+
+
+def test_request_correlation_replaces_malformed_client_identifier(client: TestClient) -> None:
+    response = client.get("/api/projects", headers={"X-Request-ID": "untrusted-request-value"})
+
+    assert response.status_code == 200
+    request_id = response.headers["X-Request-ID"]
+    assert request_id != "untrusted-request-value"
+    assert str(uuid.UUID(request_id)) == request_id
 
 
 def test_authenticated_api_rate_limit_uses_hashed_redis_buckets(
