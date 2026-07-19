@@ -181,6 +181,9 @@ Security boundaries:
   model-call budget.
 - Non-streaming research-plan generation uses the same attributed reservation
   scope before each provider call, including structured-output retry attempts.
+- Ask Thesys streaming carries an explicit immutable attribution context into
+  the provider generator, so its reservation is rate limited without relying on
+  request-thread-local state across SSE yields.
 
 ## Dependency And Security Audit Commands
 

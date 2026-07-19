@@ -22,6 +22,7 @@ from app.services.security_policy_service import (
     enforce_provider_egress_policy,
 )
 from app.services.workflow_budget_service import (
+    ModelCallRateContext,
     record_model_output_secret,
     record_model_usage,
     record_provider_failure,
@@ -163,6 +164,7 @@ class LiteLLMClient:
         temperature: float = 0.0,
         response_format_json: bool = False,
         max_tokens: int | None = None,
+        model_call_rate_context: ModelCallRateContext | None = None,
     ) -> Iterator[str]:
         """Yield OpenAI-compatible streaming content deltas from LiteLLM."""
         payload: dict[str, Any] = {
@@ -188,7 +190,7 @@ class LiteLLMClient:
 
         url = f"{self.settings.litellm_base_url.rstrip('/')}/v1/chat/completions"
         self._enforce_egress(url)
-        reserve_model_call()
+        reserve_model_call(model_call_rate_context)
         headers = {
             "Authorization": f"Bearer {self._api_key()}",
             "Content-Type": "application/json",

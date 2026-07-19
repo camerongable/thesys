@@ -90,8 +90,8 @@ def workflow_budget_scope(
         _model_call_rate_context.reset(rate_token)
 
 
-def reserve_model_call() -> None:
-    rate_context = _model_call_rate_context.get()
+def reserve_model_call(rate_context: ModelCallRateContext | None = None) -> None:
+    rate_context = rate_context or _model_call_rate_context.get()
     if rate_context is not None:
         from app.services import security_policy_service
 

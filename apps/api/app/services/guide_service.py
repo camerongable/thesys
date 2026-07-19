@@ -50,6 +50,7 @@ from app.services import (
     tool_service,
     validation_service,
     wedge_service,
+    workflow_budget_service,
 )
 
 
@@ -680,6 +681,12 @@ def _stream_grounded_chat_response(
             temperature=0.1,
             response_format_json=True,
             max_tokens=900,
+            model_call_rate_context=workflow_budget_service.ModelCallRateContext(
+                db=db,
+                auth=auth,
+                settings=settings,
+                project_id=project_id,
+            ),
         ):
             raw_content += delta
             partial_answer = _partial_answer_from_json(raw_content)

@@ -1305,7 +1305,9 @@ current verdict, next action, evidence health, validation, and decision state.
   creates an AI run or durable workflow. Sprint-scoped model calls are also
   independently limited per user and workspace at the shared provider
   reservation point before egress; research-plan generation uses the same
-  reservation scope for every non-streaming provider attempt.
+  reservation scope for every non-streaming provider attempt. Ask Thesys
+  streaming passes explicit immutable rate attribution into its provider
+  generator, preserving enforcement across SSE execution contexts.
 
 ## Next Sprint
 
