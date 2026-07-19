@@ -350,6 +350,117 @@ def _enforce_rate_limits(settings: Settings, auth: AuthContext, workflow_type: s
         )
 
 
+def enforce_authenticated_request_rate_limit(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    client_ip: str,
+) -> None:
+    """Limit authenticated API traffic before a route performs its work."""
+    if not settings.security_rate_limit_enabled:
+        return
+
+    workflow_type = "authenticated_api_request"
+    try:
+        if settings.security_rate_limit_backend == "redis":
+            _enforce_redis_authenticated_request_limits(settings, auth, client_ip, workflow_type)
+        else:
+            _enforce_memory_authenticated_request_limits(settings, auth, client_ip, workflow_type)
+    except HTTPException as exc:
+        _record_policy_denial(
+            db,
+            auth,
+            project_id=None,
+            workflow_type=workflow_type,
+            status_code=exc.status_code,
+            detail=str(exc.detail),
+        )
+        raise
+
+
+def _enforce_memory_authenticated_request_limits(
+    settings: Settings,
+    auth: AuthContext,
+    client_ip: str,
+    workflow_type: str,
+) -> None:
+    now = time.monotonic()
+    window = float(settings.security_rate_limit_window_seconds)
+    with _lock:
+        for scope, identifier, max_requests, detail in _authenticated_request_buckets(
+            settings,
+            auth,
+            client_ip,
+        ):
+            _check_rate_bucket(
+                key=(scope, identifier, workflow_type),
+                now=now,
+                window=window,
+                max_requests=max_requests,
+                detail=detail,
+            )
+
+
+def _enforce_redis_authenticated_request_limits(
+    settings: Settings,
+    auth: AuthContext,
+    client_ip: str,
+    workflow_type: str,
+) -> None:
+    try:
+        client = _redis_client(settings)
+        for scope, identifier, max_requests, detail in _authenticated_request_buckets(
+            settings,
+            auth,
+            client_ip,
+        ):
+            _check_redis_bucket(
+                client,
+                key=_rate_limit_key(
+                    settings,
+                    scope=scope,
+                    identifier=identifier,
+                    workflow_type=workflow_type,
+                ),
+                window_seconds=settings.security_rate_limit_window_seconds,
+                max_requests=max_requests,
+                detail=detail,
+            )
+    except RedisError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Distributed rate-limit service is unavailable.",
+        ) from exc
+
+
+def _authenticated_request_buckets(
+    settings: Settings,
+    auth: AuthContext,
+    client_ip: str,
+) -> tuple[tuple[str, str, int, str], ...]:
+    return (
+        (
+            "api_ip",
+            client_ip,
+            settings.security_api_rate_limit_ip_max_requests,
+            "Per-IP API request rate limit exceeded.",
+        ),
+        (
+            "api_user",
+            str(auth.user_id),
+            settings.security_api_rate_limit_user_max_requests,
+            "Per-user API request rate limit exceeded.",
+        ),
+        (
+            "api_workspace",
+            str(auth.workspace_id),
+            settings.security_api_rate_limit_workspace_max_requests,
+            "Per-workspace API request rate limit exceeded.",
+        ),
+    )
+
+
 def _enforce_redis_rate_limits(
     settings: Settings,
     auth: AuthContext,

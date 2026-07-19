@@ -164,6 +164,10 @@ Security boundaries:
 - Expensive workflows use rate limits, concurrency limits, and pre-call budget
   checks. Local/test settings use a process-local limiter; staging and production
   require the Redis-backed backend during settings validation.
+- Authenticated API requests are independently limited per transport IP, user,
+  and workspace before route work begins. The configured values are intentionally
+  separate from expensive-workflow quotas so interactive reads do not consume a
+  model or ingestion budget.
 
 ## Dependency And Security Audit Commands
 

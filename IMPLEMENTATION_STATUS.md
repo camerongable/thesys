@@ -1291,6 +1291,12 @@ current verdict, next action, evidence health, validation, and decision state.
   counter before work begins, hash tenant/user identifiers in Redis keys, audit
   limit-service outages, and fail closed when Redis is unavailable. Local and
   test settings retain an explicit in-memory backend.
+- [x] Enforce independently configurable authenticated API-request limits at
+  the shared authorization boundary. Each request is checked before route work
+  against hashed Redis buckets for transport IP, user, and workspace; denials
+  and Redis outages are audited and fail closed, while local and test runs use
+  the same scoped limits in memory. These interactive-request quotas remain
+  separate from expensive-workflow limits.
 
 ## Next Sprint
 

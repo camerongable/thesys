@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from starlette.requests import Request
 
 from app.core import oidc
 from app.core.auth import get_current_auth_context
@@ -235,6 +236,7 @@ def test_oidc_auth_resolves_preprovisioned_membership_into_principal(
     auth = get_current_auth_context(
         db_session,
         get_settings(),
+        Request({"type": "http", "client": ("127.0.0.1", 1234)}),
         authorization=f"Bearer {token}",
     )
     response = client.get("/api/projects", headers={"Authorization": f"Bearer {token}"})

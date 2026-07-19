@@ -107,14 +107,6 @@ def execute_tool(
     definition = _definition(tool_name)
     project = project_service.get_project(db, auth, project_id)
     _authorize_tool_invocation(db, auth, project_id, definition)
-    _enforce_workflow_tool_budget(
-        db,
-        auth,
-        settings,
-        project_id=project_id,
-        research_sprint_id=research_sprint_id,
-        requested_by=requested_by,
-    )
     _enforce_agent_write_kill_switch(
         db,
         auth,
@@ -135,6 +127,14 @@ def execute_tool(
         _audit_tool_denial(db, auth, project_id, definition, exc.reason, detail=exc.detail)
         db.commit()
         raise HTTPException(status_code=422, detail=exc.detail) from exc
+    _enforce_workflow_tool_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
     guarded_input, retrieved_chunk_limit = _cap_workflow_retrieval_input(
         db,
         auth,
@@ -432,14 +432,6 @@ def create_proposal(
     project = project_service.get_project(db, auth, project_id)
     _authorize_tool_invocation(db, auth, project_id, definition)
     effective_settings = settings or get_settings()
-    _enforce_workflow_tool_budget(
-        db,
-        auth,
-        effective_settings,
-        project_id=project_id,
-        research_sprint_id=research_sprint_id,
-        requested_by=requested_by,
-    )
     _enforce_agent_write_kill_switch(
         db,
         auth,
@@ -461,6 +453,14 @@ def create_proposal(
         _audit_tool_denial(db, auth, project_id, definition, exc.reason, detail=exc.detail)
         db.commit()
         raise HTTPException(status_code=422, detail=exc.detail) from exc
+    _enforce_workflow_tool_budget(
+        db,
+        auth,
+        effective_settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
     _enforce_workflow_memory_proposal_budget(
         db,
         auth,

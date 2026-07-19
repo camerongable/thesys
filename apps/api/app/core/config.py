@@ -854,6 +854,21 @@ class Settings(BaseSettings):
         ge=1,
         validation_alias="SECURITY_RATE_LIMIT_WORKSPACE_MAX_REQUESTS",
     )
+    security_api_rate_limit_ip_max_requests: int = Field(
+        default=1_200,
+        ge=1,
+        validation_alias="SECURITY_API_RATE_LIMIT_IP_MAX_REQUESTS",
+    )
+    security_api_rate_limit_user_max_requests: int = Field(
+        default=600,
+        ge=1,
+        validation_alias="SECURITY_API_RATE_LIMIT_USER_MAX_REQUESTS",
+    )
+    security_api_rate_limit_workspace_max_requests: int = Field(
+        default=3_000,
+        ge=1,
+        validation_alias="SECURITY_API_RATE_LIMIT_WORKSPACE_MAX_REQUESTS",
+    )
     security_max_concurrent_workflows: int = Field(
         default=8,
         ge=1,

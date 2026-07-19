@@ -8,7 +8,7 @@ from binascii import Error as Base64DecodeError
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -132,6 +132,7 @@ ApiKeyHeader = Annotated[str | None, Header(alias="X-API-Key")]
 def get_current_auth_context(
     db: DbDep,
     settings: SettingsDep,
+    request: Request,
     x_dev_user_email: DevUserEmailHeader = None,
     x_dev_user_name: DevUserNameHeader = None,
     x_dev_user_role: DevUserRoleHeader = None,
@@ -187,6 +188,14 @@ def get_current_auth_context(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session is revoked.",
         )
+    from app.services import security_policy_service
+
+    security_policy_service.enforce_authenticated_request_rate_limit(
+        db,
+        auth,
+        settings,
+        client_ip=request.client.host if request.client is not None else "unknown",
+    )
     _persist_authentication_event(
         db,
         event_type="login_success",

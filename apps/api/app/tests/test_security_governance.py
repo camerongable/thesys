@@ -354,6 +354,91 @@ def test_expensive_workflow_rate_limit_denies_and_audits(
     get_settings.cache_clear()
 
 
+def test_authenticated_api_rate_limit_denies_before_route_work(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_project(client)
+    monkeypatch.setenv("SECURITY_API_RATE_LIMIT_USER_MAX_REQUESTS", "1")
+    monkeypatch.setenv("SECURITY_API_RATE_LIMIT_WORKSPACE_MAX_REQUESTS", "10")
+    monkeypatch.setenv("SECURITY_API_RATE_LIMIT_IP_MAX_REQUESTS", "10")
+    get_settings.cache_clear()
+    security_policy_service.reset_policy_state()
+
+    first = client.get("/api/projects")
+    denied = client.get("/api/projects")
+
+    assert first.status_code == 200
+    assert denied.status_code == 429
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "security_policy_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["workflow_type"] == "authenticated_api_request"
+    get_settings.cache_clear()
+
+
+def test_authenticated_api_rate_limit_uses_hashed_redis_buckets(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeRedis:
+        def __init__(self) -> None:
+            self.counts: dict[str, int] = {}
+
+        def eval(self, _script: str, _keys: int, key: str, _window_seconds: int) -> int:
+            self.counts[key] = self.counts.get(key, 0) + 1
+            return self.counts[key]
+
+    fake_redis = FakeRedis()
+    monkeypatch.setenv("SECURITY_RATE_LIMIT_BACKEND", "redis")
+    monkeypatch.setenv("SECURITY_API_RATE_LIMIT_USER_MAX_REQUESTS", "1")
+    monkeypatch.setenv("SECURITY_API_RATE_LIMIT_WORKSPACE_MAX_REQUESTS", "10")
+    monkeypatch.setenv("SECURITY_API_RATE_LIMIT_IP_MAX_REQUESTS", "10")
+    monkeypatch.setattr(security_policy_service, "_redis_client", lambda _settings: fake_redis)
+    get_settings.cache_clear()
+    security_policy_service.reset_policy_state()
+
+    first = client.get("/api/projects")
+    denied = client.get("/api/projects")
+
+    assert first.status_code == 200
+    assert denied.status_code == 429
+    assert len(fake_redis.counts) == 3
+    assert all(key.startswith("thesys:security-rate:v1:api_") for key in fake_redis.counts)
+    assert all("authenticated_api_request" not in key for key in fake_redis.counts)
+    get_settings.cache_clear()
+
+
+def test_authenticated_api_rate_limit_fails_closed_when_redis_is_unavailable(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(_settings: Settings) -> object:
+        raise security_policy_service.RedisError("offline")
+
+    monkeypatch.setenv("SECURITY_RATE_LIMIT_BACKEND", "redis")
+    monkeypatch.setattr(security_policy_service, "_redis_client", unavailable)
+    get_settings.cache_clear()
+
+    response = client.get("/api/projects")
+
+    assert response.status_code == 503
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "security_policy_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["workflow_type"] == "authenticated_api_request"
+    assert audit.event_metadata["status_code"] == 503
+    get_settings.cache_clear()
+
+
 def test_expensive_workflow_rate_limit_uses_hashed_redis_buckets(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -385,7 +470,7 @@ def test_expensive_workflow_rate_limit_uses_hashed_redis_buckets(
 
     assert first.status_code == 201
     assert denied.status_code == 429
-    assert len(fake_redis.counts) == 2
+    assert len(fake_redis.counts) == 5
     assert all(key.startswith("thesys:security-rate:v1:") for key in fake_redis.counts)
     assert all("evidence_note_ingestion" not in key for key in fake_redis.counts)
     get_settings.cache_clear()
@@ -399,10 +484,15 @@ def test_expensive_workflow_rate_limit_fails_closed_when_redis_is_unavailable(
     def unavailable(_settings: Settings) -> object:
         raise security_policy_service.RedisError("offline")
 
+    project_id = _create_project(client)
     monkeypatch.setenv("SECURITY_RATE_LIMIT_BACKEND", "redis")
     monkeypatch.setattr(security_policy_service, "_redis_client", unavailable)
+    monkeypatch.setattr(
+        security_policy_service,
+        "enforce_authenticated_request_rate_limit",
+        lambda *_args, **_kwargs: None,
+    )
     get_settings.cache_clear()
-    project_id = _create_project(client)
 
     response = client.post(
         f"/api/projects/{project_id}/evidence/note",
