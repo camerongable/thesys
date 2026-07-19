@@ -17,7 +17,11 @@ from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
 )
-from app.services.workflow_budget_service import record_model_usage, reserve_model_call
+from app.services.workflow_budget_service import (
+    record_model_usage,
+    record_provider_failure,
+    reserve_model_call,
+)
 
 ChatRole = Literal["system", "user", "assistant"]
 
@@ -94,11 +98,16 @@ class LiteLLMClient:
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             security_metrics_service.record_provider_error()
+            record_provider_failure(
+                failure_kind="http_status",
+                status_code=exc.response.status_code,
+            )
             raise LiteLLMClientError(
                 f"LiteLLM request failed with status {exc.response.status_code}."
             ) from None
         except httpx.HTTPError:
             security_metrics_service.record_provider_error()
+            record_provider_failure(failure_kind="transport")
             raise LiteLLMClientError("LiteLLM request failed.") from None
 
         try:
@@ -206,11 +215,16 @@ class LiteLLMClient:
                     )
         except httpx.HTTPStatusError as exc:
             security_metrics_service.record_provider_error()
+            record_provider_failure(
+                failure_kind="http_status",
+                status_code=exc.response.status_code,
+            )
             raise LiteLLMClientError(
                 f"LiteLLM stream failed with status {exc.response.status_code}."
             ) from None
         except httpx.HTTPError:
             security_metrics_service.record_provider_error()
+            record_provider_failure(failure_kind="transport")
             raise LiteLLMClientError("LiteLLM stream failed.") from None
 
     def _enforce_egress(self, url: str) -> None:

@@ -123,6 +123,7 @@ def record_security_event(
     _open_alert_for_high_severity_event(db, event)
     _detect_repeated_guardrail_attack(db, event, settings or get_settings())
     _detect_authorization_denial_spike(db, event, settings or get_settings())
+    _detect_provider_failure_spike(db, event, settings or get_settings())
     return event
 
 
@@ -421,6 +422,67 @@ def _detect_authorization_denial_spike(
         source=event.source,
         summary="Authorization denials exceeded the configured threshold.",
         attributes={
+            "observed_count": observed_count,
+            "window_seconds": settings.security_alert_detection_window_seconds,
+        },
+        containment_status="alert_open",
+        settings=settings,
+    )
+
+
+def _detect_provider_failure_spike(
+    db: Session,
+    event: SecurityEvent,
+    settings: Settings,
+) -> None:
+    if event.event_type != "provider_failure":
+        return
+
+    window_start = event.detected_at - timedelta(
+        seconds=settings.security_alert_detection_window_seconds
+    )
+    matching_events = [
+        SecurityEvent.workspace_id == event.workspace_id,
+        SecurityEvent.event_type == "provider_failure",
+        SecurityEvent.detected_at >= window_start,
+        SecurityEvent.detected_at <= event.detected_at,
+    ]
+    if event.project_id is not None:
+        matching_events.append(SecurityEvent.project_id == event.project_id)
+    observed_count = db.scalar(
+        select(func.count()).select_from(SecurityEvent).where(*matching_events)
+    )
+    if (
+        observed_count is None
+        or observed_count < settings.security_provider_failure_spike_threshold
+    ):
+        return
+
+    escalation_filters = [
+        SecurityEvent.workspace_id == event.workspace_id,
+        SecurityEvent.event_type == "provider_failure_spike",
+        SecurityEvent.detected_at >= window_start,
+    ]
+    if event.project_id is not None:
+        escalation_filters.append(SecurityEvent.project_id == event.project_id)
+    if db.scalar(select(SecurityEvent.id).where(*escalation_filters).limit(1)) is not None:
+        return
+
+    record_security_event(
+        db,
+        workspace_id=event.workspace_id,
+        project_id=event.project_id,
+        user_id=event.user_id,
+        session_id=event.session_id,
+        request_id=event.request_id,
+        langsmith_trace_id=event.langsmith_trace_id,
+        temporal_workflow_id=event.temporal_workflow_id,
+        event_type="provider_failure_spike",
+        severity="high",
+        source="workflow",
+        summary="Provider failures exceeded the configured threshold.",
+        attributes={
+            "provider": "litellm",
             "observed_count": observed_count,
             "window_seconds": settings.security_alert_detection_window_seconds,
         },

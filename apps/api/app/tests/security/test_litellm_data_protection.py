@@ -1,7 +1,10 @@
 from typing import Any
 
+import httpx
+import pytest
+
 from app.ai import litellm_client
-from app.ai.litellm_client import ChatMessage, LiteLLMClient
+from app.ai.litellm_client import ChatMessage, LiteLLMClient, LiteLLMClientError
 from app.core.config import Settings
 
 
@@ -61,3 +64,45 @@ def test_litellm_client_sends_sanitized_payload(monkeypatch) -> None:
     assert "jane.doe@example.com" not in outbound
     assert "sk-secretvalue123" not in outbound
     assert "[REDACTED_SECRET]" in outbound
+
+
+def test_litellm_client_reports_bounded_http_failure_metadata(monkeypatch) -> None:
+    recorded: list[dict[str, object]] = []
+
+    class FailingResponse:
+        def raise_for_status(self) -> None:
+            request = httpx.Request("POST", "https://models.example.test/v1/chat/completions")
+            response = httpx.Response(503, request=request)
+            raise httpx.HTTPStatusError("service unavailable", request=request, response=response)
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> "FakeClient":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, _url: str, **_kwargs: object) -> FailingResponse:
+            return FailingResponse()
+
+    monkeypatch.setattr(litellm_client.httpx, "Client", FakeClient)
+    monkeypatch.setattr(
+        litellm_client,
+        "record_provider_failure",
+        lambda **kwargs: recorded.append(kwargs),
+    )
+    client = LiteLLMClient(
+        Settings(
+            llm_stub_mode="never",
+            litellm_api_key="test-key",
+            provider_egress_policy_enabled=False,
+        )
+    )
+
+    with pytest.raises(LiteLLMClientError, match="status 503"):
+        client.complete([ChatMessage(role="user", content="Return a safe response.")])
+
+    assert recorded == [{"failure_kind": "http_status", "status_code": 503}]

@@ -1059,6 +1059,13 @@ current verdict, next action, evidence health, validation, and decision state.
   emit one high-severity `authorization_denial_spike` event and alert with only
   bounded count/window evidence. The detector also includes governed tool,
   memory, source-content, and signed-URL denials when they are normalized.
+- [x] Detect scoped model-provider failure spikes at the shared LiteLLM boundary.
+  HTTP and transport failures preserve only provider, bounded failure category,
+  and optional status code while inheriting workspace, project, user, and
+  Temporal workflow correlation from the active sprint. A configurable
+  project-scoped threshold opens one high-severity `provider_failure_spike`
+  alert with count/window evidence, while the existing provider-error metric
+  continues to count each failed request.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,

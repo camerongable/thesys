@@ -17,7 +17,7 @@ from app.db.models import (
     SecurityAlert,
     SecurityEvent,
 )
-from app.services import governance_service, security_event_service
+from app.services import governance_service, security_event_service, workflow_budget_service
 from app.services.identity_service import ensure_dev_identity
 
 
@@ -240,6 +240,80 @@ def test_repeated_policy_denials_create_one_authorization_spike_alert(
     assert escalation_events[0].containment_status == "alert_open"
     assert len(escalation_alerts) == 1
     assert escalation_alerts[0].severity == "high"
+    get_settings.cache_clear()
+
+
+def test_repeated_provider_failures_create_one_provider_spike_alert(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SECURITY_PROVIDER_FAILURE_SPIKE_THRESHOLD", "3")
+    get_settings.cache_clear()
+    project = client.post("/api/projects", json={"name": "Provider spike"}).json()
+    project_id = uuid.UUID(project["id"])
+    plan_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Exercise provider-failure monitoring."},
+    )
+    assert plan_response.status_code == 200
+    sprint = db_session.get(ResearchSprint, uuid.UUID(plan_response.json()["sprint"]["id"]))
+    assert sprint is not None
+    sprint.temporal_workflow_id = "provider-spike-workflow"
+    db_session.commit()
+    auth = ensure_dev_identity(
+        db_session,
+        email="dev@thesys.local",
+        display_name="Dev User",
+    )
+
+    with workflow_budget_service.workflow_budget_scope(
+        db_session,
+        auth,
+        get_settings(),
+        project_id=project_id,
+        research_sprint_id=sprint.id,
+    ):
+        for _ in range(4):
+            workflow_budget_service.record_provider_failure(
+                failure_kind="http_status",
+                status_code=503,
+            )
+
+    failures = list(
+        db_session.scalars(
+            select(SecurityEvent).where(SecurityEvent.event_type == "provider_failure")
+        )
+    )
+    escalations = list(
+        db_session.scalars(
+            select(SecurityEvent).where(SecurityEvent.event_type == "provider_failure_spike")
+        )
+    )
+    alerts = list(
+        db_session.scalars(
+            select(SecurityAlert)
+            .join(SecurityEvent, SecurityAlert.security_event_id == SecurityEvent.id)
+            .where(SecurityEvent.event_type == "provider_failure_spike")
+        )
+    )
+
+    assert len(failures) == 4
+    assert all(
+        event.attributes
+        == {"provider": "litellm", "failure_kind": "http_status", "status_code": 503}
+        for event in failures
+    )
+    assert all(event.temporal_workflow_id == "provider-spike-workflow" for event in failures)
+    assert len(escalations) == 1
+    assert escalations[0].severity == "high"
+    assert escalations[0].attributes == {
+        "provider": "litellm",
+        "observed_count": 3,
+        "window_seconds": 900,
+    }
+    assert len(alerts) == 1
+    assert alerts[0].severity == "high"
     get_settings.cache_clear()
 
 

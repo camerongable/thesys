@@ -136,6 +136,36 @@ def record_model_usage(
     context.db.commit()
 
 
+def record_provider_failure(*, failure_kind: str, status_code: int | None = None) -> None:
+    """Persist a bounded provider failure when a scoped workflow can be attributed."""
+    context = _workflow_budget_context.get()
+    if context is None:
+        return
+    sprint, _ = _locked_sprint_and_budget(context)
+    from app.services import security_event_service
+
+    attributes: dict[str, str | int] = {
+        "provider": "litellm",
+        "failure_kind": failure_kind,
+    }
+    if status_code is not None:
+        attributes["status_code"] = status_code
+    security_event_service.record_security_event(
+        context.db,
+        workspace_id=context.auth.workspace_id,
+        project_id=context.project_id,
+        user_id=context.auth.user_id,
+        temporal_workflow_id=sprint.temporal_workflow_id,
+        event_type="provider_failure",
+        severity="medium",
+        source="workflow",
+        summary="A model provider request failed before a usable response was returned.",
+        attributes=attributes,
+        settings=context.settings,
+    )
+    context.db.commit()
+
+
 def reserve_structured_output_repair() -> None:
     context = _workflow_budget_context.get()
     if context is None:

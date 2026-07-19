@@ -187,6 +187,12 @@ class Settings(BaseSettings):
         le=100,
         validation_alias="SECURITY_AUTHORIZATION_DENIAL_SPIKE_THRESHOLD",
     )
+    security_provider_failure_spike_threshold: int = Field(
+        default=3,
+        ge=2,
+        le=100,
+        validation_alias="SECURITY_PROVIDER_FAILURE_SPIKE_THRESHOLD",
+    )
     security_workflow_max_model_calls: int = Field(
         default=12,
         ge=1,
