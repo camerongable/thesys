@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi.testclient import TestClient
 
 
@@ -212,7 +214,11 @@ def test_governance_tool_and_memory_route_contracts_preserve_public_keys(
     assert audit_event["event_metadata"] == {
         "tool_name": "propose_research_plan",
         "status": "rejected",
+        "request_id": audit_event["event_metadata"]["request_id"],
     }
+    assert str(uuid.UUID(audit_event["event_metadata"]["request_id"])) == audit_event[
+        "event_metadata"
+    ]["request_id"]
 
     preference_response = client.post(
         f"/api/projects/{project_id}/memory/preferences",

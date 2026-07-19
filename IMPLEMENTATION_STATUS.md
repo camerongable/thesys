@@ -1064,7 +1064,8 @@ current verdict, next action, evidence health, validation, and decision state.
   and adds that ID at the shared audit boundary. Both audit-projected and
   direct runtime normalized security events inherit the same value, linking the
   request, immutable audit record, event, and alert without recording arbitrary
-  client-provided metadata.
+  client-provided metadata. Public audit-event contract coverage asserts the
+  canonical UUID alongside the governed event metadata.
 - [x] Propagate session correlation without retaining bearer-linked identifiers.
   The common audit boundary derives a stable domain-separated SHA-256 value from
   the authenticated OIDC `sid` or JWT `jti`, and normalized security events
