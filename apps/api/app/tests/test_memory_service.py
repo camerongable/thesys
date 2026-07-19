@@ -1,4 +1,5 @@
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -238,7 +239,7 @@ def test_working_memory_has_bounded_ttl_and_expired_memory_is_inspectable(
     db_session: Session,
 ) -> None:
     project_id = uuid.UUID(_create_project(client))
-    auth = _dev_auth(db_session, "owner")
+    auth = _dev_auth(db_session, "owner", session_id="working-memory-session")
     now = datetime.now(UTC)
     working = memory_service.upsert_memory_item(
         db_session,
@@ -286,6 +287,68 @@ def test_working_memory_has_bounded_ttl_and_expired_memory_is_inspectable(
     assert {item["id"] for item in inspect["excluded_memory"] if item["reason"] == "expired"} == {
         expired.id
     }
+
+
+def test_working_memory_is_limited_to_its_authenticated_session(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    unscoped_auth = _dev_auth(db_session, "owner")
+    writer_auth = _dev_auth(db_session, "owner", session_id="writer-session")
+    other_session_auth = _dev_auth(db_session, "owner", session_id="other-session")
+    with pytest.raises(HTTPException) as exc_info:
+        memory_service.upsert_memory_item(
+            db_session,
+            unscoped_auth,
+            project_id,
+            memory_type="working",
+            write_policy="transient",
+            title="Unscoped context",
+            summary="Working memory must not fall back to project scope.",
+            content={"topic": "unscoped"},
+        )
+    assert exc_info.value.status_code == 422
+    working = memory_service.upsert_memory_item(
+        db_session,
+        writer_auth,
+        project_id,
+        memory_type="working",
+        write_policy="transient",
+        title="Session-local guide context",
+        summary="This context belongs only to the active writer session.",
+        content={"topic": "writer session"},
+    )
+    db_session.commit()
+
+    scope = working.provenance_metadata["working_memory_session_scope"]
+    assert scope != "writer-session"
+    assert memory_service.select_memory_for_workflow(
+        db_session,
+        writer_auth,
+        project_id,
+        workflow_type="guide_chat",
+    ) == [working]
+    assert memory_service.select_memory_for_workflow(
+        db_session,
+        other_session_auth,
+        project_id,
+        workflow_type="guide_chat",
+    ) == []
+    assert memory_service.list_memory(
+        db_session,
+        other_session_auth,
+        project_id,
+        include_stale=True,
+    ) == []
+    with pytest.raises(HTTPException) as exc_info:
+        memory_service.get_memory_item(
+            db_session,
+            other_session_auth,
+            project_id,
+            working.id,
+        )
+    assert exc_info.value.status_code == 404
 
 
 def test_conflicting_memory_proposal_preserves_active_version_until_approval(
@@ -733,11 +796,14 @@ def _create_project(client: TestClient) -> str:
     return response.json()["id"]
 
 
-def _dev_auth(db_session: Session, role: str):
+def _dev_auth(db_session: Session, role: str, session_id: str | None = None):
     settings = get_settings()
-    return ensure_dev_identity(
+    auth = ensure_dev_identity(
         db_session,
         email=settings.dev_auth_default_email,
         display_name=settings.dev_auth_default_name,
         role=role,
     )
+    if session_id is None:
+        return auth
+    return replace(auth, principal=replace(auth.principal, session_id=session_id))

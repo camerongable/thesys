@@ -581,6 +581,10 @@ current verdict, next action, evidence health, validation, and decision state.
   expiry in secure-memory provenance, and normalize timestamp comparisons at
   the recall boundary. Expired memory cannot enter workflow context and remains
   Inspect-visible with an `expired` exclusion reason.
+- [x] Bind working memory to a hashed authenticated session/token scope. Writes
+  without a session fail closed; list, selection, Inspect, and direct lookup
+  never expose another session's working items, preventing temporary context
+  from becoming project-wide durable memory.
 - [x] Detect anomalous embedding clusters before evidence chunks are persisted.
   A distinct source whose candidate vectors nearly match two approved,
   different-content project sources receives an inspectable source-trust signal
@@ -721,12 +725,15 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Project-overview trace replay checkpoint passed (`24 passed, 1 warning`)
   across project-overview, evidence, and workflow-event coverage; changed-file
   compile checks and repository application lint passed.
+- [x] Session-scoped working-memory checkpoint passed (`75 passed, 1 warning`)
+  across memory-service, context-compiler, and feature-boundary coverage;
+  changed-file compile checks and repository application lint passed.
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-identify the next unimplemented Sprint 65 acceptance boundary after completing
-the retrieval and workflow replay audit.
+identify remaining Sprint 65 acceptance gaps after the retrieval, replay, and
+working-memory isolation audits.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

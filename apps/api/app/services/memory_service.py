@@ -66,6 +66,7 @@ def list_memory(
 ) -> list[ProjectMemoryItem]:
     """List typed project memory with stale/expired records hidden by default."""
     project_service.get_project(db, auth, project_id)
+    session_scope = _working_memory_session_scope(auth)
     stmt = select(ProjectMemoryItem).where(
         ProjectMemoryItem.workspace_id == auth.workspace_id,
         ProjectMemoryItem.project_id == project_id,
@@ -84,13 +85,21 @@ def list_memory(
         stmt.order_by(ProjectMemoryItem.updated_at.desc()).limit(min(limit, 100))
     )
     if include_stale:
-        return list(items)
+        return [
+            item
+            for item in items
+            if memory_security_policy.working_memory_visible_to_session(
+                item,
+                session_scope=session_scope,
+            )
+        ]
     return [
         item
         for item in items
         if memory_security_policy.memory_recall_exclusion_reason(
             item,
             now=datetime.now(UTC),
+            working_memory_session_scope=session_scope,
         )
         is None
     ]
@@ -110,6 +119,7 @@ def select_memory_for_workflow(
         {"semantic", "project", "episodic", "preference"},
     )
     project_service.get_project(db, auth, project_id)
+    session_scope = _working_memory_session_scope(auth)
     items = list(
         db.scalars(
             select(ProjectMemoryItem)
@@ -133,6 +143,7 @@ def select_memory_for_workflow(
         if memory_security_policy.memory_recall_exclusion_reason(
             item,
             now=datetime.now(UTC),
+            working_memory_session_scope=session_scope,
         )
         is None
     ]
@@ -154,6 +165,7 @@ def select_memory_for_context(
     include_stale_history = workflow_type in WORKFLOW_STALE_HISTORY_ALLOWED
     now = datetime.now(UTC)
     project_service.get_project(db, auth, project_id)
+    session_scope = _working_memory_session_scope(auth)
     all_items = list(
         db.scalars(
             select(ProjectMemoryItem)
@@ -165,6 +177,14 @@ def select_memory_for_context(
             .limit(200)
         )
     )
+    all_items = [
+        item
+        for item in all_items
+        if memory_security_policy.working_memory_visible_to_session(
+            item,
+            session_scope=session_scope,
+        )
+    ]
     conflicts = detect_memory_conflicts(db, auth, project_id, mark=True, commit=False)
     selected: list[ProjectMemoryItem] = []
     excluded: list[dict[str, Any]] = []
@@ -174,6 +194,7 @@ def select_memory_for_context(
             allowed_types=allowed_types,
             include_stale_history=include_stale_history,
             now=now,
+            working_memory_session_scope=session_scope,
         )
         if reason is not None:
             excluded.append(_excluded(item, reason))
@@ -245,7 +266,10 @@ def get_memory_item(
             ProjectMemoryItem.id == memory_id,
         )
     )
-    if item is None:
+    if item is None or not memory_security_policy.working_memory_visible_to_session(
+        item,
+        session_scope=_working_memory_session_scope(auth),
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory item not found.")
     return item
 
@@ -284,6 +308,14 @@ def upsert_memory_item(
         write_policy=write_policy,
         expires_at=expires_at,
     )
+    if memory_type == "working":
+        session_scope = _working_memory_session_scope(auth)
+        if session_scope is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Working memory requires an authenticated session.",
+            )
+        safe_provenance[memory_security_policy.WORKING_MEMORY_SESSION_SCOPE_KEY] = session_scope
     if memory_type == "procedural" and not memory_security_policy.procedural_memory_write_allowed(
         safe_provenance,
         source_entity_type=source_entity_type,
@@ -857,6 +889,11 @@ def _effective_memory_expiry(
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=UTC)
     return min(expires_at, latest_expiry)
+
+
+def _working_memory_session_scope(auth: AuthContext) -> str | None:
+    session_identifier = auth.principal.session_id or auth.principal.token_id
+    return memory_security_policy.working_memory_session_scope(session_identifier)
 
 
 def _conflicting_active_memory_items(

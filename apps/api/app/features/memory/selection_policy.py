@@ -28,12 +28,17 @@ def memory_exclusion_reason(
     allowed_types: set[str],
     include_stale_history: bool,
     now: datetime,
+    working_memory_session_scope: str | None = None,
 ) -> str | None:
     if item.memory_type not in allowed_types:
         return "memory_type_not_allowed_for_workflow"
     if item.status == "proposed":
         return "pending_human_review"
-    recall_reason = security_policy.memory_recall_exclusion_reason(item, now=now)
+    recall_reason = security_policy.memory_recall_exclusion_reason(
+        item,
+        now=now,
+        working_memory_session_scope=working_memory_session_scope,
+    )
     if recall_reason is not None:
         return recall_reason
     return None

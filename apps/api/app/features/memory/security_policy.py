@@ -9,6 +9,7 @@ from typing import Any
 
 SECURE_MEMORY_POLICY_VERSION = "secure-memory:v1"
 MINIMUM_RECALL_TRUST_SCORE = 0.5
+WORKING_MEMORY_SESSION_SCOPE_KEY = "working_memory_session_scope"
 _EVIDENCE_ENTITY_TYPES = {"evidence_source", "evidence_chunk", "retrieved_evidence"}
 _PROCEDURAL_SOURCE_TYPES = {"code", "config"}
 _ORIGINS = {"user", "agent", "derived", "system"}
@@ -95,10 +96,39 @@ def procedural_memory_write_allowed(
     )
 
 
-def memory_recall_exclusion_reason(item: Any, *, now: datetime) -> str | None:
+def working_memory_session_scope(session_identifier: str | None) -> str | None:
+    """Return a non-reversible session scope suitable for memory provenance."""
+    if not isinstance(session_identifier, str) or not session_identifier.strip():
+        return None
+    return hashlib.sha256(
+        f"thesys:working-memory:{session_identifier}".encode()
+    ).hexdigest()
+
+
+def working_memory_visible_to_session(item: Any, *, session_scope: str | None) -> bool:
+    if item.memory_type != "working":
+        return True
+    metadata = item.provenance_metadata or {}
+    return (
+        session_scope is not None
+        and metadata.get(WORKING_MEMORY_SESSION_SCOPE_KEY) == session_scope
+    )
+
+
+def memory_recall_exclusion_reason(
+    item: Any,
+    *,
+    now: datetime,
+    working_memory_session_scope: str | None = None,
+) -> str | None:
     """Return an explainable denial reason for a durable-memory recall candidate."""
     if item.status != "active":
         return f"status_{item.status}"
+    if not working_memory_visible_to_session(
+        item,
+        session_scope=working_memory_session_scope,
+    ):
+        return "working_memory_session_mismatch"
     if item.expires_at is not None and _as_utc(item.expires_at) <= _as_utc(now):
         return "expired"
     metadata = item.provenance_metadata or {}
