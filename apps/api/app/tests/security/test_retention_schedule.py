@@ -1,16 +1,33 @@
 import asyncio
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import yaml
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from temporalio.client import ScheduleAlreadyRunningError, ScheduleIntervalSpec
 
 from app.core.config import Settings
-from app.db.models import User, Workspace, WorkspaceMember
-from app.services import retention_schedule_service
-from app.temporal.activities import _retention_cleanup_payloads
+from app.db.models import (
+    AuditEvent,
+    ResearchSprint,
+    SecurityAlert,
+    SecurityEvent,
+    User,
+    Workspace,
+    WorkspaceMember,
+)
+from app.security.workflow_budget import WorkflowSecurityBudget
+from app.services import (
+    retention_schedule_service,
+    workflow_timeout_reconciliation_schedule_service,
+)
+from app.services.identity_service import ensure_dev_identity
+from app.temporal.activities import (
+    _reconcile_workspace_workflow_timeouts,
+    _retention_cleanup_payloads,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 
@@ -45,6 +62,36 @@ def test_enabled_retention_schedule_is_created_or_reconciled() -> None:
     ]
 
 
+def test_enabled_workflow_timeout_reconciliation_schedule_is_created_or_reconciled() -> None:
+    settings = Settings(
+        workflow_timeout_reconciliation_schedule_enabled=True,
+        workflow_timeout_reconciliation_interval_minutes=3,
+    )
+    client = _ScheduleClient()
+
+    asyncio.run(
+        workflow_timeout_reconciliation_schedule_service.ensure_workflow_timeout_reconciliation_schedule(
+            client,
+            settings,
+        )
+    )
+
+    assert client.created == [
+        workflow_timeout_reconciliation_schedule_service.WORKFLOW_TIMEOUT_RECONCILIATION_SCHEDULE_ID
+    ]
+    client.raise_already_running = True
+    asyncio.run(
+        workflow_timeout_reconciliation_schedule_service.ensure_workflow_timeout_reconciliation_schedule(
+            client,
+            settings,
+        )
+    )
+    assert client.handle.updated_schedule is not None
+    assert client.handle.updated_schedule.spec.intervals == [
+        ScheduleIntervalSpec(every=timedelta(minutes=3))
+    ]
+
+
 def test_disabled_retention_schedule_does_not_contact_temporal() -> None:
     client = _ScheduleClient()
 
@@ -59,6 +106,8 @@ def test_compose_enables_retention_schedule_for_temporal_worker() -> None:
 
     assert environment["RETENTION_CLEANUP_SCHEDULE_ENABLED"].endswith(":-true}")
     assert environment["RETENTION_CLEANUP_INTERVAL_HOURS"].endswith(":-24}")
+    assert environment["WORKFLOW_TIMEOUT_RECONCILIATION_SCHEDULE_ENABLED"].endswith(":-true}")
+    assert environment["WORKFLOW_TIMEOUT_RECONCILIATION_INTERVAL_MINUTES"].endswith(":-5}")
 
 
 def test_retention_cleanup_payloads_choose_one_active_principal_per_workspace(
@@ -97,6 +146,79 @@ def test_retention_cleanup_payloads_choose_one_active_principal_per_workspace(
     assert _retention_cleanup_payloads(db_session) == [
         {"workspace_id": str(active_workspace.id), "user_id": str(active_owner.id)}
     ]
+
+
+def test_workflow_timeout_reconciliation_marks_expired_sprint_once(
+    client,
+    db_session: Session,
+) -> None:
+    project_id = client.post("/api/projects", json={"name": "Timed out sprint"}).json()["id"]
+    plan = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Validate a duration-bound workflow."},
+    ).json()["sprint"]
+    sprint = db_session.get(ResearchSprint, uuid.UUID(plan["id"]))
+    assert sprint is not None
+    observed_at = datetime(2026, 7, 18, tzinfo=UTC)
+    sprint.status = "running"
+    sprint.started_at = observed_at - timedelta(seconds=121)
+    sprint.temporal_workflow_id = "research-sprint-timeout"
+    sprint.temporal_run_id = "temporal-run-timeout"
+    sprint.workflow_security_budget = WorkflowSecurityBudget.from_settings(
+        Settings(security_workflow_max_duration_seconds=120)
+    ).as_payload()
+    db_session.commit()
+    auth = ensure_dev_identity(
+        db_session,
+        email="dev@thesys.local",
+        display_name="Dev User",
+    )
+
+    assert (
+        _reconcile_workspace_workflow_timeouts(
+            db_session,
+            auth,
+            Settings(),
+            now=observed_at,
+        )
+        == 1
+    )
+    db_session.commit()
+
+    assert sprint.status == "failed"
+    assert sprint.current_step == "workflow_duration_exceeded"
+    assert sprint.failed_step == "workflow_duration_exceeded"
+    audit_event = db_session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.entity_id == sprint.id,
+            AuditEvent.event_type == "workflow_duration_exceeded",
+        )
+    )
+    assert audit_event is not None
+    assert audit_event.event_metadata["max_duration_seconds"] == 120
+    assert audit_event.event_metadata["observed_duration_seconds"] == 121
+    assert audit_event.event_metadata["temporal_workflow_id"] == "research-sprint-timeout"
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit_event.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
+    assert (
+        db_session.scalar(
+            select(SecurityAlert).where(SecurityAlert.security_event_id == security_event.id)
+        )
+        is not None
+    )
+
+    assert (
+        _reconcile_workspace_workflow_timeouts(
+            db_session,
+            auth,
+            Settings(),
+            now=observed_at,
+        )
+        == 0
+    )
 
 
 class _ScheduleClient:

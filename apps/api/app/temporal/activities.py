@@ -23,6 +23,7 @@ from app.db.models import (
 )
 from app.db.session import SessionLocal
 from app.db.tenant import bind_tenant_context
+from app.security.workflow_budget import WorkflowSecurityBudget
 from app.services import (
     agentic_research_service,
     competitor_discovery_service,
@@ -343,6 +344,29 @@ def _run_workspace_retention_cleanup_sync(payload: Payload) -> Payload:
             raise
 
 
+@activity.defn(name="reconcile_workspace_workflow_timeouts_activity")
+async def reconcile_workspace_workflow_timeouts_activity(payload: Payload) -> Payload:
+    """Persist the outcome of a Temporal workflow that outlived its durable budget."""
+    return await asyncio.to_thread(_reconcile_workspace_workflow_timeouts_sync, payload)
+
+
+def _reconcile_workspace_workflow_timeouts_sync(payload: Payload) -> Payload:
+    settings = get_settings()
+    with SessionLocal() as db:
+        try:
+            auth = _auth_from_payload(db, payload)
+            bind_tenant_context(db, auth.principal)
+            expired = _reconcile_workspace_workflow_timeouts(db, auth, settings)
+            db.commit()
+            return {
+                "workspace_id": str(auth.workspace_id),
+                "workflow_duration_exhausted": expired,
+            }
+        except Exception:
+            db.rollback()
+            raise
+
+
 @activity.defn(name="purge_unscoped_authentication_events_activity")
 async def purge_unscoped_authentication_events_activity() -> Payload:
     """Purge expired credential-validation failures via the worker-only DB path."""
@@ -390,6 +414,89 @@ def _retention_cleanup_payloads(db: Session) -> list[Payload]:
         seen_workspaces.add(workspace_id)
         payloads.append({"workspace_id": str(workspace_id), "user_id": str(user_id)})
     return payloads
+
+
+def _reconcile_workspace_workflow_timeouts(
+    db: Session,
+    auth: AuthContext,
+    settings: Any,
+    *,
+    now: datetime | None = None,
+) -> int:
+    observed_at = now or datetime.now(UTC)
+    active_sprints = list(
+        db.scalars(
+            select(ResearchSprint)
+            .where(
+                ResearchSprint.workspace_id == auth.workspace_id,
+                ResearchSprint.started_at.is_not(None),
+                ResearchSprint.status.in_(
+                    (
+                        "waiting_for_approval",
+                        "approved",
+                        "running",
+                        "needs_review",
+                        "waiting_for_memory_approval",
+                    )
+                ),
+            )
+            .with_for_update()
+        )
+    )
+    expired = 0
+    for sprint in active_sprints:
+        budget = _workflow_security_budget_for_reconciliation(sprint, settings)
+        observed_duration_seconds = _workflow_duration_seconds(sprint.started_at, observed_at)
+        if observed_duration_seconds < budget.max_duration_seconds:
+            continue
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="workflow_duration_exceeded",
+            actor_type="system",
+            project_id=sprint.project_id,
+            entity_type="research_sprint",
+            entity_id=sprint.id,
+            risk_level="high",
+            summary="Temporal workflow exceeded its configured duration limit.",
+            metadata={
+                "max_duration_seconds": budget.max_duration_seconds,
+                "observed_duration_seconds": observed_duration_seconds,
+                "temporal_workflow_id": sprint.temporal_workflow_id,
+                "temporal_run_id": sprint.temporal_run_id,
+            },
+        )
+        _update_sprint(
+            sprint,
+            status="failed",
+            current_step="workflow_duration_exceeded",
+            failed_step="workflow_duration_exceeded",
+            failure_message=(
+                "Workflow exceeded its safe execution duration. No further workflow work was run."
+            ),
+            completed=True,
+        )
+        expired += 1
+    return expired
+
+
+def _workflow_security_budget_for_reconciliation(
+    sprint: ResearchSprint,
+    settings: Any,
+) -> WorkflowSecurityBudget:
+    if sprint.workflow_security_budget:
+        return WorkflowSecurityBudget.from_payload(sprint.workflow_security_budget)
+    return WorkflowSecurityBudget.from_settings(settings)
+
+
+def _workflow_duration_seconds(started_at: datetime | None, observed_at: datetime) -> int:
+    if started_at is None:
+        return 0
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=UTC)
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=UTC)
+    return max(int((observed_at - started_at).total_seconds()), 0)
 
 
 async def _run_db_activity(

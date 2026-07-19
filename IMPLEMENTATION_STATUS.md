@@ -1083,6 +1083,11 @@ current verdict, next action, evidence health, validation, and decision state.
   duration with its attributable AI-run correlation before the run is finalized,
   producing a high-risk immutable audit event, normalized workflow security
   event, and high-severity alert without retaining user prompt content.
+- [x] Reconcile Temporal workflow-duration exhaustion after the server-enforced
+  execution timeout. A worker-owned five-minute sweep evaluates each active
+  sprint's immutable budget against its durable start time, marks an overdue
+  sprint failed once, and emits the correlated high-risk audit, workflow event,
+  and alert with only configured/observed duration and Temporal identifiers.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,

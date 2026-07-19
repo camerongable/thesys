@@ -853,6 +853,16 @@ class Settings(BaseSettings):
         le=168,
         validation_alias="RETENTION_CLEANUP_INTERVAL_HOURS",
     )
+    workflow_timeout_reconciliation_schedule_enabled: bool = Field(
+        default=False,
+        validation_alias="WORKFLOW_TIMEOUT_RECONCILIATION_SCHEDULE_ENABLED",
+    )
+    workflow_timeout_reconciliation_interval_minutes: int = Field(
+        default=5,
+        ge=1,
+        le=60,
+        validation_alias="WORKFLOW_TIMEOUT_RECONCILIATION_INTERVAL_MINUTES",
+    )
     temporal_namespace_retention_reconcile_enabled: bool = Field(
         default=False,
         validation_alias="TEMPORAL_NAMESPACE_RETENTION_RECONCILE_ENABLED",

@@ -102,6 +102,27 @@ class RetentionCleanupWorkflow:
         }
 
 
+@workflow.defn
+class WorkflowTimeoutReconciliationWorkflow:
+    """Reconcile workflow-duration exhaustion after Temporal ends execution."""
+
+    @workflow.run
+    async def run(self) -> dict[str, int]:
+        payloads = await workflow.execute_activity(
+            "list_workspace_retention_cleanup_payloads_activity",
+            start_to_close_timeout=DEFAULT_ACTIVITY_TIMEOUT,
+            retry_policy=_retry_policy(),
+        )
+        expired = 0
+        for payload in payloads:
+            result = await _activity("reconcile_workspace_workflow_timeouts_activity", payload)
+            expired += int(result["workflow_duration_exhausted"])
+        return {
+            "workspaces_processed": len(payloads),
+            "workflow_duration_exhausted": expired,
+        }
+
+
 async def _activity(
     name: str,
     payload: dict[str, Any],
