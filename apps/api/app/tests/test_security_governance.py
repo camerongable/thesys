@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core import security as security_module
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.security import (
     SecurityValidationError,
     validate_upload,
@@ -21,7 +21,8 @@ from app.core.security import (
     validate_url_response_content_type,
 )
 from app.db.models import AIRun, ApprovalRequest, AuditEvent, EvidenceSource, ToolInvocation
-from app.services import security_policy_service, tool_service
+from app.schemas.security import KillSwitchUpdate
+from app.services import kill_switch_service, security_policy_service, tool_service
 from app.services.identity_service import ensure_dev_identity
 
 
@@ -438,6 +439,108 @@ def test_provider_egress_guard_denies_unapproved_live_provider_host(
     assert audit is not None
     assert audit.event_metadata["workflow_type"] == "guide_chat"
     get_settings.cache_clear()
+
+
+def test_runtime_kill_switches_deny_model_providers_and_external_egress(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    settings = Settings(
+        llm_stub_mode="never",
+        litellm_base_url="https://models.example.test",
+        provider_egress_allowed_hosts=["models.example.test", "api.tavily.com"],
+    )
+    kill_switch_service.update_state(
+        db_session,
+        auth,
+        settings,
+        KillSwitchUpdate(disable_model_provider=True),
+    )
+
+    with pytest.raises(HTTPException, match="Model-provider access") as model_denial:
+        with security_policy_service.guarded_workflow(
+            db_session,
+            auth,
+            settings,
+            project_id=project_id,
+            workflow_type="kill_switch_model_provider",
+            estimate=security_policy_service.merge_estimate(
+                settings,
+                provider_urls=security_policy_service.llm_provider_urls(settings),
+            ),
+        ):
+            pass
+
+    assert model_denial.value.status_code == 403
+    kill_switch_service.update_state(
+        db_session,
+        auth,
+        settings,
+        KillSwitchUpdate(disable_model_provider=False, disable_external_egress=True),
+    )
+    with pytest.raises(HTTPException, match="External network access") as egress_denial:
+        with security_policy_service.guarded_workflow(
+            db_session,
+            auth,
+            settings,
+            project_id=project_id,
+            workflow_type="kill_switch_external_egress",
+            estimate=security_policy_service.merge_estimate(
+                settings,
+                provider_urls=("https://api.tavily.com",),
+            ),
+        ):
+            pass
+
+    assert egress_denial.value.status_code == 403
+    denials = list(
+        db_session.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.event_type == "security_policy_denied")
+            .order_by(AuditEvent.created_at.asc())
+        )
+    )
+    assert [event.event_metadata["workflow_type"] for event in denials[-2:]] == [
+        "kill_switch_model_provider",
+        "kill_switch_external_egress",
+    ]
+
+
+def test_model_provider_kill_switch_returns_safe_api_denial_before_run_creation(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://models.example.test")
+    monkeypatch.setenv("PROVIDER_EGRESS_ALLOWED_HOSTS", "models.example.test")
+    get_settings.cache_clear()
+    try:
+        project_id = _create_project(client)
+        update_response = client.patch(
+            "/api/security/kill-switches",
+            json={"disable_model_provider": True},
+        )
+        response = client.post(
+            f"/api/projects/{project_id}/guide/chat",
+            json={"message": "What should I do next?"},
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert update_response.status_code == 200
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Model-provider access is temporarily unavailable."}
+    assert db_session.scalar(select(AIRun).where(AIRun.workflow_type == "guide_chat")) is None
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "security_policy_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["workflow_type"] == "guide_chat"
 
 
 def test_tool_denial_is_audited_and_persisted_proposals_are_redacted(

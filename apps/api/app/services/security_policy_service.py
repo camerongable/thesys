@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
 from app.core.config import Settings
-from app.services import ai_accounting_service, governance_service
+from app.services import ai_accounting_service, governance_service, kill_switch_service
 
 
 class ProviderEgressDeniedError(RuntimeError):
@@ -101,6 +101,7 @@ def guarded_workflow(
     estimate = estimate or default_budget_estimate(settings)
     acquired = False
     try:
+        _enforce_runtime_kill_switches(db, auth, settings, estimate)
         _enforce_rate_limits(settings, auth, workflow_type)
         _acquire_concurrency(settings, auth, workflow_type)
         acquired = True
@@ -150,6 +151,45 @@ def enforce_provider_egress_policy(settings: Settings, url: str) -> None:
     allowed_hosts = [item.strip().casefold() for item in settings.provider_egress_allowed_hosts]
     if not any(_host_matches(host, allowed_host) for allowed_host in allowed_hosts):
         raise ProviderEgressDeniedError(f"Provider host is not allowlisted: {host}.")
+
+
+def _enforce_runtime_kill_switches(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    estimate: WorkflowBudgetEstimate,
+) -> None:
+    if kill_switch_service.is_enabled(db, auth, settings, "disable_model_provider") and any(
+        _is_model_provider_url(settings, url) for url in estimate.provider_urls
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Model-provider access is temporarily unavailable.",
+        )
+    if kill_switch_service.is_enabled(db, auth, settings, "disable_external_egress") and any(
+        _is_external_network_target(url) for url in estimate.provider_urls
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="External network access is temporarily unavailable.",
+        )
+
+
+def _is_model_provider_url(settings: Settings, url: str) -> bool:
+    return url.rstrip("/") == settings.litellm_base_url.rstrip("/")
+
+
+def _is_external_network_target(url: str) -> bool:
+    host = urlparse(url).hostname
+    if host is None:
+        return False
+    normalized = host.strip("[]").casefold()
+    if normalized in {"localhost", "localhost.localdomain"}:
+        return False
+    try:
+        return not ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return True
 
 
 def reset_policy_state() -> None:

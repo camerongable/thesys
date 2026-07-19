@@ -853,10 +853,16 @@ current verdict, next action, evidence health, validation, and decision state.
   effective state is available through the owner/admin security endpoint, and
   each material change emits a high-risk audit event. Deployment environment
   variables remain visible global fail-closed overrides.
+- [x] Enforce the model-provider and external-egress kill switches in the shared
+  expensive-workflow boundary before rate, budget, or provider work starts.
+  The control recognizes the configured LiteLLM target plus any non-loopback
+  provider endpoint, emits the existing attributed policy-denial audit event,
+  and returns a generic 403 without creating an AI run.
 - [ ] Implement the remaining Sprint 66 capability controls: remote credential
   isolation, registration enablement plus live schema/version-drift validation,
-  enforcement of runtime kill switches at every controlled boundary, and then
-  validate the live Compose policy bundle with the OPA parser/runtime.
+  enforcement of the remaining write, source-fetch, and external-MCP runtime
+  kill switches, and then validate the live Compose policy bundle with the OPA
+  parser/runtime.
 
 ## Sprint 66 Verification
 
@@ -881,14 +887,18 @@ current verdict, next action, evidence health, validation, and decision state.
   single-head and offline SQL rendering verification, and `git diff --check`
   passed. Alembic autogeneration comparison remains unavailable because local
   Postgres runtime credentials are rejected.
+- [x] Shared-workflow kill-switch checkpoint passed (`67 passed, 1 xfailed, 4
+  warnings`) across security governance, control-plane, tool, MCP-registration,
+  and security-invariant coverage; focused lint, compilation, and `git diff
+  --check` passed.
 - [ ] The local workspace has no Docker CLI, so Compose graph validation and
   direct OPA/Rego parser validation remain part of the compose-backed
   enforcement checkpoint.
 
 ## Next Sprint
 
-Continue Sprint 66 by enforcing the audited runtime kill switches at the shared
-agent-write, model/egress, memory-write, and source-fetch boundaries.
+Continue Sprint 66 by enforcing the source-fetch kill switch before URL
+ingestion and external search requests.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

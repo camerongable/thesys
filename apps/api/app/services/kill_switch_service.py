@@ -43,6 +43,16 @@ def read_state(
     return _state_from_record(_get_record(db, auth), settings)
 
 
+def is_enabled(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    name: KillSwitchName,
+) -> bool:
+    record = _get_record(db, auth)
+    return bool(getattr(record, name, False)) or bool(getattr(settings, name))
+
+
 def update_state(
     db: Session,
     auth: AuthContext,
