@@ -200,6 +200,7 @@ def test_rls_migration_forces_policies_and_scoped_role_grants(monkeypatch) -> No
     assert RLS_DIRECT_TENANT_TABLES - set(migration.RLS_DIRECT_TABLES) == {
         "authentication_events",
         "evidence_source_tombstones",
+        "mcp_server_registrations",
         "pii_token_mappings",
         "session_revocations",
         "workspace_data_keys",

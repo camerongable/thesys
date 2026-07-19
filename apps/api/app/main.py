@@ -22,6 +22,7 @@ from app.routers.health import router as health_router
 from app.routers.intake import investigation_router
 from app.routers.intake import router as intake_router
 from app.routers.mcp import router as mcp_router
+from app.routers.mcp_registry import router as mcp_registry_router
 from app.routers.me import router as me_router
 from app.routers.memory import router as memory_router
 from app.routers.projects import router as projects_router
@@ -85,6 +86,7 @@ def create_app() -> FastAPI:
     app.include_router(ai_router)
     app.include_router(tools_router)
     app.include_router(mcp_router)
+    app.include_router(mcp_registry_router)
     app.add_exception_handler(LiteLLMClientError, _litellm_error_handler)
     app.add_exception_handler(StructuredOutputError, _structured_output_error_handler)
 

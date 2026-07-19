@@ -654,6 +654,10 @@ class Settings(BaseSettings):
         default=False,
         validation_alias="OPA_POLICY_ENFORCEMENT_ENABLED",
     )
+    mcp_server_allowed_hosts: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        validation_alias="MCP_SERVER_ALLOWED_HOSTS",
+    )
     security_rate_limit_enabled: bool = Field(
         default=True,
         validation_alias="SECURITY_RATE_LIMIT_ENABLED",
@@ -728,6 +732,7 @@ class Settings(BaseSettings):
         "url_fetch_denied_domains",
         "url_fetch_allowed_content_types",
         "provider_egress_allowed_hosts",
+        "mcp_server_allowed_hosts",
         mode="before",
     )
     @classmethod

@@ -38,7 +38,7 @@ from app.db.models.research import (
     ResearchPlan,
     ResearchSprint,
 )
-from app.db.models.security import PiiTokenMapping, WorkspaceDataKey
+from app.db.models.security import MCPServerRegistration, PiiTokenMapping, WorkspaceDataKey
 from app.db.models.tool import ToolInvocation
 from app.db.models.validation import (
     Decision,
@@ -82,6 +82,7 @@ __all__ = [
     "ProjectMemoryItem",
     "ProjectNudge",
     "ProjectThesis",
+    "MCPServerRegistration",
     "PiiTokenMapping",
     "ResearchPlan",
     "ResearchSprint",

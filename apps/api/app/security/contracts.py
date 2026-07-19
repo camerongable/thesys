@@ -344,6 +344,7 @@ RLS_DIRECT_TENANT_TABLES = frozenset(
         "problems",
         "project_intakes",
         "project_memory_items",
+        "mcp_server_registrations",
         "project_nudges",
         "project_theses",
         "pii_token_mappings",

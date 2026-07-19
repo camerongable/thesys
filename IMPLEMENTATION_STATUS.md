@@ -843,9 +843,15 @@ current verdict, next action, evidence health, validation, and decision state.
   malformed manifests fail closed before discovery or invocation. Shared input
   and output guards enforce manifest record and byte limits, OPA receives the
   same manifest fields, and API/MCP discovery exposes the approved contract.
-- [ ] Implement the remaining Sprint 66 capability controls: approved MCP
-  server registrations, scoped remote credentials, and runtime kill switches;
-  then validate the live Compose policy bundle with the OPA parser/runtime.
+- [x] Establish owner-reviewed external MCP server registrations as tenant-scoped
+  RLS records. Normal users cannot register servers; registrations require a
+  configured HTTPS host, no embedded credentials or nonstandard port, a pinned
+  SHA-256 server fingerprint, and locally approved tool names with snapshots.
+  They are persisted disabled by default and emit a high-risk audit event.
+- [ ] Implement the remaining Sprint 66 capability controls: remote credential
+  isolation, registration enablement plus live schema/version-drift validation,
+  and runtime kill switches; then validate the live Compose policy bundle with
+  the OPA parser/runtime.
 
 ## Sprint 66 Verification
 
@@ -860,14 +866,19 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Secure-manifest, MCP, tool-boundary, and security-invariant checkpoint
   passed (`105 passed, 1 xfailed, 1 warning`); application lint and
   `git diff --check` passed.
+- [x] MCP registration, adapter, tool-boundary, and security-invariant
+  checkpoint passed (`57 passed, 1 xfailed, 1 warning`); application lint,
+  Alembic single-head verification, and `git diff --check` passed. Alembic
+  autogeneration comparison remains unavailable because local Postgres runtime
+  credentials are rejected.
 - [ ] The local workspace has no Docker CLI, so Compose graph validation and
   direct OPA/Rego parser validation remain part of the compose-backed
   enforcement checkpoint.
 
 ## Next Sprint
 
-Continue Sprint 66 by implementing approved external MCP server registrations
-with hostname/TLS/pinned-identity controls and default-disabled tools.
+Continue Sprint 66 by adding audited runtime kill switches for agent writes,
+external MCP, egress, model providers, memory writes, and source fetching.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

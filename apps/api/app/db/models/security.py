@@ -1,7 +1,17 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -64,3 +74,34 @@ class PiiTokenMapping(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     algorithm: Mapped[str] = mapped_column(String(20), nullable=False, default="AES-256-GCM")
     retention_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
+
+
+class MCPServerRegistration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A workspace-owned, reviewed remote MCP server registration."""
+
+    __tablename__ = "mcp_server_registrations"
+    __table_args__ = (
+        CheckConstraint(
+            "transport in ('streamable_http','sse')",
+            name="ck_mcp_server_registrations_transport",
+        ),
+        UniqueConstraint("workspace_id", "name", name="uq_mcp_server_registrations_workspace_name"),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    transport: Mapped[str] = mapped_column(String(32), nullable=False)
+    server_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    approved_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    allowed_tools: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    tool_schema_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    oauth_issuer: Mapped[str | None] = mapped_column(String(2048))
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_by: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
