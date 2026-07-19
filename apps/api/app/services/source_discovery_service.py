@@ -128,6 +128,7 @@ def discover_sources(
                 settings,
                 _search_queries_for_sprint(sprint),
                 project_id=project_id,
+                research_sprint_id=sprint.id,
             )
             draft = SourceDiscoveryDraft(sources=[])
             completion = _external_search_completion(settings, messages, search_batch)

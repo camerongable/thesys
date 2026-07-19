@@ -134,6 +134,11 @@ class ResearchSprint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         default=dict,
     )
+    workflow_security_usage: Mapped[dict[str, object]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"),
+        nullable=False,
+        default=dict,
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     langsmith_trace_id: Mapped[str | None] = mapped_column(String(100), index=True)

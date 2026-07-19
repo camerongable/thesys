@@ -6,6 +6,11 @@ from typing import Any
 
 from app.core.config import Settings
 
+WORKFLOW_BUDGET_EXHAUSTED_DETAIL = (
+    "The workflow was stopped because it exceeded its safe execution budget. "
+    "No external write was performed."
+)
+
 
 @dataclass(frozen=True)
 class WorkflowSecurityBudget:

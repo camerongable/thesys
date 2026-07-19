@@ -1080,6 +1080,12 @@ current verdict, next action, evidence health, validation, and decision state.
   approval request, including proposals later approved or rejected. Exhaustion
   safely stops the workflow and records a high-risk audit, normalized workflow
   security event, and alert with configured and observed proposal totals.
+- [x] Enforce the sprint-scoped external-query budget before source-discovery
+  provider search. Each batch durably reserves only its remaining cleaned query
+  allowance under the locked sprint budget before egress, so failures and
+  retries cannot evade the limit. Exhaustion prevents another provider call and
+  records the configured and observed query counts in the high-risk audit,
+  normalized workflow security event, and alert.
 
 ## Next Sprint
 

@@ -20,6 +20,7 @@ from app.db.models import (
     EvidenceChunk,
     EvidenceSource,
     ResearchSprint,
+    SecurityEvent,
 )
 from app.schemas.research import (
     CompetitorDiscoveryCandidateDraft,
@@ -121,9 +122,7 @@ def test_source_discovery_generates_dedupes_and_ingests_approved_candidates(
     assert evidence.ingestion_status == "ready"
     assert evidence.url == approved["url"]
     assert fetched_text in (evidence.raw_text or "")
-    chunk = db_session.scalar(
-        select(EvidenceChunk).where(EvidenceChunk.source_id == evidence.id)
-    )
+    chunk = db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == evidence.id))
     assert chunk is not None
     assert chunk.chunk_metadata["origin"] == "source_discovery"
     assert chunk.chunk_metadata["research_sprint_id"] == sprint_id
@@ -244,13 +243,69 @@ def test_deterministic_external_search_preserves_provenance_through_ingestion(
     assert evidence.source_metadata["origin"] == "source_discovery"
     assert evidence.source_metadata["search_provider"] == "deterministic"
     assert evidence.source_metadata["search_result_rank"] == 1
-    chunk = db_session.scalar(
-        select(EvidenceChunk).where(EvidenceChunk.source_id == evidence.id)
-    )
+    chunk = db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == evidence.id))
     assert chunk is not None
     assert chunk.embedding is not None
     assert chunk.chunk_metadata["search_provider"] == "deterministic"
     assert chunk.chunk_metadata["source_metadata"]["search_provider"] == "deterministic"
+
+
+def test_source_discovery_reserves_external_query_budget_before_search(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint(client)
+    sprint = db_session.get(ResearchSprint, uuid.UUID(sprint_id))
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_external_queries": 1,
+    }
+    db_session.commit()
+    monkeypatch.setenv("EXTERNAL_SEARCH_ENABLED", "true")
+    monkeypatch.setenv("EXTERNAL_SEARCH_PROVIDER", "deterministic")
+    monkeypatch.setenv("EXTERNAL_SEARCH_MAX_QUERIES_PER_SPRINT", "6")
+    get_settings.cache_clear()
+    original_search = external_search_service._search_deterministic
+    calls: list[list[str]] = []
+
+    def _track_search(settings, queries):
+        calls.append(queries)
+        return original_search(settings, queries)
+
+    monkeypatch.setattr(external_search_service, "_search_deterministic", _track_search)
+
+    first_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+    )
+
+    assert first_response.status_code == 200
+    assert first_response.json()["search_diagnostics"]["query_count"] == 1
+    assert len(calls) == 1
+    assert len(calls[0]) == 1
+    db_session.refresh(sprint)
+    assert sprint.workflow_security_usage == {"external_queries": 1}
+
+    second_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+    )
+
+    assert second_response.status_code == 429
+    assert len(calls) == 1
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_external_query_budget_exceeded")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["max_external_queries"] == 1
+    assert audit.event_metadata["observed_external_queries"] == 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
 
 
 def test_prompt_injection_search_snippet_stays_review_only(
@@ -621,9 +676,7 @@ def test_blocked_source_fetch_ingests_discovery_snapshot(
     assert ingested["evidence_source_id"] is not None
 
     evidence = db_session.scalar(
-        select(EvidenceSource).where(
-            EvidenceSource.id == uuid.UUID(ingested["evidence_source_id"])
-        )
+        select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(ingested["evidence_source_id"]))
     )
     assert evidence is not None
     assert "Reason selected:" in (evidence.raw_text or "")

@@ -43,7 +43,10 @@ from app.features.policy.opa import (
     unavailable_opa_policy_denial,
 )
 from app.schemas.evidence import EvidenceRetrieveCreate
-from app.security.workflow_budget import WorkflowSecurityBudget
+from app.security.workflow_budget import (
+    WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    WorkflowSecurityBudget,
+)
 from app.services import (
     evidence_service,
     governance_service,
@@ -60,10 +63,6 @@ PROJECT_READ_ROLES = tool_registry.PROJECT_READ_ROLES
 PROJECT_MUTATION_ROLES = tool_registry.PROJECT_MUTATION_ROLES
 list_tool_definitions = tool_registry.list_tool_definitions
 ToolGuardViolation = schema_guard.ToolGuardViolation
-WORKFLOW_BUDGET_EXHAUSTED_DETAIL = (
-    "The workflow was stopped because it exceeded its safe execution budget. "
-    "No external write was performed."
-)
 
 
 @dataclass(frozen=True)
