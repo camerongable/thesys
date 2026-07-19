@@ -1068,6 +1068,12 @@ current verdict, next action, evidence health, validation, and decision state.
   workflow security event and alert. The default ceiling is 32 calls so the
   standard multi-stage agentic research workflow can complete while retaining a
   strict finite limit.
+- [x] Enforce the sprint-scoped retrieved-chunk budget before governed
+  retrieval. Every evidence search locks the workflow budget, counts the
+  already persisted returned chunks, caps the next request and returned output
+  to the remaining allowance, and safely stops once it is exhausted. The denial
+  emits a high-risk audit record plus the normalized workflow security event and
+  alert, including the configured and observed chunk totals.
 
 ## Next Sprint
 

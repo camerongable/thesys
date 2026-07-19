@@ -155,6 +155,16 @@ def execute_tool(
         _audit_tool_denial(db, auth, project_id, definition, exc.reason, detail=exc.detail)
         db.commit()
         raise HTTPException(status_code=422, detail=exc.detail) from exc
+    guarded_input, retrieved_chunk_limit = _cap_workflow_retrieval_input(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        definition=definition,
+        tool_input=guarded_input,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
     policy_decision = _authorize_opa_tool_invocation(
         db,
         auth,
@@ -229,6 +239,7 @@ def execute_tool(
         invocation.executed_at = datetime.now(UTC)
         db.commit()
         raise
+    output = _limit_retrieved_chunk_output(definition, output, retrieved_chunk_limit)
     try:
         _guard_tool_output(definition, output)
         _guard_tool_manifest_output(definition, output)
@@ -688,29 +699,16 @@ def _enforce_workflow_tool_budget(
     research_sprint_id: uuid.UUID | None,
     requested_by: RequestedBy,
 ) -> None:
-    if research_sprint_id is None:
-        return
-
-    sprint = db.scalar(
-        select(ResearchSprint)
-        .where(
-            ResearchSprint.id == research_sprint_id,
-            ResearchSprint.workspace_id == auth.workspace_id,
-            ResearchSprint.project_id == project_id,
-        )
-        .with_for_update()
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
     )
-    if sprint is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Research sprint not found.",
-        )
-    if not sprint.workflow_security_budget:
-        sprint.workflow_security_budget = WorkflowSecurityBudget.from_settings(
-            settings
-        ).as_payload()
-        db.flush()
-    budget = WorkflowSecurityBudget.from_payload(sprint.workflow_security_budget)
+    if budget_context is None:
+        return
+    sprint, budget = budget_context
     observed_tool_calls = int(
         db.scalar(
             select(func.count())
@@ -747,6 +745,119 @@ def _enforce_workflow_tool_budget(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
     )
+
+
+def _workflow_security_budget(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    research_sprint_id: uuid.UUID | None,
+) -> tuple[ResearchSprint, WorkflowSecurityBudget] | None:
+    if research_sprint_id is None:
+        return None
+    sprint = db.scalar(
+        select(ResearchSprint)
+        .where(
+            ResearchSprint.id == research_sprint_id,
+            ResearchSprint.workspace_id == auth.workspace_id,
+            ResearchSprint.project_id == project_id,
+        )
+        .with_for_update()
+    )
+    if sprint is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Research sprint not found.",
+        )
+    if not sprint.workflow_security_budget:
+        sprint.workflow_security_budget = WorkflowSecurityBudget.from_settings(
+            settings
+        ).as_payload()
+        db.flush()
+    return sprint, WorkflowSecurityBudget.from_payload(sprint.workflow_security_budget)
+
+
+def _cap_workflow_retrieval_input(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    tool_input: dict[str, Any],
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+) -> tuple[dict[str, Any], int | None]:
+    if definition.name != "search_project_evidence" or research_sprint_id is None:
+        return tool_input, None
+
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    assert budget_context is not None
+    sprint, budget = budget_context
+    observed_retrieved_chunks = sum(
+        _retrieved_chunk_count(output)
+        for output in db.scalars(
+            select(ToolInvocation.output_json).where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.research_sprint_id == research_sprint_id,
+                ToolInvocation.tool_name == definition.name,
+            )
+        )
+    )
+    if observed_retrieved_chunks >= budget.max_retrieved_chunks:
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="workflow_retrieved_chunk_budget_exceeded",
+            actor_type=requested_by,
+            project_id=project_id,
+            entity_type="research_sprint",
+            entity_id=research_sprint_id,
+            risk_level="high",
+            summary="Workflow retrieved-chunk budget was exhausted before retrieval.",
+            metadata={
+                "max_retrieved_chunks": budget.max_retrieved_chunks,
+                "observed_retrieved_chunks": observed_retrieved_chunks,
+                "temporal_workflow_id": sprint.temporal_workflow_id,
+            },
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+        )
+    remaining_chunks = budget.max_retrieved_chunks - observed_retrieved_chunks
+    requested_top_k = int(tool_input.get("top_k", 8))
+    return {**tool_input, "top_k": min(requested_top_k, remaining_chunks)}, remaining_chunks
+
+
+def _limit_retrieved_chunk_output(
+    definition: ToolDefinition,
+    output: dict[str, Any],
+    maximum_chunks: int | None,
+) -> dict[str, Any]:
+    if maximum_chunks is None or definition.name != "search_project_evidence":
+        return output
+    results = output.get("results")
+    if not isinstance(results, list):
+        return output
+    return {**output, "results": results[:maximum_chunks]}
+
+
+def _retrieved_chunk_count(output: dict[str, Any] | None) -> int:
+    if not isinstance(output, dict):
+        return 0
+    results = output.get("results")
+    return len(results) if isinstance(results, list) else 0
 
 
 def approve_pending_proposals_for_sprint(

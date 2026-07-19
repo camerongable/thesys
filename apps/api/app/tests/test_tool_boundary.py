@@ -794,6 +794,77 @@ def test_research_sprint_tool_budget_denies_before_a_new_invocation(
     assert security_event.source == "workflow"
 
 
+def test_research_sprint_retrieved_chunk_budget_caps_and_stops_retrieval(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id = _create_project(client)
+    plan_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Bound retrieval context for this workflow."},
+    )
+    assert plan_response.status_code == 200
+    sprint_id = uuid.UUID(plan_response.json()["sprint"]["id"])
+    sprint = db_session.get(ResearchSprint, sprint_id)
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_retrieved_chunks": 2,
+    }
+    db_session.commit()
+
+    observed_top_k: list[int] = []
+
+    def _retrieval_with_three_chunks(*args, **kwargs) -> dict[str, object]:
+        tool_input = args[5]
+        observed_top_k.append(tool_input["top_k"])
+        return {"results": [{"chunk": "one"}, {"chunk": "two"}, {"chunk": "three"}]}
+
+    monkeypatch.setattr(tool_service, "_run_tool", _retrieval_with_three_chunks)
+    auth = _dev_auth(db_session)
+    first = tool_service.execute_tool(
+        db_session,
+        auth,
+        get_settings(),
+        uuid.UUID(project_id),
+        "search_project_evidence",
+        {"query": "pricing", "top_k": 5},
+        research_sprint_id=sprint_id,
+    )
+
+    assert observed_top_k == [2]
+    assert first.invocation.input_json["top_k"] == 2
+    assert first.output["results"] == [{"chunk": "one"}, {"chunk": "two"}]
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            auth,
+            get_settings(),
+            uuid.UUID(project_id),
+            "search_project_evidence",
+            {"query": "pricing"},
+            research_sprint_id=sprint_id,
+        )
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == tool_service.WORKFLOW_BUDGET_EXHAUSTED_DETAIL
+    assert observed_top_k == [2]
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_retrieved_chunk_budget_exceeded")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["max_retrieved_chunks"] == 2
+    assert audit.event_metadata["observed_retrieved_chunks"] == 2
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
+
+
 def test_tool_proposal_rejection_resolves_approval_and_writes_audit_event(
     client: TestClient,
     db_session: Session,
