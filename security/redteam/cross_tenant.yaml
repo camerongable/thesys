@@ -1,0 +1,12 @@
+version: 1
+suite: cross_tenant
+cases:
+  - id: foreign-source-id
+    execution: integration
+    handler: tenant_scope
+    input:
+      resource: evidence_source
+      identifier_origin: another_workspace
+    expect:
+      non_enumerating_not_found: true
+      security_event: cross_tenant_access_attempt

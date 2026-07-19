@@ -1,0 +1,14 @@
+version: 1
+suite: retrieval_poisoning
+cases:
+  - id: duplicate-source-cluster
+    execution: deterministic
+    handler: source_trust
+    input:
+      source_type: url
+      metadata: {}
+      duplicate_source_count: 2
+      text: "A repeated near-duplicate source is attempting to dominate retrieval."
+    expect:
+      security_status: quarantined
+      signal: duplicate_source_content

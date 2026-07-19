@@ -1,0 +1,15 @@
+version: 1
+suite: indirect_injection
+cases:
+  - id: malicious-webpage-assistant-impersonation
+    execution: deterministic
+    handler: source_trust
+    input:
+      source_type: url
+      metadata:
+        origin: source_discovery
+        search_provider: deterministic
+      document: indirect_injection_documents/malicious_webpage.txt
+    expect:
+      security_status: quarantined
+      signal: assistant_instruction_impersonation

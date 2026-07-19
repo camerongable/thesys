@@ -1288,6 +1288,15 @@ current verdict, next action, evidence health, validation, and decision state.
 Continue Sprint 67 with the remaining loop and anomaly detection rules,
 operational metrics, dashboard, and incident-response requirements.
 
+## Sprint 68 Progress
+
+- [x] Establish the versioned red-team corpus under `security/redteam` with all
+  required attack families. Deterministic cases now execute at existing guardrail,
+  source-trust, data-protection, and output-sanitization boundaries; integration
+  cases preserve the MCP, tenant-scope, and workflow-budget contracts for their
+  next dedicated runners. Assistant-message impersonation and permanent-rule
+  memory poisoning are quarantined before retrieved content can become evidence.
+
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
 `IMPLEMENTATION_BRIEF.md` under "Post-Sprint 50 Audit and Future Upgrade

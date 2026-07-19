@@ -38,6 +38,15 @@ PROMPT_INJECTION_PATTERNS = {
         r"\b(you are now|act as|pretend to be)\s+(a\s+)?(system|developer|admin)",
         re.IGNORECASE,
     ),
+    "assistant_instruction_impersonation": re.compile(
+        r"\b(?:assistant|system|developer)\s*:\s*(?:ignore|disregard|override|bypass)\b",
+        re.IGNORECASE,
+    ),
+    "memory_policy_poisoning": re.compile(
+        r"\bpermanent\s+(?:project\s+)?rule\s*:\s*all\s+future\b.{0,120}"
+        r"\b(?:approve|reject|prefer|avoid)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
 }
 
 _POISONING_PATTERNS = {
@@ -52,6 +61,15 @@ _POISONING_PATTERNS = {
     "system_message_impersonation": re.compile(
         r"\b(system|developer|assistant)\s*(message|instruction)\s*:",
         re.IGNORECASE,
+    ),
+    "assistant_instruction_impersonation": re.compile(
+        r"\b(?:assistant|system|developer)\s*:\s*(?:ignore|disregard|override|bypass)\b",
+        re.IGNORECASE,
+    ),
+    "memory_policy_poisoning": re.compile(
+        r"\bpermanent\s+(?:project\s+)?rule\s*:\s*all\s+future\b.{0,120}"
+        r"\b(?:approve|reject|prefer|avoid)\b",
+        re.IGNORECASE | re.DOTALL,
     ),
 }
 
