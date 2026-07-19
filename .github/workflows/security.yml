@@ -125,34 +125,61 @@ jobs:
       - uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_VERSION: "8.30.1"
 
   osv-pr:
     name: OSV scan (new PR vulnerabilities)
     if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
-      actions: read
       contents: read
-      security-events: write
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
-    with:
-      scan-args: |
-        --lockfile=apps/api/uv.lock
-        --lockfile=pnpm-lock.yaml
-      fail-on-vuln: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - name: Materialize base dependency lockfiles
+        run: |
+          mkdir -p .osv-baseline/apps/api
+          git show "${{ github.event.pull_request.base.sha }}:apps/api/uv.lock" > .osv-baseline/apps/api/uv.lock
+          git show "${{ github.event.pull_request.base.sha }}:pnpm-lock.yaml" > .osv-baseline/pnpm-lock.yaml
+      - name: Scan base dependency lockfiles
+        uses: google/osv-scanner-action/osv-scanner-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        continue-on-error: true
+        with:
+          scan-args: |
+            --format=json
+            --output=.osv-baseline.json
+            --lockfile=.osv-baseline/apps/api/uv.lock
+            --lockfile=.osv-baseline/pnpm-lock.yaml
+      - name: Scan current dependency lockfiles
+        uses: google/osv-scanner-action/osv-scanner-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        continue-on-error: true
+        with:
+          scan-args: |
+            --format=json
+            --output=.osv-current.json
+            --lockfile=apps/api/uv.lock
+            --lockfile=pnpm-lock.yaml
+      - name: Fail only newly introduced OSV findings
+        run: python3 scripts/check_osv_pr_delta.py --baseline .osv-baseline.json --current .osv-current.json
 
   osv-full:
     name: OSV scan (full dependency baseline)
     if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
-      actions: read
       contents: read
-      security-events: write
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
-    with:
-      scan-args: |
-        --lockfile=apps/api/uv.lock
-        --lockfile=pnpm-lock.yaml
-      fail-on-vuln: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Scan full dependency baseline
+        uses: google/osv-scanner-action/osv-scanner-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        with:
+          scan-args: |
+            --lockfile=apps/api/uv.lock
+            --lockfile=pnpm-lock.yaml
 
   sbom:
     name: SBOM

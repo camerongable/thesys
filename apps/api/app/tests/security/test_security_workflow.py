@@ -24,11 +24,7 @@ def test_security_workflow_declares_pull_request_and_nightly_cadence() -> None:
     }
     assert workflow["permissions"] == {"contents": "read"}
     for job_name in ("osv-pr", "osv-full"):
-        assert workflow["jobs"][job_name]["permissions"] == {
-            "actions": "read",
-            "contents": "read",
-            "security-events": "write",
-        }
+        assert workflow["jobs"][job_name]["permissions"] == {"contents": "read"}
     assert workflow["jobs"]["osv-pr"]["if"] == "github.event_name == 'pull_request'"
     assert workflow["jobs"]["osv-full"]["if"] == "github.event_name != 'pull_request'"
     dependency_audit = next(
@@ -71,14 +67,19 @@ def test_security_workflow_covers_required_pull_request_gates() -> None:
         "semgrep==1.130.0",
         "pnpm security:redteam:fast",
         "gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc",
-        "google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@9a498708959aeaef5ef730655706c5a1df1edbc2",
-        "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2",
+        "GITLEAKS_VERSION: \"8.30.1\"",
+        "google/osv-scanner-action/osv-scanner-action@8dc09193bb540e09b23da07ad7e30bd33bf87018",
+        "scripts/check_osv_pr_delta.py",
         "anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610",
     ):
         assert command in content
 
     gitleaks_step = workflow["jobs"]["secrets"]["steps"][-1]
-    assert gitleaks_step["env"] == {"GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
+    assert gitleaks_step["env"] == {
+        "GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}",
+        "GITLEAKS_ENABLE_COMMENTS": "false",
+        "GITLEAKS_VERSION": "8.30.1",
+    }
 
 
 def test_security_workflow_checks_documentation_integrity() -> None:

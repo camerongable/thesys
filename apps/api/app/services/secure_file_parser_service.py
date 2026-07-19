@@ -8,9 +8,6 @@ from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
 
-from pypdf import PdfReader
-from pypdf.generic import StreamObject
-
 from app.core.config import Settings
 
 try:
@@ -89,6 +86,9 @@ def _extract_pdf_in_worker(
 ) -> None:
     try:
         _apply_memory_limit(memory_limit_mb)
+        from pypdf import PdfReader
+        from pypdf.generic import StreamObject
+
         reader = PdfReader(BytesIO(body), strict=False)
         if reader.is_encrypted:
             _send(connection, "security", "Password-protected PDFs are not allowed.")
@@ -99,6 +99,7 @@ def _extract_pdf_in_worker(
         if _exceeds_decompression_ratio(
             reader.trailer.get("/Root"),
             max_decompression_ratio=max_decompression_ratio,
+            stream_object_type=StreamObject,
         ):
             _send(
                 connection,
@@ -185,6 +186,7 @@ def _exceeds_decompression_ratio(
     value: object,
     *,
     max_decompression_ratio: float,
+    stream_object_type: type[object],
     seen: set[int] | None = None,
 ) -> bool:
     seen = seen or set()
@@ -194,7 +196,7 @@ def _exceeds_decompression_ratio(
     if value_id in seen:
         return False
     seen.add(value_id)
-    if isinstance(value, StreamObject):
+    if isinstance(value, stream_object_type):
         encoded_length = len(value._data)
         if encoded_length and len(value.get_data()) / encoded_length > max_decompression_ratio:
             return True
@@ -203,6 +205,7 @@ def _exceeds_decompression_ratio(
             _exceeds_decompression_ratio(
                 item,
                 max_decompression_ratio=max_decompression_ratio,
+                stream_object_type=stream_object_type,
                 seen=seen,
             )
             for item in value.values()
@@ -212,6 +215,7 @@ def _exceeds_decompression_ratio(
             _exceeds_decompression_ratio(
                 item,
                 max_decompression_ratio=max_decompression_ratio,
+                stream_object_type=stream_object_type,
                 seen=seen,
             )
             for item in value
