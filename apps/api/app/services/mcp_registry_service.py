@@ -13,7 +13,7 @@ from app.core.config import Settings
 from app.db.models import MCPServerRegistration
 from app.features.governance_tools import registry as tool_registry
 from app.schemas.mcp_registry import MCPServerRegistrationCreate
-from app.services import governance_service
+from app.services import governance_service, security_policy_service
 
 _FINGERPRINT_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
 
@@ -36,6 +36,12 @@ def register_server(
 ) -> MCPServerRegistration:
     """Register a reviewed server disabled until a separate enablement review."""
     require_workspace_owner(auth)
+    security_policy_service.enforce_external_mcp_allowed(
+        db,
+        auth,
+        settings,
+        operation="registration",
+    )
     base_url = _validated_server_url(str(payload.base_url), settings)
     if payload.oauth_issuer is not None:
         _validated_server_url(str(payload.oauth_issuer), settings)

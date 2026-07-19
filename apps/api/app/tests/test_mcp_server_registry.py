@@ -76,6 +76,45 @@ def test_non_owner_cannot_register_external_mcp_server(
     assert response.status_code == 403
 
 
+def test_external_mcp_kill_switch_blocks_remote_server_registration(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MCP_SERVER_ALLOWED_HOSTS", "mcp.example.test")
+    get_settings.cache_clear()
+    try:
+        update_response = client.patch(
+            "/api/security/kill-switches",
+            json={"disable_external_mcp": True},
+        )
+        response = client.post(
+            "/api/mcp/servers",
+            json={
+                "name": "Blocked connector",
+                "base_url": "https://mcp.example.test/v1",
+                "transport": "streamable_http",
+                "server_fingerprint": "e" * 64,
+                "approved_version": "1",
+                "allowed_tools": [],
+            },
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert update_response.status_code == 200
+    assert response.status_code == 403
+    assert response.json() == {"detail": "External MCP access is temporarily unavailable."}
+    assert db_session.scalar(select(MCPServerRegistration)) is None
+    denial = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "security_policy_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert denial is not None
+    assert denial.event_metadata["workflow_type"] == "external_mcp_registration"
+
+
 def test_mcp_registration_rejects_unapproved_hosts_and_tools(
     client: TestClient,
     monkeypatch,
