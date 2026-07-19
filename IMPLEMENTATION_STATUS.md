@@ -1332,6 +1332,12 @@ deployment-hardening requirements.
   SBOMs, sign and keylessly verify immutable digests, run Trivy high/critical scans, and
   upload normalized evidence plus the human-readable security report. Missing named
   SBOMs, signatures, scan success, or upstream security gates block the release report.
+- [x] Complete nightly adversarial and deployment scanning. The full Promptfoo suite
+  now executes every deterministic corpus case through its real boundary handler; nightly
+  also requires the full API security suite, a protected HTTPS Garak target scan, local
+  API/web Trivy scans, and an `infra/k8s/base` configuration scan. Garak target secrets
+  are documented for the protected CI environment; local Promptfoo execution remains
+  blocked by repeatable npm registry `ECONNRESET` failures.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

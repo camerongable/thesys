@@ -102,11 +102,66 @@ jobs:
     name: Nightly security regression suite
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           version: "0.8.14"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
       - run: uv sync --project apps/api --locked --all-extras
-      - run: uv run --project apps/api pytest app/tests/security/test_redteam_corpus.py app/tests/security/test_workflow_security_budget.py app/tests/security/test_pii_redaction_before_embedding.py
+      - name: Full red-team, tenant, PII, memory, and budget regressions
+        run: uv run --project apps/api pytest app/tests/security
+      - name: Full Promptfoo suite
+        run: pnpm security:redteam:full
+      - name: Configure Garak REST target
+        env:
+          GARAK_TARGET_URI: ${{ secrets.GARAK_TARGET_URI }}
+          GARAK_TARGET_AUTHORIZATION: ${{ secrets.GARAK_TARGET_AUTHORIZATION }}
+        run: |
+          uv run --project apps/api python scripts/write_garak_rest_config.py \
+            --target-uri "$GARAK_TARGET_URI" \
+            --authorization "$GARAK_TARGET_AUTHORIZATION" \
+            --output artifacts/garak-rest.json
+      - name: Garak application endpoint scan
+        run: |
+          uvx --from garak==0.15.1 garak \
+            --target_type rest \
+            --generator_option_file artifacts/garak-rest.json \
+            --probes promptinject,encoding \
+            --generations 1 \
+            --report_prefix artifacts/garak
+      - name: Build API image for nightly scan
+        run: docker build --file apps/api/Dockerfile --tag thesys-api:nightly-security .
+      - name: Build web image for nightly scan
+        run: docker build --file apps/web/Dockerfile --tag thesys-web:nightly-security .
+      - name: Scan API image
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          image-ref: thesys-api:nightly-security
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Scan web image
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          image-ref: thesys-web:nightly-security
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Scan Kubernetes configuration
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: config
+          scan-ref: infra/k8s/base
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true

@@ -26,6 +26,7 @@ export default class ThesysGuardrailProvider {
         input: JSON.stringify({
           prompt,
           channel: context.vars?.channel || "user_input",
+          source_case_id: context.vars?.source_case_id,
         }),
       },
     );

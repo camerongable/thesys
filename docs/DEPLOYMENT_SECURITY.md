@@ -171,6 +171,22 @@ If `pip-audit`, npm registry access, or hosted infrastructure is unavailable,
 record the exact command, error, retry condition, and next owner in
 `IMPLEMENTATION_STATUS.md`.
 
+## Release And Nightly Security Gates
+
+Version tags invoke the release gate, which publishes digest-pinned API and web
+images with provenance, CycloneDX SBOMs, keyless Cosign signatures, Trivy scan
+evidence, and a fail-closed security report. The report requires a named SBOM
+and verified digest signature for every release image.
+
+Nightly security also runs the full deterministic Promptfoo corpus, broad API
+security regressions, local API/web image scans, and a Trivy scan of
+`infra/k8s/base`. Garak probes a dedicated HTTPS scan proxy rather than a
+public production route. Configure `GARAK_TARGET_URI` and, when required,
+`GARAK_TARGET_AUTHORIZATION` as protected CI secrets; the endpoint accepts
+`{"prompt": "..."}` and returns `{"text": "..."}`. It must enforce the
+same model allowlist and egress policy as the target application and be scoped
+to the red-team environment only.
+
 ## Backup And Restore Boundaries
 
 Production-like deployments should back up:

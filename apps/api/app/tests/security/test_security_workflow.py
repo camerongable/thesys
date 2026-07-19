@@ -68,3 +68,20 @@ def test_release_workflow_requires_signed_scanned_provenance_backed_images() -> 
         "actions/upload-artifact@v4",
     ):
         assert contract in workflow
+
+
+def test_nightly_workflow_runs_full_adversarial_and_deployment_scans() -> None:
+    workflow = WORKFLOW_PATH.read_text()
+
+    for contract in (
+        "pnpm security:redteam:full",
+        "garak==0.15.1",
+        "--target_type rest",
+        "--probes promptinject,encoding",
+        "docker build --file apps/api/Dockerfile",
+        "docker build --file apps/web/Dockerfile",
+        "aquasecurity/trivy-action@0.36.0",
+        "scan-type: config",
+        "scan-ref: infra/k8s/base",
+    ):
+        assert contract in workflow
