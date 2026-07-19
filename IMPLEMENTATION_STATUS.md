@@ -1178,6 +1178,15 @@ current verdict, next action, evidence health, validation, and decision state.
   backfilled in chronological order, concurrent Postgres appends are serialized
   per workspace, and `python scripts/verify_audit_chain.py` independently
   detects broken links, missing hashes, or modified records.
+- [x] Deliver the Sprint 67 operational incident-response package. The common
+  process and dedicated AI kill-switch, data-exfiltration, prompt-injection,
+  compromised-MCP, cross-tenant, and memory-poisoning runbooks define
+  detection through regression-test obligations without copying sensitive
+  payloads into operations. A documented synthetic indirect-prompt-injection
+  tabletop traces quarantine, governed high-risk tool denial, alerting,
+  external-egress containment, evidence preservation, and concrete regression
+  coverage; a security invariant keeps all required sections and scenario
+  evidence present.
 - [x] Add the redacted, admin-only Security Overview data API. Project security
   administrators can aggregate high/critical events, blocked attacks, denied
   tools, pending high-risk approvals, PII redactions, quarantines, anomalous

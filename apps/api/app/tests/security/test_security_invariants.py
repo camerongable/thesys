@@ -89,6 +89,52 @@ def test_security_contract_documents_cover_required_boundaries_and_pr_questions(
     assert all(question in pull_request_template for question in required_questions)
 
 
+def test_incident_runbooks_and_tabletop_cover_the_sprint_67_response_contract() -> None:
+    security_dir = REPO_ROOT / "docs" / "security"
+    runbooks = {
+        "INCIDENT_RESPONSE.md",
+        "AI_KILL_SWITCH_RUNBOOK.md",
+        "DATA_EXFILTRATION_RUNBOOK.md",
+        "PROMPT_INJECTION_RUNBOOK.md",
+        "COMPROMISED_MCP_RUNBOOK.md",
+        "CROSS_TENANT_ACCESS_RUNBOOK.md",
+        "MEMORY_POISONING_RUNBOOK.md",
+    }
+    required_sections = {
+        "## Detection",
+        "## Initial Triage",
+        "## Containment",
+        "## Kill Switches",
+        "## Evidence Preservation",
+        "## Credential Rotation",
+        "## Affected-Data Analysis",
+        "## Eradication",
+        "## Recovery",
+        "## User/Customer Notification Considerations",
+        "## Postmortem",
+        "## Regression-Test Addition",
+    }
+
+    for name in runbooks:
+        contents = (security_dir / name).read_text()
+        assert required_sections <= set(
+            line.strip() for line in contents.splitlines() if line.startswith("## ")
+        )
+
+    tabletop = (security_dir / "TABLETOP_INDIRECT_PROMPT_INJECTION.md").read_text().casefold()
+    required_tabletop_evidence = {
+        "malicious external webpage",
+        "high-risk tool",
+        "policy",
+        "security alert",
+        "disable_external_egress",
+        "quarantined",
+        "regression",
+        "lessons learned",
+    }
+    assert all(item in tabletop for item in required_tabletop_evidence)
+
+
 def test_data_classification_registry_covers_sensitive_assets() -> None:
     required = {
         "user_identity",
