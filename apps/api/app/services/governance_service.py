@@ -8,7 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.auth import AuthContext, require_permission
+from app.core.auth import AuthContext, require_permission, session_correlation_id
 from app.core.redaction import redact_payload, redact_text
 from app.core.request_context import current_request_id
 from app.db.models import ApprovalRequest, AuditEvent
@@ -52,6 +52,8 @@ def record_audit_event(
     event_metadata = dict(metadata or {})
     if request_id := current_request_id():
         event_metadata.setdefault("request_id", request_id)
+    if session_id := session_correlation_id(auth):
+        event_metadata["session_id"] = session_id
     event = AuditEvent(
         id=uuid.uuid4(),
         workspace_id=auth.workspace_id,

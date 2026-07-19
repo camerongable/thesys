@@ -1055,6 +1055,11 @@ current verdict, next action, evidence health, validation, and decision state.
   and adds that ID at the shared audit boundary. Normalized security events
   inherit the same value, linking the request, immutable audit record, event,
   and alert without recording arbitrary client-provided metadata.
+- [x] Propagate session correlation without retaining bearer-linked identifiers.
+  The common audit boundary derives a stable domain-separated SHA-256 value from
+  the authenticated OIDC `sid` or JWT `jti`, and normalized security events
+  inherit that value. Raw session and token IDs are not persisted for forensic
+  correlation.
 - [x] Add actionable high-severity alerting and the first anomaly detection.
   Every high or critical security event now opens a tenant/RLS-scoped alert with
   a disposition lifecycle for later incident handling. Repeated blocked prompt

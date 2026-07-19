@@ -120,6 +120,14 @@ class AuthContext:
         return self.principal.role
 
 
+def session_correlation_id(auth: AuthContext) -> str | None:
+    """Return a stable audit correlation value without retaining a raw session identifier."""
+    identifier = auth.principal.session_id or auth.principal.token_id
+    if not identifier:
+        return None
+    return hashlib.sha256(f"thesys-session-correlation:v1:{identifier}".encode()).hexdigest()
+
+
 DbDep = Annotated[Session, Depends(get_db)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 DevUserEmailHeader = Annotated[str | None, Header()]

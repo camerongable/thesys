@@ -1,4 +1,6 @@
+import hashlib
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -126,6 +128,52 @@ def test_high_risk_audit_event_creates_redacted_normalized_security_event(
     assert resolve_response.status_code == 200
     assert resolve_response.json()["alert"]["status"] == "resolved"
     assert resolve_response.json()["alert"]["resolved_by_user_id"] == str(auth.user_id)
+
+
+@pytest.mark.parametrize(
+    ("session_id", "token_id"),
+    [
+        ("oidc-session-sensitive-value", "oidc-token-ignored-when-session-exists"),
+        (None, "jwt-token-sensitive-value"),
+    ],
+)
+def test_audit_events_use_a_hashed_authenticated_session_correlation(
+    db_session: Session,
+    session_id: str | None,
+    token_id: str | None,
+) -> None:
+    raw_identifier = session_id or token_id
+    assert raw_identifier is not None
+    auth = ensure_dev_identity(
+        db_session,
+        email="session-correlation@thesys.local",
+        display_name="Session Correlation",
+    )
+    auth = replace(
+        auth,
+        principal=replace(auth.principal, session_id=session_id, token_id=token_id),
+    )
+
+    audit = governance_service.record_audit_event(
+        db_session,
+        auth,
+        event_type="session_correlation_test",
+        actor_type="user",
+        risk_level="high",
+        summary="Recorded an authenticated security event.",
+    )
+    db_session.commit()
+
+    expected_session_id = hashlib.sha256(
+        f"thesys-session-correlation:v1:{raw_identifier}".encode()
+    ).hexdigest()
+    event = db_session.scalar(select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id))
+
+    assert audit.event_metadata["session_id"] == expected_session_id
+    assert event is not None
+    assert event.session_id == expected_session_id
+    assert raw_identifier not in str(audit.__dict__)
+    assert raw_identifier not in str(event.__dict__)
 
 
 def test_repeated_blocked_guardrail_attacks_create_one_critical_escalation_alert(

@@ -52,6 +52,9 @@ Every API response also carries an `X-Request-ID`: a client-supplied canonical
 UUID is preserved, while malformed values are replaced. The request ID is added
 to audit records produced during that request and therefore to their normalized
 security events, without accepting arbitrary client strings as audit metadata.
+When an authenticated principal has an OIDC `sid` or JWT `jti`, audit and
+security-event session correlation uses a domain-separated SHA-256 value rather
+than persisting the raw session or token identifier.
 Production also sends HSTS for one year with subdomains. If a later web-auth flow
 uses cookies, it must introduce secure/HttpOnly/SameSite cookies, short session
 lifetime, rotation, logout invalidation, and CSRF validation as one design.
