@@ -259,6 +259,12 @@ class Settings(BaseSettings):
         le=100,
         validation_alias="SECURITY_WORKFLOW_MAX_FAILED_SOURCE_FETCHES",
     )
+    security_workflow_max_rejected_memory_proposals: int = Field(
+        default=2,
+        ge=1,
+        le=100,
+        validation_alias="SECURITY_WORKFLOW_MAX_REJECTED_MEMORY_PROPOSALS",
+    )
     ai_workflow_max_tokens: int = Field(
         default=100_000,
         ge=1_000,

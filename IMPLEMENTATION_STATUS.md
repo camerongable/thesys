@@ -1057,8 +1057,8 @@ current verdict, next action, evidence health, validation, and decision state.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,
   critique-loop, repeated-identical-tool, alternating-tool-cycle,
-  repeated-retrieval-query, no-progress-retrieval, and failed-source-fetch
-  limits before durable execution.
+  repeated-retrieval-query, no-progress-retrieval, failed-source-fetch, and
+  rejected-memory-proposal limits before durable execution.
   The snapshot is visible through the sprint API, persists across
   retries/configuration changes, travels with the Temporal payload, and
   constrains its execution timeout by the configured workflow duration limit.
@@ -1145,6 +1145,11 @@ current verdict, next action, evidence health, validation, and decision state.
   retry at the immutable ceiling before network fetch, then emits a high-risk
   audit, normalized workflow security event, and alert with configured/observed
   counts.
+- [x] Detect repeated rejected memory proposals before another proposal is
+  persisted. Both governed proposal entry points lock the sprint budget and
+  count only rejected `propose_memory_update` invocations. Exhaustion safely
+  stops a new memory proposal and emits a high-risk audit, normalized workflow
+  security event, and alert with configured/observed rejection counts.
 
 ## Next Sprint
 

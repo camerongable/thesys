@@ -22,6 +22,7 @@ def test_workflow_security_budget_snapshots_all_required_dimensions() -> None:
             security_workflow_max_repeated_retrieval_queries=6,
             security_workflow_max_consecutive_empty_retrievals=7,
             security_workflow_max_failed_source_fetches=8,
+            security_workflow_max_rejected_memory_proposals=9,
         )
     )
 
@@ -41,6 +42,7 @@ def test_workflow_security_budget_snapshots_all_required_dimensions() -> None:
         "max_repeated_retrieval_queries": 6,
         "max_consecutive_empty_retrievals": 7,
         "max_failed_source_fetches": 8,
+        "max_rejected_memory_proposals": 9,
     }
 
 
@@ -65,6 +67,7 @@ def test_workflow_security_budget_snapshots_all_required_dimensions() -> None:
             "max_repeated_retrieval_queries": 1,
             "max_consecutive_empty_retrievals": 1,
             "max_failed_source_fetches": 1,
+            "max_rejected_memory_proposals": 1,
         },
         {
             "max_model_calls": True,
@@ -82,6 +85,7 @@ def test_workflow_security_budget_snapshots_all_required_dimensions() -> None:
             "max_repeated_retrieval_queries": 1,
             "max_consecutive_empty_retrievals": 1,
             "max_failed_source_fetches": 1,
+            "max_rejected_memory_proposals": 1,
         },
     ],
 )
