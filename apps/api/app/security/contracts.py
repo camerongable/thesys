@@ -153,6 +153,12 @@ DATA_TYPES: dict[str, ClassifiedDataType] = {
         ProviderPolicy.LOCAL_ONLY,
         "ToolPolicyGateway",
     ),
+    "mcp_server_credentials": ClassifiedDataType(
+        "Encrypted, per-server MCP OAuth credentials",
+        DataClassification.RESTRICTED,
+        ProviderPolicy.LOCAL_ONLY,
+        "ToolPolicyGateway",
+    ),
     "workspace_kill_switch_states": ClassifiedDataType(
         "Workspace emergency kill-switch state",
         DataClassification.CONFIDENTIAL,
@@ -350,6 +356,7 @@ RLS_DIRECT_TENANT_TABLES = frozenset(
         "problems",
         "project_intakes",
         "project_memory_items",
+        "mcp_server_credentials",
         "mcp_server_registrations",
         "project_nudges",
         "project_theses",

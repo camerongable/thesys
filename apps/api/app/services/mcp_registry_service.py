@@ -115,7 +115,7 @@ def enable_server(
 ) -> MCPServerRegistration:
     """Enable a server only after a fresh identity and manifest review succeeds."""
     require_workspace_owner(auth)
-    registration = _get_registration(db, auth, registration_id)
+    registration = get_registration(db, auth, registration_id)
     security_policy_service.enforce_external_mcp_allowed(
         db,
         auth,
@@ -186,7 +186,7 @@ def _validated_server_url(value: str, settings: Settings) -> str:
     return value.rstrip("/")
 
 
-def _get_registration(
+def get_registration(
     db: Session,
     auth: AuthContext,
     registration_id: uuid.UUID,

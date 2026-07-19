@@ -884,9 +884,16 @@ current verdict, next action, evidence health, validation, and decision state.
   disabled and records an attributable high-risk audit event. OAuth-backed and
   SSE registrations remain disabled until their scoped credential and transport
   implementations exist.
-- [ ] Implement the remaining Sprint 66 capability controls: per-server
-  credential isolation and the outbound remote-MCP invocation client, then
-  validate the live Compose policy bundle with the OPA parser/runtime.
+- [x] Add encrypted, per-server MCP credential isolation. Owner-only endpoints
+  store either short-lived user-delegated access/refresh tokens or a
+  client-credentials secret under workspace envelope encryption bound to the
+  exact registration; issuer and audience must match the reviewed server,
+  metadata never returns secret material, and audited revocation deletes the
+  credential and disables the server.
+- [ ] Implement the remaining Sprint 66 capability controls: the outbound
+  remote-MCP invocation client with token exchange/refresh and cryptographic
+  issuer/audience validation, then validate the live Compose policy bundle with
+  the OPA parser/runtime.
 
 ## Sprint 66 Verification
 
@@ -935,14 +942,19 @@ current verdict, next action, evidence health, validation, and decision state.
   warning`) across remote review, MCP registration, MCP adapter, tool-boundary,
   control-plane, API-contract, and security-invariant coverage; focused lint,
   compilation, and `git diff --check` passed.
+- [x] Encrypted MCP-credential checkpoint passed (`60 passed, 1 xfailed, 1
+  warning`) across credential storage, MCP registration/review/adapter,
+  kill-switch, envelope-encryption, and security-invariant coverage; focused
+  lint, compilation, Alembic single-head/offline SQL rendering, and `git diff
+  --check` passed.
 - [ ] The local workspace has no Docker CLI, so Compose graph validation and
   direct OPA/Rego parser validation remain part of the compose-backed
   enforcement checkpoint.
 
 ## Next Sprint
 
-Continue Sprint 66 by adding encrypted, per-server credential isolation before
-introducing outbound remote-MCP invocation.
+Continue Sprint 66 by adding the outbound remote-MCP invocation client with
+scoped token acquisition/refresh and claim validation.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

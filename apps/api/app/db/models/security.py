@@ -107,6 +107,56 @@ class MCPServerRegistration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     reviewed_by: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
 
 
+class MCPServerCredential(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Encrypted, least-privilege OAuth material for one reviewed MCP server."""
+
+    __tablename__ = "mcp_server_credentials"
+    __table_args__ = (
+        CheckConstraint(
+            "credential_type in ('oauth_user_delegated','oauth_client_credentials')",
+            name="ck_mcp_server_credentials_type",
+        ),
+        CheckConstraint(
+            "algorithm = 'AES-256-GCM'",
+            name="ck_mcp_server_credentials_algorithm",
+        ),
+        UniqueConstraint(
+            "server_registration_id",
+            name="uq_mcp_server_credentials_registration",
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    server_registration_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("mcp_server_registrations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    credential_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    issuer: Mapped[str] = mapped_column(String(2048), nullable=False)
+    audience: Mapped[str] = mapped_column(String(2048), nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    access_token_ciphertext: Mapped[str | None] = mapped_column(Text)
+    access_token_nonce: Mapped[str | None] = mapped_column(String(32))
+    access_token_key_version: Mapped[str | None] = mapped_column(String(64))
+    refresh_token_ciphertext: Mapped[str | None] = mapped_column(Text)
+    refresh_token_nonce: Mapped[str | None] = mapped_column(String(32))
+    refresh_token_key_version: Mapped[str | None] = mapped_column(String(64))
+    client_id: Mapped[str | None] = mapped_column(String(255))
+    client_secret_ciphertext: Mapped[str | None] = mapped_column(Text)
+    client_secret_nonce: Mapped[str | None] = mapped_column(String(32))
+    client_secret_key_version: Mapped[str | None] = mapped_column(String(64))
+    algorithm: Mapped[str] = mapped_column(String(20), nullable=False, default="AES-256-GCM")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
+
+
 class WorkspaceKillSwitchState(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Workspace-scoped emergency capability disables."""
 
