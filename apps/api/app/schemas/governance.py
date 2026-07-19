@@ -10,6 +10,7 @@ SecurityEventSeverity = Literal["info", "low", "medium", "high", "critical"]
 SecurityEventSource = Literal[
     "api", "guardrail", "retrieval", "tool", "memory", "workflow", "auth", "mcp"
 ]
+SecurityAlertStatus = Literal["open", "acknowledged", "resolved"]
 ApprovalRequestType = Literal[
     "research_plan",
     "memory_update",
@@ -66,6 +67,31 @@ class SecurityEventRead(BaseModel):
 
 class SecurityEventListRead(BaseModel):
     events: list[SecurityEventRead]
+
+
+class SecurityAlertRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID | None
+    security_event_id: uuid.UUID
+    severity: Literal["high", "critical"]
+    alert_type: str
+    status: SecurityAlertStatus
+    summary: str
+    acknowledged_by_user_id: uuid.UUID | None
+    acknowledged_at: datetime | None
+    resolved_by_user_id: uuid.UUID | None
+    resolved_at: datetime | None
+    created_at: datetime
+
+
+class SecurityAlertListRead(BaseModel):
+    alerts: list[SecurityAlertRead]
+
+
+class SecurityAlertActionRead(BaseModel):
+    alert: SecurityAlertRead
 
 
 class ApprovalRequestRead(BaseModel):

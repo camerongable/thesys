@@ -1,15 +1,17 @@
 """Normalized, redacted security-event persistence and query helpers."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from sqlalchemy import select
+from fastapi import HTTPException, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext, require_workspace_security_admin
+from app.core.config import Settings, get_settings
 from app.core.redaction import redact_payload, redact_text
-from app.db.models import AuditEvent, SecurityEvent
+from app.db.models import AuditEvent, SecurityAlert, SecurityEvent
 from app.services import project_service
 
 SecurityEventSeverity = Literal["info", "low", "medium", "high", "critical"]
@@ -17,8 +19,19 @@ SecurityEventSource = Literal[
     "api", "guardrail", "retrieval", "tool", "memory", "workflow", "auth", "mcp"
 ]
 
+_REPEATED_GUARDRAIL_ESCALATIONS = {
+    "prompt_injection_detected": "repeated_prompt_injection_attempts",
+    "jailbreak_detected": "repeated_jailbreak_attempts",
+    "system_prompt_extraction_attempt": "repeated_system_prompt_extraction_attempts",
+}
 
-def record_from_audit_event(db: Session, audit_event: AuditEvent) -> SecurityEvent:
+
+def record_from_audit_event(
+    db: Session,
+    audit_event: AuditEvent,
+    *,
+    settings: Settings | None = None,
+) -> SecurityEvent:
     """Project one high-risk audit record into the normalized security-event stream."""
     metadata = audit_event.event_metadata or {}
     attributes = {
@@ -50,6 +63,7 @@ def record_from_audit_event(db: Session, audit_event: AuditEvent) -> SecurityEve
         source=_source_for_audit_event(audit_event.event_type),
         summary=audit_event.summary,
         attributes=attributes,
+        settings=settings,
     )
 
 
@@ -73,6 +87,7 @@ def record_security_event(
     summary: str,
     attributes: dict[str, Any] | None = None,
     containment_status: str | None = None,
+    settings: Settings | None = None,
 ) -> SecurityEvent:
     """Persist bounded correlation data without retaining sensitive security payloads."""
     event = SecurityEvent(
@@ -97,6 +112,8 @@ def record_security_event(
     )
     db.add(event)
     db.flush()
+    _open_alert_for_high_severity_event(db, event)
+    _detect_repeated_guardrail_attack(db, event, settings or get_settings())
     return event
 
 
@@ -119,6 +136,189 @@ def list_project_security_events(
             .order_by(SecurityEvent.detected_at.desc())
             .limit(min(limit, 100))
         )
+    )
+
+
+def list_project_security_alerts(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    *,
+    limit: int = 50,
+) -> list[SecurityAlert]:
+    require_workspace_security_admin(auth)
+    project_service.get_project(db, auth, project_id)
+    return list(
+        db.scalars(
+            select(SecurityAlert)
+            .where(
+                SecurityAlert.workspace_id == auth.workspace_id,
+                SecurityAlert.project_id == project_id,
+            )
+            .order_by(SecurityAlert.created_at.desc())
+            .limit(min(limit, 100))
+        )
+    )
+
+
+def acknowledge_project_security_alert(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    alert_id: uuid.UUID,
+) -> SecurityAlert:
+    alert = _get_project_security_alert(db, auth, project_id, alert_id)
+    if alert.status != "open":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Alert is not open.")
+    alert.status = "acknowledged"
+    alert.acknowledged_by_user_id = auth.user_id
+    alert.acknowledged_at = datetime.now(UTC)
+    db.flush()
+    _record_alert_disposition_audit(db, auth, alert, event_type="security_alert_acknowledged")
+    return alert
+
+
+def resolve_project_security_alert(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    alert_id: uuid.UUID,
+) -> SecurityAlert:
+    alert = _get_project_security_alert(db, auth, project_id, alert_id)
+    if alert.status not in {"open", "acknowledged"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Alert is already resolved.",
+        )
+    alert.status = "resolved"
+    alert.resolved_by_user_id = auth.user_id
+    alert.resolved_at = datetime.now(UTC)
+    db.flush()
+    _record_alert_disposition_audit(db, auth, alert, event_type="security_alert_resolved")
+    return alert
+
+
+def _open_alert_for_high_severity_event(db: Session, event: SecurityEvent) -> None:
+    if event.severity not in {"high", "critical"}:
+        return
+    db.add(
+        SecurityAlert(
+            workspace_id=event.workspace_id,
+            project_id=event.project_id,
+            security_event_id=event.id,
+            severity=event.severity,
+            alert_type=event.event_type,
+            summary=event.summary,
+        )
+    )
+    db.flush()
+
+
+def _get_project_security_alert(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    alert_id: uuid.UUID,
+) -> SecurityAlert:
+    require_workspace_security_admin(auth)
+    project_service.get_project(db, auth, project_id)
+    alert = db.scalar(
+        select(SecurityAlert).where(
+            SecurityAlert.id == alert_id,
+            SecurityAlert.workspace_id == auth.workspace_id,
+            SecurityAlert.project_id == project_id,
+        )
+    )
+    if alert is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Security alert not found.",
+        )
+    return alert
+
+
+def _record_alert_disposition_audit(
+    db: Session,
+    auth: AuthContext,
+    alert: SecurityAlert,
+    *,
+    event_type: str,
+) -> None:
+    from app.services import governance_service
+
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type=event_type,
+        actor_type="user",
+        project_id=alert.project_id,
+        entity_type="security_alert",
+        entity_id=alert.id,
+        risk_level="medium",
+        summary=f"Security alert {alert.alert_type} was {alert.status}.",
+        metadata={"alert_type": alert.alert_type, "severity": alert.severity},
+    )
+
+
+def _detect_repeated_guardrail_attack(
+    db: Session,
+    event: SecurityEvent,
+    settings: Settings,
+) -> None:
+    escalation_type = _REPEATED_GUARDRAIL_ESCALATIONS.get(event.event_type)
+    if escalation_type is None or event.source != "guardrail" or event.severity != "high":
+        return
+
+    window_start = event.detected_at - timedelta(
+        seconds=settings.security_alert_detection_window_seconds
+    )
+    matching_events = [
+        SecurityEvent.workspace_id == event.workspace_id,
+        SecurityEvent.event_type == event.event_type,
+        SecurityEvent.source == "guardrail",
+        SecurityEvent.severity == "high",
+        SecurityEvent.detected_at >= window_start,
+        SecurityEvent.detected_at <= event.detected_at,
+    ]
+    if event.user_id is not None:
+        matching_events.append(SecurityEvent.user_id == event.user_id)
+
+    observed_count = db.scalar(
+        select(func.count()).select_from(SecurityEvent).where(*matching_events)
+    )
+    if observed_count is None or observed_count < settings.security_repeated_guardrail_threshold:
+        return
+
+    escalation_filters = [
+        SecurityEvent.workspace_id == event.workspace_id,
+        SecurityEvent.event_type == escalation_type,
+        SecurityEvent.detected_at >= window_start,
+    ]
+    if event.user_id is not None:
+        escalation_filters.append(SecurityEvent.user_id == event.user_id)
+    if db.scalar(select(SecurityEvent.id).where(*escalation_filters).limit(1)) is not None:
+        return
+
+    record_security_event(
+        db,
+        workspace_id=event.workspace_id,
+        project_id=event.project_id,
+        user_id=event.user_id,
+        session_id=event.session_id,
+        request_id=event.request_id,
+        langsmith_trace_id=event.langsmith_trace_id,
+        temporal_workflow_id=event.temporal_workflow_id,
+        event_type=escalation_type,
+        severity="critical",
+        source="guardrail",
+        summary="Repeated blocked guardrail attacks exceeded the configured threshold.",
+        attributes={
+            "trigger_event_type": event.event_type,
+            "observed_count": observed_count,
+            "window_seconds": settings.security_alert_detection_window_seconds,
+        },
+        containment_status="alert_open",
+        settings=settings,
     )
 
 

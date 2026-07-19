@@ -288,3 +288,54 @@ class SecurityEvent(UUIDPrimaryKeyMixin, Base):
         index=True,
     )
     containment_status: Mapped[str | None] = mapped_column(String(80), index=True)
+
+
+class SecurityAlert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Actionable high-severity security event requiring operator disposition."""
+
+    __tablename__ = "security_alerts"
+    __table_args__ = (
+        CheckConstraint(
+            "severity in ('high','critical')",
+            name="ck_security_alerts_severity",
+        ),
+        CheckConstraint(
+            "status in ('open','acknowledged','resolved')",
+            name="ck_security_alerts_status",
+        ),
+        UniqueConstraint("security_event_id", name="uq_security_alerts_security_event"),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        index=True,
+    )
+    security_event_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("security_events.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    alert_type: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open", index=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    acknowledged_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

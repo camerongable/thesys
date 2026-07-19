@@ -1046,11 +1046,18 @@ current verdict, next action, evidence health, validation, and decision state.
   tool, and MCP high-risk paths become queryable by workspace owners and admins
   through the governed project endpoint. Retention now purges the correct event
   type with the worker's narrowly scoped delete grant.
+- [x] Add actionable high-severity alerting and the first anomaly detection.
+  Every high or critical security event now opens a tenant/RLS-scoped alert with
+  a disposition lifecycle for later incident handling. Repeated blocked prompt
+  injection, jailbreak, or system-prompt extraction attempts from the same
+  actor within a configured window produce one critical, attributable escalation
+  event and alert. Workspace owners and admins can query the redacted alert
+  queue per project.
 
 ## Next Sprint
 
-Continue Sprint 67 by adding detection rules and alert escalation for the
-normalized security-event stream.
+Continue Sprint 67 by adding resource-budget enforcement, loop detection, and
+the remaining detection rules to the normalized security-event stream.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

@@ -169,6 +169,18 @@ class Settings(BaseSettings):
         default="deterministic",
         validation_alias="GUARDRAIL_ATTACK_DETECTOR",
     )
+    security_alert_detection_window_seconds: int = Field(
+        default=900,
+        ge=60,
+        le=86_400,
+        validation_alias="SECURITY_ALERT_DETECTION_WINDOW_SECONDS",
+    )
+    security_repeated_guardrail_threshold: int = Field(
+        default=3,
+        ge=2,
+        le=100,
+        validation_alias="SECURITY_REPEATED_GUARDRAIL_THRESHOLD",
+    )
     ai_workflow_max_tokens: int = Field(
         default=100_000,
         ge=1_000,

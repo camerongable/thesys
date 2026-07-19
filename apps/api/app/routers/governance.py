@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext, AuthContextDep, SettingsDep
-from app.db.models import ApprovalRequest, AuditEvent, SecurityEvent
+from app.db.models import ApprovalRequest, AuditEvent, SecurityAlert, SecurityEvent
 from app.db.session import get_db
 from app.schemas.governance import (
     ApprovalRequestActionRead,
@@ -15,6 +15,9 @@ from app.schemas.governance import (
     ApprovalRequestStatus,
     AuditEventListRead,
     AuditEventRead,
+    SecurityAlertActionRead,
+    SecurityAlertListRead,
+    SecurityAlertRead,
     SecurityEventListRead,
     SecurityEventRead,
 )
@@ -36,6 +39,10 @@ def serialize_audit_event(event: AuditEvent) -> AuditEventRead:
 
 def serialize_security_event(event: SecurityEvent) -> SecurityEventRead:
     return SecurityEventRead.model_validate(event)
+
+
+def serialize_security_alert(alert: SecurityAlert) -> SecurityAlertRead:
+    return SecurityAlertRead.model_validate(alert)
 
 
 @router.get("/approvals", response_model=ApprovalRequestListRead)
@@ -124,6 +131,50 @@ def list_project_security_events(
 
     events = security_event_service.list_project_security_events(db, auth, project_id, limit=limit)
     return SecurityEventListRead(events=[serialize_security_event(event) for event in events])
+
+
+@router.get("/security-alerts", response_model=SecurityAlertListRead)
+def list_project_security_alerts(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    limit: LimitQuery = 50,
+) -> SecurityAlertListRead:
+    from app.services import security_event_service
+
+    alerts = security_event_service.list_project_security_alerts(db, auth, project_id, limit=limit)
+    return SecurityAlertListRead(alerts=[serialize_security_alert(alert) for alert in alerts])
+
+
+@router.post("/security-alerts/{alert_id}/acknowledge", response_model=SecurityAlertActionRead)
+def acknowledge_project_security_alert(
+    project_id: uuid.UUID,
+    alert_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> SecurityAlertActionRead:
+    from app.services import security_event_service
+
+    alert = security_event_service.acknowledge_project_security_alert(
+        db,
+        auth,
+        project_id,
+        alert_id,
+    )
+    return SecurityAlertActionRead(alert=serialize_security_alert(alert))
+
+
+@router.post("/security-alerts/{alert_id}/resolve", response_model=SecurityAlertActionRead)
+def resolve_project_security_alert(
+    project_id: uuid.UUID,
+    alert_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+) -> SecurityAlertActionRead:
+    from app.services import security_event_service
+
+    alert = security_event_service.resolve_project_security_alert(db, auth, project_id, alert_id)
+    return SecurityAlertActionRead(alert=serialize_security_alert(alert))
 
 
 def _get_project_approval(
