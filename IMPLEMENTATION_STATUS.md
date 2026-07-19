@@ -952,9 +952,16 @@ current verdict, next action, evidence health, validation, and decision state.
   sends the key in MCP metadata, validates/redacts output, and records
   before/after audits. Ambiguous failures become terminal and cannot be
   approved or automatically dispatched again.
-- [ ] Implement the remaining Sprint 66 capability controls: implement SSE
-  transport, then validate the live Compose policy bundle with the OPA
-  parser/runtime.
+- [x] Add the reviewed legacy HTTP+SSE MCP transport. A registration-scoped
+  authenticated SSE session must first receive an `endpoint` event; the
+  advertised POST URL is constrained to the registered HTTPS origin before any
+  credential can be sent. Each MCP JSON-RPC request then receives an exact,
+  bounded SSE `message` response, while notifications are harmlessly ignored.
+  The existing TLS pinning, fresh `initialize`/`tools/list` review, approved
+  schema checks, idempotency metadata, output validation, and fail-closed error
+  behavior apply unchanged.
+- [ ] Implement the remaining Sprint 66 capability control: validate the live
+  Compose policy bundle with the OPA parser/runtime.
 
 ## Sprint 66 Verification
 
@@ -1026,7 +1033,8 @@ current verdict, next action, evidence health, validation, and decision state.
 
 ## Next Sprint
 
-Continue Sprint 66 by implementing the reviewed SSE remote-MCP transport.
+Continue Sprint 66 by validating the live Compose OPA policy bundle with the
+OPA parser/runtime.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
