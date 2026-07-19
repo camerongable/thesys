@@ -1,11 +1,14 @@
 import uuid
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.db.models import ApprovalRequest, Assumption, AuditEvent, ToolInvocation
+from app.features.policy.opa import OpaPolicyDecision, OpaPolicyUnavailableError
 from app.services import tool_service
 from app.services.evidence_service import ParsedSource
 from app.services.identity_service import ensure_dev_identity
@@ -262,6 +265,192 @@ def test_agentic_research_tools_audit_reads_and_gate_memory_updates(
         in {"propose_memory_update", "propose_validation_plan", "propose_decision"}
     ]
     assert {item["status"] for item in approved_proposals} == {"approved"}
+
+
+def test_opa_denial_prevents_tool_execution_and_audits_policy_result(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    decision = OpaPolicyDecision(
+        allow=False,
+        requires_approval=True,
+        reason="Tool access denied by test policy.",
+        allowed_scopes=(),
+        max_records=0,
+    )
+
+    class DenyingOpaClient:
+        def __init__(self, _settings: Settings) -> None:
+            pass
+
+        def evaluate(
+            self,
+            _policy_name: str,
+            _policy_input: dict[str, object],
+        ) -> OpaPolicyDecision:
+            return decision
+
+    monkeypatch.setattr(tool_service, "OpaPolicyClient", DenyingOpaClient)
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            _dev_auth(db_session),
+            Settings(opa_policy_enforcement_enabled=True),
+            project_id,
+            "get_project_summary",
+        )
+
+    assert exc_info.value.status_code == 403
+    assert db_session.scalar(select(ToolInvocation)) is None
+    denial = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "tool_invocation_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert denial is not None
+    assert denial.event_metadata["reason"] == "opa_policy_denied"
+    assert denial.event_metadata["policy_decision"]["allow"] is False
+
+
+def test_opa_unavailable_prevents_proposal_creation(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+
+    class UnavailableOpaClient:
+        def __init__(self, _settings: Settings) -> None:
+            pass
+
+        def evaluate(
+            self,
+            _policy_name: str,
+            _policy_input: dict[str, object],
+        ) -> OpaPolicyDecision:
+            raise OpaPolicyUnavailableError("OPA offline")
+
+    monkeypatch.setattr(tool_service, "OpaPolicyClient", UnavailableOpaClient)
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.create_proposal(
+            db_session,
+            _dev_auth(db_session),
+            project_id,
+            "propose_memory_update",
+            {"summary": "Propose a memory update."},
+            settings=Settings(opa_policy_enforcement_enabled=True),
+        )
+
+    assert exc_info.value.status_code == 503
+    assert db_session.scalar(select(ToolInvocation)) is None
+    denial = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "tool_invocation_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert denial is not None
+    assert denial.event_metadata["reason"] == "opa_policy_unavailable"
+
+
+def test_opa_allow_records_typed_decision_with_tool_invocation(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    captured_input: dict[str, object] = {}
+    decision = OpaPolicyDecision(
+        allow=True,
+        requires_approval=False,
+        reason="Read access allowed by test policy.",
+        allowed_scopes=("project",),
+        max_records=25,
+    )
+
+    class AllowingOpaClient:
+        def __init__(self, _settings: Settings) -> None:
+            pass
+
+        def evaluate(self, policy_name: str, policy_input: dict[str, object]) -> OpaPolicyDecision:
+            captured_input["policy_name"] = policy_name
+            captured_input.update(policy_input)
+            return decision
+
+    monkeypatch.setattr(tool_service, "OpaPolicyClient", AllowingOpaClient)
+    auth = _dev_auth(db_session)
+    result = tool_service.execute_tool(
+        db_session,
+        auth,
+        Settings(opa_policy_enforcement_enabled=True),
+        project_id,
+        "get_project_summary",
+    )
+
+    audit = db_session.scalar(
+        select(AuditEvent).where(AuditEvent.entity_id == result.invocation.id)
+    )
+    assert audit is not None
+    assert audit.event_metadata["policy_decision"] == {
+        "allow": True,
+        "requires_approval": False,
+        "reason": "Read access allowed by test policy.",
+        "allowed_scopes": ["project"],
+        "max_records": 25,
+    }
+    assert captured_input["policy_name"] == "tool_access"
+    assert captured_input["principal"]["workspace_id"] == str(auth.workspace_id)
+    assert captured_input["project"]["id"] == str(project_id)
+    assert captured_input["tool"]["name"] == "get_project_summary"
+
+
+def test_opa_approval_requirement_blocks_unapproved_tool_execution(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    decision = OpaPolicyDecision(
+        allow=True,
+        requires_approval=True,
+        reason="Approval required by test policy.",
+        allowed_scopes=("project",),
+        max_records=25,
+    )
+
+    class ApprovalRequiredOpaClient:
+        def __init__(self, _settings: Settings) -> None:
+            pass
+
+        def evaluate(
+            self,
+            _policy_name: str,
+            _policy_input: dict[str, object],
+        ) -> OpaPolicyDecision:
+            return decision
+
+    monkeypatch.setattr(tool_service, "OpaPolicyClient", ApprovalRequiredOpaClient)
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            _dev_auth(db_session),
+            Settings(opa_policy_enforcement_enabled=True),
+            project_id,
+            "get_project_summary",
+        )
+
+    assert exc_info.value.status_code == 403
+    denial = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "tool_invocation_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert denial is not None
+    assert denial.event_metadata["reason"] == "opa_approval_required"
 
 
 def _create_project(client: TestClient) -> str:

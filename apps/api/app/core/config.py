@@ -650,6 +650,10 @@ class Settings(BaseSettings):
         le=30.0,
         validation_alias="OPA_POLICY_TIMEOUT_SECONDS",
     )
+    opa_policy_enforcement_enabled: bool = Field(
+        default=False,
+        validation_alias="OPA_POLICY_ENFORCEMENT_ENABLED",
+    )
     security_rate_limit_enabled: bool = Field(
         default=True,
         validation_alias="SECURITY_RATE_LIMIT_ENABLED",

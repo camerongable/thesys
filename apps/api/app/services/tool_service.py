@@ -16,7 +16,7 @@ from app.core.auth import (
     record_cross_tenant_access_attempt,
     require_permission,
 )
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.redaction import redact_payload, redact_text
 from app.db.models import (
     Artifact,
@@ -34,6 +34,14 @@ from app.db.models import (
 from app.features.governance_tools import audit as tool_audit
 from app.features.governance_tools import registry as tool_registry
 from app.features.governance_tools import schema_guard
+from app.features.policy.opa import (
+    OpaPolicyClient,
+    OpaPolicyDecision,
+    OpaPolicyUnavailableError,
+    opa_policy_enforced,
+    require_opa_decision,
+    unavailable_opa_policy_denial,
+)
 from app.schemas.evidence import EvidenceRetrieveCreate
 from app.services import (
     evidence_service,
@@ -89,7 +97,7 @@ def execute_tool(
 ) -> ToolExecutionResult:
     """Execute a read/write tool after schema, role, scope, and output guards."""
     definition = _definition(tool_name)
-    project_service.get_project(db, auth, project_id)
+    project = project_service.get_project(db, auth, project_id)
     _authorize_tool_invocation(db, auth, project_id, definition)
     try:
         guarded_input = _guard_tool_input(
@@ -102,6 +110,15 @@ def execute_tool(
         _audit_tool_denial(db, auth, project_id, definition, exc.reason, detail=exc.detail)
         db.commit()
         raise HTTPException(status_code=422, detail=exc.detail) from exc
+    policy_decision = _authorize_opa_tool_invocation(
+        db,
+        auth,
+        settings,
+        project,
+        definition,
+        requested_by=requested_by,
+        research_sprint_id=research_sprint_id,
+    )
     clean_input = redact_payload(guarded_input, redact_emails=True)
     invocation = ToolInvocation(
         workspace_id=auth.workspace_id,
@@ -130,6 +147,7 @@ def execute_tool(
         metadata=_tool_invocation_requested_metadata(
             definition,
             include_approval_policy=True,
+            policy_decision=_opa_decision_metadata(policy_decision),
         ),
     )
     try:
@@ -205,12 +223,13 @@ def create_proposal(
     research_sprint_id: uuid.UUID | None = None,
     requested_by: RequestedBy = "agent",
     input_json: dict[str, Any] | None = None,
+    settings: Settings | None = None,
 ) -> ToolInvocation:
     """Create an approval-gated proposal tool invocation without mutating state."""
     definition = _definition(tool_name)
     if definition.access_mode != "proposal":
         raise ValueError(f"{tool_name} is not a proposal tool.")
-    project_service.get_project(db, auth, project_id)
+    project = project_service.get_project(db, auth, project_id)
     _authorize_tool_invocation(db, auth, project_id, definition)
     try:
         guarded_proposal = _guard_proposal_payload(
@@ -224,6 +243,15 @@ def create_proposal(
         _audit_tool_denial(db, auth, project_id, definition, exc.reason, detail=exc.detail)
         db.commit()
         raise HTTPException(status_code=422, detail=exc.detail) from exc
+    policy_decision = _authorize_opa_tool_invocation(
+        db,
+        auth,
+        settings or get_settings(),
+        project,
+        definition,
+        requested_by=requested_by,
+        research_sprint_id=research_sprint_id,
+    )
     invocation = ToolInvocation(
         workspace_id=auth.workspace_id,
         project_id=project_id,
@@ -255,6 +283,7 @@ def create_proposal(
         metadata=_tool_invocation_requested_metadata(
             definition,
             include_approval_policy=False,
+            policy_decision=_opa_decision_metadata(policy_decision),
         ),
     )
     _create_tool_approval_request(
@@ -858,6 +887,88 @@ def _authorize_tool_invocation(
         raise
 
 
+def _authorize_opa_tool_invocation(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project: Any,
+    definition: ToolDefinition,
+    *,
+    requested_by: RequestedBy,
+    research_sprint_id: uuid.UUID | None,
+) -> OpaPolicyDecision | None:
+    """Evaluate tool policy after deterministic scope and schema guards pass."""
+    if not opa_policy_enforced(settings):
+        return None
+
+    policy_input = {
+        "principal": {
+            "user_id": str(auth.user_id),
+            "workspace_id": str(auth.workspace_id),
+            "role": normalized_role(auth.role),
+            "authentication_method": auth.principal.authentication_method,
+        },
+        "project": {
+            "id": str(project.id),
+            "workspace_id": str(project.workspace_id),
+        },
+        "tool": {
+            "name": definition.name,
+            "access_mode": definition.access_mode,
+            "risk_level": definition.risk_level,
+            "approval_policy": definition.approval_policy,
+        },
+        "request": {
+            "requested_by": requested_by,
+            "research_sprint_id": (
+                str(research_sprint_id) if research_sprint_id is not None else None
+            ),
+        },
+    }
+    try:
+        decision = OpaPolicyClient(settings).evaluate("tool_access", policy_input)
+    except OpaPolicyUnavailableError as exc:
+        denial = unavailable_opa_policy_denial(exc)
+        _audit_tool_denial(
+            db,
+            auth,
+            project.id,
+            definition,
+            "opa_policy_unavailable",
+            detail=denial.detail,
+        )
+        db.commit()
+        raise denial from exc
+    try:
+        approved_decision = require_opa_decision(decision)
+    except HTTPException as exc:
+        _audit_tool_denial(
+            db,
+            auth,
+            project.id,
+            definition,
+            "opa_policy_denied",
+            detail=str(exc.detail),
+            policy_decision=_opa_decision_metadata(decision),
+        )
+        db.commit()
+        raise
+    if approved_decision.requires_approval and definition.access_mode != "proposal":
+        detail = "Policy requires approval before this tool can execute."
+        _audit_tool_denial(
+            db,
+            auth,
+            project.id,
+            definition,
+            "opa_approval_required",
+            detail=detail,
+            policy_decision=_opa_decision_metadata(approved_decision),
+        )
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+    return approved_decision
+
+
 def _audit_tool_denial(
     db: Session,
     auth: AuthContext,
@@ -866,6 +977,7 @@ def _audit_tool_denial(
     reason: str,
     *,
     detail: str | None = None,
+    policy_decision: dict[str, Any] | None = None,
 ) -> None:
     governance_service.record_audit_event(
         db,
@@ -882,8 +994,21 @@ def _audit_tool_denial(
             role=normalized_role(auth.role),
             reason=reason,
             detail=detail,
+            policy_decision=policy_decision,
         ),
     )
+
+
+def _opa_decision_metadata(decision: OpaPolicyDecision | None) -> dict[str, Any] | None:
+    if decision is None:
+        return None
+    return {
+        "allow": decision.allow,
+        "requires_approval": decision.requires_approval,
+        "reason": decision.reason,
+        "allowed_scopes": list(decision.allowed_scopes),
+        "max_records": decision.max_records,
+    }
 
 
 def _create_tool_approval_request(

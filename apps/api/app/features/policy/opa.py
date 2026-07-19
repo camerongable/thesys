@@ -73,6 +73,14 @@ def unavailable_opa_policy_denial(_exc: OpaPolicyUnavailableError) -> HTTPExcept
     )
 
 
+def opa_policy_enforced(settings: Settings) -> bool:
+    """Keep local unit tests isolated while requiring OPA in deployed environments."""
+    return settings.opa_policy_enforcement_enabled or settings.environment.lower() in {
+        "staging",
+        "production",
+    }
+
+
 def _parse_decision(payload: object) -> OpaPolicyDecision:
     if not isinstance(payload, dict) or not isinstance(payload.get("result"), dict):
         raise OpaPolicyUnavailableError("OPA returned no policy decision.")

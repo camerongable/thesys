@@ -7,6 +7,7 @@ def invocation_requested_metadata(
     definition: Any,
     *,
     include_approval_policy: bool,
+    policy_decision: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Shape metadata for a tool-invocation request audit event."""
 
@@ -16,6 +17,8 @@ def invocation_requested_metadata(
     }
     if include_approval_policy:
         metadata["approval_policy"] = definition.approval_policy
+    if policy_decision is not None:
+        metadata["policy_decision"] = policy_decision
     return metadata
 
 
@@ -33,8 +36,9 @@ def denial_metadata(
     role: str,
     reason: str,
     detail: str | None,
+    policy_decision: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    metadata = {
         "tool_name": definition.name,
         "access_mode": definition.access_mode,
         "approval_policy": definition.approval_policy,
@@ -42,6 +46,9 @@ def denial_metadata(
         "reason": reason,
         "detail": detail,
     }
+    if policy_decision is not None:
+        metadata["policy_decision"] = policy_decision
+    return metadata
 
 
 def approval_summary(definition: Any, output_summary: str | None) -> str:

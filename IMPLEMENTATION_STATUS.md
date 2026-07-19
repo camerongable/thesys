@@ -816,22 +816,31 @@ current verdict, next action, evidence health, validation, and decision state.
   approval, and egress policy packages; local compose runs the OPA sidecar. A
   typed HTTP evaluator validates every response shape and maps unavailable or
   malformed policy decisions to a fail-closed privileged-operation denial.
-  Tool and memory mutation paths still need to invoke this boundary in the
-  following Sprint 66 slices.
+- [x] Route governed tool execution and persisted proposal creation through the
+  OPA `tool_access` decision after tenant, role, and schema validation and
+  before a `ToolInvocation` is stored. Denials and accepted decisions are
+  audited with the typed policy result; unavailable OPA and unimplemented
+  approval-required execution paths deny before side effects. MCP proposal
+  calls pass their request settings through the same boundary. Local Compose
+  enables the boundary by default, while staging and production enforce it even
+  without the local switch.
+- [ ] Route durable memory mutations and the remaining privileged action
+  surfaces through their OPA decisions, then validate the live Compose policy
+  bundle with the OPA parser/runtime.
 
 ## Sprint 66 Verification
 
-- [x] OPA policy-client, tool-boundary, and memory-service checkpoint passed
-  (`34 passed, 1 warning`); changed-file lint, compile checks, Compose graph
-  validation, and `git diff --check` passed. The OPA container image was not
-  available locally, so direct Rego parser validation remains part of the
-  compose-backed enforcement checkpoint.
+- [x] OPA policy-client, tool-boundary, and security-governance checkpoint
+  passed (`61 passed, 1 xfailed, 4 warnings`); changed-file lint, compile
+  checks, and `git diff --check` passed.
+- [ ] The local workspace has no Docker CLI, so Compose graph validation and
+  direct OPA/Rego parser validation remain part of the compose-backed
+  enforcement checkpoint.
 
 ## Next Sprint
 
-Continue Sprint 66 by routing governed tool execution through the OPA
-tool-access decision and denying privileged execution when the sidecar is
-unavailable.
+Continue Sprint 66 by routing durable memory mutations through the OPA
+memory-write decision and denying writes when the sidecar is unavailable.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

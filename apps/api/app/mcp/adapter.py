@@ -148,6 +148,7 @@ def call_tool(
             arguments,
             requested_by="agent",
             input_json={"mcp": {"client_id": client_id, "adapter_version": ADAPTER_VERSION}},
+            settings=settings,
         )
         duration_ms = int((perf_counter() - started) * 1000)
         _attach_mcp_metadata(db, auth, project_id, invocation, client_id, duration_ms)
