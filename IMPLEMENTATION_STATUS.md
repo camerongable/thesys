@@ -960,8 +960,11 @@ current verdict, next action, evidence health, validation, and decision state.
   The existing TLS pinning, fresh `initialize`/`tools/list` review, approved
   schema checks, idempotency metadata, output validation, and fail-closed error
   behavior apply unchanged.
-- [ ] Implement the remaining Sprint 66 capability control: validate the live
-  Compose policy bundle with the OPA parser/runtime.
+- [x] Validate the mounted OPA policy bundle with the Compose-pinned OPA 0.67.0
+  runtime. Strict Rego parsing and bundle construction pass, and a local
+  `opa run --server` instance returns the complete typed allow and default-deny
+  decisions for all six mounted packages. This found and removed an unmatched
+  brace that would otherwise have prevented the policy sidecar from starting.
 
 ## Sprint 66 Verification
 
@@ -1027,14 +1030,16 @@ current verdict, next action, evidence health, validation, and decision state.
   tool-boundary, MCP-adapter, security-governance, remote-review, and
   registration coverage; changed-file lint/format, Alembic single-head/offline
   SQL rendering, and `git diff --check` passed.
-- [ ] The local workspace has no Docker CLI, so Compose graph validation and
-  direct OPA/Rego parser validation remain part of the compose-backed
-  enforcement checkpoint.
+- [x] Compose-pinned OPA 0.67.0 parser/runtime checkpoint passed: strict Rego
+  parsing, bundle construction, and REST decision evaluation for allow and
+  default-deny paths across all six mounted policy packages passed. The local
+  workspace still has no Docker CLI, so full Compose graph rendering remains a
+  deployment-environment verification item.
 
 ## Next Sprint
 
-Continue Sprint 66 by validating the live Compose OPA policy bundle with the
-OPA parser/runtime.
+Continue Sprint 67 by completing the normalized security-event model and its
+first shared emitters.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

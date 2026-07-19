@@ -65,4 +65,3 @@ lifecycle_operation {
 lifecycle_operation {
     input.memory.operation == "resolve_conflict"
 }
-}
