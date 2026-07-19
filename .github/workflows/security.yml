@@ -238,7 +238,7 @@ jobs:
       - name: Build web image for nightly scan
         run: docker build --file apps/web/Dockerfile --tag thesys-web:nightly-security .
       - name: Scan API image
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: thesys-api:nightly-security
           format: table
@@ -246,7 +246,7 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
       - name: Scan web image
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: thesys-web:nightly-security
           format: table
@@ -254,7 +254,7 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
       - name: Scan Kubernetes configuration
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: infra/k8s/base
