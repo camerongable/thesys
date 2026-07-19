@@ -15,6 +15,7 @@ from app.db.models import (
     DecisionLink,
     EvidenceChunk,
     EvidenceSource,
+    EvidenceSourceTombstone,
     ProjectMemoryItem,
 )
 
@@ -122,6 +123,16 @@ def test_source_deletion_removes_retrieval_and_invalidates_derivatives(
     assert (
         db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == source_id)) is None
     )
+    tombstone = db_session.scalar(
+        select(EvidenceSourceTombstone).where(EvidenceSourceTombstone.source_id == source_id)
+    )
+    assert tombstone is not None
+    assert tombstone.workspace_id == source.workspace_id
+    assert tombstone.project_id == source.project_id
+    assert tombstone.source_type == "note"
+    assert tombstone.deletion_reason == "user_deleted"
+    assert tombstone.deletion_metadata["deletion_impact"]["chunks_deleted"] == 1
+    assert tombstone.deletion_metadata["source_trust_status"] == "approved"
     assert (
         db_session.scalar(select(ClaimEvidenceLink).where(ClaimEvidenceLink.claim_id == claim.id))
         is None
@@ -169,4 +180,5 @@ def test_source_deletion_removes_retrieval_and_invalidates_derivatives(
         "memory_items_staled": 2,
         "object_deleted": False,
         "retrieval_revoked": True,
+        "tombstone_id": str(tombstone.id),
     }

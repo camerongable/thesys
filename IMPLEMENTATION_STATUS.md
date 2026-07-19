@@ -581,6 +581,10 @@ current verdict, next action, evidence health, validation, and decision state.
   A deleted source removes its retrieval chunks, invalidates dependent memory,
   records `requires_reverification`, and includes every stale memory item in
   the attributed deletion-propagation audit event.
+- [x] Preserve a tenant-scoped non-content tombstone whenever evidence is
+  deleted. It records the original source ID/type, content hash, security and
+  trust state, deletion actor/time, and derivative impact while source text,
+  previews, object keys, and chunks remain deleted and non-retrievable.
 - [x] Enforce an eight-hour maximum TTL for working memory, persist the canonical
   expiry in secure-memory provenance, and normalize timestamp comparisons at
   the recall boundary. Expired memory cannot enter workflow context and remains
@@ -779,6 +783,10 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Embedded-media poisoning checkpoint passed (`80 passed, 2 warnings`)
   across source-trust, image-upload, evidence-ingestion, and feature-boundary
   coverage; changed-file compile checks and repository application lint passed.
+- [x] Source-deletion tombstone checkpoint passed (`93 passed, 1 xfailed, 1
+  warning`) across deletion propagation, security invariants, evidence, and
+  feature-boundary coverage; changed-file compile checks and repository
+  application lint passed.
 
 ## Next Sprint
 

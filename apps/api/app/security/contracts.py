@@ -338,6 +338,7 @@ RLS_DIRECT_TENANT_TABLES = frozenset(
         "discovered_sources",
         "evidence_chunks",
         "evidence_sources",
+        "evidence_source_tombstones",
         "experiment_results",
         "experiments",
         "problems",

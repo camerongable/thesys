@@ -17,6 +17,7 @@ from app.db.models import (
     AuthenticationEvent,
     EvidenceChunk,
     EvidenceSource,
+    EvidenceSourceTombstone,
     PiiTokenMapping,
     SessionRevocation,
     User,
@@ -102,6 +103,11 @@ def test_expired_evidence_and_pii_mappings_are_purged_by_workspace(
     assert (
         db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == source_id)) is None
     )
+    tombstone = db_session.scalar(
+        select(EvidenceSourceTombstone).where(EvidenceSourceTombstone.source_id == source_id)
+    )
+    assert tombstone is not None
+    assert tombstone.deletion_reason == "retention_expired"
 
 
 def test_local_retention_cleanup_removes_expired_payloads_but_keeps_run_accounting(

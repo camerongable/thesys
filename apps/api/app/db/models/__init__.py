@@ -11,7 +11,7 @@ from app.db.models.artifact import (
 from app.db.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.db.models.cache import AICacheEntry, AICacheEvent
 from app.db.models.competitor import Competitor, CompetitorEvidenceLink
-from app.db.models.evidence import EvidenceChunk, EvidenceSource
+from app.db.models.evidence import EvidenceChunk, EvidenceSource, EvidenceSourceTombstone
 from app.db.models.governance import ApprovalRequest, AuditEvent
 from app.db.models.identity import (
     AuthenticationEvent,
@@ -73,6 +73,7 @@ __all__ = [
     "DiscoveredSource",
     "EvidenceChunk",
     "EvidenceSource",
+    "EvidenceSourceTombstone",
     "Experiment",
     "ExperimentResult",
     "Problem",

@@ -145,7 +145,14 @@ def purge_expired_evidence_sources(
         if _expired_source(source, current_time)
     ]
     for source in expired:
-        evidence_service.delete_source(db, auth, settings, source.project_id, source.id)
+        evidence_service.delete_source(
+            db,
+            auth,
+            settings,
+            source.project_id,
+            source.id,
+            deletion_reason="retention_expired",
+        )
     return len(expired)
 
 

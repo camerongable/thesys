@@ -199,6 +199,7 @@ def test_rls_migration_forces_policies_and_scoped_role_grants(monkeypatch) -> No
     assert set(migration.RLS_DIRECT_TABLES) < RLS_DIRECT_TENANT_TABLES
     assert RLS_DIRECT_TENANT_TABLES - set(migration.RLS_DIRECT_TABLES) == {
         "authentication_events",
+        "evidence_source_tombstones",
         "pii_token_mappings",
         "session_revocations",
         "workspace_data_keys",
@@ -366,6 +367,34 @@ def test_pii_token_mapping_migration_forces_rls_and_excludes_readonly_role(monke
     assert "thesys_api" in combined and "SELECT, INSERT, UPDATE, DELETE" in combined
     assert "thesys_worker" in combined
     assert "thesys_readonly" not in combined
+
+
+def test_evidence_source_tombstone_migration_forces_rls_and_scoped_grants(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0037_evidence_source_tombstones.py"
+    spec = importlib.util.spec_from_file_location("evidence_tombstone_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "evidence_source_tombstones" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "evidence_source_tombstones" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "evidence_source_tombstones"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "WITH CHECK" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT, UPDATE, DELETE" in combined
+    assert "thesys_worker" in combined and "thesys_readonly" in combined
 
 
 def test_application_credentials_are_read_only_through_secret_provider() -> None:

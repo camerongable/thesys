@@ -33,6 +33,7 @@ from app.db.models import (
     DiscoveredSource,
     EvidenceChunk,
     EvidenceSource,
+    EvidenceSourceTombstone,
     ProjectMemoryItem,
 )
 from app.features.evidence import extraction as evidence_extraction
@@ -630,10 +631,21 @@ def delete_source(
     settings: Settings,
     project_id: uuid.UUID,
     source_id: uuid.UUID,
+    *,
+    deletion_reason: str = "user_deleted",
 ) -> None:
     source = get_source(db, auth, project_id, source_id)
     require_permission(auth, "write_project")
+    if deletion_reason not in {"user_deleted", "retention_expired"}:
+        raise ValueError("Unsupported evidence-source deletion reason.")
     deletion_impact = _invalidate_source_derivatives(db, source)
+    tombstone = _create_source_tombstone(
+        source,
+        deleted_by=auth.user_id,
+        deletion_reason=deletion_reason,
+        deletion_impact=deletion_impact,
+    )
+    db.add(tombstone)
     if source.object_storage_key:
         object_storage_service.delete_evidence_object(
             settings,
@@ -675,6 +687,7 @@ def delete_source(
             **deletion_impact,
             "object_deleted": source.object_storage_key is not None,
             "retrieval_revoked": True,
+            "tombstone_id": str(tombstone.id),
         },
     )
     db.commit()
@@ -1751,6 +1764,42 @@ def _invalidate_source_derivatives(
         "decisions_requiring_review": decisions_requiring_review,
         "memory_items_staled": stale_memory_count,
     }
+
+
+def _create_source_tombstone(
+    source: EvidenceSource,
+    *,
+    deleted_by: uuid.UUID | None,
+    deletion_reason: str,
+    deletion_impact: dict[str, int],
+) -> EvidenceSourceTombstone:
+    metadata = source.source_metadata or {}
+    security = metadata.get("security")
+    source_trust = metadata.get("source_trust")
+    content_hash = metadata.get("content_hash")
+    return EvidenceSourceTombstone(
+        workspace_id=source.workspace_id,
+        project_id=source.project_id,
+        source_id=source.id,
+        source_type=source.source_type,
+        content_hash=content_hash if isinstance(content_hash, str) else None,
+        deletion_reason=deletion_reason,
+        deletion_metadata={
+            "ingestion_status": source.ingestion_status,
+            "data_classification": security.get("data_classification")
+            if isinstance(security, dict)
+            else None,
+            "security_status": security.get("security_status")
+            if isinstance(security, dict)
+            else None,
+            "source_trust_status": source_trust.get("security_status")
+            if isinstance(source_trust, dict)
+            else None,
+            "deletion_impact": deletion_impact,
+        },
+        deleted_by=deleted_by,
+        deleted_at=datetime.now(UTC),
+    )
 
 
 def _merge_metadata(
