@@ -354,6 +354,72 @@ def test_expensive_workflow_rate_limit_denies_and_audits(
     get_settings.cache_clear()
 
 
+def test_expensive_workflow_rate_limit_uses_hashed_redis_buckets(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeRedis:
+        def __init__(self) -> None:
+            self.counts: dict[str, int] = {}
+
+        def eval(self, _script: str, _keys: int, key: str, _window_seconds: int) -> int:
+            self.counts[key] = self.counts.get(key, 0) + 1
+            return self.counts[key]
+
+    fake_redis = FakeRedis()
+    monkeypatch.setenv("SECURITY_RATE_LIMIT_BACKEND", "redis")
+    monkeypatch.setenv("SECURITY_RATE_LIMIT_USER_MAX_REQUESTS", "1")
+    monkeypatch.setenv("SECURITY_RATE_LIMIT_WORKSPACE_MAX_REQUESTS", "10")
+    monkeypatch.setattr(security_policy_service, "_redis_client", lambda _settings: fake_redis)
+    get_settings.cache_clear()
+    project_id = _create_project(client)
+
+    first = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={"title": "Signal", "text": "Founder interview notes show a repeated workflow."},
+    )
+    denied = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={"title": "Signal 2", "text": "More notes."},
+    )
+
+    assert first.status_code == 201
+    assert denied.status_code == 429
+    assert len(fake_redis.counts) == 2
+    assert all(key.startswith("thesys:security-rate:v1:") for key in fake_redis.counts)
+    assert all("evidence_note_ingestion" not in key for key in fake_redis.counts)
+    get_settings.cache_clear()
+
+
+def test_expensive_workflow_rate_limit_fails_closed_when_redis_is_unavailable(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(_settings: Settings) -> object:
+        raise security_policy_service.RedisError("offline")
+
+    monkeypatch.setenv("SECURITY_RATE_LIMIT_BACKEND", "redis")
+    monkeypatch.setattr(security_policy_service, "_redis_client", unavailable)
+    get_settings.cache_clear()
+    project_id = _create_project(client)
+
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={"title": "Signal", "text": "Founder interview notes show a repeated workflow."},
+    )
+
+    assert response.status_code == 503
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "security_policy_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["status_code"] == 503
+    get_settings.cache_clear()
+
+
 def test_concurrency_guard_denies_second_expensive_workflow(
     client: TestClient,
     db_session: Session,

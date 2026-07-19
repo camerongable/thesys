@@ -46,7 +46,7 @@ jobs:
           uv run --project apps/api pytest app/tests/security
           pnpm --filter thesys-web test
           pnpm --filter thesys-web typecheck
-          pnpm security:redteam:fast
+          pnpm security:redteam:full
       - name: Dependency vulnerability gate
         id: dependency-scan
         continue-on-error: true

@@ -1282,6 +1282,11 @@ current verdict, next action, evidence health, validation, and decision state.
   operations, containment, and MCP status in compact responsive rows with
   loading, error/retry, and refresh states. A titled project-header icon opens
   the route; raw event content is never rendered.
+- [x] Replace the process-local expensive-workflow rate limiter in hosted
+  environments. Staging and production now select an atomic Redis fixed-window
+  counter before work begins, hash tenant/user identifiers in Redis keys, audit
+  limit-service outages, and fail closed when Redis is unavailable. Local and
+  test settings retain an explicit in-memory backend.
 
 ## Next Sprint
 
@@ -1342,6 +1347,10 @@ deployment-hardening requirements.
   immutable commit SHA, verified by a security contract test; Dependabot proposes weekly
   reviewed updates for Actions, Python, and npm. Default-branch protection and required
   review are documented as an external GitHub repository-administration prerequisite.
+- [x] Require the full deterministic Promptfoo corpus at release as well as
+  nightly. A release cannot generate its evidence report when any direct,
+  indirect, memory, retrieval, tool, MCP, PII, encoded, multimodal, output, or
+  consumption adversarial case fails.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

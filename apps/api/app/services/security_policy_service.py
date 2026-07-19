@@ -1,5 +1,6 @@
 """Rate, concurrency, budget, and provider-egress guards for expensive workflows."""
 
+import hashlib
 import ipaddress
 import time
 import uuid
@@ -12,6 +13,8 @@ from threading import RLock
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
+from redis import Redis
+from redis.exceptions import RedisError
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
@@ -34,7 +37,16 @@ class WorkflowBudgetEstimate:
 
 _rate_events: dict[tuple[str, str, str], deque[float]] = defaultdict(deque)
 _concurrency_counts: dict[tuple[str, str], int] = defaultdict(int)
+_redis_clients: dict[str, Redis] = {}
 _lock = RLock()
+
+_REDIS_FIXED_WINDOW_SCRIPT = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+"""
 
 
 def default_budget_estimate(
@@ -307,10 +319,17 @@ def reset_policy_state() -> None:
     with _lock:
         _rate_events.clear()
         _concurrency_counts.clear()
+        clients = list(_redis_clients.values())
+        _redis_clients.clear()
+    for client in clients:
+        client.close()
 
 
 def _enforce_rate_limits(settings: Settings, auth: AuthContext, workflow_type: str) -> None:
     if not settings.security_rate_limit_enabled:
+        return
+    if settings.security_rate_limit_backend == "redis":
+        _enforce_redis_rate_limits(settings, auth, workflow_type)
         return
     now = time.monotonic()
     window = float(settings.security_rate_limit_window_seconds)
@@ -329,6 +348,84 @@ def _enforce_rate_limits(settings: Settings, auth: AuthContext, workflow_type: s
             max_requests=settings.security_rate_limit_workspace_max_requests,
             detail="Per-workspace expensive workflow rate limit exceeded.",
         )
+
+
+def _enforce_redis_rate_limits(
+    settings: Settings,
+    auth: AuthContext,
+    workflow_type: str,
+) -> None:
+    try:
+        client = _redis_client(settings)
+        _check_redis_bucket(
+            client,
+            key=_rate_limit_key(
+                settings,
+                scope="user",
+                identifier=str(auth.user_id),
+                workflow_type=workflow_type,
+            ),
+            window_seconds=settings.security_rate_limit_window_seconds,
+            max_requests=settings.security_rate_limit_user_max_requests,
+            detail="Per-user expensive workflow rate limit exceeded.",
+        )
+        _check_redis_bucket(
+            client,
+            key=_rate_limit_key(
+                settings,
+                scope="workspace",
+                identifier=str(auth.workspace_id),
+                workflow_type=workflow_type,
+            ),
+            window_seconds=settings.security_rate_limit_window_seconds,
+            max_requests=settings.security_rate_limit_workspace_max_requests,
+            detail="Per-workspace expensive workflow rate limit exceeded.",
+        )
+    except RedisError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Distributed rate-limit service is unavailable.",
+        ) from exc
+
+
+def _redis_client(settings: Settings) -> Redis:
+    with _lock:
+        client = _redis_clients.get(settings.redis_url)
+        if client is None:
+            client = Redis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                socket_connect_timeout=1.0,
+                socket_timeout=1.0,
+            )
+            _redis_clients[settings.redis_url] = client
+        return client
+
+
+def _check_redis_bucket(
+    client: Redis,
+    *,
+    key: str,
+    window_seconds: int,
+    max_requests: int,
+    detail: str,
+) -> None:
+    count = int(client.eval(_REDIS_FIXED_WINDOW_SCRIPT, 1, key, window_seconds))
+    if count > max_requests:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail)
+
+
+def _rate_limit_key(
+    settings: Settings,
+    *,
+    scope: str,
+    identifier: str,
+    workflow_type: str,
+) -> str:
+    digest = hashlib.sha256(
+        f"{scope}:{identifier}:{workflow_type}".encode()
+    ).hexdigest()
+    return f"{settings.security_rate_limit_redis_key_prefix}:{scope}:{digest}"
 
 
 def _check_rate_bucket(
@@ -378,6 +475,7 @@ def _is_policy_denial(exc: HTTPException) -> bool:
         status.HTTP_403_FORBIDDEN,
         status.HTTP_409_CONFLICT,
         status.HTTP_429_TOO_MANY_REQUESTS,
+        status.HTTP_503_SERVICE_UNAVAILABLE,
     }
 
 

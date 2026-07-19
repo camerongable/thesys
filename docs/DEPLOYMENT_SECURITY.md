@@ -156,7 +156,8 @@ Security boundaries:
 - Redaction runs before audit/tool/trace/LangSmith payloads are persisted or
   exported.
 - Expensive workflows use rate limits, concurrency limits, and pre-call budget
-  checks.
+  checks. Local/test settings use a process-local limiter; staging and production
+  require the Redis-backed backend during settings validation.
 
 ## Dependency And Security Audit Commands
 

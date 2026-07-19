@@ -828,6 +828,16 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="SECURITY_RATE_LIMIT_ENABLED",
     )
+    security_rate_limit_backend: Literal["redis", "memory"] | None = Field(
+        default=None,
+        validation_alias="SECURITY_RATE_LIMIT_BACKEND",
+    )
+    security_rate_limit_redis_key_prefix: str = Field(
+        default="thesys:security-rate:v1",
+        min_length=1,
+        max_length=120,
+        validation_alias="SECURITY_RATE_LIMIT_REDIS_KEY_PREFIX",
+    )
     security_rate_limit_window_seconds: int = Field(
         default=60,
         ge=1,
@@ -957,7 +967,13 @@ class Settings(BaseSettings):
                 "RETENTION_LANGSMITH_TRACE_DAYS when LANGSMITH_TRACING=true."
             )
 
-        if self.environment in {"staging", "production"}:
+        hosted_environment = self.environment in {"staging", "production"}
+        if self.security_rate_limit_backend is None:
+            self.security_rate_limit_backend = "redis" if hosted_environment else "memory"
+
+        if hosted_environment:
+            if self.security_rate_limit_backend != "redis":
+                raise ValueError("Hosted environments must use SECURITY_RATE_LIMIT_BACKEND=redis.")
             expected_database_user = f"thesys_{self.database_runtime_role}"
             if make_url(self.database_url).username != expected_database_user:
                 raise ValueError("Hosted DATABASE_URL must use the declared scoped runtime role.")

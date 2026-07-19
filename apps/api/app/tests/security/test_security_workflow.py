@@ -63,6 +63,7 @@ def test_release_workflow_requires_signed_scanned_provenance_backed_images() -> 
         "cosign verify",
         "aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8",
         "format: json",
+        "pnpm security:redteam:full",
         "scripts/prepare_release_evidence.py",
         "scripts/generate_security_report.py",
         "if: always()",
