@@ -96,6 +96,35 @@ def procedural_memory_write_allowed(
     )
 
 
+def normalized_episodic_event_timestamp(metadata: dict[str, Any]) -> str | None:
+    """Return a canonical event timestamp for a sourced episodic-memory write."""
+    value = metadata.get("event_at")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        event_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if event_at.tzinfo is None:
+        return None
+    return event_at.astimezone(UTC).isoformat()
+
+
+def episodic_memory_write_allowed(
+    metadata: dict[str, Any],
+    *,
+    source_entity_type: str | None,
+    source_entity_id: object | None,
+) -> bool:
+    """Require attributable, timezone-aware workflow events for episodic memory."""
+    return bool(
+        isinstance(source_entity_type, str)
+        and source_entity_type.strip()
+        and source_entity_id is not None
+        and normalized_episodic_event_timestamp(metadata) is not None
+    )
+
+
 def working_memory_session_scope(session_identifier: str | None) -> str | None:
     """Return a non-reversible session scope suitable for memory provenance."""
     if not isinstance(session_identifier, str) or not session_identifier.strip():

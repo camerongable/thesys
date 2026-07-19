@@ -46,6 +46,9 @@ def test_memory_types_are_filtered_and_stale_memory_is_excluded(
         summary="Early research event that has been superseded.",
         content={"event": "old"},
         status_value="stale",
+        source_entity_type="research_sprint",
+        source_entity_id=uuid.uuid4(),
+        provenance_metadata={"event_at": datetime.now(UTC).isoformat()},
     )
     db_session.commit()
 
@@ -287,6 +290,59 @@ def test_working_memory_has_bounded_ttl_and_expired_memory_is_inspectable(
     assert {item["id"] for item in inspect["excluded_memory"] if item["reason"] == "expired"} == {
         expired.id
     }
+
+
+def test_episodic_memory_requires_a_sourced_timestamped_event_and_expires(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    now = datetime.now(UTC)
+
+    with pytest.raises(HTTPException) as exc_info:
+        memory_service.upsert_memory_item(
+            db_session,
+            auth,
+            project_id,
+            memory_type="episodic",
+            write_policy="derived_read_only",
+            title="Unattributed event",
+            summary="This cannot become durable episodic memory.",
+            content={"event": "unattributed"},
+            provenance_metadata={"event_at": now.isoformat()},
+        )
+    assert exc_info.value.status_code == 422
+
+    event = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="episodic",
+        write_policy="derived_read_only",
+        title="Research source discovered",
+        summary="A new primary source was found during the research sprint.",
+        content={"event": "source_discovered"},
+        source_entity_type="research_sprint",
+        source_entity_id=uuid.uuid4(),
+        provenance_metadata={"event_at": now.isoformat().replace("+00:00", "Z")},
+    )
+    db_session.commit()
+
+    assert event.created_at is not None
+    assert event.provenance_metadata["event_at"] == now.isoformat()
+    assert event.expires_at is not None
+    persisted_expiry = event.expires_at.replace(tzinfo=UTC)
+    assert memory_service.EPISODIC_MEMORY_TTL <= persisted_expiry - now <= (
+        memory_service.EPISODIC_MEMORY_TTL + timedelta(seconds=1)
+    )
+    assert event.provenance_metadata["expires_at"] == persisted_expiry.isoformat()
+    assert memory_service.select_memory_for_workflow(
+        db_session,
+        auth,
+        project_id,
+        workflow_type="agentic_research",
+    ) == [event]
 
 
 def test_working_memory_is_limited_to_its_authenticated_session(

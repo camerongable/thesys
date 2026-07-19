@@ -27,6 +27,7 @@ from app.services import governance_service, project_service
 
 ACTIVE_MEMORY_STATUSES = {"active"}
 WORKING_MEMORY_TTL = timedelta(hours=8)
+EPISODIC_MEMORY_TTL = timedelta(days=30)
 WORKFLOW_MEMORY_TYPES: dict[str, set[str]] = {
     "assumption_extraction": {"semantic", "project", "preference"},
     "guide_chat": {"working", "semantic", "project", "preference"},
@@ -316,6 +317,22 @@ def upsert_memory_item(
                 detail="Working memory requires an authenticated session.",
             )
         safe_provenance[memory_security_policy.WORKING_MEMORY_SESSION_SCOPE_KEY] = session_scope
+    if memory_type == "episodic":
+        if not memory_security_policy.episodic_memory_write_allowed(
+            safe_provenance,
+            source_entity_type=source_entity_type,
+            source_entity_id=source_entity_id,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "Episodic memory requires source provenance and a timezone-aware "
+                    "event timestamp."
+                ),
+            )
+        safe_provenance["event_at"] = memory_security_policy.normalized_episodic_event_timestamp(
+            safe_provenance
+        )
     if memory_type == "procedural" and not memory_security_policy.procedural_memory_write_allowed(
         safe_provenance,
         source_entity_type=source_entity_type,
@@ -881,9 +898,13 @@ def _effective_memory_expiry(
     memory_type: MemoryType,
     expires_at: datetime | None,
 ) -> datetime | None:
-    if memory_type != "working":
+    ttl = {
+        "working": WORKING_MEMORY_TTL,
+        "episodic": EPISODIC_MEMORY_TTL,
+    }.get(memory_type)
+    if ttl is None:
         return expires_at
-    latest_expiry = datetime.now(UTC) + WORKING_MEMORY_TTL
+    latest_expiry = datetime.now(UTC) + ttl
     if expires_at is None:
         return latest_expiry
     if expires_at.tzinfo is None:
