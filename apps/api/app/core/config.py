@@ -181,6 +181,12 @@ class Settings(BaseSettings):
         le=100,
         validation_alias="SECURITY_REPEATED_GUARDRAIL_THRESHOLD",
     )
+    security_authorization_denial_spike_threshold: int = Field(
+        default=5,
+        ge=2,
+        le=100,
+        validation_alias="SECURITY_AUTHORIZATION_DENIAL_SPIKE_THRESHOLD",
+    )
     security_workflow_max_model_calls: int = Field(
         default=12,
         ge=1,

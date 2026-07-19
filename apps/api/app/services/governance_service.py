@@ -72,7 +72,7 @@ def record_audit_event(
     event.event_hash = audit_chain_service.calculate_event_hash(event, previous_event_hash)
     db.add(event)
     db.flush()
-    if risk_level == "high":
+    if risk_level == "high" or event_type == "security_policy_denied":
         from app.services import security_event_service
 
         security_event_service.record_from_audit_event(db, event)

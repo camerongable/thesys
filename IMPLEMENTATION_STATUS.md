@@ -1053,6 +1053,12 @@ current verdict, next action, evidence health, validation, and decision state.
   actor within a configured window produce one critical, attributable escalation
   event and alert. Workspace owners and admins can query the redacted alert
   queue per project.
+- [x] Detect authorization-denial spikes without promoting every routine denial
+  to an alert. Policy denials now enter the normalized security stream at
+  medium severity; repeated attributable denials across the configured window
+  emit one high-severity `authorization_denial_spike` event and alert with only
+  bounded count/window evidence. The detector also includes governed tool,
+  memory, source-content, and signed-URL denials when they are normalized.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,

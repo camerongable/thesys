@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
+from app.core.config import get_settings
 from app.db.models import (
     ApprovalRequest,
     AuditEvent,
@@ -179,6 +180,67 @@ def test_repeated_blocked_guardrail_attacks_create_one_critical_escalation_alert
     assert len(escalation_alerts) == 1
     assert escalation_alerts[0].severity == "critical"
     assert escalation_alerts[0].status == "open"
+
+
+def test_repeated_policy_denials_create_one_authorization_spike_alert(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SECURITY_AUTHORIZATION_DENIAL_SPIKE_THRESHOLD", "3")
+    get_settings.cache_clear()
+    project = client.post("/api/projects", json={"name": "Authorization spike"}).json()
+    project_id = uuid.UUID(project["id"])
+    auth = ensure_dev_identity(
+        db_session,
+        email="dev@thesys.local",
+        display_name="Dev User",
+    )
+
+    for index in range(4):
+        governance_service.record_audit_event(
+            db_session,
+            auth,
+            event_type="security_policy_denied",
+            actor_type="user",
+            project_id=project_id,
+            risk_level="medium",
+            summary=f"Denied guarded workflow attempt {index + 1}.",
+            metadata={"workflow_type": "evidence_note_ingestion", "status_code": 429},
+        )
+    db_session.commit()
+
+    policy_events = list(
+        db_session.scalars(
+            select(SecurityEvent).where(SecurityEvent.event_type == "security_policy_denied")
+        )
+    )
+    escalation_events = list(
+        db_session.scalars(
+            select(SecurityEvent).where(SecurityEvent.event_type == "authorization_denial_spike")
+        )
+    )
+    escalation_alerts = list(
+        db_session.scalars(
+            select(SecurityAlert)
+            .join(SecurityEvent, SecurityAlert.security_event_id == SecurityEvent.id)
+            .where(SecurityEvent.event_type == "authorization_denial_spike")
+        )
+    )
+
+    assert len(policy_events) == 4
+    assert all(event.severity == "medium" for event in policy_events)
+    assert len(escalation_events) == 1
+    assert escalation_events[0].severity == "high"
+    assert escalation_events[0].source == "api"
+    assert escalation_events[0].attributes == {
+        "observed_count": 3,
+        "window_seconds": 900,
+    }
+    assert escalation_events[0].containment_status == "alert_open"
+    assert len(escalation_alerts) == 1
+    assert escalation_alerts[0].severity == "high"
+    get_settings.cache_clear()
 
 
 def test_project_security_overview_aggregates_redacted_operational_state(
