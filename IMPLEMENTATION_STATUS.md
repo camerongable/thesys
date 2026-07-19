@@ -634,6 +634,10 @@ current verdict, next action, evidence health, validation, and decision state.
   results and ingestion-step output from revoked sources, and suppress an
   associated run summary rather than replaying evidence that has since become
   quarantined or otherwise ineligible.
+- [x] Apply the same workflow-trace policy to project overview activity. Recent
+  strategic updates now serialize workflow summaries through the current
+  eligibility check, so a source quarantined after ingestion cannot replay its
+  text through the project homepage or its updates endpoint.
 
 ## Sprint 65 Verification
 
@@ -714,12 +718,15 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Code-owned procedural-memory checkpoint passed (`64 passed, 1 warning`)
   across memory-service and feature-boundary coverage; changed-file compile
   checks and repository application lint passed.
+- [x] Project-overview trace replay checkpoint passed (`24 passed, 1 warning`)
+  across project-overview, evidence, and workflow-event coverage; changed-file
+  compile checks and repository application lint passed.
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-audit remaining evidence-derived replay surfaces, then move to the next
-unimplemented Sprint 65 acceptance boundary.
+identify the next unimplemented Sprint 65 acceptance boundary after completing
+the retrieval and workflow replay audit.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

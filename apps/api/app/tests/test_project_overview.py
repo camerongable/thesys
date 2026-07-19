@@ -1,4 +1,10 @@
+import uuid
+
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.db.models import EvidenceSource
 
 
 def test_project_overview_guides_new_project(client: TestClient) -> None:
@@ -78,3 +84,43 @@ def test_project_overview_summarizes_demo_project(client: TestClient) -> None:
     readiness_response = client.get(f"/api/projects/{project_id}/readiness")
     assert readiness_response.status_code == 200
     assert readiness_response.json()["recommended_next_action"] == "Review validation evidence"
+
+
+def test_project_updates_hide_quarantined_source_workflow_summary(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_response = client.post("/api/projects", json={"name": "Overview trace policy"})
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+    source_text = "overview trace content must not replay after source quarantine"
+    source_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={"title": "Overview source", "text": source_text},
+    )
+    assert source_response.status_code == 201
+
+    source = db_session.scalar(
+        select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(source_response.json()["id"]))
+    )
+    assert source is not None
+    source.source_metadata = {
+        **source.source_metadata,
+        "security": {
+            **source.source_metadata["security"],
+            "security_status": "quarantined",
+        },
+        "source_trust": {
+            **source.source_metadata["source_trust"],
+            "security_status": "quarantined",
+        },
+    }
+    db_session.commit()
+
+    updates_response = client.get(f"/api/projects/{project_id}/strategic-updates")
+    overview_response = client.get(f"/api/projects/{project_id}/overview")
+
+    assert updates_response.status_code == 200
+    assert overview_response.status_code == 200
+    assert source_text not in updates_response.text
+    assert source_text not in overview_response.text
