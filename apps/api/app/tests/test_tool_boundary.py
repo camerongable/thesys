@@ -317,9 +317,10 @@ def test_remote_mcp_external_egress_switch_denies_before_persisting_tool_invocat
     assert denial.event_metadata["workflow_type"] == "external_egress_mcp_invocation"
 
 
-def test_remote_mcp_proposals_remain_disabled_pending_approval_execution_support(
+def test_remote_mcp_proposal_preview_uses_governed_approval_lifecycle(
     client: TestClient,
     db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project_id = uuid.UUID(_create_project(client))
     auth = _dev_auth(db_session)
@@ -328,6 +329,75 @@ def test_remote_mcp_proposals_remain_disabled_pending_approval_execution_support
         auth,
         allowed_tools=["propose_memory_update"],
     )
+    remote_summary = "Preview a bounded remote memory update."
+    monkeypatch.setattr(
+        mcp_registry_service.remote_mcp_review_service,
+        "invoke_registration",
+        lambda _settings, _registration, **_kwargs: remote_mcp_review_service.RemoteMcpInvocation(
+            review=remote_mcp_review_service.RemoteMcpReview(
+                server_name="reviewed-remote",
+                server_version="1.2.3",
+                certificate_fingerprint="a" * 64,
+                tool_count=1,
+            ),
+            tool_name="propose_memory_update",
+            output={"proposal": {"summary": remote_summary}},
+        ),
+    )
+
+    result = tool_service.execute_tool(
+        db_session,
+        auth,
+        get_settings(),
+        project_id,
+        "propose_memory_update",
+        {"summary": "Prepare a remote proposal for review."},
+        remote_mcp_server_id=registration.id,
+    )
+
+    assert result.output == {"proposal": {"summary": remote_summary}}
+    assert result.invocation.status == "requested"
+    assert result.invocation.executed_at is None
+    approval = db_session.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.entity_type == "tool_invocation",
+            ApprovalRequest.entity_id == result.invocation.id,
+            ApprovalRequest.status == "pending",
+        )
+    )
+    assert approval is not None
+    assert approval.proposed_change["proposal"] == {"summary": remote_summary}
+    audit = db_session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.event_type == "mcp_server_tool_invoked",
+            AuditEvent.entity_id == result.invocation.id,
+        )
+    )
+    assert audit is not None
+
+
+def test_remote_mcp_writes_remain_denied_before_persistence(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session)
+    definition = tool_registry.definition("propose_memory_update")
+    write_definition = replace(
+        definition,
+        name="write_remote_memory",
+        title="Write remote memory",
+        access_mode="write",
+        approval_policy="required_for_write",
+        risk_level="high",
+    )
+    monkeypatch.setitem(tool_registry.TOOL_REGISTRY, write_definition.name, write_definition)
+    registration = _remote_mcp_registration(
+        db_session,
+        auth,
+        allowed_tools=[write_definition.name],
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         tool_service.execute_tool(
@@ -335,8 +405,8 @@ def test_remote_mcp_proposals_remain_disabled_pending_approval_execution_support
             auth,
             get_settings(),
             project_id,
-            "propose_memory_update",
-            {"summary": "Do not execute this remote proposal yet."},
+            write_definition.name,
+            {"summary": "No direct remote write."},
             remote_mcp_server_id=registration.id,
         )
 
@@ -522,9 +592,7 @@ def test_tool_proposal_rejection_resolves_approval_and_writes_audit_event(
     assert approval.proposed_change["tool_invocation_id"] == str(invocation_id)
     assert approval.proposed_change["proposal"]["research_sprint_id"] == sprint_id
 
-    reject_response = client.post(
-        f"/api/projects/{project_id}/approvals/{approval.id}/reject"
-    )
+    reject_response = client.post(f"/api/projects/{project_id}/approvals/{approval.id}/reject")
 
     assert reject_response.status_code == 200
     assert reject_response.json()["approval"]["status"] == "rejected"
@@ -573,13 +641,9 @@ def test_agentic_research_tools_audit_reads_and_gate_memory_updates(
     invocations = activity_response.json()["invocations"]
     names = {item["tool_name"] for item in invocations}
     assert REQUIRED_READ_TOOLS.issubset(names)
-    assert {"propose_memory_update", "propose_validation_plan", "propose_decision"}.issubset(
-        names
-    )
+    assert {"propose_memory_update", "propose_validation_plan", "propose_decision"}.issubset(names)
     assert all(
-        item["status"] == "executed"
-        for item in invocations
-        if item["access_mode"] == "read"
+        item["status"] == "executed" for item in invocations if item["access_mode"] == "read"
     )
     pending_proposals = [
         item

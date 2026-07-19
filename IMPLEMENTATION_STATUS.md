@@ -939,9 +939,15 @@ current verdict, next action, evidence health, validation, and decision state.
   and refresh token, persists credentials through the existing per-server
   boundary, and rejects replay. Both steps honor external MCP/egress switches
   and emit credential-free high-risk audits.
+- [x] Enable reviewed remote MCP proposal previews. Locally approved proposal
+  manifests are now allowed through the same tenant, policy, egress, fresh
+  schema review, scoped-credential, output-redaction, and audit boundary as
+  remote reads; their returned preview is stored as a pending human approval.
+  Direct remote write manifests remain denied before persistence or egress.
 - [ ] Implement the remaining Sprint 66 capability controls: execute approved
-  remote proposal and write tools safely, implement SSE transport, then validate
-  the live Compose policy bundle with the OPA parser/runtime.
+  remote write tools safely with idempotency and before/after audit, implement
+  SSE transport, then validate the live Compose policy bundle with the OPA
+  parser/runtime.
 
 ## Sprint 66 Verification
 

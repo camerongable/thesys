@@ -196,7 +196,7 @@ def prepare_tool_invocation(
     registration_id: uuid.UUID,
     tool_name: str,
 ) -> MCPServerRegistration:
-    """Resolve an enabled, read-only remote capability before invocation persistence."""
+    """Resolve an enabled, non-writing remote capability before invocation persistence."""
     security_policy_service.enforce_external_mcp_allowed(
         db,
         auth,
@@ -216,7 +216,7 @@ def prepare_tool_invocation(
     if (
         not registration.enabled
         or tool_name not in registration.allowed_tools
-        or definition.access_mode != "read"
+        or definition.access_mode not in {"read", "proposal"}
     ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
