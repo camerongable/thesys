@@ -12,7 +12,7 @@ from app.core.auth import AuthContext, require_workspace_security_admin
 from app.core.config import Settings, get_settings
 from app.core.redaction import redact_payload, redact_text
 from app.db.models import AuditEvent, SecurityAlert, SecurityEvent
-from app.services import project_service
+from app.services import project_service, security_metrics_service
 
 SecurityEventSeverity = Literal["info", "low", "medium", "high", "critical"]
 SecurityEventSource = Literal[
@@ -112,6 +112,7 @@ def record_security_event(
     )
     db.add(event)
     db.flush()
+    security_metrics_service.record_security_event(event.event_type, event.source)
     _open_alert_for_high_severity_event(db, event)
     _detect_repeated_guardrail_attack(db, event, settings or get_settings())
     return event

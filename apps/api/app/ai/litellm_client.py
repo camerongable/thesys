@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from app.core.config import Settings
 from app.security.guardrails import GuardrailBlockedError, GuardrailGateway
 from app.security.secrets import SecretName, SecretProviderError, resolve_secret
-from app.services import model_data_policy_service
+from app.services import model_data_policy_service, security_metrics_service
 from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
@@ -93,10 +93,12 @@ class LiteLLMClient:
                 response = client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            security_metrics_service.record_provider_error()
             raise LiteLLMClientError(
                 f"LiteLLM request failed with status {exc.response.status_code}."
             ) from None
         except httpx.HTTPError:
+            security_metrics_service.record_provider_error()
             raise LiteLLMClientError("LiteLLM request failed.") from None
 
         try:
@@ -109,6 +111,10 @@ class LiteLLMClient:
         usage = body.get("usage") or {}
         total_cost = _parse_cost_header(response.headers.get("x-litellm-response-cost"))
         record_model_usage(
+            total_tokens=usage.get("total_tokens"),
+            total_cost=total_cost,
+        )
+        security_metrics_service.record_model_usage(
             total_tokens=usage.get("total_tokens"),
             total_cost=total_cost,
         )
@@ -192,11 +198,19 @@ class LiteLLMClient:
                             response.headers.get("x-litellm-response-cost")
                         ),
                     )
+                    security_metrics_service.record_model_usage(
+                        total_tokens=None,
+                        total_cost=_parse_cost_header(
+                            response.headers.get("x-litellm-response-cost")
+                        ),
+                    )
         except httpx.HTTPStatusError as exc:
+            security_metrics_service.record_provider_error()
             raise LiteLLMClientError(
                 f"LiteLLM stream failed with status {exc.response.status_code}."
             ) from None
         except httpx.HTTPError:
+            security_metrics_service.record_provider_error()
             raise LiteLLMClientError("LiteLLM stream failed.") from None
 
     def _enforce_egress(self, url: str) -> None:

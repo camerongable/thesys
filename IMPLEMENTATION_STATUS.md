@@ -1150,6 +1150,11 @@ current verdict, next action, evidence health, validation, and decision state.
   count only rejected `propose_memory_update` invocations. Exhaustion safely
   stops a new memory proposal and emits a high-risk audit, normalized workflow
   security event, and alert with configured/observed rejection counts.
+- [x] Establish the Prometheus-facing security metrics foundation. The isolated
+  `/api/security/metrics` registry exposes only low-cardinality counters, never
+  tenant identifiers or content. Normalized security events drive prompt,
+  jailbreak, guardrail, tool, scope-denial, budget, and loop signals; the shared
+  LiteLLM boundary adds provider-error, token, and reported-cost telemetry.
 
 ## Next Sprint
 
