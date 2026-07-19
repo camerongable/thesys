@@ -161,3 +161,164 @@ def test_review_registration_rejects_live_schema_drift(monkeypatch) -> None:
         remote_mcp_review_service.review_registration(Settings(), registration)
 
     assert exc_info.value.reason_code == "tool_schema_drift"
+
+
+def test_invoke_registration_revalidates_session_and_returns_schema_checked_output(
+    monkeypatch,
+) -> None:
+    registration = _registration()
+    registration.enabled = True
+    registration.oauth_issuer = "https://issuer.example.test"
+    client = _Client(
+        [
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {"serverInfo": {"name": "remote", "version": "1.2.3"}},
+                },
+                {"Mcp-Session-Id": "session-1"},
+            ),
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "search_project_evidence",
+                                "inputSchema": registration.tool_schema_snapshot[
+                                    "search_project_evidence"
+                                ]["input_schema"],
+                                "outputSchema": registration.tool_schema_snapshot[
+                                    "search_project_evidence"
+                                ]["output_schema"],
+                                "annotations": {"manifestVersion": "1.0.0"},
+                            }
+                        ]
+                    },
+                }
+            ),
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "result": {
+                        "content": [{"type": "text", "text": "ignored"}],
+                        "structuredContent": {"result": "approved output"},
+                        "isError": False,
+                    },
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        remote_mcp_review_service,
+        "_certificate_fingerprint",
+        lambda *_args, **_kwargs: "a" * 64,
+    )
+    monkeypatch.setattr(remote_mcp_review_service.httpx, "Client", lambda **_kwargs: client)
+
+    invocation = remote_mcp_review_service.invoke_registration(
+        Settings(),
+        registration,
+        tool_name="search_project_evidence",
+        arguments={"query": "reviewed query"},
+        authorization=SecretStr("server-scoped-token"),
+    )
+
+    assert invocation.tool_name == "search_project_evidence"
+    assert invocation.output == {"result": "approved output"}
+    assert client.requests[2]["headers"] == {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "Mcp-Session-Id": "session-1",
+        "Authorization": "Bearer server-scoped-token",
+    }
+    assert client.requests[2]["json"] == {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "search_project_evidence",
+            "arguments": {"query": "reviewed query"},
+        },
+    }
+
+
+def test_invoke_registration_rejects_disabled_unapproved_and_invalid_output(monkeypatch) -> None:
+    registration = _registration()
+    with pytest.raises(remote_mcp_review_service.RemoteMcpReviewError) as disabled_exc:
+        remote_mcp_review_service.invoke_registration(
+            Settings(),
+            registration,
+            tool_name="search_project_evidence",
+            arguments={"query": "reviewed query"},
+        )
+
+    registration.enabled = True
+    with pytest.raises(remote_mcp_review_service.RemoteMcpReviewError) as tool_exc:
+        remote_mcp_review_service.invoke_registration(
+            Settings(),
+            registration,
+            tool_name="unapproved_tool",
+            arguments={},
+        )
+
+    client = _Client(
+        [
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {"serverInfo": {"name": "remote", "version": "1.2.3"}},
+                },
+                {"Mcp-Session-Id": "session-1"},
+            ),
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "search_project_evidence",
+                                "inputSchema": registration.tool_schema_snapshot[
+                                    "search_project_evidence"
+                                ]["input_schema"],
+                                "outputSchema": registration.tool_schema_snapshot[
+                                    "search_project_evidence"
+                                ]["output_schema"],
+                                "annotations": {"manifestVersion": "1.0.0"},
+                            }
+                        ]
+                    },
+                }
+            ),
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "result": {"structuredContent": {"result": 7}, "isError": False},
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        remote_mcp_review_service,
+        "_certificate_fingerprint",
+        lambda *_args, **_kwargs: "a" * 64,
+    )
+    monkeypatch.setattr(remote_mcp_review_service.httpx, "Client", lambda **_kwargs: client)
+
+    with pytest.raises(remote_mcp_review_service.RemoteMcpReviewError) as output_exc:
+        remote_mcp_review_service.invoke_registration(
+            Settings(),
+            registration,
+            tool_name="search_project_evidence",
+            arguments={"query": "reviewed query"},
+        )
+
+    assert disabled_exc.value.reason_code == "server_not_enabled"
+    assert tool_exc.value.reason_code == "tool_not_approved"
+    assert output_exc.value.reason_code == "tool_output_invalid"

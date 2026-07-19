@@ -895,10 +895,18 @@ current verdict, next action, evidence health, validation, and decision state.
   TLS-pinned `initialize` and `tools/list` preflight; no token reaches another
   registration, audit event, or API response. Client-credentials exchange and
   token refresh remain disabled until a validated token client is added.
-- [ ] Implement the remaining Sprint 66 capability controls: the outbound
-  remote-MCP invocation client with token exchange/refresh and cryptographic
-  issuer/audience validation, then validate the live Compose policy bundle with
-  the OPA parser/runtime.
+- [x] Add the protocol-level outbound remote-MCP invocation client. It refuses
+  disabled registrations and unapproved tool names, validates the approved
+  input schema before egress, then uses one TLS-pinned MCP session for fresh
+  `initialize`, `tools/list`, and `tools/call` checks. Only schema-valid
+  `structuredContent` matching the reviewed output contract is returned; this
+  internal client has no public route until it is integrated with project RBAC,
+  OPA, approvals, redaction, and audit.
+- [ ] Implement the remaining Sprint 66 capability controls: integrate remote
+  calls into the governed project tool pipeline, add client-credentials token
+  exchange and user-delegated refresh with cryptographic issuer/audience
+  validation, then validate the live Compose policy bundle with the OPA
+  parser/runtime.
 
 ## Sprint 66 Verification
 

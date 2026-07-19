@@ -13,6 +13,7 @@ from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.db.models import MCPServerRegistration
+from app.features.governance_tools import schema_guard
 from app.features.mcp.protocol import MCP_PROTOCOL_VERSION
 
 REVIEW_CLIENT_INFO = {"name": "thesys-security-review", "version": "v1"}
@@ -34,6 +35,13 @@ class RemoteMcpReview:
     tool_count: int
 
 
+@dataclass(frozen=True)
+class RemoteMcpInvocation:
+    review: RemoteMcpReview
+    tool_name: str
+    output: dict[str, Any]
+
+
 def review_registration(
     settings: Settings,
     registration: MCPServerRegistration,
@@ -41,6 +49,83 @@ def review_registration(
     authorization: SecretStr | None = None,
 ) -> RemoteMcpReview:
     """Verify the pinned identity and reviewed tool contract of a remote server."""
+    try:
+        with httpx.Client(
+            timeout=settings.mcp_remote_review_timeout_seconds,
+            follow_redirects=False,
+            verify=True,
+        ) as client:
+            review, _ = _review_with_client(
+                settings,
+                registration,
+                client,
+                authorization=authorization,
+            )
+    except RemoteMcpReviewError:
+        raise
+    except (httpx.HTTPError, ValueError, OSError, ssl.SSLError) as exc:
+        raise RemoteMcpReviewError("remote_review_unavailable") from exc
+    return review
+
+
+def invoke_registration(
+    settings: Settings,
+    registration: MCPServerRegistration,
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    authorization: SecretStr | None = None,
+) -> RemoteMcpInvocation:
+    """Call one approved remote tool after a fresh review on the same MCP session."""
+    if not registration.enabled:
+        raise RemoteMcpReviewError("server_not_enabled")
+    if tool_name not in registration.allowed_tools:
+        raise RemoteMcpReviewError("tool_not_approved")
+    snapshot = registration.tool_schema_snapshot.get(tool_name)
+    if not isinstance(snapshot, dict):
+        raise RemoteMcpReviewError("tool_schema_drift")
+    _validate_schema_payload(snapshot.get("input_schema"), arguments, "input")
+
+    try:
+        with httpx.Client(
+            timeout=settings.mcp_remote_review_timeout_seconds,
+            follow_redirects=False,
+            verify=True,
+        ) as client:
+            review, session_id = _review_with_client(
+                settings,
+                registration,
+                client,
+                authorization=authorization,
+            )
+            call_result, _ = _rpc_call(
+                client,
+                registration.base_url,
+                request_id=3,
+                method="tools/call",
+                params={"name": tool_name, "arguments": arguments},
+                session_id=session_id,
+                authorization=authorization,
+            )
+    except RemoteMcpReviewError:
+        raise
+    except (httpx.HTTPError, ValueError, OSError, ssl.SSLError) as exc:
+        raise RemoteMcpReviewError("remote_invocation_unavailable") from exc
+
+    if call_result.get("isError") is True:
+        raise RemoteMcpReviewError("remote_tool_failed")
+    output = call_result.get("structuredContent")
+    _validate_schema_payload(snapshot.get("output_schema"), output, "output")
+    return RemoteMcpInvocation(review=review, tool_name=tool_name, output=output)
+
+
+def _review_with_client(
+    settings: Settings,
+    registration: MCPServerRegistration,
+    client: httpx.Client,
+    *,
+    authorization: SecretStr | None,
+) -> tuple[RemoteMcpReview, str | None]:
     if registration.transport != "streamable_http":
         raise RemoteMcpReviewError("unsupported_transport")
     certificate_fingerprint = _certificate_fingerprint(
@@ -49,58 +134,48 @@ def review_registration(
     )
     if certificate_fingerprint != registration.server_fingerprint.casefold():
         raise RemoteMcpReviewError("server_identity_mismatch")
-
-    try:
-        with httpx.Client(
-            timeout=settings.mcp_remote_review_timeout_seconds,
-            follow_redirects=False,
-            verify=True,
-        ) as client:
-            initialize_result, session_id = _rpc_call(
-                client,
-                registration.base_url,
-                request_id=1,
-                method="initialize",
-                params={
-                    "protocolVersion": MCP_PROTOCOL_VERSION,
-                    "capabilities": {},
-                    "clientInfo": REVIEW_CLIENT_INFO,
-                },
-                authorization=authorization,
-            )
-            server_info = initialize_result.get("serverInfo")
-            if not isinstance(server_info, dict):
-                raise RemoteMcpReviewError("invalid_server_info")
-            server_name = server_info.get("name")
-            server_version = server_info.get("version")
-            if not isinstance(server_name, str) or not server_name.strip():
-                raise RemoteMcpReviewError("invalid_server_info")
-            if server_version != registration.approved_version:
-                raise RemoteMcpReviewError("server_version_drift")
-
-            tools_result, _ = _rpc_call(
-                client,
-                registration.base_url,
-                request_id=2,
-                method="tools/list",
-                params={},
-                session_id=session_id,
-                authorization=authorization,
-            )
-    except RemoteMcpReviewError:
-        raise
-    except (httpx.HTTPError, ValueError, OSError, ssl.SSLError) as exc:
-        raise RemoteMcpReviewError("remote_review_unavailable") from exc
-
+    initialize_result, session_id = _rpc_call(
+        client,
+        registration.base_url,
+        request_id=1,
+        method="initialize",
+        params={
+            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": REVIEW_CLIENT_INFO,
+        },
+        authorization=authorization,
+    )
+    server_info = initialize_result.get("serverInfo")
+    if not isinstance(server_info, dict):
+        raise RemoteMcpReviewError("invalid_server_info")
+    server_name = server_info.get("name")
+    server_version = server_info.get("version")
+    if not isinstance(server_name, str) or not server_name.strip():
+        raise RemoteMcpReviewError("invalid_server_info")
+    if server_version != registration.approved_version:
+        raise RemoteMcpReviewError("server_version_drift")
+    tools_result, _ = _rpc_call(
+        client,
+        registration.base_url,
+        request_id=2,
+        method="tools/list",
+        params={},
+        session_id=session_id,
+        authorization=authorization,
+    )
     tools = tools_result.get("tools")
     if not isinstance(tools, list):
         raise RemoteMcpReviewError("invalid_tool_catalog")
     _verify_tool_catalog(registration, tools)
-    return RemoteMcpReview(
-        server_name=server_name.strip(),
-        server_version=server_version,
-        certificate_fingerprint=certificate_fingerprint,
-        tool_count=len(tools),
+    return (
+        RemoteMcpReview(
+            server_name=server_name.strip(),
+            server_version=server_version,
+            certificate_fingerprint=certificate_fingerprint,
+            tool_count=len(tools),
+        ),
+        session_id,
     )
 
 
@@ -175,6 +250,19 @@ def _verify_tool_catalog(
             remote_tools[name], snapshot
         ):
             raise RemoteMcpReviewError("tool_schema_drift")
+
+
+def _validate_schema_payload(schema: Any, value: Any, value_type: str) -> dict[str, Any]:
+    if not isinstance(schema, dict):
+        raise RemoteMcpReviewError("tool_schema_drift")
+    try:
+        return schema_guard.validate_schema_payload(
+            schema,
+            value,
+            label=f"remote MCP tool {value_type}",
+        )
+    except schema_guard.ToolGuardViolation as exc:
+        raise RemoteMcpReviewError(f"tool_{value_type}_invalid") from exc
 
 
 def _tool_matches_snapshot(tool: dict[str, Any], snapshot: dict[str, Any]) -> bool:
