@@ -1455,6 +1455,10 @@ remaining hosted release and repository-administration prerequisites.
 - [x] Made the documentation map discoverable from the README and repository
   navigation guide, including product, architecture, security, operations,
   ownership, dependencies, and delivery evidence.
+- [x] Documented evaluation cadence in the owner and evaluation guides,
+  distinguishing on-demand project endpoints, manual quality scripts, pull
+  request evaluation contracts, scheduled security checks, and version-tag
+  release evidence.
 - [x] Added `scripts/check_documentation_links.py` and the PR `Documentation
   integrity` job. It validates 41 Markdown documents for local links and
   documented repository code paths; its workflow contract test passed (`8

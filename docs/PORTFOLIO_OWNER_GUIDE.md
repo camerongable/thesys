@@ -141,6 +141,24 @@ and `apps/api/app/services/workflow_budget_service.py`.
 | Nightly/manual CI | Full deterministic Promptfoo suite, broad security tests, container/Kubernetes scans, and optionally Garak against a protected test target. | Garak requires a separate HTTPS target and is irrelevant until a safe hosted test endpoint exists. |
 | Hosted deployment | Real OIDC, PostgreSQL RLS, TLS-backed Redis/Temporal/Postgres, object storage, secrets providers, OTLP, and operational controls. | These controls require deployment configuration and service credentials; source code alone cannot prove them active. |
 
+## Evaluation Cadence
+
+Use the evaluation path that matches the question being answered:
+
+- During implementation, run the focused `pnpm eval:*` command for the area
+  changed and inspect its report.
+- For a project-specific demonstration or investigation, call the relevant
+  in-app evaluation endpoint. It runs only when requested.
+- On each pull request, GitHub Actions runs selected evaluation contracts and
+  fast adversarial checks. This protects core behavior without imposing the
+  cost of every broad evaluation on each change.
+- On the scheduled/manual security workflow, GitHub Actions runs the complete
+  adversarial suite, including Garak. Version tags run the release evidence
+  workflow.
+
+The exact commands, boundaries, and report locations are documented in
+[Evals And Observability](EVALS_AND_OBSERVABILITY.md).
+
 ## Six-Minute Demo Narrative
 
 1. Create or open a project and state the rough idea, target user, and problem.

@@ -4,6 +4,24 @@ Thesys treats AI quality as a versioned product surface. Local eval scripts,
 quality gates, persisted AI run records, and optional LangSmith export make
 model behavior inspectable without requiring live provider credentials.
 
+## When Evals Run
+
+Thesys uses several evaluation paths. They do not all run automatically, and
+they answer different questions.
+
+| Trigger | What runs | Purpose |
+| --- | --- | --- |
+| On-demand project action | The API evaluation endpoints in `apps/api/app/routers/evals.py` | Evaluate a specific project or workflow when a user requests it. |
+| Manual local command | `pnpm eval:research`, `pnpm eval:ai`, `pnpm eval:extraction`, or `pnpm eval:quality` | Produce focused, explainable quality evidence while developing or preparing a demo. |
+| Pull request | Selected evaluation contracts, security tests, and the fast Promptfoo suite in the [Security workflow](../.github/workflows/security.yml) | Catch regressions in protected model, prompt, tool, retrieval, and guardrail behavior before merge. |
+| Scheduled or manually dispatched workflow | The full security suite, full Promptfoo suite, and Garak scan in the [Security workflow](../.github/workflows/security.yml) | Run broader adversarial and dependency checks without slowing every pull request. |
+| Version tag | The full release evidence workflow, including image scanning and provenance work, in [Release Security](../.github/workflows/release-security.yml) | Capture a release-oriented security record when a version is published. |
+
+The quality-report commands are intentionally manual: they produce artifacts
+for review rather than an automatic merge gate. Pull requests still exercise
+their underlying evaluation contracts, but do not run every report-generation
+script or the full scheduled adversarial suite.
+
 ## Quality Gate Commands
 
 Aggregate local gate:
