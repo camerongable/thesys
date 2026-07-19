@@ -794,6 +794,115 @@ def test_research_sprint_tool_budget_denies_before_a_new_invocation(
     assert security_event.source == "workflow"
 
 
+def test_repeated_identical_sprint_tool_invocation_stops_before_persisting(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = _create_project(client)
+    plan_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Detect repeated governed tool calls."},
+    )
+    assert plan_response.status_code == 200
+    sprint_id = uuid.UUID(plan_response.json()["sprint"]["id"])
+    sprint = db_session.get(ResearchSprint, sprint_id)
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_identical_tool_invocations": 1,
+    }
+    db_session.commit()
+
+    auth = _dev_auth(db_session)
+    first = tool_service.execute_tool(
+        db_session,
+        auth,
+        get_settings(),
+        uuid.UUID(project_id),
+        "get_project_summary",
+        research_sprint_id=sprint_id,
+    )
+
+    assert first.invocation.research_sprint_id == sprint_id
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            auth,
+            get_settings(),
+            uuid.UUID(project_id),
+            "get_project_summary",
+            research_sprint_id=sprint_id,
+        )
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == tool_service.WORKFLOW_BUDGET_EXHAUSTED_DETAIL
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(ToolInvocation)
+            .where(
+                ToolInvocation.research_sprint_id == sprint_id,
+                ToolInvocation.tool_name == "get_project_summary",
+            )
+        )
+        == 1
+    )
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_repeated_tool_invocation_detected")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.risk_level == "high"
+    assert audit.event_metadata["max_identical_tool_invocations"] == 1
+    assert audit.event_metadata["observed_identical_invocations"] == 1
+    assert len(audit.event_metadata["input_sha256"]) == 64
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
+
+    proposal = {
+        "summary": "Propose a governed memory update.",
+        "research_sprint_id": str(sprint_id),
+    }
+    first_proposal = tool_service.create_proposal(
+        db_session,
+        auth,
+        uuid.UUID(project_id),
+        "propose_memory_update",
+        proposal,
+        research_sprint_id=sprint_id,
+        settings=get_settings(),
+    )
+
+    assert first_proposal.research_sprint_id == sprint_id
+    with pytest.raises(HTTPException) as proposal_exc_info:
+        tool_service.create_proposal(
+            db_session,
+            auth,
+            uuid.UUID(project_id),
+            "propose_memory_update",
+            proposal,
+            research_sprint_id=sprint_id,
+            settings=get_settings(),
+        )
+
+    assert proposal_exc_info.value.status_code == 429
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(ToolInvocation)
+            .where(
+                ToolInvocation.research_sprint_id == sprint_id,
+                ToolInvocation.tool_name == "propose_memory_update",
+            )
+        )
+        == 1
+    )
+
+
 def test_research_sprint_retrieved_chunk_budget_caps_and_stops_retrieval(
     client: TestClient,
     db_session: Session,

@@ -17,6 +17,7 @@ def test_workflow_security_budget_snapshots_all_required_dimensions() -> None:
             security_workflow_max_memory_proposals=12,
             security_workflow_max_structured_output_repairs=2,
             security_workflow_max_critique_loops=3,
+            security_workflow_max_identical_tool_invocations=4,
         )
     )
 
@@ -31,6 +32,7 @@ def test_workflow_security_budget_snapshots_all_required_dimensions() -> None:
         "max_memory_proposals": 12,
         "max_structured_output_repairs": 2,
         "max_critique_loops": 3,
+        "max_identical_tool_invocations": 4,
     }
 
 
@@ -50,6 +52,7 @@ def test_workflow_security_budget_snapshots_all_required_dimensions() -> None:
             "max_memory_proposals": 1,
             "max_structured_output_repairs": 0,
             "max_critique_loops": 0,
+            "max_identical_tool_invocations": 1,
         },
         {
             "max_model_calls": True,
@@ -62,6 +65,7 @@ def test_workflow_security_budget_snapshots_all_required_dimensions() -> None:
             "max_memory_proposals": 1,
             "max_structured_output_repairs": 0,
             "max_critique_loops": 0,
+            "max_identical_tool_invocations": 1,
         },
     ],
 )

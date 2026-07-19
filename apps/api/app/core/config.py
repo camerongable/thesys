@@ -229,6 +229,12 @@ class Settings(BaseSettings):
         le=100,
         validation_alias="SECURITY_WORKFLOW_MAX_CRITIQUE_LOOPS",
     )
+    security_workflow_max_identical_tool_invocations: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        validation_alias="SECURITY_WORKFLOW_MAX_IDENTICAL_TOOL_INVOCATIONS",
+    )
     ai_workflow_max_tokens: int = Field(
         default=100_000,
         ge=1_000,

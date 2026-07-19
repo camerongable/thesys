@@ -1,5 +1,7 @@
 """Governed project tool registry used by agents, guide chat, and MCP clients."""
 
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -113,27 +115,6 @@ def execute_tool(
         research_sprint_id=research_sprint_id,
         requested_by=requested_by,
     )
-    if remote_mcp_server_id is not None:
-        from app.services import mcp_registry_service
-
-        if definition.access_mode == "write":
-            mcp_registry_service.prepare_remote_write_request(
-                db,
-                auth,
-                settings,
-                project_id=project_id,
-                registration_id=remote_mcp_server_id,
-                tool_name=definition.name,
-            )
-        else:
-            mcp_registry_service.prepare_tool_invocation(
-                db,
-                auth,
-                settings,
-                project_id=project_id,
-                registration_id=remote_mcp_server_id,
-                tool_name=definition.name,
-            )
     _enforce_agent_write_kill_switch(
         db,
         auth,
@@ -186,6 +167,37 @@ def execute_tool(
         ),
     )
     clean_input = redact_payload(guarded_input, redact_emails=True)
+    _enforce_repeated_tool_invocation_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        definition=definition,
+        input_json=clean_input,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
+    if remote_mcp_server_id is not None:
+        from app.services import mcp_registry_service
+
+        if definition.access_mode == "write":
+            mcp_registry_service.prepare_remote_write_request(
+                db,
+                auth,
+                settings,
+                project_id=project_id,
+                registration_id=remote_mcp_server_id,
+                tool_name=definition.name,
+            )
+        else:
+            mcp_registry_service.prepare_tool_invocation(
+                db,
+                auth,
+                settings,
+                project_id=project_id,
+                registration_id=remote_mcp_server_id,
+                tool_name=definition.name,
+            )
     if remote_mcp_server_id is not None and definition.access_mode == "write":
         return _request_remote_write(
             db,
@@ -430,6 +442,19 @@ def create_proposal(
         requested_by=requested_by,
         research_sprint_id=research_sprint_id,
     )
+    clean_input = redact_payload(guarded_input, redact_emails=True)
+    clean_proposal = redact_payload(guarded_proposal, redact_emails=True)
+    _enforce_repeated_tool_invocation_limit(
+        db,
+        auth,
+        effective_settings,
+        project_id=project_id,
+        definition=definition,
+        input_json=clean_input,
+        proposal=clean_proposal,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
     invocation = ToolInvocation(
         workspace_id=auth.workspace_id,
         project_id=project_id,
@@ -437,8 +462,8 @@ def create_proposal(
         tool_name=definition.name,
         access_mode=definition.access_mode,
         risk_level=definition.risk_level,
-        input_json=redact_payload(guarded_input, redact_emails=True),
-        output_json=redact_payload({"proposal": guarded_proposal}, redact_emails=True),
+        input_json=clean_input,
+        output_json={"proposal": clean_proposal},
         output_summary=redact_text(
             _summarize_output(definition.name, {"proposal": guarded_proposal}),
             redact_emails=True,
@@ -794,6 +819,98 @@ def _workflow_security_budget(
         ).as_payload()
         db.flush()
     return sprint, WorkflowSecurityBudget.from_payload(sprint.workflow_security_budget)
+
+
+def _enforce_repeated_tool_invocation_limit(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    input_json: dict[str, Any],
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+    proposal: dict[str, Any] | None = None,
+) -> None:
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    if budget_context is None:
+        return
+    sprint, budget = budget_context
+    candidate_digest = _tool_invocation_input_digest(input_json, proposal=proposal)
+    existing_invocations = db.execute(
+        select(ToolInvocation.input_json, ToolInvocation.output_json).where(
+            ToolInvocation.workspace_id == auth.workspace_id,
+            ToolInvocation.project_id == project_id,
+            ToolInvocation.research_sprint_id == research_sprint_id,
+            ToolInvocation.tool_name == definition.name,
+        )
+    )
+    observed_identical_invocations = sum(
+        _tool_invocation_input_digest(
+            stored_input,
+            proposal=_stored_tool_proposal(stored_output) if proposal is not None else None,
+        )
+        == candidate_digest
+        for stored_input, stored_output in existing_invocations
+    )
+    if observed_identical_invocations < budget.max_identical_tool_invocations:
+        return
+
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_repeated_tool_invocation_detected",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=research_sprint_id,
+        risk_level="high",
+        summary="Workflow stopped before repeating an identical tool invocation.",
+        metadata={
+            "tool_name": definition.name,
+            "input_sha256": candidate_digest,
+            "max_identical_tool_invocations": budget.max_identical_tool_invocations,
+            "observed_identical_invocations": observed_identical_invocations,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
+
+
+def _tool_invocation_input_digest(
+    input_json: dict[str, Any],
+    *,
+    proposal: dict[str, Any] | None = None,
+) -> str:
+    payload: dict[str, Any] = {"input": input_json}
+    if proposal is not None:
+        payload["proposal"] = proposal
+    canonical_payload = json.dumps(
+        payload,
+        default=str,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
+
+
+def _stored_tool_proposal(output_json: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(output_json, dict):
+        return None
+    proposal = output_json.get("proposal")
+    return proposal if isinstance(proposal, dict) else None
 
 
 def _enforce_workflow_memory_proposal_budget(

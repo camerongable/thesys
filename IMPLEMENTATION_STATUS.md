@@ -1055,11 +1055,11 @@ current verdict, next action, evidence health, validation, and decision state.
   queue per project.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
-  retrieval, token, cost, duration, memory-proposal, structured-repair, and
-  critique-loop limits before durable execution. The snapshot is visible through
-  the sprint API, persists across retries/configuration changes, travels with
-  the Temporal payload, and constrains its execution timeout by the configured
-  workflow duration limit.
+  retrieval, token, cost, duration, memory-proposal, structured-repair,
+  critique-loop, and repeated-identical-tool limits before durable execution.
+  The snapshot is visible through the sprint API, persists across
+  retries/configuration changes, travels with the Temporal payload, and
+  constrains its execution timeout by the configured workflow duration limit.
 - [x] Enforce the sprint-scoped tool-call budget at the shared governed tool
   boundary. Direct local calls, reviewed remote MCP calls, and approval-gated
   proposals lock and count durable tool invocations before any tool preparation
@@ -1112,11 +1112,18 @@ current verdict, next action, evidence health, validation, and decision state.
   exhaustion stops the graph before the memo-writing stage and records the
   configured and observed totals in the high-risk workflow audit, normalized
   security event, and alert.
+- [x] Detect repeated identical sprint-scoped tool invocations at the shared
+  governed boundary. A canonical SHA-256 digest of redacted, schema-validated
+  input is compared under the locked durable sprint budget before a local call,
+  remote-MCP preparation, or approval-gated proposal is persisted. The default
+  allows five matching calls; the next one safely stops with a high-risk audit,
+  normalized workflow security event, and alert that retain only the digest and
+  configured/observed counts.
 
 ## Next Sprint
 
-Continue Sprint 67 by metering and enforcing the remaining workflow budget
-dimensions, then add loop detection and the remaining detection rules.
+Continue Sprint 67 with the remaining loop and anomaly detection rules,
+operational metrics, dashboard, and incident-response requirements.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

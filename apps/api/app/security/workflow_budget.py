@@ -24,6 +24,7 @@ class WorkflowSecurityBudget:
     max_memory_proposals: int
     max_structured_output_repairs: int
     max_critique_loops: int
+    max_identical_tool_invocations: int
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "WorkflowSecurityBudget":
@@ -38,6 +39,9 @@ class WorkflowSecurityBudget:
             max_memory_proposals=settings.security_workflow_max_memory_proposals,
             max_structured_output_repairs=settings.security_workflow_max_structured_output_repairs,
             max_critique_loops=settings.security_workflow_max_critique_loops,
+            max_identical_tool_invocations=(
+                settings.security_workflow_max_identical_tool_invocations
+            ),
         )
 
     @classmethod
@@ -57,6 +61,10 @@ class WorkflowSecurityBudget:
                     "max_structured_output_repairs",
                 ),
                 max_critique_loops=_nonnegative_int(payload, "max_critique_loops"),
+                max_identical_tool_invocations=_positive_int(
+                    payload,
+                    "max_identical_tool_invocations",
+                ),
             )
         except (TypeError, ValueError, KeyError) as exc:
             raise ValueError("Workflow security budget is invalid.") from exc
@@ -73,6 +81,7 @@ class WorkflowSecurityBudget:
             "max_memory_proposals": self.max_memory_proposals,
             "max_structured_output_repairs": self.max_structured_output_repairs,
             "max_critique_loops": self.max_critique_loops,
+            "max_identical_tool_invocations": self.max_identical_tool_invocations,
         }
 
 
