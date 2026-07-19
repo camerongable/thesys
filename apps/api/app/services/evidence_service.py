@@ -52,6 +52,7 @@ from app.services import (
     secure_file_parser_service,
     secure_image_service,
     secure_ingestion_state_service,
+    security_event_service,
     security_policy_service,
     source_provenance_service,
 )
@@ -1000,6 +1001,14 @@ def _process_source_text(
                 source,
                 secure_ingestion_state_service.SecureIngestionState.PII_REVIEW_PENDING,
             )
+            _record_pii_redaction_security_event(
+                db,
+                auth,
+                source,
+                data_classification=protected_source_text.data_classification.value,
+                pii_entity_count=len(protected_source_text.pii_entity_types),
+                sanitization_version=protected_source_text.sanitization_version,
+            )
 
         searchable_text = _normalize_text(protected_source_text.text)
         chunks = _chunk_text(searchable_text)
@@ -1429,6 +1438,24 @@ def _quarantine_source_for_trust(
     )
     source.ingestion_status = "quarantined"
     source.ingestion_error = "Evidence source quarantined pending trust review."
+    security_event_service.record_security_event(
+        db,
+        workspace_id=auth.workspace_id,
+        project_id=source.project_id,
+        user_id=auth.user_id,
+        event_type="evidence_source_quarantined",
+        severity="high",
+        source="guardrail",
+        summary="Quarantined evidence because source trust checks failed.",
+        attributes={
+            "quarantine_reason": "source_trust",
+            "injection_score": source_trust.injection_score,
+            "poisoning_score": source_trust.poisoning_score,
+            "signal_count": len(source_trust.signals),
+            "retrieval_revoked": True,
+        },
+        containment_status="quarantined",
+    )
     governance_service.record_audit_event(
         db,
         auth,
@@ -1437,7 +1464,7 @@ def _quarantine_source_for_trust(
         project_id=source.project_id,
         entity_type="evidence_source",
         entity_id=source.id,
-        risk_level="high",
+        risk_level="medium",
         summary="Quarantined evidence before embedding because source trust failed.",
         metadata={
             "injection_score": source_trust.injection_score,
@@ -2065,6 +2092,21 @@ def _quarantine_file_upload(
         secure_ingestion_state_service.SecureIngestionState.QUARANTINED,
     )
     db.add(source)
+    security_event_service.record_security_event(
+        db,
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        user_id=auth.user_id,
+        event_type="evidence_source_quarantined",
+        severity="high",
+        source="api",
+        summary="Quarantined an evidence upload before parsing.",
+        attributes={
+            "quarantine_reason": "malware_scan",
+            "malware_status": scan_result.status.value,
+        },
+        containment_status="quarantined",
+    )
     governance_service.record_audit_event(
         db,
         auth,
@@ -2073,7 +2115,7 @@ def _quarantine_file_upload(
         project_id=project_id,
         entity_type="evidence_source",
         entity_id=source_id,
-        risk_level="high",
+        risk_level="medium",
         summary="Quarantined an evidence upload before parsing.",
         metadata={
             "content_type": content_type,
@@ -2084,6 +2126,32 @@ def _quarantine_file_upload(
         },
     )
     db.commit()
+
+
+def _record_pii_redaction_security_event(
+    db: Session,
+    auth: AuthContext,
+    source: EvidenceSource,
+    *,
+    data_classification: str,
+    pii_entity_count: int,
+    sanitization_version: str,
+) -> None:
+    security_event_service.record_security_event(
+        db,
+        workspace_id=auth.workspace_id,
+        project_id=source.project_id,
+        user_id=auth.user_id,
+        event_type="pii_redaction_applied",
+        severity="medium",
+        source="api",
+        summary="Redacted sensitive entities before evidence indexing.",
+        attributes={
+            "data_classification": data_classification,
+            "pii_entity_count": pii_entity_count,
+            "sanitization_version": sanitization_version,
+        },
+    )
 
 
 def _record_ingestion_security_event(

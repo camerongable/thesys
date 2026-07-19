@@ -6,7 +6,7 @@ from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import AIRun, AIStep, EvidenceChunk, EvidenceSource
+from app.db.models import AIRun, AIStep, EvidenceChunk, EvidenceSource, SecurityEvent
 from app.services import embedding_service, evidence_service, multimodal_extraction_service
 from app.services.data_protection_service import data_protection_service
 
@@ -107,6 +107,20 @@ def test_note_pii_is_sanitized_before_persistence_and_embedding(
     }
     assert security_metadata["retention_expires_at"]
     assert chunk.chunk_metadata["security"]["retrieval_allowed"] is True
+    event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.event_type == "pii_redaction_applied")
+    )
+    assert event is not None
+    assert event.severity == "medium"
+    assert event.source == "api"
+    assert event.attributes == {
+        "data_classification": "restricted",
+        "pii_entity_count": 3,
+        "sanitization_version": "v1",
+    }
+    for raw_value in ("Jane Doe", "jane.doe@example.com", "sk-supersecretvalue123"):
+        assert raw_value not in event.summary
+        assert raw_value not in str(event.attributes)
 
 
 def test_unapproved_source_or_chunk_is_excluded_from_retrieval_and_reembedding(

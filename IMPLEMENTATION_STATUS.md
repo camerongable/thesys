@@ -1160,6 +1160,11 @@ current verdict, next action, evidence health, validation, and decision state.
   observation, and the shared retrieval pipeline emits
   `ai_retrieval_source_count` from the distinct sources in its returned result
   set, including cache hits.
+- [x] Emit direct normalized events for secure-ingestion PII redaction and
+  evidence quarantine. The event attributes retain only classification,
+  bounded counts, and control status; no source text, entity values, scanner
+  signatures, or extraction content is stored. Existing audit trails remain
+  attributable without duplicating the high-severity security event or alert.
 - [x] Add the redacted, admin-only Security Overview data API. Project security
   administrators can aggregate high/critical events, blocked attacks, denied
   tools, pending high-risk approvals, PII redactions, quarantines, anomalous

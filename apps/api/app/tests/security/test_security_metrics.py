@@ -24,6 +24,8 @@ def test_prometheus_metrics_endpoint_exposes_low_cardinality_security_counters(
     security_metrics_service.record_security_event("prompt_injection_detected", "guardrail")
     security_metrics_service.record_security_event("tool_invocation_denied", "tool")
     security_metrics_service.record_security_event("cross_tenant_access_attempt", "api")
+    security_metrics_service.record_security_event("pii_redaction_applied", "api")
+    security_metrics_service.record_security_event("evidence_source_quarantined", "guardrail")
     security_metrics_service.record_security_event("workflow_token_budget_exceeded", "workflow")
     security_metrics_service.record_security_event(
         "workflow_repeated_tool_invocation_detected",
@@ -46,13 +48,19 @@ def test_prometheus_metrics_endpoint_exposes_low_cardinality_security_counters(
         _metric_value(before_text, "ai_prompt_injection_total") + 1
     )
     assert _metric_value(payload, "ai_guardrail_block_total") == (
-        _metric_value(before_text, "ai_guardrail_block_total") + 1
+        _metric_value(before_text, "ai_guardrail_block_total") + 2
     )
     assert _metric_value(payload, "ai_tool_denied_total") == (
         _metric_value(before_text, "ai_tool_denied_total") + 1
     )
     assert _metric_value(payload, "ai_cross_tenant_denial_total") == (
         _metric_value(before_text, "ai_cross_tenant_denial_total") + 1
+    )
+    assert _metric_value(payload, "ai_pii_redaction_total") == (
+        _metric_value(before_text, "ai_pii_redaction_total") + 1
+    )
+    assert _metric_value(payload, "ai_memory_quarantine_total") == (
+        _metric_value(before_text, "ai_memory_quarantine_total") + 1
     )
     assert _metric_value(payload, "ai_budget_exceeded_total") == (
         _metric_value(before_text, "ai_budget_exceeded_total") + 1

@@ -6,7 +6,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditEvent, EvidenceChunk, EvidenceSource, ProjectMemoryItem
+from app.db.models import (
+    AuditEvent,
+    EvidenceChunk,
+    EvidenceSource,
+    ProjectMemoryItem,
+    SecurityEvent,
+)
 from app.features.evidence.source_provenance import (
     assess_recommendation_shift,
     assess_single_source_claim_conflict,
@@ -49,7 +55,22 @@ def test_instruction_heavy_source_is_quarantined_before_embedding(
     audit = db_session.scalar(select(AuditEvent).order_by(AuditEvent.created_at.desc()))
     assert audit is not None
     assert audit.event_type == "evidence_source_quarantined"
+    assert audit.risk_level == "medium"
     assert audit.event_metadata["injection_score"] == trust["injection_score"]
+    event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.event_type == "evidence_source_quarantined")
+    )
+    assert event is not None
+    assert event.severity == "high"
+    assert event.source == "guardrail"
+    assert event.containment_status == "quarantined"
+    assert event.attributes == {
+        "quarantine_reason": "source_trust",
+        "injection_score": trust["injection_score"],
+        "poisoning_score": trust["poisoning_score"],
+        "signal_count": len(trust["signals"]),
+        "retrieval_revoked": True,
+    }
 
     detail = client.get(f"/api/projects/{project_id}/evidence/{source.id}")
     listing = client.get(f"/api/projects/{project_id}/evidence")
