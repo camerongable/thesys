@@ -246,11 +246,14 @@ SECURITY_INVARIANTS: tuple[SecurityInvariant, ...] = (
     SecurityInvariant(
         "SEC-INV-02",
         "No retrieved document may issue instructions to an agent.",
-        "partial",
+        "enforced",
         64,
-        "Untrusted-context prompt boundaries and source-risk metadata.",
-        "test_all_llm_calls_route_through_guardrail_gateway",
-        "Prompt defenses are distributed until the central gateway lands.",
+        (
+            "Central untrusted-content boundary, source-trust filters, and guardrail "
+            "gateway restrictions."
+        ),
+        "test_gateway_escapes_retrieved_content_wrapper_boundaries",
+        "Novel instruction forms require ongoing detector and red-team corpus updates.",
     ),
     SecurityInvariant(
         "SEC-INV-03",
@@ -259,7 +262,7 @@ SECURITY_INVARIANTS: tuple[SecurityInvariant, ...] = (
         66,
         "Proposal tools, approvals, and trusted memory write paths.",
         "test_memory_mutation_entrypoints_are_classified",
-        "Later policy-as-code work will make the decision surface more explicit.",
+        "Trusted system paths must remain narrow and explicitly classified.",
     ),
     SecurityInvariant(
         "SEC-INV-04",
@@ -268,16 +271,22 @@ SECURITY_INVARIANTS: tuple[SecurityInvariant, ...] = (
         66,
         "Governed tool registry and centralized authorization.",
         "test_mutating_tools_require_policy_and_approval",
-        "MCP server identity and scoped grants remain future work.",
+        (
+            "Hosted MCP identity-provider and remote-server operations require "
+            "deployment verification."
+        ),
     ),
     SecurityInvariant(
         "SEC-INV-05",
         "No restricted data may be sent to an unapproved provider.",
-        "partial",
+        "enforced",
         62,
-        "Data-type policies, provider egress allowlists, and sanitized LiteLLM payload routing.",
+        (
+            "Data-type policies, approved provider/model registry, egress allowlists, "
+            "and sanitized provider payload routing."
+        ),
         "test_restricted_provider_routing",
-        "Non-chat provider adapters and centralized gateway enforcement remain Sprint 64 work.",
+        "Supported PII and secret detectors bound the data that can be recognized and redacted.",
     ),
     SecurityInvariant(
         "SEC-INV-06",
@@ -286,7 +295,7 @@ SECURITY_INVARIANTS: tuple[SecurityInvariant, ...] = (
         63,
         "Approved source and chunk security metadata is required at retrieval and re-embedding.",
         "test_sources_require_classification_before_retrieval",
-        "File malware quarantine and explicit retention-state enforcement remain Sprint 63 work.",
+        "Classifier and scanner coverage must evolve with new file types and threats.",
     ),
     SecurityInvariant(
         "SEC-INV-07",
@@ -295,43 +304,58 @@ SECURITY_INVARIANTS: tuple[SecurityInvariant, ...] = (
         65,
         "Citation verification and claim support levels.",
         "app/tests/test_citation_verifier.py",
-        "Adversarial citation-confusion coverage expands in Sprint 68.",
+        "Semantic support evaluation can require human review for ambiguous evidence.",
     ),
     SecurityInvariant(
         "SEC-INV-08",
         "No secret may be recorded in logs, traces, prompts, audit metadata, or memory.",
-        "partial",
+        "enforced",
         64,
-        "Shared redaction helpers on persisted and exported telemetry.",
-        "app/tests/test_langsmith_observability.py",
-        "Central output DLP and canary-secret tests remain pending.",
+        (
+            "Shared audit, trace, provider, output, and memory redaction with closed "
+            "secret resolution."
+        ),
+        "test_trace_payloads_redact_pii_and_secrets",
+        "Novel secret formats may evade best-effort detection and require pattern updates.",
     ),
     SecurityInvariant(
         "SEC-INV-09",
         "No external side effect may occur without an attributable actor and audit record.",
-        "partial",
+        "enforced",
         66,
-        "Tool invocation identity and requested/executed/denied audit events.",
+        (
+            "Attributable tool invocation identity, policy decisions, approvals, and "
+            "requested/executed/denied audit events."
+        ),
         "test_externally_visible_tool_paths_emit_audit_events",
-        "External MCP write execution and sandbox telemetry remain pending.",
+        (
+            "New side-effecting integrations require a governed manifest and audit "
+            "regression coverage."
+        ),
     ),
     SecurityInvariant(
         "SEC-INV-10",
         "No AI workflow may exceed configured resource budgets.",
-        "partial",
+        "enforced",
         67,
-        "Workflow budget preflight, rate limits, and circuit checks.",
+        (
+            "Redis-backed rate limits, immutable durable budgets, loop detection, "
+            "alerts, and kill switches."
+        ),
         "test_durable_workflows_declare_complete_budgets",
-        "Durable workflow payloads do not yet carry every budget dimension.",
+        "Hosted Redis is a required fail-closed deployment dependency.",
     ),
     SecurityInvariant(
         "SEC-INV-11",
         "No AI-generated durable memory may bypass provenance and trust checks.",
-        "partial",
+        "enforced",
         65,
-        "Memory proposals, provenance metadata, conflict detection, and approvals.",
+        (
+            "Memory proposals, source provenance, trust/quarantine checks, conflict "
+            "detection, approvals, TTL, and invalidation."
+        ),
         "test_memory_mutation_entrypoints_are_classified",
-        "Poisoning trust scores and quarantine filters remain pending.",
+        "Trusted-looking evidence can still require human review before durable activation.",
     ),
     SecurityInvariant(
         "SEC-INV-12",
@@ -340,7 +364,7 @@ SECURITY_INVARIANTS: tuple[SecurityInvariant, ...] = (
         66,
         "Deterministic role, tool, approval, and service policy checks.",
         "test_mutating_tools_require_policy_and_approval",
-        "Policy bundles and deny-reason telemetry expand in Sprint 66.",
+        "New model-facing execution paths must remain behind deterministic policy boundaries.",
     ),
 )
 

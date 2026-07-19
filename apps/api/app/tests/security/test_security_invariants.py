@@ -37,7 +37,7 @@ def test_security_invariant_registry_is_complete_and_owned() -> None:
     assert [item.id for item in SECURITY_INVARIANTS] == [
         f"SEC-INV-{index:02d}" for index in range(1, 13)
     ]
-    assert {item.status for item in SECURITY_INVARIANTS} <= {"enforced", "partial", "planned"}
+    assert {item.status for item in SECURITY_INVARIANTS} == {"enforced"}
     assert all(61 < item.owner_sprint <= 68 for item in SECURITY_INVARIANTS)
     assert all(
         item.enforcement and item.test_reference and item.residual_risk

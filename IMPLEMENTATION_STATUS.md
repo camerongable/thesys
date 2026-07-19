@@ -72,6 +72,10 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Promote production-auth, ingestion-classification, centralized-guardrail,
   and complete durable-workflow-budget invariants from their initial expected
   gaps into enforced checks as their owning Sprints 62, 63, 64, and 67 land.
+- [x] Reconcile all twelve code-owned security invariants with their completed
+  Sprint 62-67 controls. The registry now distinguishes enforced safeguards from
+  explicit residual operational risk rather than treating delivered controls as
+  partial work.
 - [x] Add the pull-request security-impact checklist and README/docs navigation.
 
 ## Sprint 61 Verification
