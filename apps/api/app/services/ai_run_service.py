@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import AuthContext
 from app.core.redaction import redact_payload, redact_text
 from app.db.models import AIRun, AIStep
+from app.security.prompt_registry import ensure_approved_prompt_version
 from app.services import security_metrics_service
 
 
@@ -25,6 +26,7 @@ def start_run(
     model_name: str | None = None,
 ) -> AIRun:
     """Create the top-level trace row for an AI or workflow operation."""
+    ensure_approved_prompt_version(prompt_version)
     run = AIRun(
         workspace_id=auth.workspace_id,
         project_id=project_id,

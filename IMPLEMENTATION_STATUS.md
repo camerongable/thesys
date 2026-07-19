@@ -1306,6 +1306,10 @@ deployment-hardening requirements.
   `(provider, model, purpose)` approval carrying data-classification and security-eval
   metadata. The supported development targets and Tavily search are registered;
   unreviewed model configuration fails closed before provider transit.
+- [x] Add a reviewed prompt-version registry for production `thesys:` workflows.
+  The registry covers every active version and the shared retrieved-content safety
+  rule with immutable content hashes and security-evaluation metadata. AI runs reject
+  an unapproved or modified prompt before persistence and before a model call can begin.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
