@@ -1078,6 +1078,11 @@ current verdict, next action, evidence health, validation, and decision state.
   severity, allowing the shared authorization-denial threshold to emit one
   high-severity alert for repeated probes while retaining only count/window
   evidence.
+- [x] Detect observed guide-workflow duration exhaustion at its durable stream
+  boundary. A timed-out guide run now records the configured and observed
+  duration with its attributable AI-run correlation before the run is finalized,
+  producing a high-risk immutable audit event, normalized workflow security
+  event, and high-severity alert without retaining user prompt content.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,

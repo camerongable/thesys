@@ -9,7 +9,16 @@ from sqlalchemy.orm import Session
 from app.ai.litellm_client import LLMCompletion
 from app.ai.structured_output import StructuredOutputResult
 from app.core.config import get_settings
-from app.db.models import AIRun, AIStep, ApprovalRequest, AuditEvent, EvidenceChunk, ToolInvocation
+from app.db.models import (
+    AIRun,
+    AIStep,
+    ApprovalRequest,
+    AuditEvent,
+    EvidenceChunk,
+    SecurityAlert,
+    SecurityEvent,
+    ToolInvocation,
+)
 from app.services import guide_service
 from app.services.identity_service import ensure_dev_identity
 
@@ -698,6 +707,30 @@ def test_guide_chat_stream_timeout_returns_safe_final_response(
     final_payload = events[-1][1]
     assert "No project state was changed" in final_payload["answer"]
     assert final_payload["ai_run_id"]
+
+    run_id = uuid.UUID(final_payload["ai_run_id"])
+    audit_event = db_session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.entity_id == run_id,
+            AuditEvent.event_type == "workflow_duration_exceeded",
+        )
+    )
+    assert audit_event is not None
+    assert audit_event.risk_level == "high"
+    assert audit_event.event_metadata["ai_run_id"] == str(run_id)
+    assert audit_event.event_metadata["max_duration_seconds"] == 0
+    assert audit_event.event_metadata["observed_duration_seconds"] >= 0
+
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit_event.id)
+    )
+    assert security_event is not None
+    assert security_event.ai_run_id == run_id
+    assert security_event.source == "workflow"
+    assert security_event.severity == "high"
+    assert db_session.scalar(
+        select(SecurityAlert).where(SecurityAlert.security_event_id == security_event.id)
+    ) is not None
 
 
 def test_guide_chat_stream_close_marks_run_cancelled(

@@ -43,6 +43,7 @@ from app.services import (
     ai_cache_service,
     ai_run_service,
     context_service,
+    governance_service,
     memory_service,
     project_overview_service,
     thesis_service,
@@ -302,7 +303,14 @@ def stream_chat_events(
             },
         )
         if _stream_timed_out(started_at, timeout):
-            yield from _timeout_stream_events(db, run, context, timeout)
+            yield from _timeout_stream_events(
+                db,
+                auth,
+                run,
+                context,
+                timeout,
+                perf_counter() - started_at,
+            )
             return
 
         guardrail_decision = GuardrailGateway(settings).evaluate_user_input(
@@ -350,7 +358,14 @@ def stream_chat_events(
             },
         )
         if _stream_timed_out(started_at, timeout):
-            yield from _timeout_stream_events(db, run, context, timeout)
+            yield from _timeout_stream_events(
+                db,
+                auth,
+                run,
+                context,
+                timeout,
+                perf_counter() - started_at,
+            )
             return
 
         proposal_tool = _proposal_tool_for_message(normalized)
@@ -433,7 +448,14 @@ def stream_chat_events(
 
         response.ai_run_id = run.id
         if _stream_timed_out(started_at, timeout):
-            yield from _timeout_stream_events(db, run, context, timeout)
+            yield from _timeout_stream_events(
+                db,
+                auth,
+                run,
+                context,
+                timeout,
+                perf_counter() - started_at,
+            )
             return
 
         if not answer_streamed:
@@ -472,11 +494,29 @@ def _stream_timed_out(started_at: float, timeout_seconds: float) -> bool:
 
 def _timeout_stream_events(
     db: Session,
+    auth: AuthContext,
     run,
     context: GuideContextRead,
     timeout_seconds: float,
+    observed_duration_seconds: float,
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     response = _timeout_chat_response(context, run.id, timeout_seconds)
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_duration_exceeded",
+        actor_type="user",
+        project_id=context.project_id,
+        entity_type="ai_run",
+        entity_id=run.id,
+        risk_level="high",
+        summary="Guide workflow exceeded its configured duration limit.",
+        metadata={
+            "ai_run_id": str(run.id),
+            "max_duration_seconds": round(timeout_seconds, 3),
+            "observed_duration_seconds": round(observed_duration_seconds, 3),
+        },
+    )
     ai_run_service.fail_run(
         db,
         run,
