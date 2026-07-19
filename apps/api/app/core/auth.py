@@ -296,6 +296,20 @@ def _persist_authentication_event(
             workspace_id=workspace_id,
             user_id=user_id,
         )
+        if event_type == "cross_tenant_access_attempt" and reason_code == "project_scope_denied":
+            from app.services import security_event_service
+
+            security_event_service.record_security_event(
+                db,
+                workspace_id=workspace_id,
+                project_id=None,
+                user_id=user_id,
+                event_type="cross_project_access_denied",
+                severity="medium",
+                source="auth",
+                summary="Project access was denied outside the active workspace scope.",
+                attributes={"reason_code": reason_code},
+            )
         db.commit()
     except SQLAlchemyError:
         db.rollback()

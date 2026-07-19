@@ -187,6 +187,12 @@ class Settings(BaseSettings):
         le=100,
         validation_alias="SECURITY_AUTHORIZATION_DENIAL_SPIKE_THRESHOLD",
     )
+    security_cross_project_enumeration_threshold: int = Field(
+        default=5,
+        ge=2,
+        le=100,
+        validation_alias="SECURITY_CROSS_PROJECT_ENUMERATION_THRESHOLD",
+    )
     security_provider_failure_spike_threshold: int = Field(
         default=3,
         ge=2,
