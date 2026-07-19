@@ -1,3 +1,4 @@
+import base64
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -7,9 +8,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import AIRun, AIStep, EvidenceChunk, EvidenceSource
-from app.schemas.evidence import EvidenceRetrievalResultRead
-from app.services import evidence_service, multimodal_extraction_service, retrieval_service
+from app.db.models import AIRun, AIStep, EvidenceChunk, EvidenceSource, SecurityAlert, SecurityEvent
+from app.schemas.evidence import EvidenceRetrievalResultRead, RetrievalQueryPlanRead
+from app.services import (
+    evidence_service,
+    multimodal_extraction_service,
+    retrieval_service,
+    secure_file_parser_service,
+    security_metrics_service,
+)
+
+
+def _ingestion_states(source: EvidenceSource) -> list[str]:
+    ingestion = source.source_metadata["ingestion"]
+    return [entry["state"] for entry in ingestion["history"]]
 
 
 def test_note_ingestion_chunks_embeds_and_retrieves(
@@ -41,6 +53,21 @@ def test_note_ingestion_chunks_embeds_and_retrieves(
     assert source["classification"] == "customer_discovery"
     assert source["chunk_count"] == 1
     assert source["summary"]
+
+    persisted_source = db_session.scalar(
+        select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(source["id"]))
+    )
+    assert persisted_source is not None
+    assert _ingestion_states(persisted_source) == [
+        "uploaded",
+        "extraction_pending",
+        "extracted",
+        "classification_pending",
+        "classified",
+        "approved_for_embedding",
+        "embedded",
+        "retrievable",
+    ]
 
     chunk = db_session.scalar(select(EvidenceChunk))
     assert chunk is not None
@@ -89,9 +116,192 @@ def test_note_ingestion_chunks_embeds_and_retrieves(
     assert retrieval_step.output_json["diagnostics"]["fallback_path_used"] is True
     assert retrieval_step.output_json["diagnostics"]["query_plan"]["subqueries"]
     assert retrieval_step.output_json["diagnostics"]["reranker"]["provider"] == "deterministic"
+    assert retrieval_step.output_json["diagnostics"]["reranker"]["adapter"] == "deterministic"
     assert retrieval_step.output_json["diagnostics"]["context"]["selected_count"] == 1
+    assert retrieval_step.output_json["diagnostics"]["context"]["mmr_enabled"] is True
     quality = retrieval_step.output_json["diagnostics"]["quality_report"]
     assert quality["citation_coverage_proxy"] == 1
+    assert quality["precision_at_k"] is not None
+    assert quality["mrr"] is not None
+
+    reprocess_response = client.post(
+        f"/api/projects/{project_id}/evidence/{source['id']}/reprocess"
+    )
+    assert reprocess_response.status_code == 200
+    db_session.expire_all()
+    reprocessed_source = db_session.scalar(
+        select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(source["id"]))
+    )
+    assert reprocessed_source is not None
+    assert _ingestion_states(reprocessed_source)[-7:] == [
+        "extraction_pending",
+        "extracted",
+        "classification_pending",
+        "classified",
+        "approved_for_embedding",
+        "embedded",
+        "retrievable",
+    ]
+
+
+def test_retrieval_records_distinct_returned_source_count(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    observed: list[int] = []
+    monkeypatch.setattr(security_metrics_service, "record_retrieval_source_count", observed.append)
+    project_response = client.post(
+        "/api/projects",
+        json={"name": "Retrieval metric project"},
+    )
+    project_id = project_response.json()["id"]
+    note_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={
+            "title": "Source count evidence",
+            "text": "Independent coaches need trusted weekly check-in recommendations.",
+        },
+    )
+    assert note_response.status_code == 201
+
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/retrieve",
+        json={"query": "trusted coach recommendations", "mode": "keyword", "top_k": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"]
+    assert observed == [1]
+
+
+def test_unusually_broad_retrieval_creates_a_redacted_high_severity_alert(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SECURITY_UNUSUALLY_BROAD_RETRIEVAL_SOURCE_THRESHOLD", "3")
+    get_settings.cache_clear()
+    project_id = client.post("/api/projects", json={"name": "Broad retrieval"}).json()["id"]
+    source_ids: list[str] = []
+    source_texts = [
+        "Founder interviews describe onboarding friction and shared retrieval signal "
+        "market research.",
+        "Pricing surveys compare annual contracts and shared retrieval signal market research.",
+        "Support tickets identify retention gaps and shared retrieval signal market research.",
+    ]
+    for index, text in enumerate(source_texts):
+        response = client.post(
+            f"/api/projects/{project_id}/evidence/note",
+            json={
+                "title": f"Broad source {index + 1}",
+                "text": text,
+            },
+        )
+        assert response.status_code == 201
+        source_ids.append(response.json()["id"])
+
+    query = "shared retrieval signal market research"
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/retrieve",
+        json={"query": query, "mode": "keyword", "top_k": 3},
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["results"]) == 3
+    cached_response = client.post(
+        f"/api/projects/{project_id}/evidence/retrieve",
+        json={"query": query, "mode": "keyword", "top_k": 3},
+    )
+    assert cached_response.status_code == 200
+    assert len(cached_response.json()["results"]) == 3
+    events = list(
+        db_session.scalars(
+            select(SecurityEvent).where(SecurityEvent.event_type == "unusually_broad_retrieval")
+        )
+    )
+    assert len(events) == 2
+    event = events[0]
+    assert event.project_id == uuid.UUID(project_id)
+    assert event.severity == "high"
+    assert event.source == "retrieval"
+    assert event.attributes == {
+        "returned_chunk_count": 3,
+        "distinct_source_count": 3,
+        "requested_top_k": 3,
+    }
+    assert query not in str(event.__dict__)
+    assert all(source_id not in str(event.__dict__) for source_id in source_ids)
+    alerts = list(
+        db_session.scalars(
+            select(SecurityAlert)
+            .join(SecurityEvent, SecurityAlert.security_event_id == SecurityEvent.id)
+            .where(SecurityEvent.event_type == "unusually_broad_retrieval")
+        )
+    )
+    assert len(alerts) == 2
+    assert all(alert.project_id == uuid.UUID(project_id) for alert in alerts)
+    assert all(alert.severity == "high" for alert in alerts)
+    get_settings.cache_clear()
+
+
+def test_workflow_traces_hide_evidence_after_source_quarantine(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_response = client.post("/api/projects", json={"name": "Trace eligibility"})
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+    source_text = "trace-only evidence must disappear after its source is quarantined"
+    source_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={"title": "Trace source", "text": source_text},
+    )
+    assert source_response.status_code == 201
+    source_id = source_response.json()["id"]
+
+    retrieval_response = client.post(
+        f"/api/projects/{project_id}/evidence/retrieve",
+        json={"query": "trace-only evidence source quarantine", "mode": "hybrid", "top_k": 5},
+    )
+    assert retrieval_response.status_code == 200
+    retrieval = retrieval_response.json()
+    assert retrieval["results"]
+
+    source = db_session.scalar(
+        select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(source_id))
+    )
+    assert source is not None
+    source.source_metadata = {
+        **source.source_metadata,
+        "security": {
+            **source.source_metadata["security"],
+            "security_status": "quarantined",
+        },
+        "source_trust": {
+            **source.source_metadata["source_trust"],
+            "security_status": "quarantined",
+        },
+    }
+    db_session.commit()
+
+    detail_response = client.get(f"/api/workflows/{retrieval['ai_run_id']}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["steps"][0]["output_json"]["results"] == []
+    assert source_text not in detail_response.text
+
+    list_response = client.get(f"/api/projects/{project_id}/workflows")
+    assert list_response.status_code == 200
+    listed_run = next(
+        run
+        for run in list_response.json()["runs"]
+        if run["id"] == retrieval["ai_run_id"]
+    )
+    assert listed_run["steps"][0]["output_json"]["results"] == []
+    assert source_text not in list_response.text
+
+    event_response = client.get(f"/api/workflows/{retrieval['ai_run_id']}/events")
+    assert event_response.status_code == 200
+    assert source_text not in event_response.text
 
 
 def test_broad_evidence_retrieval_plans_reranks_and_assembles_context(
@@ -158,7 +368,10 @@ def test_broad_evidence_retrieval_plans_reranks_and_assembles_context(
     assert diagnostics["context"]["selected_count"] >= 1
     assert diagnostics["context"]["token_count"] <= diagnostics["context"]["token_budget"]
     assert diagnostics["context"]["deduped_count"] >= 1
+    assert diagnostics["context"]["max_chunks_per_domain"] >= 1
+    assert diagnostics["context"]["max_chunks_per_source_type"] >= 1
     assert diagnostics["quality_report"]["citation_coverage_proxy"] == 1
+    assert diagnostics["quality_report"]["ndcg_proxy"] is not None
     assert diagnostics["quality_report"]["context_token_count"] == (
         diagnostics["context"]["token_count"]
     )
@@ -304,17 +517,35 @@ def test_url_ingestion_canonicalizes_and_records_page_provenance(
     assert body["metadata"]["canonical_url"] == "https://example.com/pricing"
     assert body["metadata"]["domain"] == "example.com"
     assert body["metadata"]["prompt_injection_markers"]
+    assert body["ingestion_status"] == "quarantined"
+    assert body["metadata"]["source_trust"]["security_status"] == "quarantined"
+    assert body["metadata"]["source_trust"]["injection_score"] >= 0.6
     assert body["metadata"]["source_quality"]["risk_level"] == "high"
+    assert body["metadata"]["source_quality"]["policy_version"] == "source-quality:v2"
+    assert body["metadata"]["source_quality"]["explanation"]
+    assert body["metadata"]["source_quality"]["factors"]
+    assert body["metadata"]["source_quality"]["retrieval_weight"] < 0.8
+    assert body["metadata"]["readability"]["parser"] == "html.parser"
+    assert body["metadata"]["extraction_method"] == "readable_html_parser_v3"
+    assert body["metadata"]["extraction_confidence"] > 0
     assert body["metadata"]["text_lineage"]["page_title"] == "Pricing"
     assert body["metadata"]["text_lineage"]["sections"]
+    assert body["metadata"]["text_lineage"]["sections"][0]["char_start"] >= 0
+    assert body["metadata"]["source_snapshot_id"].startswith("html:")
+    assert (
+        body["metadata"]["snapshot"]["source_snapshot_id"]
+        == body["metadata"]["source_snapshot_id"]
+    )
+    assert body["metadata"]["snapshot"]["screenshot"]["available"] is False
+    assert body["metadata"]["snapshot"]["retention_policy"]
     assert body["metadata"]["raw_html_snapshot"]["content_hash"]
+    assert body["metadata"]["raw_html_snapshot"]["screenshot"]["available"] is False
 
     source = db_session.scalar(
         select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(body["id"]))
     )
     assert source is not None
-    chunk = source.chunks[0]
-    assert chunk.chunk_metadata["source_metadata"]["source_quality"]["risk_level"] == "high"
+    assert source.chunks == []
 
 
 def test_url_ingestion_dedupes_external_sources_by_content_hash(
@@ -401,9 +632,11 @@ def test_image_upload_uses_deterministic_multimodal_extraction_and_retrieval(
         files={
             "file": (
                 "sprint-40-fixture.png",
-                (
-                    b"\x89PNG\r\nTHESYS_OCR_TEXT: Coaches saw weekly check-in pain "
-                    b"and willingness to pay for synthesis."
+                base64.b64decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAY3RFWHREZXNjcmlwdGlv"
+                    "bgBUSEVTWVNfT0NSX1RFWFQ6IENvYWNoZXMgc2F3IHdlZWtseSBjaGVjay1pbiBwYWlu"
+                    "IGFuZCB3aWxsaW5nbmVzcyB0byBwYXkgZm9yIHN5bnRoZXNpcy5kbAaCAAAADElEQVR4"
+                    "nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC"
                 ),
                 "image/png",
             )
@@ -423,7 +656,9 @@ def test_image_upload_uses_deterministic_multimodal_extraction_and_retrieval(
         select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(body["id"]))
     )
     assert source is not None
-    assert "weekly check-in pain" in (source.raw_text or "")
+    assert "Deterministic multimodal extraction" in (source.raw_text or "")
+    assert "weekly check-in pain" not in (source.raw_text or "")
+    assert source.source_metadata["image_security"]["image_sanitized"] is True
     chunk = db_session.scalar(
         select(EvidenceChunk).where(EvidenceChunk.source_id == source.id)
     )
@@ -432,7 +667,7 @@ def test_image_upload_uses_deterministic_multimodal_extraction_and_retrieval(
 
     retrieval_response = client.post(
         f"/api/projects/{project_id}/evidence/retrieve",
-        json={"query": "weekly check-in pain willingness to pay", "mode": "keyword"},
+        json={"query": "deterministic multimodal extraction evidence", "mode": "keyword"},
     )
 
     assert retrieval_response.status_code == 200
@@ -451,6 +686,20 @@ def test_text_pdf_uses_pypdf_without_multimodal_fallback(
         raise AssertionError("Text-native PDFs should not use multimodal extraction.")
 
     monkeypatch.setattr(multimodal_extraction_service, "extract_file", fail_extract)
+
+    monkeypatch.setattr(
+        secure_file_parser_service,
+        "extract_pdf",
+        lambda _settings, *, body: secure_file_parser_service.PDFExtraction(
+            page_texts=[
+                "Coaches compare pricing tiers.\n"
+                "| Plan | Price | Buyer |\n"
+                "| --- | --- | --- |\n"
+                "| Starter | $29 | Solo coach |\n"
+                "| Pro | $99 | Studio |\n"
+            ]
+        ),
+    )
     create_response = client.post("/api/projects", json={"name": "PDF evidence"})
     project_id = create_response.json()["id"]
 
@@ -473,7 +722,15 @@ def test_text_pdf_uses_pypdf_without_multimodal_fallback(
     assert body["metadata"]["extracted_text_length"] >= 20
     assert body["metadata"]["pdf_page_count"] == 1
     assert body["metadata"]["pdf_page_lineage"][0]["page_number"] == 1
-    assert body["metadata"]["table_extraction"]["enabled"] is False
+    assert body["metadata"]["table_extraction"]["enabled"] is True
+    assert body["metadata"]["table_extraction"]["table_count"] == 1
+    assert body["metadata"]["table_extraction"]["tables"][0]["headers"] == [
+        "Plan",
+        "Price",
+        "Buyer",
+    ]
+    assert body["metadata"]["table_extraction"]["tables"][0]["cells"][0]["text"] == "Starter"
+    assert body["metadata"]["source_quality"]["table_extraction_confidence"] > 0
     assert "extraction_provider" not in body["metadata"]
 
 
@@ -485,14 +742,6 @@ def test_low_text_pdf_routes_to_multimodal_fallback_when_enabled(
     monkeypatch.setenv("MULTIMODAL_PDF_MIN_TEXT_CHARS", "80")
     get_settings.cache_clear()
     calls: list[dict[str, str]] = []
-
-    class FakePage:
-        def extract_text(self) -> str:
-            return ""
-
-    class FakePdfReader:
-        def __init__(self, body) -> None:
-            self.pages = [FakePage()]
 
     def fake_extract(settings, *, filename: str, content_type: str, body: bytes, media_type: str):
         calls.append(
@@ -523,7 +772,11 @@ def test_low_text_pdf_routes_to_multimodal_fallback_when_enabled(
             total_cost=Decimal("0"),
         )
 
-    monkeypatch.setattr(evidence_service, "PdfReader", FakePdfReader)
+    monkeypatch.setattr(
+        secure_file_parser_service,
+        "extract_pdf",
+        lambda _settings, *, body: secure_file_parser_service.PDFExtraction(page_texts=[""]),
+    )
     monkeypatch.setattr(multimodal_extraction_service, "extract_file", fake_extract)
     create_response = client.post("/api/projects", json={"name": "Scanned PDF evidence"})
     project_id = create_response.json()["id"]
@@ -546,6 +799,43 @@ def test_low_text_pdf_routes_to_multimodal_fallback_when_enabled(
     assert body["metadata"]["pdf_text_extraction"] == "multimodal_fallback"
     assert body["metadata"]["pypdf_extracted_text_length"] == 0
     assert body["metadata"]["extraction_provider"] == "deterministic"
+    assert body["metadata"]["ocr_fallback"]["used"] is True
+    assert body["metadata"]["ocr_confidence"] > 0
+    assert body["metadata"]["source_quality"]["extraction_confidence"] > 0
+
+
+def test_source_quality_weight_affects_deterministic_rerank() -> None:
+    plan = RetrievalQueryPlanRead(
+        intent="pricing",
+        needed_evidence_types=["pricing"],
+        subqueries=["pricing proof"],
+    )
+    source_a = uuid.uuid4()
+    source_b = uuid.uuid4()
+    weak = _retrieval_result(
+        source_a,
+        "pricing proof for coaches",
+        score=0.7,
+        metadata={"source_quality_retrieval_weight": 0.2},
+    )
+    strong = _retrieval_result(
+        source_b,
+        "pricing proof for coaches",
+        score=0.7,
+        metadata={"source_quality_retrieval_weight": 0.95},
+    )
+
+    reranked = retrieval_service._deterministic_rerank(  # noqa: SLF001
+        "pricing proof for coaches",
+        plan,
+        [weak, strong],
+        ordered_ids=None,
+    )
+
+    assert reranked[0].source_id == source_b
+    assert reranked[0].rerank_score is not None
+    assert reranked[1].rerank_score is not None
+    assert reranked[0].rerank_score > reranked[1].rerank_score
 
 
 def test_reembed_evidence_dry_run_and_project_update(
@@ -639,6 +929,7 @@ def _retrieval_result(
     text: str,
     *,
     score: float,
+    metadata: dict[str, object] | None = None,
 ) -> EvidenceRetrievalResultRead:
     return EvidenceRetrievalResultRead(
         source_id=source_id,
@@ -651,7 +942,7 @@ def _retrieval_result(
         score=score,
         semantic_score=score,
         keyword_score=score,
-        metadata={},
+        metadata=metadata or {},
         rerank_score=score,
         created_at=datetime.now(UTC),
     )

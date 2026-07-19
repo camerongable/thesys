@@ -38,7 +38,7 @@ SECRET_VALUE_PATTERNS = (
     re.compile(r"\bBearer\s+[A-Za-z0-9._~+\-/]+=*\b", re.IGNORECASE),
     re.compile(r"\b[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\b"),
     re.compile(
-        r"(?i)\b(api[_-]?key|token|secret|password|authorization|bearer)\s*[:=]\s*"
+        r"(?i)\b(api[_-]?key|access[_-]?token|token|secret|password|authorization|bearer)\s*[:=]\s*"
         r"['\"]?[^'\"\s,;}]+"
     ),
 )

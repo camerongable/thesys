@@ -202,21 +202,21 @@ Thesys is built to show the difference between a thin LLM wrapper and a durable 
 | AI concept | How it is demonstrated in this repo | Technologies and libraries |
 |---|---|---|
 | Agentic RAG | Autonomous research sprints plan work, call bounded tools, retrieve evidence, detect gaps, run follow-up retrieval, synthesize a memo, critique citations, and wait for human approval before updating project memory. | LangGraph, FastAPI, SQLAlchemy, Temporal, internal tool registry |
-| Multi-stage retrieval | Project-scoped retrieval plans broad strategic questions, decomposes subqueries, fuses results, reranks candidates, assembles a bounded context pack, and returns quality diagnostics. | PostgreSQL, pgvector, deterministic and LiteLLM rerankers, custom retrieval service |
+| Multi-stage retrieval | Project-scoped retrieval plans broad strategic questions, decomposes subqueries, fuses results, combines semantic and text ranking, reranks candidates, applies MMR diversity controls, assembles a bounded context pack, and returns quality diagnostics. | PostgreSQL, pgvector, Postgres `ts_rank_cd`, BM25-like local scoring, deterministic/LiteLLM/no-op reranker adapters, custom retrieval service |
 | Production embeddings | Evidence chunks record provider, model, dimension, version, timestamp, and errors. Local deterministic embeddings stay available for tests, while LiteLLM-backed embeddings support live mode and re-embedding after model changes. | LiteLLM-compatible embeddings API, pgvector, PostgreSQL, Alembic |
 | Retrieval-grounded generation | Opportunity briefs, competitor analysis, research memos, Ask Thesys answers, assumptions, and validation plans are generated from project state and retrieved evidence rather than model memory alone. | Retrieval service, Pydantic schemas, LiteLLM, SQLAlchemy |
 | Structured LLM outputs | LLM responses are requested as JSON, validated against typed schemas, repaired when possible, and persisted as structured project objects. | Pydantic v2, LiteLLM-compatible chat completions, structured output helper |
 | Model gateway and deterministic fallback | Chat, embedding, reranking, and multimodal extraction paths are configurable. Local demos and tests can run without provider credentials. | LiteLLM Proxy, httpx, Ollama, OpenAI-compatible APIs, Gemini, deterministic stubs |
 | Persistent project memory | The product stores thesis versions, evidence, artifacts, claims, assumptions, validation missions, decisions, AI runs, AI steps, tool calls, approvals, and audit events instead of relying on chat history. | PostgreSQL, SQLAlchemy, Alembic |
-| Bounded conversational context | Ask Thesys uses recent-turn context and project memory while keeping chat non-mutating and scoped to one project. | Guide service, Pydantic response schemas, retrieval tool calls, React Query |
-| Tool governance and MCP adapter | Project capabilities are exposed through explicit tool contracts with schemas, risk levels, access modes, approval policy, audit logging, and an MCP-shaped HTTP adapter. | Internal tool registry, MCP adapter, approval requests, RBAC, audit events |
+| Unified context engineering | Major AI workflows compile typed context packs with domain state, retrieval results, selected memory, untrusted inputs, tool output metadata, token budgets, dropped-item reasons, and workflow-specific context profiles. | ContextCompiler, Pydantic context schemas, FastAPI services, SQLAlchemy-backed memory |
+| Tool governance and MCP adapter | Project capabilities are exposed through explicit tool contracts with schemas, risk levels, access modes, approval policy, audit logging, legacy MCP-shaped HTTP routes, and project-scoped MCP JSON-RPC. | Internal tool registry, MCP JSON-RPC adapter, approval requests, RBAC, audit events |
 | Human-in-the-loop agents | AI workflows can propose research plans, memory updates, validation plans, and decisions, but important strategic state changes require user approval. | Tool registry, approval requests, Temporal signals, role-based project permissions |
 | Prompt-injection and ingestion safety | Retrieved content is treated as untrusted evidence, URL fetches are SSRF-guarded, uploads are validated, fetched-page injection markers are recorded, and secrets are redacted from traces. | Shared prompt rules, SSRF guards, upload validation, cited synthesis prompts, secret redaction utilities |
 | External research connectors | Source discovery can use deterministic local results or live Tavily search. Approved ingestion preserves canonical URLs, content hashes, provider/query/rank provenance, fetch timestamps, and source quality signals. | Tavily API, httpx, source discovery service, source provenance service |
-| Multimodal evidence extraction | Image uploads and low-text PDF fallback can be extracted through a multimodal model boundary. PDFs record page lineage and table-extraction extension metadata, while local deterministic fixture extraction keeps tests stable. | LiteLLM multimodal chat, pypdf, file upload pipeline, source provenance metadata |
+| Source and document intelligence | URL, PDF, text, image, and discovered-source evidence preserve parser/provider metadata, source snapshots, page/section/table/OCR quote provenance, source-quality factors, and collapsed citation drilldowns. Local deterministic OCR/table fixtures keep evals credential-free while live providers remain egress-gated. | Python `html.parser`, pypdf, LiteLLM multimodal chat, source provenance service, citation verifier, Next.js Inspect surfaces |
 | Durable orchestration | Long-running research sprints can survive retries, approval waits, and worker restarts through a durable workflow layer. | Temporal, Temporal Python SDK, FastAPI service layer |
 | AI observability | AI runs and steps track model, prompt version, latency, token usage, cost, trace IDs, failures, retrieval diagnostics, and generated artifact provenance. | LangSmith, AI run/step tables, LiteLLM cost headers, workflow trace UI |
-| Evaluation | Research and AI evals check citation coverage, unsupported claims, agentic traceability, gap detection, retrieval quality, search provenance, cost visibility, source provenance, prompt-injection markers, and secret redaction. | Custom eval scripts, JSON eval cases, pytest-compatible service checks |
+| Evaluation | Research, guide, AI, context, retrieval, cache, and extraction evals check citation coverage, unsupported claims, agentic traceability, gap detection, retrieval quality, source/document provenance, OCR/table fixtures, live-provider-unavailable warnings, cost visibility, context inclusion, stale-memory exclusion, poisoned-instruction isolation, dropped-context explanations, prompt-injection markers, and secret redaction. | Custom eval scripts, JSON eval cases, pytest-compatible service checks |
 | AI product UX | The UI exposes verdicts, next actions, evidence, unsupported gaps, assumptions, validation missions, decisions, citations, and traces while keeping implementation details hidden by default. | Next.js, React, TanStack Query, project guide service |
 
 ### Feature-by-Feature AI Engineering Map
@@ -244,14 +244,18 @@ Thesys is built to show the difference between a thin LLM wrapper and a durable 
 
 **Context and Memory**
 
-- Builds typed context packs for Ask Thesys and agentic research with token budgets, provenance, dropped-item diagnostics, and untrusted-content rules.
+- Builds typed context packs for assumption extraction, Ask Thesys, agentic research, opportunity briefs, competitor analysis, validation planning, validation-result interpretation, and decision recommendation.
+- Uses explicit workflow profiles so each path has an inspectable token budget, expected context item types, selected memory, dropped-context explanations, citation IDs, and untrusted-content rules.
 - Stores typed memory items for semantic, episodic, procedural, preference, working, and project memory.
 - Selects memory by workflow so each AI path receives relevant context without turning the whole database into a prompt.
+- Supports approval-gated preference memory, compacted memory proposals, stale/archive behavior, conflict detection/resolution, and recommendation-to-memory provenance links.
+- Exposes hidden-by-default memory and context diagnostics in Inspect, plus `/evals/context` and `scripts/eval_ai_quality.py --json` checks.
 
 **Tool Governance and MCP**
 
 - Defines read, proposal, and write tools with schemas, risk levels, and approval policies.
-- Exposes the same governed tool boundary through `/api/mcp/tools` and `/api/mcp/projects/{project_id}/tools/{tool_name}/call`.
+- Exposes the same governed tool boundary through MCP JSON-RPC at `/api/mcp/rpc` and `/api/mcp/projects/{project_id}/rpc`.
+- Keeps compatibility routes at `/api/mcp/tools` and `/api/mcp/projects/{project_id}/tools/{tool_name}/call`.
 - Logs MCP-originated tool calls and preserves approval gates for proposal tools.
 
 **Source and Competitor Discovery**
@@ -294,6 +298,12 @@ Tool schemas are enforced at runtime. Guard checks validate the requesting
 actor, accepted input fields, bounded payload sizes, output shape, and
 research-sprint scope before any tool logic runs.
 
+Sprint 54 adds a production-security shape around expensive AI workflows:
+per-user and per-workspace rate limits, max concurrent workflow guards, pre-call
+token/cost budget checks, provider-egress allowlists, JWT/API-key auth modes,
+stricter dev-auth isolation, URL fetch domain/port/content-type policy, and
+formal threat-model documentation.
+
 The API persists governance events and generic approval requests for research
 plans, memory updates, tool invocations, validation plans, and decisions. The
 project workspace includes a governance approval queue with pending summaries,
@@ -308,7 +318,51 @@ errors pass through secret redaction for API keys, bearer tokens, JWT-like
 tokens, sensitive key names, secret values, and emails.
 
 In local dev auth, `X-Dev-User-Role` can be set to one of `owner`, `admin`,
-`editor`, or `viewer` to exercise governance behavior.
+`editor`, or `viewer` to exercise governance behavior. Dev auth is rejected
+outside `APP_ENV=local`. `AUTH_MODE=oidc` verifies asymmetric bearer tokens
+against a fixed algorithm allowlist and JWKS, then resolves a pre-provisioned
+active user, exact workspace membership, and stored role into a `Principal`.
+`AUTH_MODE=jwt` remains a shared-secret demo path, and `AUTH_MODE=api_key`
+verifies hashed service-account API keys for integration-style access. JWT key
+IDs, revoked JWT IDs, and revoked API-key
+hashes are configurable to model rotation and revocation behavior.
+
+Authenticated principals are also bound to transaction-local Postgres settings.
+Forced row-level security covers every currently modeled tenant table, including
+child/link tables that inherit workspace scope. The API, Temporal worker,
+migration process, and readonly access use separate non-superuser database roles;
+application-level workspace predicates remain in place as defense in depth.
+
+Secret access is environment-gated: local development uses the environment
+provider, while staging and production require Vault or a cloud secret manager.
+Application credential consumers resolve closed, named secrets at the point of
+use. Restricted reversible fields can use AES-256-GCM envelope encryption with
+a random per-workspace data key; only the externally wrapped data key is stored,
+and its table is protected by the same forced RLS boundary.
+
+Evidence objects use workspace/project/source-scoped keys. Hosted deployments
+must use HTTPS S3-compatible storage and verify private access, bucket-owner
+enforcement, server-side AES256/KMS encryption, retention, and an insecure-
+transport deny policy before completing storage operations. Downloads are
+authorized before short-lived presigning and use explicit safe response headers;
+object writes, download grants/denials, and deletions are audited without
+persisting signed URLs or raw storage keys.
+
+The API is stateless and uses authorization headers rather than browser cookies.
+Its CORS policy therefore does not enable browser credentials. API responses
+carry a restrictive CSP with frame denial, `nosniff`, no-referrer and permissions
+policies, and production HSTS. A future cookie-based session flow must add
+secure/HttpOnly/SameSite settings, rotation, revocation, and CSRF protection.
+
+Authentication outcomes are persisted separately from project audit history.
+They record only event and reason codes, authentication method, and internal
+workspace/user IDs when attribution is established; bearer tokens, API keys,
+and arbitrary request metadata are not accepted by the event model.
+
+OIDC sessions with a `sid`, and JWTs with a `jti`, can revoke themselves through
+`POST /api/session/revoke`. Revocation stores a workspace/user-scoped SHA-256
+digest rather than the raw identifier, creates a `session_revoked` audit event,
+and blocks later reuse before route handling.
 
 ---
 
@@ -445,8 +499,10 @@ the domain workflow, then follow the AI services behind each step.
 | Area | Path | What to look for |
 |---|---|---|
 | API entrypoints | `apps/api/app/routers/` | FastAPI routes for projects, evidence, research sprints, guide chat, tools, workflows, evals, and governance. |
+| Feature packages | `apps/api/app/features/` | Sprint 59 feature-owned modules. Evidence extraction/provenance/citations, retrieval planning/reranking/context selection, validation generation/result interpretation, research planning/memo rendering/prompting/citation-audit/source-discovery shaping, guide routing/streaming/citations/context projection/prompt assembly, memory context-pack/Inspect serialization, decision recommendation shaping, governed tool guards, MCP protocol serialization, eval report file readers/writers/summary/failure-payload shaping, research eval case loading/scoring, shared eval metric-record helpers, and eval observability metric assembly live here behind compatibility shims. |
+| Shared backend utilities | `apps/api/app/common/` | Cross-feature helpers that are not owned by the service layer, such as metadata merging. |
 | AI service layer | `apps/api/app/services/` | The main AI/product behavior: retrieval, embeddings, source discovery, agentic research, guide chat, validation, governance, and observability. |
-| LLM helpers | `apps/api/app/ai/` | LiteLLM client, structured-output validation/repair, prompt versions, fallback policy, and shared prompt-safety rules. |
+| LLM helpers | `apps/api/app/ai/` | LiteLLM client, structured-output validation/repair, prompt versions, fallback policy, deterministic fallback completion metadata, and shared prompt-safety rules. |
 | Domain models | `apps/api/app/db/models/` | SQLAlchemy models for project memory, evidence, artifacts, claims, tools, approvals, AI runs, and research workflow state. |
 | Schemas | `apps/api/app/schemas/` | Pydantic request/response contracts and structured AI output shapes. |
 | Durable workflows | `apps/api/app/temporal/` | Temporal workflow and activities for long-running research sprints. |
@@ -457,29 +513,73 @@ the domain workflow, then follow the AI services behind each step.
 Useful codepaths for AI reviewers:
 
 - Agentic research graph: `apps/api/app/services/agentic_research_service.py`
+- Research sprint planning prompts/fallbacks: `apps/api/app/features/research/planning.py`
+- Research memo rendering: `apps/api/app/features/research/memo_rendering.py`
+- Research memo prompt assembly: `apps/api/app/features/research/memo_prompting.py`
+- Research citation audit shaping: `apps/api/app/features/research/citation_audit.py`
 - Retrieval pipeline: `apps/api/app/services/retrieval_service.py`
 - Embedding provider boundary: `apps/api/app/services/embedding_service.py`
 - Context packs: `apps/api/app/services/context_service.py`
 - Typed memory: `apps/api/app/services/memory_service.py`
+- Memory Inspect serialization: `apps/api/app/features/memory/inspection.py`
 - Ask Thesys grounded guide: `apps/api/app/services/guide_service.py`
+- Ask Thesys intent/action routing: `apps/api/app/features/guide/routing.py`
+- Ask Thesys stage recommendations: `apps/api/app/features/guide/recommendations.py`
+- Ask Thesys streaming events: `apps/api/app/features/guide/events.py`
+- Ask Thesys citation drilldowns: `apps/api/app/features/guide/citations.py`
+- Ask Thesys grounded answer shaping: `apps/api/app/features/guide/grounding.py`
+- Ask Thesys guide eval shaping: `apps/api/app/features/guide/evals.py`
+- Validation generation prompts/fallbacks:
+  `apps/api/app/features/validation/generation.py`
+- Validation plan rendering: `apps/api/app/features/validation/plan_rendering.py`
+- Decision recommendation shaping: `apps/api/app/features/decisions/recommendation.py`
 - Tool governance boundary: `apps/api/app/services/tool_service.py`
+- Tool schema guards: `apps/api/app/features/governance_tools/schema_guard.py`
 - MCP adapter: `apps/api/app/mcp/adapter.py`
 - Source discovery and external search: `apps/api/app/services/source_discovery_service.py`
   and `apps/api/app/services/external_search_service.py`
-- Source provenance: `apps/api/app/services/source_provenance_service.py`
+- Evidence feature package map: `docs/BACKEND_FEATURE_PACKAGE_MAP.md`
+- Source provenance and extraction:
+  `apps/api/app/features/evidence/source_provenance.py` and
+  `apps/api/app/features/evidence/extraction.py`
 - Multimodal extraction: `apps/api/app/services/multimodal_extraction_service.py`
+- Citation verification: `apps/api/app/features/evidence/citation_verifier.py`
+- Retrieval planning and reranking:
+  `apps/api/app/features/retrieval/planning.py` and
+  `apps/api/app/features/retrieval/reranker.py`
+- Retrieval diagnostics: `apps/api/app/features/retrieval/diagnostics.py`
+- Eval report file readers: `apps/api/app/features/evals/report_files.py`
+- Eval report writer/renderers: `apps/api/app/features/evals/report_writer.py`
+- Eval report summary shaping: `apps/api/app/features/evals/report_summary.py`
 - Observability/evals: `apps/api/app/services/langsmith_observability_service.py`
   and `apps/api/app/services/eval_service.py`
 - Shared service utilities: `apps/api/app/services/common/`
 
 Developer docs:
 
-- [Repository navigation](docs/REPOSITORY_NAVIGATION.md)
-- [AI architecture](docs/AI_ARCHITECTURE.md)
-- [Retrieval pipeline](docs/RETRIEVAL_PIPELINE.md)
-- [Governance and MCP](docs/GOVERNANCE_AND_MCP.md)
-- [Memory model](docs/MEMORY_MODEL.md)
-- [Security and evals](docs/SECURITY_AND_EVALS.md)
+- **Start here:** [Portfolio owner guide](docs/PORTFOLIO_OWNER_GUIDE.md) and
+  [repository navigation](docs/REPOSITORY_NAVIGATION.md).
+- **Product and architecture:** [AI architecture](docs/AI_ARCHITECTURE.md),
+  [distributed systems and durable execution](docs/DISTRIBUTED_SYSTEMS.md),
+  [context engineering](docs/CONTEXT_ENGINEERING.md),
+  [retrieval and citations](docs/RETRIEVAL_AND_CITATIONS.md),
+  [memory system](docs/MEMORY_SYSTEM.md), and
+  [source intelligence](docs/SOURCE_INTELLIGENCE.md).
+- **Security and operations:** [security overview](docs/security.md),
+  [security documentation guide](docs/security/README.md),
+  [security architecture](docs/security/SECURITY_ARCHITECTURE.md),
+  [threat model](docs/security/THREAT_MODEL.md),
+  [control matrix](docs/security/CONTROL_MATRIX.md),
+  [abuse cases](docs/security/ABUSE_CASES.md),
+  [deployment and security](docs/DEPLOYMENT_SECURITY.md), and
+  [security and evals](docs/SECURITY_AND_EVALS.md).
+- **Dependencies and integrations:** [dependencies and tooling](docs/DEPENDENCIES.md),
+  [governance and MCP](docs/GOVERNANCE_AND_MCP.md),
+  [MCP integration](docs/MCP_INTEGRATION.md), and
+  [retrieval pipeline](docs/RETRIEVAL_PIPELINE.md).
+- **Verification and delivery:** [evals and observability](docs/EVALS_AND_OBSERVABILITY.md),
+  [implementation brief](IMPLEMENTATION_BRIEF.md), and
+  [implementation status](IMPLEMENTATION_STATUS.md).
 
 ---
 
@@ -578,12 +678,14 @@ Example environment variables:
 
 ```bash
 # Application
-APP_ENV=development
+APP_ENV=local
 FRONTEND_URL=http://localhost:3000
 BACKEND_URL=http://localhost:8000
 
 # Database
-DATABASE_URL=postgresql+psycopg://thesys:thesys@localhost:5432/thesys
+DATABASE_RUNTIME_ROLE=api
+DATABASE_URL=postgresql+psycopg://thesys_api:thesys-api-local@localhost:5432/thesys
+MIGRATION_DATABASE_URL=postgresql+psycopg://thesys_migration:thesys-migration-local@localhost:5432/thesys
 
 # LLM / Model Gateway
 LLM_STUB_MODE=always
@@ -598,6 +700,11 @@ EMBEDDING_PROVIDER=deterministic
 EMBEDDING_MODEL=deterministic-hash-embedding-1536
 EMBEDDING_DIMENSION=1536
 EMBEDDING_VERSION=v1
+AI_EMBEDDING_CACHE_ENABLED=true
+AI_RETRIEVAL_CACHE_ENABLED=true
+AI_RERANK_CACHE_ENABLED=true
+AI_SEMANTIC_ANSWER_CACHE_ENABLED=false
+AI_SEMANTIC_ANSWER_CACHE_LIVE_ENABLED=false
 RETRIEVAL_VECTOR_PATH=auto
 RETRIEVAL_PYTHON_FALLBACK_ENABLED=true
 RETRIEVAL_RERANKING_ENABLED=true
@@ -620,6 +727,9 @@ LANGSMITH_API_KEY=
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 LANGSMITH_PROJECT=thesys-local
 LANGSMITH_PUBLIC_URL_BASE=https://smith.langchain.com
+LANGSMITH_PROVIDER_RETENTION_DAYS=14
+RETENTION_TEMPORAL_HISTORY_DAYS=30
+TEMPORAL_NAMESPACE_RETENTION_RECONCILE_ENABLED=true
 ```
 
 ---
@@ -731,7 +841,12 @@ send traces to LangSmith, set:
 LANGSMITH_TRACING=true
 LANGSMITH_API_KEY=your_langsmith_key
 LANGSMITH_PROJECT=thesys-local
+LANGSMITH_PROVIDER_RETENTION_DAYS=14
 ```
+
+Set the LangSmith project's retention to the same configured number of days.
+The Temporal worker reconciles its namespace history TTL to
+`RETENTION_TEMPORAL_HISTORY_DAYS` when enabled.
 
 The research workflow records spans for planning, source discovery, competitor
 discovery, retrieval, synthesis, critique, memo generation, assumption updates,
@@ -749,6 +864,15 @@ Run the broader AI quality, safety, provenance, and cost gate:
 ```bash
 pnpm eval:ai
 ```
+
+Run the aggregate quality gate and local eval report generator:
+
+```bash
+pnpm eval:quality
+```
+
+This writes local JSON, Markdown, HTML, and JSONL trend artifacts under
+`reports/evals/` and powers the hidden Inspect quality report surface.
 
 To include live project metrics from a running API:
 
@@ -832,8 +956,18 @@ The core workflow is designed to prevent premature building by identifying the m
 
 ## Current Status
 
-This is a V1 proof-of-concept with the Sprint 50 AI engineering upgrade track
-implemented.
+This is a V1 portfolio proof-of-concept. Sprint 41-50 established the first AI
+engineering upgrade baseline; they are not treated as fully complete
+production-grade work. Sprints 51-60 are the explicit gap-closure track, and the
+current branch has implemented Sprints 51-60. Sprint 60 closes the carried-gap
+ledger by documenting implemented work, exact verification blockers, future
+owners, and V1 out-of-scope decisions for every `G41-*` through `G50-*` item.
+Sprints 61-68 add the production-style security and verification foundations:
+identity/RLS, safe ingestion and PII handling, AI guardrails, retrieval/memory
+trust boundaries, governed MCP/tools, durable workflow budgets, security
+telemetry, red-team coverage, and CI/release controls. Sprint 69 keeps the
+documentation current and owner-facing; it does not change the portfolio
+project's non-hosted status.
 
 Implemented or demonstrated:
 
@@ -848,32 +982,199 @@ Implemented or demonstrated:
 - decision recommendation
 - guided UI around next best action
 - provider-backed embeddings, pgvector SQL retrieval, multi-stage retrieval,
-  reranking, context assembly, retrieval-quality diagnostics, and re-embedding
+  Postgres text-search ranking, BM25-like local fallback scoring, swappable
+  reranking, MMR diversity selection, retrieval-quality diagnostics, golden
+  retrieval evals, and re-embedding
 - LLM-grounded Ask Thesys with citations, retrieval diagnostics, bounded recent
-  turns, action-card routing, SSE streaming endpoint, approval-gated proposals,
-  guide evals, and deterministic fallback
+  turns, action-card routing, true streaming events, provider answer deltas when
+  supported, timeout/cancellation handling, approval-gated proposals, guide
+  evals, and deterministic fallback
 - optional Tavily-backed source discovery with provenance
 - multimodal image extraction and low-text PDF fallback through a LiteLLM
-  multimodal provider boundary
+  multimodal provider boundary, with deterministic OCR fallback metadata
 - URL/upload security guards, fetched-page prompt-injection markers, source
-  quality signals, canonical URL/content-hash dedupe, and PDF page lineage
-- typed context packs and multiple memory types with workflow-aware selection
-- MCP-shaped adapter over the governed tool registry
-- AI cost accounting, provider-failure circuit checks, and local AI eval gates
+  quality factors/explanations, canonical URL/content-hash dedupe, page/section
+  quote provenance, snapshot metadata, PDF page lineage, and table extraction
+- JWT/API-key production-auth shape, dev-auth isolation, expensive-workflow
+  rate/concurrency limits, pre-call AI budget enforcement, live-provider egress
+  allowlists, dependency/security check scripts, and a formal threat model
+- unified context compiler, workflow context profiles, typed context packs,
+  multiple memory types, memory proposal review, context diagnostics, and
+  workflow-aware memory selection
+- MCP JSON-RPC adapter and stdio bridge over the governed tool registry
+- DB-backed semantic caching for embeddings, retrieval plans, rerank results, and
+  optional non-streaming Ask Thesys answers with hashed keys, versioned
+  invalidation, stale-cache denials, and saved token/cost/latency metrics
+- AI cost accounting, provider-failure circuit checks, OpenTelemetry-compatible
+  local metrics, aggregate quality gates, file-backed eval reports/trends,
+  cache-quality gates, fixture-backed extraction quality checks, redacted
+  optional LangSmith eval export, and hidden Inspect quality reporting
 - shared service utilities, source provenance utilities, developer docs, and
   code navigation guides
 
-Planned future work:
+Gap-closure roadmap:
 
-- stronger retrieval quality with BM25, MMR/diversity, cross-encoder reranking,
-  and labeled retrieval evals
-- richer trace/citation drilldowns that remain hidden by default
-- recurring market monitoring
-- advanced evaluation dashboard and CI integration for eval gates
-- team collaboration
-- multi-project portfolio dashboard
-- integrations
-- consultant / product discovery / investor workflow packs
+`SPRINT_51_60_TODO.md` now contains the execution-level gap ledger for every
+unfinished Sprint 41-50 item. It uses stable `G41-*` through `G50-*` work-item
+IDs and pickup-ready Sprint 59/60 artifacts so each gap can close with
+verification, be marked intentionally out of V1 scope, or receive a named future
+owner. It also includes residual routing for completed Sprints 51-58, a
+per-sprint residual handoff checklist directly under each completed Sprint
+51-58 section, a file-level Sprint 59 cleanup punch list, and step-by-step
+Sprint 60 pickup notes. The TODO now also includes an audit gap crosswalk, a
+per-sprint completion-gate table, and a per-ID pickup checklist for each
+`G41-*` through `G50-*` gap so future work has exact edit targets, behavioral
+expectations, verification commands, blocker-recording rules, and
+status-disposition requirements. It also defines a required disposition row
+format covering status, owner sprint item, source/doc links, exact verification
+or blocker text, future owner, and portfolio-claim impact. The audit crosswalk
+is the "did we capture it?"
+check: every unfinished Sprint 41-50 objective maps to a `G*` ID, a Sprint 59
+or Sprint 60 pickup item, and concrete file-level directions. The list below is
+the reader-friendly summary.
+
+The TODO now also has a `Gap Capture Control` rule plus closure checklists for
+Sprint 59 and Sprint 60. Those checklists spell out the exact service
+entrypoints, feature-module targets, service-owned side effects, docs, README
+links, status rows, verification commands, and blocker text required before a
+future engineer can mark each remaining gap complete.
+
+It also has a `Gap-Patching Rule for Completed Sprints`: Sprints 51-58 are
+code-landed only. Their original Sprint 41-50 gaps stay open until the owning
+`S60-P*` package patches the named doc/source artifacts, records exact commands
+or blockers, updates README/navigation language when needed, and writes final
+`IMPLEMENTATION_STATUS.md` rows for every related `G*` ID.
+
+It also now includes an `Original Sprint 41-50 Gap Patch Manifest`. That
+manifest is the first pickup surface for remaining work: for each partially
+complete original sprint, it names the owning `S59-R*` or `S60-P*` item, first
+files to open, exact docs/code artifacts to patch, commands to run, blocker text
+to capture, and `IMPLEMENTATION_STATUS.md` rows required before closure.
+
+For pickup, use the `No-Ambiguity Sprint Pickup Contract` near the top of
+`SPRINT_51_60_TODO.md`. It maps each follow-up sprint to the exact original
+`G41-*` through `G50-*` gaps, first files to open, required docs/code targets,
+verification commands or blocker rules, and the `IMPLEMENTATION_STATUS.md`
+disposition rows that must exist before a sprint can be called complete.
+
+Completion semantics: a checked Sprint 51-58 implementation item means code has
+landed, not that the original Sprint 41-50 gap is fully closed. The `G41-*`
+through `G50-*` items in `SPRINT_51_60_TODO.md` are the authoritative ledger,
+and each one must receive an `implemented`, `intentionally out of V1`, or
+`future owner` disposition in `IMPLEMENTATION_STATUS.md` before the roadmap can
+claim complete gap closure. The TODO now uses **code-landed** versus
+**gap-closed** terminology and avoids checked "close gap" items for Sprints
+51-58 unless the related docs, QA, provider/audit checks, blocker records, and
+final status dispositions also exist.
+
+- Sprint 53 is implemented on this branch: Ask Thesys now has incremental
+  answer deltas/provider streaming support, live retrieval/tool/proposal events,
+  cancellation persistence, timeouts, and collapsed citation drilldowns.
+- Sprint 54 is implemented on this branch: rate limits, workflow concurrency
+  limits, pre-call token/cost budget enforcement, dependency audit commands,
+  JWT/API-key production auth, SSRF hardening, provider-egress controls, and
+  threat modeling are in place.
+- Sprint 55 is implemented on this branch: retrieval now includes Postgres text
+  rank signals, BM25-like local scoring, MMR/source-domain-type-competitor caps,
+  a no-op/deterministic/LiteLLM reranker adapter, claim-level citation outcomes,
+  and a credential-free golden retrieval eval command.
+- Sprint 56 is implemented on this branch: it closes the observability gap with
+  OpenTelemetry-compatible workflow,
+  model, retrieval, tool, approval, cost, cache, timeout, and egress metrics;
+  one CI-ready quality-gate command; Markdown/HTML eval reports; local trend
+  persistence; prompt/schema/context/retrieval/memory/tool changelogs; optional
+  redacted LangSmith export; and a hidden-by-default quality report surface.
+- Sprint 57 is implemented on this branch: it adds semantic caching and cost
+  optimization for embeddings, retrieval plans, reranking, and optional
+  non-streaming guide answers with strict project/workspace isolation, versioned
+  invalidation, stale-cache denial records, and saved-token/cost/latency metrics.
+- Sprint 58 is implemented on this branch: source ingestion now records
+  readability/parser metadata, raw/page/screenshot snapshot metadata, OCR
+  confidence/page metadata, deterministic table artifacts, normalized quote
+  provenance, source-quality explanations/factors, retrieval quality weighting,
+  enriched citation DTOs, collapsed Evidence/retrieval/guide/research
+  provenance surfaces, and fixture-backed extraction evals with explicit
+  live-provider-unavailable warnings. Remaining carry-forwards are tracked in
+  `SPRINT_51_60_TODO.md`: maintained parser dependency versus deterministic
+  fallback, true screenshot/page artifact storage, screenshot-region OCR/table
+  provenance, live-provider credential QA, web/browser provenance QA, and
+  Project Inspect trust-summary QA.
+- Sprint 59 is implemented on this branch: it closes the architecture cleanup
+  gap with characterization coverage, feature-owned packages, typed boundary
+  ledgers, compatibility shims, duplication disposition, import-boundary checks,
+  and preserved public API behavior. The pickup artifacts are concrete:
+  `docs/BACKEND_FEATURE_PACKAGE_MAP.md` now contains the target package map,
+  implemented characterization matrix, DTO boundary ledger, shim/migration
+  ledger, implemented function-level slices for retrieval context selection and
+  retrieval result fusion/scoring, validation generation/result interpretation
+  fallback, citation de-duplication/retrieved-ID checks, governed tool registry
+  contracts, eval gate diagnostics, command-gate result parsing/shaping, shared
+  eval metric records for the AI/extraction scripts, LangSmith export
+  payload/result shaping, memory selection/conflict policy, and deterministic
+  fallback completion metadata. Shared eval metric records now cover the AI
+  quality, extraction quality, MCP contract, and research sprint eval scripts,
+  research eval case loading/scoring is feature-owned, and missing/malformed/
+  unreadable report plus malformed/unreadable/unwritable trend payloads and
+  live-provider-unavailable warning metrics, rerun metadata, and local metric
+  export payloads are feature-owned. Typed eval boundary validation now covers
+  gate results, shared metric records, report failures, LangSmith export
+  results, OpenTelemetry metric points, eval-run summaries, token/cost summaries,
+  and cache diagnostics; full gate execution, trend persistence, and upload
+  side-effect ownership remain future cleanup. Fallback completion metadata now
+  also records provider mode, fallback reason, redacted provider failure
+  details, timeout/cause classification, token/cost defaults, and redacted
+  trace/run metadata. Decision recommendation and decision-coach responses now
+  expose typed weak-evidence labels without mutating decision state. Validation
+  result interpretation now also has feature-owned mission-context projection,
+  prompt payload construction, and approval proposed-update payload shaping in
+  `app.features.validation.result_interpretation`; provider calls, approval
+  persistence, memory writes, confidence mutation, audit persistence, DB
+  commits, and route orchestration remain service-owned. Research graph step
+  output serialization now lives in `app.features.research.graph_state` behind
+  service aliases, deterministic research strategy helpers now live in
+  `app.features.research.strategy`, and final memo prompt assembly now lives in
+  `app.features.research.memo_prompting` with trusted/untrusted context
+  splitting and untrusted retrieved-content wrapping. Memo citation-audit
+  shaping now lives in `app.features.research.citation_audit` with claim
+  support downgrades, finding-level citation filtering, citation enrichment,
+  and citation de-duplication. Research sprint planning prompt/fallback shaping
+  now lives in `app.features.research.planning`, source-discovery prompt
+  payloads now live in `app.features.research.source_discovery` alongside
+  candidate specs and provenance shaping, and research memo proposal payloads
+  now live in `app.features.research.proposals`; LangGraph execution,
+  context-pack construction, tracing, persistence, tool/retrieval execution,
+  provider calls, structured-output parsing, external-search execution, tool
+  proposal/approval writes, claim/artifact/plan/sprint writes, evidence
+  ingestion, Temporal signaling, and DB writes remain service-owned.
+  Ask Thesys guide context projection and grounded prompt assembly now live in
+  `app.features.guide.context_projection` and `app.features.guide.prompting`,
+  covering recent-turn bounding, risk/unknown projection, overview-to-context
+  shaping, trusted/untrusted context splitting, and untrusted retrieved-content
+  wrapping; active workflow lookup, retrieval execution, context-pack
+  construction, provider generation, cache, run accounting, proposals, nudge
+  persistence, approvals, and routes remain service-owned.
+  `SPRINT_51_60_TODO.md` still calls out Sprint 59 must-not-miss edge cases so
+  broad refactor work cannot hide unverified behavior. MCP/stdout/HTTP approval
+  parity is now pinned for automated routes, including direct MCP HTTP,
+  JSON-RPC, tool-invocation reads, approval-list reads, rejection transitions,
+  denial audit metadata, and redacted persisted summaries; only live stdio
+  read/proposal smoke remains in Sprint 60. Approval rejection/audit payloads,
+  context compression/conflict/Inspect serialization, and route contract parity
+  are now pinned by focused tests, with memory review metadata shaped in
+  `app.features.memory.review`. Evidence extraction metadata ownership now also
+  covers direct URL response metadata, file identity metadata, image upload
+  metadata, text upload metadata, PDF parser metadata, and OCR fallback
+  metadata in `app.features.evidence.extraction`, while fetch/storage/parser/
+  provider/embedding/audit/transaction orchestration remains service-owned.
+- Sprint 60 is implemented on this branch: it closes the documentation/readiness
+  gap with source-linked architecture docs, post-refactor navigation, targeted
+  guide-stream docstrings, deployment/security docs, object-storage and
+  backup/restore guidance, advanced integration documentation, explicit
+  provider/browser/audit blockers, a final carried-gap disposition table, and
+  honest portfolio limits. Deferred work is not hidden: hosted smokes, live
+  MCP client smokes, strict dependency audits, browser QA, live Tavily/multimodal
+  QA, and screenshot/page artifact productization are marked as future-owner or
+  out-of-V1 rows in `IMPLEMENTATION_STATUS.md`.
 
 ---
 
@@ -927,21 +1228,39 @@ Read tools allow agents to inspect project context. Proposal tools allow agents
 to suggest changes, but final state mutation requires human approval. This
 creates a safer boundary between model reasoning and application state.
 
-The MCP adapter wraps the same governed tools through HTTP endpoints so external
-developer agents can inspect project state and propose changes without bypassing
-project permissions, approval gates, or audit logging. It is an MCP-shaped
-adapter around Thesys tools, not an ungoverned parallel tool system.
+The MCP adapter wraps the same governed tools through project-scoped JSON-RPC so
+external developer agents can inspect project state and propose changes without
+bypassing project permissions, approval gates, or audit logging. Legacy
+HTTP-shaped MCP routes remain available for simple local clients.
 
 The local API exposes:
 
 ```bash
 curl http://localhost:8000/api/tools
 curl http://localhost:8000/api/mcp/tools
+curl -X POST http://localhost:8000/api/mcp/projects/<project_id>/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"tools","method":"tools/list","params":{"includeProposals":false}}'
+curl -X POST http://localhost:8000/api/mcp/projects/<project_id>/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":"get_project_summary","arguments":{},"_meta":{"client_id":"local-agent"}}}'
 curl -X POST http://localhost:8000/api/mcp/projects/<project_id>/tools/search_project_evidence/call \
   -H "Content-Type: application/json" \
   -d '{"client_id":"local-agent","arguments":{"query":"pricing risk","mode":"hybrid","top_k":5}}'
 curl http://localhost:8000/api/projects/<project_id>/tool-invocations
 curl http://localhost:8000/api/projects/<project_id>/tool-invocations?research_sprint_id=<sprint_id>
+```
+
+For local stdio-based clients, run:
+
+```bash
+python3 scripts/mcp_stdio_server.py --api-base http://localhost:8000 --project-id <project_id>
+```
+
+The live MCP contract harness is:
+
+```bash
+python3 scripts/eval_mcp_contract.py --project-id <project_id> --json
 ```
 
 Project pages also include a secondary Tool Activity panel in the evidence

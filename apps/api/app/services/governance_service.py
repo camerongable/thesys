@@ -5,16 +5,25 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.auth import AuthContext, require_permission
+from app.core.auth import AuthContext, require_permission, session_correlation_id
 from app.core.redaction import redact_payload, redact_text
+from app.core.request_context import current_request_id
 from app.db.models import ApprovalRequest, AuditEvent
-from app.services import project_service
+from app.services import audit_chain_service, project_service
 
 ActorType = Literal["user", "agent", "system"]
 RiskLevel = Literal["low", "medium", "high"]
+_NORMALIZED_SECURITY_AUDIT_EVENT_TYPES = {
+    "security_policy_denied",
+    "evidence_source_content_access_denied",
+    "memory_write_denied",
+    "signed_url_denied",
+    "tool_invocation_approved",
+    "tool_invocation_denied",
+}
 ApprovalRequestType = Literal[
     "research_plan",
     "memory_update",
@@ -37,23 +46,50 @@ def record_audit_event(
     entity_id: uuid.UUID | None = None,
     risk_level: RiskLevel | None = None,
     metadata: dict[str, Any] | None = None,
+    actor_identity: str | None = None,
+    policy_decision: str | None = None,
+    resource_identifier: str | None = None,
 ) -> AuditEvent:
     """Record a redacted audit event without committing the surrounding transaction."""
+    _lock_workspace_audit_chain(db, auth.workspace_id)
+    created_at = datetime.now(UTC)
+    event_metadata = dict(metadata or {})
+    if request_id := current_request_id():
+        event_metadata.setdefault("request_id", request_id)
+    if session_id := session_correlation_id(auth):
+        event_metadata["session_id"] = session_id
     event = AuditEvent(
+        id=uuid.uuid4(),
         workspace_id=auth.workspace_id,
         project_id=project_id,
         user_id=auth.user_id if actor_type == "user" else None,
         event_type=event_type,
         actor_type=actor_type,
+        actor_identity=actor_identity or _actor_identity(auth, actor_type),
+        policy_decision=policy_decision or _policy_decision(event_type),
+        resource_identifier=resource_identifier
+        or _resource_identifier(auth.workspace_id, project_id, entity_type, entity_id),
         entity_type=entity_type,
         entity_id=entity_id,
         summary=redact_text(summary, redact_emails=True),
         risk_level=risk_level,
-        event_metadata=redact_payload(metadata or {}, redact_emails=True),
-        created_at=datetime.now(UTC),
+        event_metadata=redact_payload(event_metadata, redact_emails=True),
+        created_at=created_at,
     )
+    previous_event_hash = db.scalar(
+        select(AuditEvent.event_hash)
+        .where(AuditEvent.workspace_id == auth.workspace_id)
+        .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+        .limit(1)
+    )
+    event.previous_event_hash = previous_event_hash
+    event.event_hash = audit_chain_service.calculate_event_hash(event, previous_event_hash)
     db.add(event)
     db.flush()
+    if risk_level == "high" or event_type in _NORMALIZED_SECURITY_AUDIT_EVENT_TYPES:
+        from app.services import security_event_service
+
+        security_event_service.record_from_audit_event(db, event)
     return event
 
 
@@ -328,3 +364,39 @@ def _rejected_event_type(request_type: str) -> str:
     if request_type == "research_plan":
         return "research_plan_rejected"
     return f"{request_type}_rejected"
+
+
+def _lock_workspace_audit_chain(db: Session, workspace_id: uuid.UUID) -> None:
+    """Serialize Postgres audit appends for a workspace before reading its tail hash."""
+    if db.bind is None or db.bind.dialect.name != "postgresql":
+        return
+    lock_key = int.from_bytes(workspace_id.bytes[:8], byteorder="big", signed=True)
+    db.execute(select(func.pg_advisory_xact_lock(lock_key)))
+
+
+def _actor_identity(auth: AuthContext, actor_type: ActorType) -> str:
+    if actor_type == "user":
+        return f"user:{auth.user_id}"
+    return f"{actor_type}:service"
+
+
+def _policy_decision(event_type: str) -> str:
+    normalized = event_type.casefold()
+    if any(token in normalized for token in ("denied", "rejected", "blocked")):
+        return "denied"
+    if "approved" in normalized:
+        return "approved"
+    return "recorded"
+
+
+def _resource_identifier(
+    workspace_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    entity_type: str | None,
+    entity_id: uuid.UUID | None,
+) -> str:
+    if entity_type is not None and entity_id is not None:
+        return f"{entity_type}:{entity_id}"
+    if project_id is not None:
+        return f"project:{project_id}"
+    return f"workspace:{workspace_id}"

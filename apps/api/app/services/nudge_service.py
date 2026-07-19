@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
 from app.db.models import ProjectNudge
+from app.features.guide import actions as guide_actions
 from app.schemas.guide import GuideActionRead
 from app.schemas.nudges import ProjectNudgeRead
 from app.schemas.overview import ProjectOverviewRead
@@ -15,6 +16,9 @@ from app.services import project_overview_service, project_service, validation_s
 
 class ProjectNudgeNotFoundError(ValueError):
     pass
+
+
+_guide_action = guide_actions.nudge_action
 
 
 @dataclass(frozen=True)
@@ -290,31 +294,6 @@ def _weak_evidence_nudge(
             target_modal="validation-mission",
             risk_level="medium",
         ),
-    )
-
-
-def _guide_action(
-    project_id: uuid.UUID,
-    action_id: str,
-    action_type: str,
-    label: str,
-    description: str,
-    why_it_matters: str,
-    target_hash: str,
-    risk_level: str,
-    target_modal: str | None = None,
-) -> GuideActionRead:
-    return GuideActionRead(
-        id=action_id,
-        type=action_type,  # type: ignore[arg-type]
-        label=label,
-        description=description,
-        why_it_matters=why_it_matters,
-        target_route=f"/projects/{project_id}#{target_hash}",
-        target_modal=target_modal,
-        payload={"source": "project_nudge"},
-        risk_level=risk_level,  # type: ignore[arg-type]
-        requires_confirmation=False,
     )
 
 

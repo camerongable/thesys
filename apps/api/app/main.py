@@ -4,9 +4,12 @@ from fastapi.responses import JSONResponse
 
 from app.ai.litellm_client import LiteLLMClientError
 from app.ai.structured_output import StructuredOutputError
+from app.core.browser_security import BrowserSecurityHeadersMiddleware
 from app.core.config import get_settings
 from app.core.errors import public_error_detail
 from app.core.logging import configure_logging
+from app.core.request_correlation import RequestCorrelationMiddleware
+from app.core.telemetry import configure_telemetry
 from app.routers.ai import router as ai_router
 from app.routers.artifacts import router as artifacts_router
 from app.routers.assumptions import router as assumptions_router
@@ -20,11 +23,13 @@ from app.routers.governance import router as governance_router
 from app.routers.health import router as health_router
 from app.routers.intake import investigation_router
 from app.routers.intake import router as intake_router
+from app.routers.mcp import router as mcp_router
+from app.routers.mcp_registry import router as mcp_registry_router
 from app.routers.me import router as me_router
 from app.routers.memory import router as memory_router
-from app.routers.mcp import router as mcp_router
 from app.routers.projects import router as projects_router
 from app.routers.research_sprints import router as research_sprints_router
+from app.routers.security import router as security_router
 from app.routers.tools import router as tools_router
 from app.routers.workflows import router as workflows_router
 
@@ -46,6 +51,7 @@ async def _structured_output_error_handler(_: Request, exc: Exception) -> JSONRe
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
+    configure_telemetry(settings)
 
     app = FastAPI(
         title=settings.app_name,
@@ -57,10 +63,13 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        # API auth is header-based; browser credentials would enable cookies without CSRF.
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(BrowserSecurityHeadersMiddleware, environment=settings.environment)
+    app.add_middleware(RequestCorrelationMiddleware)
 
     app.include_router(health_router)
     app.include_router(me_router)
@@ -82,6 +91,8 @@ def create_app() -> FastAPI:
     app.include_router(ai_router)
     app.include_router(tools_router)
     app.include_router(mcp_router)
+    app.include_router(mcp_registry_router)
+    app.include_router(security_router)
     app.add_exception_handler(LiteLLMClientError, _litellm_error_handler)
     app.add_exception_handler(StructuredOutputError, _structured_output_error_handler)
 

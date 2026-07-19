@@ -32,6 +32,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { SafeExternalLink } from "@/components/safe-external-link";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   approveAgenticResearchMemo,
@@ -52,12 +53,17 @@ import {
   dismissProjectNudge,
   executeNextAction,
   GuideAction,
+  getContextEval,
+  getEvalObservabilityMetrics,
+  getEvalTrends,
   getIdeaStory,
   getDurableResearchStatus,
+  getLatestEvalReport,
   getProjectResearchHistory,
   getProjectOverview,
   getProjectNudges,
   getV1ResearchEval,
+  inspectProjectMemory,
   listApprovalRequests,
   listArtifacts,
   listAuditEvents,
@@ -68,9 +74,11 @@ import {
   NextBestAction,
   ProjectStage,
   ProjectNudge,
+  ProjectMemoryItem,
   rejectApprovalRequest,
   rejectCompetitorCandidate,
   rejectDiscoveredSource,
+  rejectProjectMemory,
   rejectAgenticResearchMemo,
   rejectResearchSprint,
   RecommendationConfidence,
@@ -83,6 +91,7 @@ import {
   startDurableResearchWorkflow,
   startResearchSprintPlan,
   ToolInvocation,
+  approveProjectMemory,
   updateCompetitorCandidate,
   updateResearchPlan,
 } from "@/lib/api";
@@ -251,6 +260,14 @@ export function ProjectOverview() {
             Projects
           </Link>
           <div className="flex items-center gap-2">
+            <Link
+              aria-label="Open security overview"
+              className="inline-flex h-11 min-h-11 w-11 items-center justify-center rounded-md border border-border bg-card text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus sm:h-10 sm:min-h-10 sm:w-10"
+              href={`/projects/${projectId}/security`}
+              title="Security overview"
+            >
+              <ShieldAlert className="h-4 w-4" aria-hidden="true" />
+            </Link>
             <ThemeToggle />
             <ProjectExploreControl activeTab={activeTab} onOpen={openNavigationItem} />
           </div>
@@ -1363,6 +1380,12 @@ function ProjectInspectDrawer({
               </div>
             </DrawerSection>
 
+            <ProjectMemoryInspectSection projectId={overview.project.id} />
+
+            <ProjectContextDiagnosticsSection projectId={overview.project.id} />
+
+            <ProjectEvalReportSection projectId={overview.project.id} />
+
             <DrawerSection
               icon={<ShieldAlert className="h-4 w-4 text-primary" aria-hidden="true" />}
               title="Assumptions behind the decision"
@@ -1476,6 +1499,542 @@ function ProjectInspectDrawer({
           </div>
         </div>
       </aside>
+    </div>
+  );
+}
+
+function ProjectMemoryInspectSection({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient();
+  const [workflowType, setWorkflowType] = useState("guide_chat");
+  const memoryQuery = useQuery({
+    queryKey: ["projects", projectId, "memory", "inspect", workflowType],
+    queryFn: () => inspectProjectMemory(projectId, workflowType),
+  });
+  const approveMutation = useMutation({
+    mutationFn: (memoryId: string) => approveProjectMemory(projectId, memoryId),
+    onSuccess: () => refreshAfterMemoryAction(queryClient, projectId),
+  });
+  const rejectMutation = useMutation({
+    mutationFn: (memoryId: string) => rejectProjectMemory(projectId, memoryId),
+    onSuccess: () => refreshAfterMemoryAction(queryClient, projectId),
+  });
+  const data = memoryQuery.data;
+  const selected = data?.selected_memory ?? [];
+  const proposed = data?.proposed_memory ?? [];
+  const excluded = data?.excluded_memory ?? [];
+  const conflicts = data?.conflicts ?? [];
+  const busy = approveMutation.isPending || rejectMutation.isPending;
+  const error =
+    (memoryQuery.error as Error | null) ??
+    approveMutation.error ??
+    rejectMutation.error;
+
+  return (
+    <DrawerSection
+      icon={<Database className="h-4 w-4 text-primary" aria-hidden="true" />}
+      title="Project memory"
+    >
+      <div className="flex flex-col gap-3">
+        <div className="grid gap-2 sm:grid-cols-4">
+          <DecisionMetric label="Selected" value={selected.length} />
+          <DecisionMetric label="Proposed" value={proposed.length} />
+          <DecisionMetric label="Excluded" value={excluded.length} />
+          <DecisionMetric label="Conflicts" value={conflicts.length} />
+        </div>
+        <details className="rounded-md border border-border px-3 py-3">
+          <summary className="cursor-pointer list-none">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-sm font-medium">Browse memory</span>
+              <select
+                className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground sm:w-56"
+                onChange={(event) => setWorkflowType(event.target.value)}
+                onClick={(event) => event.stopPropagation()}
+                value={workflowType}
+              >
+                <option value="assumption_extraction">Assumption extraction</option>
+                <option value="guide_chat">Ask Thesys</option>
+                <option value="agentic_research">Research sprint</option>
+                <option value="opportunity_brief">Opportunity brief</option>
+                <option value="competitor_analysis">Competitor analysis</option>
+                <option value="validation_plan">Validation plan</option>
+                <option value="validation_result_interpretation">Validation results</option>
+                <option value="decision_recommendation">Decision recommendation</option>
+              </select>
+            </div>
+          </summary>
+
+          {error ? (
+            <p className="mt-3 text-sm text-danger-foreground">{error.message}</p>
+          ) : memoryQuery.isLoading ? (
+            <p className="mt-3 text-sm text-muted-foreground">Loading memory...</p>
+          ) : (
+            <div className="mt-4 space-y-4">
+              <MemoryItemList items={selected} title="Selected for this workflow" />
+              <MemoryProposalList
+                busy={busy}
+                items={proposed}
+                onApprove={(memoryId) => approveMutation.mutate(memoryId)}
+                onReject={(memoryId) => rejectMutation.mutate(memoryId)}
+              />
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Excluded
+                </h4>
+                {excluded.length === 0 ? (
+                  <p className="mt-2 text-sm text-muted-foreground">No excluded memory.</p>
+                ) : (
+                  <ol className="mt-2 space-y-2">
+                    {excluded.slice(0, 8).map((item) => (
+                      <li className="rounded-md bg-muted px-3 py-2 text-sm" key={item.id}>
+                        <div className="font-medium">{truncate(item.title, 90)}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {formatLabel(item.memory_type)} · {formatLabel(item.status)} ·{" "}
+                          {formatLabel(item.reason)}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Conflicts
+                </h4>
+                {conflicts.length === 0 ? (
+                  <p className="mt-2 text-sm text-muted-foreground">No active conflicts.</p>
+                ) : (
+                  <ol className="mt-2 space-y-2">
+                    {conflicts.map((conflict) => (
+                      <li className="rounded-md bg-warning-muted px-3 py-2 text-sm" key={conflict.conflict_group_id}>
+                        <div className="font-medium text-warning-foreground">
+                          {truncate(conflict.reason, 120)}
+                        </div>
+                        <div className="mt-1 text-xs text-warning-foreground">
+                          {conflict.titles.map((title) => truncate(title, 50)).join(", ")}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            </div>
+          )}
+        </details>
+      </div>
+    </DrawerSection>
+  );
+}
+
+function ProjectContextDiagnosticsSection({ projectId }: { projectId: string }) {
+  const [enabled, setEnabled] = useState(false);
+  const contextEvalQuery = useQuery({
+    enabled,
+    queryKey: ["projects", projectId, "evals", "context"],
+    queryFn: () => getContextEval(projectId),
+  });
+  const data = contextEvalQuery.data;
+  const report = data?.report;
+  const metrics = data?.metrics ?? [];
+  const includedItems = Array.isArray(report?.included_items)
+    ? (report.included_items as Array<Record<string, unknown>>)
+    : [];
+  const droppedItems = Array.isArray(report?.dropped_items)
+    ? (report.dropped_items as Array<Record<string, unknown>>)
+    : [];
+
+  return (
+    <DrawerSection
+      icon={<FileText className="h-4 w-4 text-primary" aria-hidden="true" />}
+      title="Context diagnostics"
+    >
+      <details
+        className="rounded-md border border-border px-3 py-3"
+        onToggle={(event) => {
+          if (event.currentTarget.open) {
+            setEnabled(true);
+          }
+        }}
+      >
+        <summary className="cursor-pointer list-none">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-sm font-medium">Context quality gate</span>
+            {data ? (
+              <span className={data.passed ? tonePillClass("good") : tonePillClass("danger")}>
+                {data.score}/{data.total}
+              </span>
+            ) : null}
+          </div>
+        </summary>
+        {contextEvalQuery.isLoading ? (
+          <p className="mt-3 text-sm text-muted-foreground">Loading diagnostics...</p>
+        ) : contextEvalQuery.error ? (
+          <p className="mt-3 text-sm text-danger-foreground">
+            {(contextEvalQuery.error as Error).message}
+          </p>
+        ) : data ? (
+          <div className="mt-4 space-y-4">
+            <div className="grid gap-2 sm:grid-cols-4">
+              <DecisionMetric label="Items" value={report?.item_count ?? 0} />
+              <DecisionMetric label="Dropped" value={report?.dropped_count ?? 0} />
+              <DecisionMetric label="Tokens" value={report?.token_count ?? 0} />
+              <DecisionMetric
+                label="Citations"
+                value={report?.available_citation_ids?.length ?? 0}
+              />
+            </div>
+            <ol className="space-y-2">
+              {metrics.map((metric) => (
+                <li className="rounded-md bg-muted px-3 py-2 text-sm" key={metric.key}>
+                  <div className="flex items-start gap-2">
+                    {metric.passed ? (
+                      <CheckCircle2
+                        className="mt-0.5 h-4 w-4 shrink-0 text-success-foreground"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <AlertTriangle
+                        className="mt-0.5 h-4 w-4 shrink-0 text-danger-foreground"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <div className="min-w-0">
+                      <div className="font-medium">{metric.label}</div>
+                      <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                        {String(metric.observed)} · expected {metric.expected}
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <details className="rounded-md border border-border px-3 py-3">
+              <summary className="cursor-pointer list-none text-sm font-medium">
+                Included and dropped context
+              </summary>
+              <div className="mt-3 grid gap-4">
+                <ContextReportList items={includedItems} title="Included" />
+                <ContextReportList items={droppedItems} title="Dropped" />
+              </div>
+            </details>
+            <div className="rounded-md bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">
+              {report?.workflow_type ?? "context"} · {report?.context_pack_id ?? "no context pack"}
+            </div>
+          </div>
+        ) : null}
+      </details>
+    </DrawerSection>
+  );
+}
+
+function ProjectEvalReportSection({ projectId }: { projectId: string }) {
+  const [enabled, setEnabled] = useState(false);
+  const reportQuery = useQuery({
+    enabled,
+    queryKey: ["projects", projectId, "evals", "reports", "latest"],
+    queryFn: () => getLatestEvalReport(projectId),
+  });
+  const trendsQuery = useQuery({
+    enabled,
+    queryKey: ["projects", projectId, "evals", "reports", "trends"],
+    queryFn: () => getEvalTrends(projectId),
+  });
+  const metricsQuery = useQuery({
+    enabled,
+    queryKey: ["projects", projectId, "evals", "observability-metrics"],
+    queryFn: () => getEvalObservabilityMetrics(projectId),
+  });
+  const report = reportQuery.data?.report ?? null;
+  const status = evalReportStatus(report);
+  const tone = evalReportTone(status);
+  const gates = evalGateRecords(report);
+  const failedGates = gates.filter((gate) => String(gate.status ?? "").toLowerCase() === "fail");
+  const trends = trendsQuery.data?.trends ?? [];
+  const metrics = metricsQuery.data?.metrics ?? [];
+  const tokenMetric = metrics.find((metric) => metric.name === "thesys.ai.tokens.total");
+  const costMetric = metrics.find((metric) => metric.name === "thesys.ai.cost.total");
+  const egressMetric = metrics.find((metric) => metric.name === "thesys.provider_egress.denials");
+  const cacheHitMetric = metrics.find((metric) => metric.name === "thesys.ai.cache.hits");
+  const score = evalScore(report);
+  const paths = asRecord(report?.paths);
+  const generatedAt = nullableString(report?.generated_at);
+  const unavailable = report?.available === false;
+  const error =
+    (reportQuery.error as Error | null) ??
+    (trendsQuery.error as Error | null) ??
+    (metricsQuery.error as Error | null);
+
+  return (
+    <DrawerSection
+      icon={<ListChecks className="h-4 w-4 text-primary" aria-hidden="true" />}
+      title="AI quality gates"
+    >
+      <details
+        className="rounded-md border border-border px-3 py-3"
+        onToggle={(event) => {
+          if (event.currentTarget.open) {
+            setEnabled(true);
+          }
+        }}
+      >
+        <summary className="cursor-pointer list-none">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-sm font-medium">Latest eval report</span>
+            <span className={tonePillClass(tone)}>
+              {unavailable ? "unavailable" : `${status}${score ? ` · ${score}` : ""}`}
+            </span>
+          </div>
+        </summary>
+        {reportQuery.isLoading || trendsQuery.isLoading || metricsQuery.isLoading ? (
+          <p className="mt-3 text-sm text-muted-foreground">Loading eval report...</p>
+        ) : error ? (
+          <p className="mt-3 text-sm text-danger-foreground">{error.message}</p>
+        ) : unavailable ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            {String(report?.message ?? "Run python3 scripts/eval_quality_gate.py.")}
+          </p>
+        ) : (
+          <div className="mt-4 space-y-4">
+            <div className="grid gap-2 sm:grid-cols-4">
+              <DecisionMetric label="Gates" value={gates.length} />
+              <DecisionMetric label="Failures" value={failedGates.length} />
+              <DecisionMetric label="Trends" value={trends.length} />
+              <DecisionMetric label="Cache hits" value={metricValue(cacheHitMetric)} />
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <DecisionMetric label="Tokens" value={metricValue(tokenMetric)} />
+              <DecisionMetric label="Cost" value={metricValue(costMetric)} />
+              <DecisionMetric label="Egress denies" value={metricValue(egressMetric)} />
+            </div>
+            {generatedAt ? (
+              <p className="text-xs text-muted-foreground">Last run {formatDateTime(generatedAt)}</p>
+            ) : null}
+            <EvalGateList gates={gates} />
+            {failedGates.length > 0 ? (
+              <EvalGateList gates={failedGates} title="Failing gates" />
+            ) : null}
+            <EvalTrendSummary trends={trends} />
+            <details className="rounded-md border border-border px-3 py-3">
+              <summary className="cursor-pointer list-none text-sm font-medium">
+                Report files
+              </summary>
+              <div className="mt-3 grid gap-2 text-xs leading-5 text-muted-foreground">
+                {paths ? (
+                  Object.entries(paths).map(([key, value]) => (
+                    <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)]" key={key}>
+                      <span>{formatLabel(key)}</span>
+                      <code className="break-all rounded bg-muted px-2 py-1">{String(value)}</code>
+                    </div>
+                  ))
+                ) : (
+                  <p>No report paths recorded.</p>
+                )}
+              </div>
+            </details>
+          </div>
+        )}
+      </details>
+    </DrawerSection>
+  );
+}
+
+function EvalGateList({
+  gates,
+  title = "Gates",
+}: {
+  gates: Array<Record<string, unknown>>;
+  title?: string;
+}) {
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h4>
+      {gates.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No gate records.</p>
+      ) : (
+        <ol className="mt-2 space-y-2">
+          {gates.slice(0, 8).map((gate, index) => {
+            const status = String(gate.status ?? (gate.passed ? "pass" : "fail"));
+            const tone = evalReportTone(status);
+            const rerun = nullableString(gate.rerun);
+            return (
+              <li className="rounded-md bg-muted px-3 py-2 text-sm" key={`${title}-${index}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium">{formatLabel(String(gate.name ?? "gate"))}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {String(gate.score ?? 0)}/{String(gate.total ?? 0)}
+                    </div>
+                  </div>
+                  <span className={tonePillClass(tone)}>{formatLabel(status)}</span>
+                </div>
+                {rerun ? (
+                  <code className="mt-2 block break-all rounded bg-card px-2 py-1 text-xs text-muted-foreground">
+                    {rerun}
+                  </code>
+                ) : null}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function EvalTrendSummary({ trends }: { trends: Array<Record<string, unknown>> }) {
+  const recent = trends.slice(-5).reverse();
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Recent trend rows
+      </h4>
+      {recent.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No trend records.</p>
+      ) : (
+        <ol className="mt-2 space-y-2">
+          {recent.map((trend, index) => {
+            const status = String(trend.status ?? (trend.passed ? "pass" : "fail"));
+            return (
+              <li className="rounded-md bg-muted px-3 py-2 text-xs" key={`trend-${index}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <span>{nullableString(trend.generated_at) ?? "unknown run"}</span>
+                  <span className={tonePillClass(evalReportTone(status))}>
+                    {formatLabel(status)}
+                  </span>
+                </div>
+                <div className="mt-1 text-muted-foreground">
+                  {String(trend.score ?? 0)}/{String(trend.total ?? 0)} · commit{" "}
+                  {String(trend.git_commit ?? "unknown")}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function ContextReportList({
+  items,
+  title,
+}: {
+  items: Array<Record<string, unknown>>;
+  title: string;
+}) {
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h4>
+      {items.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No records.</p>
+      ) : (
+        <ol className="mt-2 space-y-2">
+          {items.slice(0, 8).map((item, index) => (
+            <li className="rounded-md bg-muted px-3 py-2 text-xs" key={`${title}-${index}`}>
+              <div className="font-medium">{truncate(String(item.title ?? item.id), 90)}</div>
+              <div className="mt-1 text-muted-foreground">
+                {formatLabel(String(item.type ?? "context"))}
+                {item.reason ? ` · ${formatLabel(String(item.reason))}` : ""}
+                {item.untrusted ? " · untrusted" : ""}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function MemoryItemList({ items, title }: { items: ProjectMemoryItem[]; title: string }) {
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h4>
+      {items.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No memory records.</p>
+      ) : (
+        <ol className="mt-2 space-y-2">
+          {items.slice(0, 8).map((item) => (
+            <li key={item.id}>
+              <MemoryItemRow item={item} />
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function MemoryProposalList({
+  busy,
+  items,
+  onApprove,
+  onReject,
+}: {
+  busy: boolean;
+  items: ProjectMemoryItem[];
+  onApprove: (memoryId: string) => void;
+  onReject: (memoryId: string) => void;
+}) {
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Proposed memory
+      </h4>
+      {items.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No proposed memory.</p>
+      ) : (
+        <ol className="mt-2 space-y-2">
+          {items.slice(0, 8).map((item) => (
+            <li className="rounded-md bg-card px-3 py-3" key={item.id}>
+              <MemoryItemRow item={item} />
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  disabled={busy}
+                  onClick={() => onApprove(item.id)}
+                  size="sm"
+                  type="button"
+                >
+                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                  Approve
+                </Button>
+                <Button
+                  disabled={busy}
+                  onClick={() => onReject(item.id)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Reject
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function MemoryItemRow({ item }: { item: ProjectMemoryItem }) {
+  const source = item.provenance_metadata.source ?? item.source_entity_type ?? "memory";
+  return (
+    <div className="rounded-md bg-muted px-3 py-2 text-sm">
+      <div className="font-medium">{truncate(item.title, 100)}</div>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        {truncate(item.summary, 180)}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+        <span>{formatLabel(item.memory_type)}</span>
+        <span>{formatLabel(item.status)}</span>
+        <span>{formatLabel(item.write_policy)}</span>
+        <span>{String(source)}</span>
+        <span>{formatDateTime(item.updated_at)}</span>
+      </div>
     </div>
   );
 }
@@ -1706,7 +2265,7 @@ function DecisionSignal({
   );
 }
 
-function DecisionMetric({ label, value }: { label: string; value: number }) {
+function DecisionMetric({ label, value }: { label: string; value: number | string }) {
   return (
     <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
       {label}: {value}
@@ -2573,6 +3132,17 @@ async function refreshAfterGovernanceAction(
   ]);
 }
 
+async function refreshAfterMemoryAction(
+  queryClient: ReturnType<typeof useQueryClient>,
+  projectId: string,
+) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["projects", projectId, "memory"] }),
+    queryClient.invalidateQueries({ queryKey: ["projects", projectId, "overview"] }),
+    invalidateGovernanceQueries(queryClient, projectId),
+  ]);
+}
+
 function ResearchSprintCard({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
   const [objective, setObjective] = useState("");
@@ -3213,15 +3783,13 @@ function ResearchHistoryPanel({ projectId }: { projectId: string }) {
                     </span>
                   ) : null}
                   {sprintHistory.sprint.langsmith_trace_url ? (
-                    <a
+                    <SafeExternalLink
                       className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-primary hover:underline"
                       href={sprintHistory.sprint.langsmith_trace_url}
-                      rel="noreferrer"
-                      target="_blank"
                     >
                       <ExternalLink className="h-3 w-3" aria-hidden="true" />
                       View trace
-                    </a>
+                    </SafeExternalLink>
                   ) : null}
                 </div>
               </div>
@@ -4081,6 +4649,7 @@ function EvidenceReviewActiveItem({
 
   if (activeItem.kind === "source") {
     const source = activeItem.source;
+    const provenanceEntries = discoveredSourceProvenanceEntries(source);
     return (
       <article className="min-w-0 border-t border-border pt-4 lg:border-t-0 lg:pt-0">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -4120,14 +4689,12 @@ function EvidenceReviewActiveItem({
             </Button>
           </div>
         </div>
-        <a
+        <SafeExternalLink
           className="mt-3 block break-all text-xs text-primary hover:underline"
           href={source.url}
-          rel="noreferrer"
-          target="_blank"
         >
           {source.url}
-        </a>
+        </SafeExternalLink>
         {source.snippet ? (
           <p className="mt-4 max-w-[72ch] text-sm leading-6 text-muted-foreground">
             {clarifyWorkspaceTerm(source.snippet)}
@@ -4142,36 +4709,18 @@ function EvidenceReviewActiveItem({
             Research question: {clarifyWorkspaceTerm(source.associated_research_question)}
           </p>
         ) : null}
-        {source.search_provider || source.search_query || source.retrieved_at ? (
+        {provenanceEntries.length > 0 ? (
           <details className="mt-3 border-t border-border pt-3">
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
               Show search provenance
             </summary>
             <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-[140px_minmax(0,1fr)]">
-              {source.search_provider ? (
-                <>
-                  <span className="font-medium text-foreground">Provider</span>
-                  <span>{source.search_provider}</span>
-                </>
-              ) : null}
-              {source.search_query ? (
-                <>
-                  <span className="font-medium text-foreground">Query</span>
-                  <span className="break-words">{clarifyWorkspaceTerm(source.search_query)}</span>
-                </>
-              ) : null}
-              {source.search_result_rank ? (
-                <>
-                  <span className="font-medium text-foreground">Rank</span>
-                  <span>{source.search_result_rank}</span>
-                </>
-              ) : null}
-              {source.retrieved_at ? (
-                <>
-                  <span className="font-medium text-foreground">Retrieved</span>
-                  <span>{formatDateTime(source.retrieved_at)}</span>
-                </>
-              ) : null}
+              {provenanceEntries.map(([label, value]) => (
+                <div className="contents" key={label}>
+                  <span className="font-medium text-foreground">{label}</span>
+                  <span className="break-words">{value}</span>
+                </div>
+              ))}
             </div>
           </details>
         ) : null}
@@ -4218,14 +4767,12 @@ function EvidenceReviewActiveItem({
           </div>
         </div>
         {candidate.url ? (
-          <a
+          <SafeExternalLink
             className="mt-3 block break-all text-xs text-primary hover:underline"
             href={candidate.url}
-            rel="noreferrer"
-            target="_blank"
           >
             {candidate.url}
-          </a>
+          </SafeExternalLink>
         ) : null}
         <p className="mt-4 max-w-[72ch] text-sm leading-6 text-muted-foreground">
           {clarifyWorkspaceTerm(candidate.positioning ?? "No positioning note yet.")}
@@ -4480,6 +5027,29 @@ function evidenceReviewItemSignal(item: EvidenceReviewQueueItem) {
   return `Version ${item.version.version} · approve or reject updates`;
 }
 
+function discoveredSourceProvenanceEntries(source: DiscoveredSource) {
+  const entries: Array<readonly [string, string]> = [];
+  addCitationMetadataEntry(entries, "Provider", source.search_provider);
+  addCitationMetadataEntry(entries, "Query", source.search_query);
+  addCitationMetadataEntry(entries, "Rank", source.search_result_rank);
+  addCitationMetadataEntry(
+    entries,
+    "Retrieved",
+    source.retrieved_at ? formatDateTime(source.retrieved_at) : null,
+  );
+  const provenance = source.provenance_metadata ?? {};
+  addCitationMetadataEntry(entries, "Provider score", provenance.provider_score);
+  addCitationMetadataEntry(entries, "Provider rank", provenance.provider_rank);
+  addCitationMetadataEntry(entries, "Snapshot fallback", provenance.snapshot_fallback_status);
+  addCitationMetadataEntry(entries, "Extraction warning", provenance.extraction_warning);
+  addCitationMetadataEntry(entries, "Canonical URL", provenance.canonical_url);
+  addCitationMetadataEntry(entries, "Source snapshot", provenance.source_snapshot_id);
+  if (Object.keys(provenance).length > 0) {
+    addCitationMetadataEntry(entries, "Raw provenance", provenance);
+  }
+  return entries;
+}
+
 function ResearchMemoReview({
   artifact,
   approvalPending,
@@ -4531,15 +5101,13 @@ function ResearchMemoReview({
               {formatDateTime(version.created_at)}
             </span>
             {version.langsmith_trace_url ? (
-              <a
+              <SafeExternalLink
                 className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-primary hover:underline"
                 href={version.langsmith_trace_url}
-                rel="noreferrer"
-                target="_blank"
               >
                 <ExternalLink className="h-3 w-3" aria-hidden="true" />
                 View trace
-              </a>
+              </SafeExternalLink>
             ) : null}
           </div>
         </div>
@@ -4692,15 +5260,13 @@ function ResearchMemoReview({
                 citations.map((citation) => (
                   <div key={`${citation.source_id}-${citation.chunk_id ?? "source"}`}>
                     {citation.url ? (
-                      <a
+                      <SafeExternalLink
                         className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
                         href={citation.url}
-                        rel="noreferrer"
-                        target="_blank"
                       >
                         {clarifyWorkspaceTerm(citation.title ?? citation.url)}
                         <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                      </a>
+                      </SafeExternalLink>
                     ) : (
                       <p className="text-sm font-medium">
                         {clarifyWorkspaceTerm(citation.title ?? citation.source_id)}
@@ -4711,6 +5277,7 @@ function ResearchMemoReview({
                         ? truncate(citation.quote, 180)
                         : `Source ${citation.source_id}`}
                     </p>
+                    <CitationProvenanceDetails citation={citation} />
                   </div>
                 ))
               )}
@@ -4777,15 +5344,13 @@ function SourceGroundedMemo({
               citations.map((citation) => (
                 <div key={`${citation.source_id}-${citation.chunk_id ?? "source"}`}>
                   {citation.url ? (
-                    <a
+                    <SafeExternalLink
                       className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
                       href={citation.url}
-                      rel="noreferrer"
-                      target="_blank"
                     >
                       {clarifyWorkspaceTerm(citation.title ?? citation.url)}
                       <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                    </a>
+                    </SafeExternalLink>
                   ) : (
                     <p className="text-sm font-medium">
                       {clarifyWorkspaceTerm(citation.title ?? citation.source_id)}
@@ -4796,6 +5361,7 @@ function SourceGroundedMemo({
                       {truncate(citation.quote, 180)}
                     </p>
                   ) : null}
+                  <CitationProvenanceDetails citation={citation} />
                 </div>
               ))
             )}
@@ -4923,14 +5489,12 @@ function SourceCandidateList({
                 </div>
               </summary>
               <div className="mt-3 border-t border-border pt-3">
-                <a
+                <SafeExternalLink
                   className="block break-all text-xs text-primary hover:underline"
                   href={source.url}
-                  rel="noreferrer"
-                  target="_blank"
                 >
                   {source.url}
-                </a>
+                </SafeExternalLink>
                 {source.snippet ? (
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
                     {source.snippet}
@@ -5096,14 +5660,12 @@ function CompetitorCandidateItem({
 
       <div className="mt-3 border-t border-border pt-3">
         {candidate.url ? (
-          <a
+          <SafeExternalLink
             className="block break-all text-xs text-primary hover:underline"
             href={candidate.url}
-            rel="noreferrer"
-            target="_blank"
           >
             {candidate.url}
-          </a>
+          </SafeExternalLink>
         ) : null}
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           {candidate.positioning ?? "No positioning note yet."}
@@ -6080,6 +6642,64 @@ function LifecycleStatusBadge({ status }: { status: LifecycleStatus }) {
   );
 }
 
+function CitationProvenanceDetails({ citation }: { citation: Citation }) {
+  const entries = citationProvenanceEntries(citation);
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <details className="mt-2 text-xs text-muted-foreground">
+      <summary className="cursor-pointer">Provenance</summary>
+      <dl className="mt-2 grid gap-1 border-t border-border pt-2">
+        {entries.map(([label, value]) => (
+          <div key={label} className="grid gap-1 sm:grid-cols-[130px_minmax(0,1fr)]">
+            <dt className="font-medium text-foreground">{label}</dt>
+            <dd className="min-w-0 break-words">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
+function citationProvenanceEntries(citation: Citation) {
+  const entries: Array<readonly [string, string]> = [];
+  addCitationMetadataEntry(entries, "Source type", citation.source_type);
+  addCitationMetadataEntry(entries, "Extraction", citation.extraction?.extraction_method);
+  addCitationMetadataEntry(entries, "Confidence", citation.extraction?.extraction_confidence);
+  addCitationMetadataEntry(entries, "Source quality", citation.source_quality?.explanation);
+  addCitationMetadataEntry(entries, "Quality risk", citation.source_quality?.risk_level);
+  addCitationMetadataEntry(entries, "Snapshot", citation.provenance?.source_snapshot_id);
+  addCitationMetadataEntry(entries, "Page", citation.page_number);
+  addCitationMetadataEntry(entries, "Section", citation.section_heading);
+  addCitationMetadataEntry(entries, "Table", citation.table_id);
+  addCitationMetadataEntry(entries, "Region", citation.region);
+  addCitationMetadataEntry(entries, "Quote offsets", citation.quote_offsets);
+  addCitationMetadataEntry(entries, "Warnings", citation.warnings);
+  return entries;
+}
+
+function addCitationMetadataEntry(
+  entries: Array<readonly [string, string]>,
+  label: string,
+  value: unknown,
+) {
+  if (value === undefined || value === null || value === "") {
+    return;
+  }
+  entries.push([label, formatCitationMetadataValue(value)] as const);
+}
+
+function formatCitationMetadataValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.join(", ") : "None";
+  }
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
 function extractMemoSections(markdown: string) {
   const lines = markdown.split(/\r?\n/);
   const sections: Array<{ title: string; body: string }> = [];
@@ -6243,6 +6863,60 @@ function valuesFromUnknown(value: unknown) {
   return Array.isArray(value) ? value : [];
 }
 
+function evalGateRecords(report: Record<string, unknown> | null) {
+  const gates = valuesFromUnknown(report?.gates ?? report?.reports);
+  return gates
+    .map(asRecord)
+    .filter((gate): gate is Record<string, unknown> => gate !== null);
+}
+
+function evalReportStatus(report: Record<string, unknown> | null) {
+  const status = nullableString(report?.status);
+  if (status) {
+    return status;
+  }
+  if (report?.passed === true) {
+    return "pass";
+  }
+  if (report?.passed === false) {
+    return "fail";
+  }
+  return "unavailable";
+}
+
+function evalReportTone(status: string): HealthTone {
+  const normalized = status.toLowerCase();
+  if (normalized === "pass" || normalized === "passed") {
+    return "good";
+  }
+  if (normalized === "warn" || normalized === "warning" || normalized === "unavailable") {
+    return "warning";
+  }
+  if (normalized === "fail" || normalized === "failed") {
+    return "danger";
+  }
+  return "neutral";
+}
+
+function evalScore(report: Record<string, unknown> | null) {
+  const score = report?.score;
+  const total = report?.total;
+  if ((typeof score === "number" || typeof score === "string") && typeof total === "number") {
+    return `${score}/${total}`;
+  }
+  return null;
+}
+
+function metricValue(metric: { value: number; unit: string } | undefined) {
+  if (!metric) {
+    return 0;
+  }
+  if (metric.unit === "USD") {
+    return `$${metric.value.toFixed(4)}`;
+  }
+  return metric.value;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -6263,6 +6937,20 @@ function normalizeCitation(value: unknown): Citation | null {
     retrieved_at: nullableString(citation.retrieved_at),
     relevance_score:
       typeof citation.relevance_score === "number" ? citation.relevance_score : null,
+    source_type: nullableString(citation.source_type),
+    metadata: asRecord(citation.metadata) ?? {},
+    provenance: asRecord(citation.provenance) ?? {},
+    source_quality: asRecord(citation.source_quality) ?? {},
+    extraction: asRecord(citation.extraction) ?? {},
+    snapshot: asRecord(citation.snapshot) ?? {},
+    page_number: typeof citation.page_number === "number" ? citation.page_number : null,
+    section_heading: nullableString(citation.section_heading),
+    table_id: nullableString(citation.table_id),
+    region: asRecord(citation.region),
+    quote_offsets: asRecord(citation.quote_offsets),
+    warnings: Array.isArray(citation.warnings)
+      ? citation.warnings.filter((item): item is string => typeof item === "string")
+      : [],
   };
 }
 

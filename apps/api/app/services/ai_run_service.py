@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.core.auth import AuthContext
 from app.core.redaction import redact_payload, redact_text
 from app.db.models import AIRun, AIStep
+from app.security.prompt_registry import ensure_approved_prompt_version
+from app.services import security_metrics_service
 
 
 def start_run(
@@ -24,6 +26,7 @@ def start_run(
     model_name: str | None = None,
 ) -> AIRun:
     """Create the top-level trace row for an AI or workflow operation."""
+    ensure_approved_prompt_version(prompt_version)
     run = AIRun(
         workspace_id=auth.workspace_id,
         project_id=project_id,
@@ -102,6 +105,8 @@ def complete_run(
     model_provider: str,
     model_name: str,
 ) -> AIRun:
+    completed_at = datetime.now(UTC)
+    duration_seconds = _terminal_duration_seconds(run, completed_at)
     run.status = "succeeded"
     run.output_summary = redact_text(output_summary, redact_emails=True)
     run.total_tokens = total_tokens
@@ -109,9 +114,10 @@ def complete_run(
     run.model_provider = model_provider
     run.model_name = model_name
     run.error = None
-    run.completed_at = datetime.now(UTC)
+    run.completed_at = completed_at
     db.commit()
     db.refresh(run)
+    _record_terminal_duration(duration_seconds)
     return run
 
 
@@ -139,19 +145,39 @@ def wait_for_human(
 
 
 def cancel_run(db: Session, run: AIRun, *, output_summary: str) -> AIRun:
+    completed_at = datetime.now(UTC)
+    duration_seconds = _terminal_duration_seconds(run, completed_at)
     run.status = "cancelled"
     run.output_summary = redact_text(output_summary, redact_emails=True)
     run.error = None
-    run.completed_at = datetime.now(UTC)
+    run.completed_at = completed_at
     db.commit()
     db.refresh(run)
+    _record_terminal_duration(duration_seconds)
     return run
 
 
 def fail_run(db: Session, run: AIRun, *, error: str) -> AIRun:
+    completed_at = datetime.now(UTC)
+    duration_seconds = _terminal_duration_seconds(run, completed_at)
     run.status = "failed"
     run.error = redact_text(error, redact_emails=True)
-    run.completed_at = datetime.now(UTC)
+    run.completed_at = completed_at
     db.commit()
     db.refresh(run)
+    _record_terminal_duration(duration_seconds)
     return run
+
+
+def _terminal_duration_seconds(run: AIRun, completed_at: datetime) -> float | None:
+    if run.completed_at is not None or run.started_at is None:
+        return None
+    started_at = run.started_at
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=UTC)
+    return max((completed_at - started_at).total_seconds(), 0.0)
+
+
+def _record_terminal_duration(duration_seconds: float | None) -> None:
+    if duration_seconds is not None:
+        security_metrics_service.record_workflow_duration(duration_seconds)

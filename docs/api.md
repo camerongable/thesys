@@ -1,5 +1,16 @@
 # API
 
+FastAPI generates the current machine-readable OpenAPI contract and interactive
+API reference when the application is running. Use the running application's
+`/openapi.json` and `/docs` endpoints for the authoritative endpoint list and
+request/response schemas.
+
+This document retains the historical API capability milestones that explain why
+major endpoints exist; it is not a complete current endpoint catalog. For
+runtime ownership and code-path pointers, use
+[Repository Navigation](REPOSITORY_NAVIGATION.md). For authentication and
+security behavior, use [Security Overview](security.md).
+
 Sprint 0 exposes:
 
 ```http

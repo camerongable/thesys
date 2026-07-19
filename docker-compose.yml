@@ -26,6 +26,14 @@ services:
       timeout: 3s
       retries: 10
 
+  opa:
+    image: openpolicyagent/opa:0.67.0
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "/policies"]
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./policies:/policies:ro
+
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -37,6 +45,11 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
+
+  clamav:
+    image: clamav/clamav:stable
+    ports:
+      - "3310:3310"
 
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
@@ -73,16 +86,20 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      target: development
     command: >
-      sh -c "alembic upgrade head &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      sh -ec "DATABASE_URL=$$MIGRATION_DATABASE_URL alembic upgrade head;
+              unset MIGRATION_DATABASE_URL;
+              exec uvicorn app.main:app --host 0.0.0.0 --port 8000"
     environment:
-      ENVIRONMENT: local
+      APP_ENV: local
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       AUTH_MODE: dev
+      DATABASE_RUNTIME_ROLE: api
       DEV_AUTH_DEFAULT_EMAIL: ${DEV_AUTH_DEFAULT_EMAIL:-dev@thesys.local}
       DEV_AUTH_DEFAULT_NAME: ${DEV_AUTH_DEFAULT_NAME:-Dev User}
-      DATABASE_URL: postgresql+psycopg://thesys:thesys@postgres:5432/thesys
+      DATABASE_URL: postgresql+psycopg://thesys_api:thesys-api-local@postgres:5432/thesys
+      MIGRATION_DATABASE_URL: postgresql+psycopg://thesys_migration:thesys-migration-local@postgres:5432/thesys
       REDIS_URL: redis://redis:6379/0
       LITELLM_BASE_URL: http://litellm:4000
       LITELLM_API_KEY: ${LITELLM_API_KEY:-sk-local-dev}
@@ -98,8 +115,17 @@ services:
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minioadmin}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-minioadmin}
       S3_BUCKET: ${S3_BUCKET:-thesys-local}
+      S3_AUTO_CREATE_BUCKET: ${S3_AUTO_CREATE_BUCKET:-true}
+      S3_VERIFY_BUCKET_SECURITY: ${S3_VERIFY_BUCKET_SECURITY:-false}
+      S3_SERVER_SIDE_ENCRYPTION: ${S3_SERVER_SIDE_ENCRYPTION:-AES256}
+      S3_PRESIGNED_URL_TTL_SECONDS: ${S3_PRESIGNED_URL_TTL_SECONDS:-300}
+      S3_RETENTION_DAYS: ${S3_RETENTION_DAYS:-30}
+      THESYS_ENCRYPTION_KEK_V1: ${THESYS_ENCRYPTION_KEK_V1:-MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=}
       OBJECT_STORAGE_MODE: ${OBJECT_STORAGE_MODE:-s3}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
+      MALWARE_SCANNER_MODE: clamav
+      MALWARE_SCANNER_HOST: clamav
+      MALWARE_SCANNER_PORT: 3310
       URL_FETCH_TIMEOUT_SECONDS: ${URL_FETCH_TIMEOUT_SECONDS:-15}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-deterministic}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-deterministic-hash-embedding-1536}
@@ -107,6 +133,11 @@ services:
       EMBEDDING_VERSION: ${EMBEDDING_VERSION:-v1}
       EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-30}
       EMBEDDING_RETRY_ATTEMPTS: ${EMBEDDING_RETRY_ATTEMPTS:-1}
+      AI_EMBEDDING_CACHE_ENABLED: ${AI_EMBEDDING_CACHE_ENABLED:-true}
+      AI_RETRIEVAL_CACHE_ENABLED: ${AI_RETRIEVAL_CACHE_ENABLED:-true}
+      AI_RERANK_CACHE_ENABLED: ${AI_RERANK_CACHE_ENABLED:-true}
+      AI_SEMANTIC_ANSWER_CACHE_ENABLED: ${AI_SEMANTIC_ANSWER_CACHE_ENABLED:-false}
+      AI_SEMANTIC_ANSWER_CACHE_LIVE_ENABLED: ${AI_SEMANTIC_ANSWER_CACHE_LIVE_ENABLED:-false}
       RETRIEVAL_VECTOR_PATH: ${RETRIEVAL_VECTOR_PATH:-auto}
       RETRIEVAL_PYTHON_FALLBACK_ENABLED: ${RETRIEVAL_PYTHON_FALLBACK_ENABLED:-true}
       RETRIEVAL_RERANKING_ENABLED: ${RETRIEVAL_RERANKING_ENABLED:-true}
@@ -130,6 +161,10 @@ services:
       LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
       LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-thesys-local}
       LANGSMITH_PUBLIC_URL_BASE: ${LANGSMITH_PUBLIC_URL_BASE:-https://smith.langchain.com}
+      LANGSMITH_PROVIDER_RETENTION_DAYS: ${LANGSMITH_PROVIDER_RETENTION_DAYS:-14}
+      OPA_POLICY_URL: http://opa:8181
+      OPA_POLICY_TIMEOUT_SECONDS: ${OPA_POLICY_TIMEOUT_SECONDS:-2}
+      OPA_POLICY_ENFORCEMENT_ENABLED: ${OPA_POLICY_ENFORCEMENT_ENABLED:-true}
       TEMPORAL_ENABLED: ${TEMPORAL_ENABLED:-true}
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
@@ -139,7 +174,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./apps/api:/app
+      - ./apps/api/app:/app/app
     depends_on:
       postgres:
         condition: service_healthy
@@ -147,24 +182,30 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      clamav:
+        condition: service_started
       litellm:
         condition: service_started
       temporal:
+        condition: service_started
+      opa:
         condition: service_started
 
   temporal-worker:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      target: development
     command: python -m app.temporal.worker
     restart: unless-stopped
     environment:
-      ENVIRONMENT: local
+      APP_ENV: local
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       AUTH_MODE: dev
+      DATABASE_RUNTIME_ROLE: worker
       DEV_AUTH_DEFAULT_EMAIL: ${DEV_AUTH_DEFAULT_EMAIL:-dev@thesys.local}
       DEV_AUTH_DEFAULT_NAME: ${DEV_AUTH_DEFAULT_NAME:-Dev User}
-      DATABASE_URL: postgresql+psycopg://thesys:thesys@postgres:5432/thesys
+      DATABASE_URL: postgresql+psycopg://thesys_worker:thesys-worker-local@postgres:5432/thesys
       REDIS_URL: redis://redis:6379/0
       LITELLM_BASE_URL: http://litellm:4000
       LITELLM_API_KEY: ${LITELLM_API_KEY:-sk-local-dev}
@@ -180,6 +221,11 @@ services:
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minioadmin}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-minioadmin}
       S3_BUCKET: ${S3_BUCKET:-thesys-local}
+      S3_AUTO_CREATE_BUCKET: ${S3_AUTO_CREATE_BUCKET:-true}
+      S3_VERIFY_BUCKET_SECURITY: ${S3_VERIFY_BUCKET_SECURITY:-false}
+      S3_SERVER_SIDE_ENCRYPTION: ${S3_SERVER_SIDE_ENCRYPTION:-AES256}
+      S3_PRESIGNED_URL_TTL_SECONDS: ${S3_PRESIGNED_URL_TTL_SECONDS:-300}
+      S3_RETENTION_DAYS: ${S3_RETENTION_DAYS:-30}
       OBJECT_STORAGE_MODE: ${OBJECT_STORAGE_MODE:-s3}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
       URL_FETCH_TIMEOUT_SECONDS: ${URL_FETCH_TIMEOUT_SECONDS:-15}
@@ -189,6 +235,11 @@ services:
       EMBEDDING_VERSION: ${EMBEDDING_VERSION:-v1}
       EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-30}
       EMBEDDING_RETRY_ATTEMPTS: ${EMBEDDING_RETRY_ATTEMPTS:-1}
+      AI_EMBEDDING_CACHE_ENABLED: ${AI_EMBEDDING_CACHE_ENABLED:-true}
+      AI_RETRIEVAL_CACHE_ENABLED: ${AI_RETRIEVAL_CACHE_ENABLED:-true}
+      AI_RERANK_CACHE_ENABLED: ${AI_RERANK_CACHE_ENABLED:-true}
+      AI_SEMANTIC_ANSWER_CACHE_ENABLED: ${AI_SEMANTIC_ANSWER_CACHE_ENABLED:-false}
+      AI_SEMANTIC_ANSWER_CACHE_LIVE_ENABLED: ${AI_SEMANTIC_ANSWER_CACHE_LIVE_ENABLED:-false}
       RETRIEVAL_VECTOR_PATH: ${RETRIEVAL_VECTOR_PATH:-auto}
       RETRIEVAL_PYTHON_FALLBACK_ENABLED: ${RETRIEVAL_PYTHON_FALLBACK_ENABLED:-true}
       RETRIEVAL_RERANKING_ENABLED: ${RETRIEVAL_RERANKING_ENABLED:-true}
@@ -217,8 +268,14 @@ services:
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
       TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-thesys-research-sprints}
       TEMPORAL_WORKFLOW_TIMEOUT_SECONDS: ${TEMPORAL_WORKFLOW_TIMEOUT_SECONDS:-3600}
+      LANGSMITH_PROVIDER_RETENTION_DAYS: ${LANGSMITH_PROVIDER_RETENTION_DAYS:-14}
+      RETENTION_CLEANUP_SCHEDULE_ENABLED: ${RETENTION_CLEANUP_SCHEDULE_ENABLED:-true}
+      RETENTION_CLEANUP_INTERVAL_HOURS: ${RETENTION_CLEANUP_INTERVAL_HOURS:-24}
+      WORKFLOW_TIMEOUT_RECONCILIATION_SCHEDULE_ENABLED: ${WORKFLOW_TIMEOUT_RECONCILIATION_SCHEDULE_ENABLED:-true}
+      WORKFLOW_TIMEOUT_RECONCILIATION_INTERVAL_MINUTES: ${WORKFLOW_TIMEOUT_RECONCILIATION_INTERVAL_MINUTES:-5}
+      TEMPORAL_NAMESPACE_RETENTION_RECONCILE_ENABLED: ${TEMPORAL_NAMESPACE_RETENTION_RECONCILE_ENABLED:-true}
     volumes:
-      - ./apps/api:/app
+      - ./apps/api/app:/app/app
     depends_on:
       postgres:
         condition: service_healthy
@@ -233,6 +290,7 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      target: development
       args:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
     command: pnpm run dev --hostname 0.0.0.0

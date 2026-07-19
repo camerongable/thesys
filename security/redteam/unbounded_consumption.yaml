@@ -1,0 +1,14 @@
+version: 1
+suite: unbounded_consumption
+cases:
+  - id: repeated-tool-and-repair-loop
+    execution: integration
+    handler: workflow_budget
+    input:
+      patterns:
+        - repeated_critique_loop
+        - alternating_tool_cycle
+        - repeated_structured_output_repair
+    expect:
+      workflow_stopped: true
+      security_event: workflow_tool_cycle_detected

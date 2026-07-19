@@ -1,0 +1,858 @@
+import ast
+import importlib.util
+import inspect
+from pathlib import Path
+
+import pytest
+import yaml
+
+from app.core.config import Settings
+from app.db.models import Base
+from app.features.governance_tools.registry import list_tool_definitions
+from app.security.contracts import (
+    DATA_TYPES,
+    GLOBAL_TABLES,
+    IDENTITY_BOOTSTRAP_TABLES,
+    INHERITED_TENANT_TABLES,
+    MEMORY_WRITE_PATHS,
+    RLS_DIRECT_TENANT_TABLES,
+    RLS_INHERITED_TENANT_TABLES,
+    SECURITY_INVARIANTS,
+    DataClassification,
+    ProviderPolicy,
+)
+from app.security.workflow_budget import WorkflowSecurityBudget
+from app.services import (
+    evidence_service,
+    memory_service,
+    retrieval_service,
+    temporal_research_service,
+    tool_service,
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[5]
+
+
+def test_security_invariant_registry_is_complete_and_owned() -> None:
+    assert [item.id for item in SECURITY_INVARIANTS] == [
+        f"SEC-INV-{index:02d}" for index in range(1, 13)
+    ]
+    assert {item.status for item in SECURITY_INVARIANTS} == {"enforced"}
+    assert all(61 < item.owner_sprint <= 68 for item in SECURITY_INVARIANTS)
+    assert all(
+        item.enforcement and item.test_reference and item.residual_risk
+        for item in SECURITY_INVARIANTS
+    )
+
+
+def test_security_contract_documents_cover_required_boundaries_and_pr_questions() -> None:
+    security_dir = REPO_ROOT / "docs" / "security"
+    required_documents = {
+        "THREAT_MODEL.md",
+        "DATA_CLASSIFICATION.md",
+        "CONTROL_MATRIX.md",
+        "SECURITY_ARCHITECTURE.md",
+        "ABUSE_CASES.md",
+    }
+    assert required_documents <= {path.name for path in security_dir.glob("*.md")}
+
+    architecture = (security_dir / "SECURITY_ARCHITECTURE.md").read_text().casefold()
+    required_boundaries = {
+        "browser to api",
+        "api to database",
+        "api to object storage",
+        "api to litellm",
+        "litellm to model provider",
+        "api to external search provider",
+        "api to fetched url",
+        "uploaded file to parser",
+        "retrieval layer to llm prompt",
+        "llm to tool gateway",
+        "tool gateway to application service",
+        "agent to durable project memory",
+        "api to langsmith",
+        "api to temporal",
+        "mcp client to mcp server",
+    }
+    assert all(boundary in architecture for boundary in required_boundaries)
+
+    pull_request_template = (REPO_ROOT / ".github" / "pull_request_template.md").read_text()
+    required_questions = {
+        "introduce a new trust boundary",
+        "send new data to an external provider",
+        "add or modify an agent tool",
+        "write durable memory",
+        "affect tenant isolation",
+        "require new audit events",
+        "alter data retention or deletion",
+        "require new adversarial tests",
+    }
+    assert all(question in pull_request_template for question in required_questions)
+
+
+def test_security_control_documents_reflect_completed_sprint_controls() -> None:
+    matrix = (REPO_ROOT / "docs" / "security" / "CONTROL_MATRIX.md").read_text()
+    threat_model = (REPO_ROOT / "docs" / "security" / "THREAT_MODEL.md").read_text()
+    completed_controls = {
+        "Direct prompt injection and jailbreak",
+        "Indirect prompt injection",
+        "RAG corpus poisoning",
+        "Durable memory poisoning",
+        "Tool misuse or excessive agency",
+        "MCP confused deputy or server compromise",
+        "Restricted-data provider exfiltration",
+        "Secrets in logs, traces, prompts, or memory",
+        "SSRF, unsafe redirect, or parser exploit",
+        "Resource and cost exhaustion",
+        "Compromised dependency or container",
+    }
+
+    for threat in completed_controls:
+        assert f"| {threat} " in matrix
+    assert "| Planned |" not in matrix
+    assert "| Planned |" not in threat_model
+
+
+def test_incident_runbooks_and_tabletop_cover_the_sprint_67_response_contract() -> None:
+    security_dir = REPO_ROOT / "docs" / "security"
+    runbooks = {
+        "INCIDENT_RESPONSE.md",
+        "AI_KILL_SWITCH_RUNBOOK.md",
+        "DATA_EXFILTRATION_RUNBOOK.md",
+        "PROMPT_INJECTION_RUNBOOK.md",
+        "COMPROMISED_MCP_RUNBOOK.md",
+        "CROSS_TENANT_ACCESS_RUNBOOK.md",
+        "MEMORY_POISONING_RUNBOOK.md",
+    }
+    required_sections = {
+        "## Detection",
+        "## Initial Triage",
+        "## Containment",
+        "## Kill Switches",
+        "## Evidence Preservation",
+        "## Credential Rotation",
+        "## Affected-Data Analysis",
+        "## Eradication",
+        "## Recovery",
+        "## User/Customer Notification Considerations",
+        "## Postmortem",
+        "## Regression-Test Addition",
+    }
+
+    for name in runbooks:
+        contents = (security_dir / name).read_text()
+        assert required_sections <= set(
+            line.strip() for line in contents.splitlines() if line.startswith("## ")
+        )
+
+    tabletop = (security_dir / "TABLETOP_INDIRECT_PROMPT_INJECTION.md").read_text().casefold()
+    required_tabletop_evidence = {
+        "malicious external webpage",
+        "high-risk tool",
+        "policy",
+        "security alert",
+        "disable_external_egress",
+        "quarantined",
+        "regression",
+        "lessons learned",
+    }
+    assert all(item in tabletop for item in required_tabletop_evidence)
+
+
+def test_data_classification_registry_covers_sensitive_assets() -> None:
+    required = {
+        "user_identity",
+        "workspace_membership",
+        "business_plan",
+        "uploaded_file",
+        "raw_extracted_text",
+        "sanitized_searchable_text",
+        "interview_notes_with_identifiers",
+        "embeddings",
+        "project_memory",
+        "research_results",
+        "validation_results",
+        "decision_records",
+        "api_credentials",
+        "oauth_credentials",
+        "system_prompts",
+        "tool_schemas",
+        "mcp_server_credentials",
+        "mcp_oauth_authorization_transactions",
+        "mcp_server_registrations",
+        "audit_events",
+        "security_alerts",
+        "security_events",
+        "authentication_events",
+        "session_revocations",
+        "langsmith_traces",
+        "temporal_workflow_state",
+        "model_provider_payload",
+    }
+
+    assert required <= DATA_TYPES.keys()
+    assert all(item.owner for item in DATA_TYPES.values())
+
+
+def test_restricted_data_types_define_provider_policy() -> None:
+    restricted = [
+        item for item in DATA_TYPES.values() if item.classification == DataClassification.RESTRICTED
+    ]
+
+    assert restricted
+    assert all(
+        item.provider_policy
+        in {ProviderPolicy.LOCAL_ONLY, ProviderPolicy.APPROVED_RESTRICTED_PROVIDER}
+        for item in restricted
+    )
+
+
+def test_all_database_tables_have_a_tenant_path() -> None:
+    uncategorized: list[str] = []
+    broken_inherited_paths: list[str] = []
+
+    for table in Base.metadata.tables.values():
+        if table.name in GLOBAL_TABLES or "workspace_id" in table.c:
+            continue
+        inherited = INHERITED_TENANT_TABLES.get(table.name)
+        if inherited is None:
+            uncategorized.append(table.name)
+            continue
+        column_name, target = inherited
+        foreign_keys = {str(key.target_fullname) for key in table.c[column_name].foreign_keys}
+        if target not in foreign_keys:
+            broken_inherited_paths.append(f"{table.name}.{column_name}->{target}")
+
+    assert not uncategorized, f"Tables without a declared tenant path: {uncategorized}"
+    assert not broken_inherited_paths, f"Invalid inherited tenant paths: {broken_inherited_paths}"
+
+
+def test_all_tenant_tables_are_covered_by_rls() -> None:
+    direct_tenant_tables = {
+        table.name
+        for table in Base.metadata.tables.values()
+        if "workspace_id" in table.c and table.name not in IDENTITY_BOOTSTRAP_TABLES
+    }
+
+    assert direct_tenant_tables == RLS_DIRECT_TENANT_TABLES
+    assert set(INHERITED_TENANT_TABLES) == RLS_INHERITED_TENANT_TABLES
+    assert {
+        "projects",
+        "project_theses",
+        "evidence_sources",
+        "evidence_chunks",
+        "project_memory_items",
+        "research_sprints",
+        "research_plans",
+        "competitors",
+        "assumptions",
+        "validation_missions",
+        "experiment_results",
+        "decisions",
+        "tool_invocations",
+        "approval_requests",
+        "audit_events",
+        "security_events",
+    } <= RLS_DIRECT_TENANT_TABLES
+
+
+def test_migration_revision_identifiers_fit_alembic_default_version_table() -> None:
+    revisions = []
+    for migration_path in (REPO_ROOT / "apps/api/alembic/versions").glob("*.py"):
+        for line in migration_path.read_text().splitlines():
+            if line.startswith("revision = "):
+                revisions.append(line.split('"')[1])
+                break
+
+    assert revisions
+    assert all(len(revision) <= 32 for revision in revisions)
+
+
+def test_rls_migration_forces_policies_and_scoped_role_grants(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0029_tenant_rls.py"
+    spec = importlib.util.spec_from_file_location("tenant_rls_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    assert set(migration.RLS_DIRECT_TABLES) < RLS_DIRECT_TENANT_TABLES
+    assert RLS_DIRECT_TENANT_TABLES - set(migration.RLS_DIRECT_TABLES) == {
+        "authentication_events",
+        "evidence_source_tombstones",
+        "mcp_server_credentials",
+        "mcp_oauth_authorization_transactions",
+        "mcp_server_registrations",
+        "pii_token_mappings",
+        "session_revocations",
+        "security_alerts",
+        "security_events",
+        "workspace_data_keys",
+        "workspace_kill_switch_states",
+    }
+    assert set(migration.RLS_INHERITED_TABLES) == RLS_INHERITED_TENANT_TABLES
+    combined = "\n".join(statements)
+    for table in (*migration.RLS_DIRECT_TABLES, *migration.RLS_INHERITED_TABLES):
+        assert f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY' in statements
+        assert f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY' in statements
+        assert f'CREATE POLICY workspace_isolation ON "{table}"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "WITH CHECK" in combined
+    assert "GRANT SELECT" in combined
+    assert "GRANT INSERT, UPDATE, DELETE" in combined
+    assert "thesys_api" in combined
+    assert "thesys_worker" in combined
+    assert "thesys_readonly" in combined
+    readonly_grants = "\n".join(
+        statement for statement in statements if "thesys_readonly" in statement
+    )
+    assert '"users"' not in readonly_grants
+    assert "GRANT INSERT, UPDATE, DELETE" not in readonly_grants
+
+    statements.clear()
+    migration.downgrade()
+    for table in (*migration.RLS_DIRECT_TABLES, *migration.RLS_INHERITED_TABLES):
+        assert f'DROP POLICY IF EXISTS workspace_isolation ON "{table}"' in statements
+        assert f'ALTER TABLE "{table}" DISABLE ROW LEVEL SECURITY' in statements
+
+
+def test_workspace_data_key_migration_adds_forced_rls_and_scoped_grants(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0030_workspace_data_keys.py"
+    spec = importlib.util.spec_from_file_location("workspace_data_key_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "workspace_data_keys" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "workspace_data_keys" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "workspace_data_keys"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "WITH CHECK" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT, UPDATE, DELETE" in combined
+    assert "thesys_worker" in combined
+    assert "thesys_readonly" not in combined
+
+
+def test_audit_chain_migration_backfills_hashes_and_protects_timestamps() -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0047_tamper_evident_audit_chain.py"
+    source = migration_path.read_text()
+
+    for column in (
+        "actor_identity",
+        "policy_decision",
+        "resource_identifier",
+        "previous_event_hash",
+        "event_hash",
+    ):
+        assert column in source
+    assert "sha256" in source
+    assert "ORDER BY workspace_id, created_at, id" in source
+    assert "audit_events_timestamp_immutable" in source
+    assert "audit event timestamps are immutable" in source
+
+
+def test_authentication_event_migration_limits_pre_authentication_writes(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0031_authentication_events.py"
+    spec = importlib.util.spec_from_file_location("authentication_event_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "authentication_events" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "authentication_events" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "authentication_events"' in combined
+    assert "workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid" in combined
+    assert "pre_authentication_failure_insert" in combined
+    assert "workspace_id IS NULL AND user_id IS NULL" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT" in combined
+    assert "thesys_worker" in combined and "thesys_readonly" in combined
+
+
+def test_session_revocation_migration_forces_rls_and_immutable_runtime_grants(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0032_session_revocations.py"
+    spec = importlib.util.spec_from_file_location("session_revocation_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "session_revocations" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "session_revocations" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "session_revocations"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT" in combined
+    assert "UPDATE" not in combined and "DELETE" not in combined
+
+
+def test_security_event_migration_forces_rls_and_retention_worker_grant(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0043_security_events.py"
+    spec = importlib.util.spec_from_file_location("security_events_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "security_events" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "security_events" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "security_events"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT" in combined
+    assert "thesys_worker" in combined and "SELECT, INSERT, DELETE" in combined
+    assert "thesys_readonly" in combined
+    assert "UPDATE" not in combined
+
+
+def test_security_alert_migration_forces_rls_and_scoped_alert_grants(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0044_security_alerts.py"
+    spec = importlib.util.spec_from_file_location("security_alerts_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "security_alerts" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "security_alerts" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "security_alerts"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT, UPDATE" in combined
+    assert "thesys_worker" in combined and "SELECT" in combined
+    assert "thesys_readonly" in combined and "SELECT" in combined
+    assert "DELETE" not in combined
+
+
+def test_evidence_quarantine_migration_allows_the_fail_closed_status(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0033_evidence_quarantine.py"
+    spec = importlib.util.spec_from_file_location("evidence_quarantine_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    constraints: list[tuple[object, ...]] = []
+    monkeypatch.setattr(migration.op, "drop_constraint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "create_check_constraint",
+        lambda *args, **_kwargs: constraints.append(args),
+    )
+
+    migration.upgrade()
+
+    assert constraints == [
+        (
+            migration.CONSTRAINT_NAME,
+            migration.TABLE_NAME,
+            "ingestion_status in ('pending','processing','ready','failed','quarantined')",
+        )
+    ]
+
+
+def test_pii_token_mapping_migration_forces_rls_and_excludes_readonly_role(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0034_pii_token_mappings.py"
+    spec = importlib.util.spec_from_file_location("pii_token_mapping_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "pii_token_mappings" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "pii_token_mappings" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "pii_token_mappings"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "WITH CHECK" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT, UPDATE, DELETE" in combined
+    assert "thesys_worker" in combined
+    assert "thesys_readonly" not in combined
+
+
+def test_evidence_source_tombstone_migration_forces_rls_and_scoped_grants(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0037_evidence_source_tombstones.py"
+    spec = importlib.util.spec_from_file_location("evidence_tombstone_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "evidence_source_tombstones" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "evidence_source_tombstones" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "evidence_source_tombstones"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "WITH CHECK" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT, UPDATE, DELETE" in combined
+    assert "thesys_worker" in combined and "thesys_readonly" in combined
+
+
+def test_kill_switch_state_migration_forces_rls_and_scoped_grants(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0039_workspace_kill_switch_states.py"
+    spec = importlib.util.spec_from_file_location("kill_switch_state_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "workspace_kill_switch_states" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "workspace_kill_switch_states" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "workspace_kill_switch_states"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "WITH CHECK" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT, UPDATE, DELETE" in combined
+    assert "thesys_worker" in combined and "thesys_readonly" in combined
+
+
+def test_mcp_server_credential_migration_forces_rls_and_scoped_grants(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0040_mcp_server_credentials.py"
+    spec = importlib.util.spec_from_file_location("mcp_server_credential_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "mcp_server_credentials" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "mcp_server_credentials" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "mcp_server_credentials"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "WITH CHECK" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT, UPDATE, DELETE" in combined
+    assert "thesys_worker" in combined and "thesys_readonly" in combined
+
+
+def test_mcp_oauth_transaction_migration_forces_rls_and_scoped_grants(monkeypatch) -> None:
+    migration_path = (
+        REPO_ROOT / "apps/api/alembic/versions/0041_mcp_oauth_authorization_transactions.py"
+    )
+    spec = importlib.util.spec_from_file_location("mcp_oauth_transaction_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert (
+        'ALTER TABLE "mcp_oauth_authorization_transactions" ENABLE ROW LEVEL SECURITY' in statements
+    )
+    assert (
+        'ALTER TABLE "mcp_oauth_authorization_transactions" FORCE ROW LEVEL SECURITY' in statements
+    )
+    assert 'CREATE POLICY workspace_isolation ON "mcp_oauth_authorization_transactions"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "WITH CHECK" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT, UPDATE, DELETE" in combined
+    assert "thesys_worker" in combined and "thesys_readonly" in combined
+
+
+def test_application_credentials_are_read_only_through_secret_provider() -> None:
+    sensitive_settings = {
+        "auth_jwt_secret",
+        "litellm_api_key",
+        "openai_api_key",
+        "anthropic_api_key",
+        "gemini_api_key",
+        "s3_access_key_id",
+        "s3_secret_access_key",
+        "tavily_api_key",
+        "langsmith_api_key",
+    }
+    allowed_paths = {
+        REPO_ROOT / "apps/api/app/core/config.py",
+        REPO_ROOT / "apps/api/app/security/secrets.py",
+    }
+    approved_provider_consumers = {
+        "apps/api/app/ai/litellm_client.py",
+        "apps/api/app/core/auth.py",
+        "apps/api/app/routers/ai.py",
+        "apps/api/app/security/encryption.py",
+        "apps/api/app/services/embedding_service.py",
+        "apps/api/app/services/external_search_service.py",
+        "apps/api/app/services/langsmith_observability_service.py",
+        "apps/api/app/services/multimodal_extraction_service.py",
+        "apps/api/app/services/object_storage_service.py",
+    }
+    violations: list[str] = []
+    provider_consumers: set[str] = set()
+
+    for path in (REPO_ROOT / "apps/api/app").rglob("*.py"):
+        if path in allowed_paths or "tests" in path.parts:
+            continue
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr in sensitive_settings:
+                violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{node.attr}")
+            if isinstance(node, ast.ImportFrom) and node.module == "app.security.secrets":
+                provider_consumers.add(str(path.relative_to(REPO_ROOT)))
+
+    assert not violations, f"Credential settings bypass the secret provider: {violations}"
+    assert provider_consumers <= approved_provider_consumers
+
+
+def test_database_role_manifest_separates_runtime_and_migration_credentials() -> None:
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+    api = compose["services"]["api"]
+    worker = compose["services"]["temporal-worker"]
+    api_environment = api["environment"]
+    worker_environment = worker["environment"]
+
+    assert "thesys_api:" in api_environment["DATABASE_URL"]
+    assert "thesys_migration:" in api_environment["MIGRATION_DATABASE_URL"]
+    assert "unset MIGRATION_DATABASE_URL" in api["command"]
+    assert "exec uvicorn" in api["command"]
+    assert "thesys_worker:" in worker_environment["DATABASE_URL"]
+    assert api_environment["DATABASE_RUNTIME_ROLE"] == "api"
+    assert worker_environment["DATABASE_RUNTIME_ROLE"] == "worker"
+
+    bootstrap = (REPO_ROOT / "infra/postgres/init.sql").read_text()
+    assert "thesys_migration" in bootstrap and "BYPASSRLS" in bootstrap
+    for role in ("thesys_api", "thesys_worker", "thesys_readonly"):
+        assert role in bootstrap
+    assert bootstrap.count("NOBYPASSRLS") >= 3
+    assert "REVOKE CREATE ON SCHEMA public FROM PUBLIC" in bootstrap
+    assert "ALTER SCHEMA public OWNER TO thesys_migration" in bootstrap
+
+
+def test_mutating_tools_require_policy_and_approval() -> None:
+    mutating_tools = [item for item in list_tool_definitions() if item.access_mode != "read"]
+
+    assert mutating_tools
+    assert all(item.allowed_project_roles for item in mutating_tools)
+    assert all(item.approval_policy != "never_required" for item in mutating_tools)
+    assert callable(tool_service._authorize_tool_invocation)
+
+
+def test_memory_mutation_entrypoints_are_classified() -> None:
+    tree = ast.parse(inspect.getsource(memory_service))
+    detected_mutators: set[str] = set()
+    mutation_calls = {"commit", "flush", "delete"}
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name.startswith("_"):
+            continue
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Call):
+                continue
+            if isinstance(child.func, ast.Attribute) and child.func.attr in mutation_calls:
+                detected_mutators.add(node.name)
+            if isinstance(child.func, ast.Name) and child.func.id == "ProjectMemoryItem":
+                detected_mutators.add(node.name)
+
+    assert detected_mutators <= MEMORY_WRITE_PATHS.keys()
+    assert {"upsert_from_assumption", "upsert_from_risk"} <= MEMORY_WRITE_PATHS.keys()
+    assert all(hasattr(memory_service, function_name) for function_name in MEMORY_WRITE_PATHS)
+    lifecycle_paths = {
+        "approve_memory_proposal",
+        "reject_memory_proposal",
+        "mark_stale",
+        "archive_memory",
+        "merge_duplicates",
+        "resolve_memory_conflict",
+    }
+    assert all(
+        "_authorize_opa_memory_lifecycle"
+        in inspect.getsource(getattr(memory_service, function_name))
+        for function_name in lifecycle_paths
+    )
+
+
+def test_externally_visible_tool_paths_emit_audit_events() -> None:
+    execute_source = inspect.getsource(tool_service.execute_tool)
+
+    assert "tool_invocation_requested" in execute_source
+    assert "tool_invocation_executed" in execute_source
+    assert "_audit_tool_denial" in execute_source
+
+
+def test_production_auth_cannot_run_in_dev_header_mode() -> None:
+    with pytest.raises(ValueError):
+        Settings(environment="production", auth_mode="dev")
+
+
+def test_sources_require_classification_before_retrieval() -> None:
+    retrieval_conditions = inspect.getsource(
+        retrieval_service.RetrievalSecurityPolicy.sql_conditions
+    )
+    retrieval_pipeline = inspect.getsource(retrieval_service._base_conditions)
+    reembedding = inspect.getsource(evidence_service.reembed_evidence)
+
+    assert 'source_metadata["security"]["security_status"]' in retrieval_conditions
+    assert 'source_metadata["security"]["classification_status"]' in retrieval_conditions
+    assert 'source_metadata["source_trust"]["security_status"]' in retrieval_conditions
+    assert 'source_metadata["source_trust"]["trust_score"]' in retrieval_conditions
+    assert 'chunk_metadata["security"]["retrieval_allowed"]' in retrieval_conditions
+    assert "RetrievalSecurityPolicy.for_auth" in retrieval_pipeline
+    assert "is_source_approved" in reembedding
+    assert "is_chunk_retrievable" in reembedding
+
+
+def test_all_generative_model_calls_route_through_guardrail_gateway() -> None:
+    provider_boundaries = [
+        path
+        for path in (REPO_ROOT / "apps/api/app").rglob("*.py")
+        if "tests" not in path.parts and "/v1/chat/completions" in path.read_text()
+    ]
+
+    assert {path.relative_to(REPO_ROOT).as_posix() for path in provider_boundaries} == {
+        "apps/api/app/ai/litellm_client.py",
+        "apps/api/app/services/multimodal_extraction_service.py",
+    }
+    for path in provider_boundaries:
+        source = path.read_text()
+        assert "GuardrailGateway" in source, path
+        assert "build_secure_prompt" in source, path
+        assert "evaluate_model_output" in source, path
+
+    multimodal_source = (
+        REPO_ROOT / "apps/api/app/services/multimodal_extraction_service.py"
+    ).read_text()
+    assert "evaluate_retrieved_content" in multimodal_source
+
+
+def test_embedding_provider_boundary_uses_non_generating_scope_contract() -> None:
+    provider_boundaries = [
+        path
+        for path in (REPO_ROOT / "apps/api/app").rglob("*.py")
+        if "tests" not in path.parts and "/v1/embeddings" in path.read_text()
+    ]
+
+    assert {path.relative_to(REPO_ROOT).as_posix() for path in provider_boundaries} == {
+        "apps/api/app/services/embedding_service.py",
+    }
+    source = provider_boundaries[0].read_text()
+    assert "prepare_embedding_provider_text" in source
+    assert "enforce_provider_egress_policy" in source
+    assert "GuardrailGateway" not in source
+
+
+def test_durable_workflows_declare_complete_budgets() -> None:
+    payload_source = inspect.getsource(temporal_research_service._workflow_payload)
+    required_budget_fields = {
+        "max_model_calls",
+        "max_tool_calls",
+        "max_external_queries",
+        "max_retrieved_chunks",
+        "max_tokens",
+        "max_cost_usd",
+        "max_duration_seconds",
+        "max_memory_proposals",
+        "max_structured_output_repairs",
+        "max_critique_loops",
+    }
+
+    budget_payload = WorkflowSecurityBudget.from_settings(Settings()).as_payload()
+
+    assert required_budget_fields <= set(budget_payload)
+    assert "workflow_security_budget" in payload_source

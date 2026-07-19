@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -17,11 +18,19 @@ from app.core.auth import AuthContext
 from app.core.config import Settings
 from app.core.redaction import redact_payload
 from app.db.models import ApprovalRequest, ToolInvocation
-from app.schemas.mcp import MCPToolCallRead, MCPToolRead
+from app.features.mcp import protocol
+from app.schemas.mcp import MCPJSONRPCRequest, MCPJSONRPCResponse, MCPToolCallRead, MCPToolRead
 from app.services import governance_service, project_service, tool_service
 
-ADAPTER_VERSION = "thesys-mcp-adapter:v1"
+ADAPTER_VERSION = protocol.ADAPTER_VERSION
+MCP_PROTOCOL_VERSION = protocol.MCP_PROTOCOL_VERSION
+SERVER_INFO = protocol.SERVER_INFO
 READ_TOOL_LIMIT = 100
+JSONRPC_INVALID_REQUEST = protocol.JSONRPC_INVALID_REQUEST
+JSONRPC_METHOD_NOT_FOUND = protocol.JSONRPC_METHOD_NOT_FOUND
+JSONRPC_INVALID_PARAMS = protocol.JSONRPC_INVALID_PARAMS
+JSONRPC_INTERNAL_ERROR = protocol.JSONRPC_INTERNAL_ERROR
+JSONRPC_AUTHORIZATION_ERROR = protocol.JSONRPC_AUTHORIZATION_ERROR
 
 
 @dataclass(frozen=True)
@@ -47,9 +56,82 @@ def list_tools(*, include_proposals: bool = True) -> list[MCPToolRead]:
             access_mode=definition.access_mode,
             risk_level=definition.risk_level,
             approval_policy=definition.approval_policy,
+            version=definition.version,
+            required_scopes=list(definition.required_scopes),
+            allowed_data_classifications=list(definition.allowed_data_classifications),
+            allowed_network_destinations=list(definition.allowed_network_destinations),
+            timeout_seconds=definition.timeout_seconds,
+            max_output_bytes=definition.max_output_bytes,
+            max_affected_records=definition.max_affected_records,
+            reversible=definition.reversible,
+            owner=definition.owner,
         )
         for definition in definitions[:READ_TOOL_LIMIT]
     ]
+
+
+def handle_jsonrpc(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    request: MCPJSONRPCRequest,
+    project_id: uuid.UUID | None = None,
+) -> MCPJSONRPCResponse:
+    """Handle one MCP JSON-RPC request with structured protocol errors."""
+
+    try:
+        if request.method == "initialize":
+            return _rpc_result(request.id, _initialize_result(request.params))
+        if request.method == "notifications/initialized":
+            return _rpc_result(request.id, {"accepted": True})
+        if request.method == "tools/list":
+            include_proposals = bool(request.params.get("includeProposals", True))
+            return _rpc_result(
+                request.id,
+                {
+                    "tools": [
+                        _jsonrpc_tool_schema(tool)
+                        for tool in list_tools(include_proposals=include_proposals)
+                    ]
+                },
+            )
+        if request.method == "tools/call":
+            if project_id is None:
+                return _rpc_error(
+                    request.id,
+                    JSONRPC_INVALID_PARAMS,
+                    "tools/call requires a project-scoped MCP endpoint.",
+                )
+            return _rpc_result(
+                request.id,
+                _call_tool_result(db, auth, settings, project_id, request.params),
+            )
+        return _rpc_error(
+            request.id,
+            JSONRPC_METHOD_NOT_FOUND,
+            f"Unsupported MCP method: {request.method}",
+        )
+    except ValueError as exc:
+        return _rpc_error(request.id, JSONRPC_INVALID_PARAMS, str(exc))
+    except HTTPException as exc:
+        return _rpc_error(
+            request.id,
+            (
+                JSONRPC_AUTHORIZATION_ERROR
+                if exc.status_code in {401, 403}
+                else JSONRPC_INVALID_PARAMS
+            ),
+            str(exc.detail),
+            data={"status_code": exc.status_code},
+        )
+    except Exception as exc:
+        return _rpc_error(
+            request.id,
+            JSONRPC_INTERNAL_ERROR,
+            "MCP request failed.",
+            data={"error": str(exc)},
+        )
 
 
 def call_tool(
@@ -75,6 +157,7 @@ def call_tool(
             arguments,
             requested_by="agent",
             input_json={"mcp": {"client_id": client_id, "adapter_version": ADAPTER_VERSION}},
+            settings=settings,
         )
         duration_ms = int((perf_counter() - started) * 1000)
         _attach_mcp_metadata(db, auth, project_id, invocation, client_id, duration_ms)
@@ -106,6 +189,30 @@ def call_tool(
     )
 
 
+def _call_tool_result(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    tool_name = str(params.get("name") or "")
+    if not tool_name:
+        raise ValueError("tools/call params.name is required.")
+    arguments = _tool_arguments_from_params(params)
+    client_id = _client_id_from_tool_call_params(params)
+    call = call_tool(
+        db,
+        auth,
+        settings,
+        project_id,
+        tool_name=tool_name,
+        arguments=arguments,
+        client_id=client_id,
+    )
+    return _jsonrpc_tool_call_result(call)
+
+
 def _attach_mcp_metadata(
     db: Session,
     auth: AuthContext,
@@ -116,16 +223,9 @@ def _attach_mcp_metadata(
 ) -> None:
     """Annotate the tool invocation and audit log with MCP client metadata."""
 
-    mcp_metadata = {
-        "client_id": client_id,
-        "adapter_version": ADAPTER_VERSION,
-        "duration_ms": duration_ms,
-    }
+    mcp_metadata = _mcp_invocation_metadata(client_id, duration_ms)
     invocation.input_json = redact_payload(
-        {
-            "tool_input": invocation.input_json or {},
-            "mcp": mcp_metadata,
-        },
+        _mcp_tool_input_payload(invocation.input_json, mcp_metadata),
         redact_emails=True,
     )
     governance_service.record_audit_event(
@@ -137,36 +237,25 @@ def _attach_mcp_metadata(
         entity_type="tool_invocation",
         entity_id=invocation.id,
         risk_level=invocation.risk_level,
-        summary=f"MCP client invoked {invocation.tool_name}.",
-        metadata={"tool_name": invocation.tool_name, **mcp_metadata},
+        summary=_mcp_audit_summary(invocation.tool_name),
+        metadata=_mcp_audit_metadata(invocation.tool_name, mcp_metadata),
     )
     db.commit()
     db.refresh(invocation)
 
 
-def _read(
-    invocation: ToolInvocation,
-    *,
-    duration_ms: int,
-    approval_request_id: str | None,
-    output: dict[str, Any],
-) -> MCPToolCallRead:
-    return MCPToolCallRead(
-        tool_name=invocation.tool_name,
-        access_mode=invocation.access_mode,  # type: ignore[arg-type]
-        risk_level=invocation.risk_level,  # type: ignore[arg-type]
-        status=invocation.status,
-        invocation_id=str(invocation.id),
-        approval_required=invocation.access_mode == "proposal",
-        approval_request_id=approval_request_id,
-        duration_ms=duration_ms,
-        output=output,
-        trace={
-            "tool_invocation_id": str(invocation.id),
-            "requested_by": invocation.requested_by,
-            "mcp_adapter_version": ADAPTER_VERSION,
-        },
-    )
+_initialize_result = protocol.initialize_result
+_jsonrpc_tool_schema = protocol.jsonrpc_tool_schema
+_client_id_from_tool_call_params = protocol.client_id_from_tool_call_params
+_tool_arguments_from_params = protocol.tool_arguments_from_params
+_jsonrpc_tool_call_result = protocol.jsonrpc_tool_call_result
+_rpc_result = protocol.rpc_result
+_rpc_error = protocol.rpc_error
+_mcp_invocation_metadata = protocol.mcp_invocation_metadata
+_mcp_tool_input_payload = protocol.mcp_tool_input_payload
+_mcp_audit_metadata = protocol.mcp_audit_metadata
+_mcp_audit_summary = protocol.mcp_audit_summary
+_read = protocol.tool_call_read
 
 
 def _approval_for_invocation(db: Session, invocation: ToolInvocation) -> ApprovalRequest | None:
@@ -180,7 +269,4 @@ def _approval_for_invocation(db: Session, invocation: ToolInvocation) -> Approva
 
 
 def _definition(tool_name: str):
-    for definition in tool_service.list_tool_definitions():
-        if definition.name == tool_name:
-            return definition
-    raise ValueError(f"Unsupported MCP tool: {tool_name}")
+    return tool_service._definition(tool_name)

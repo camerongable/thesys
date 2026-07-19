@@ -1,11 +1,168 @@
 # Security
 
-Sprint 0 security posture:
+Thesys treats the AI layer as a security boundary, not just a model-calling
+utility. The current branch includes controls for local development, portfolio
+demo use, and the production shape that a hosted version would need.
 
-- secrets are represented through environment variables
-- local services are isolated through Docker Compose
-- CORS is limited to the local web origin by default
+For the complete security documentation map, including runbooks and evidence
+boundaries, start with the [Security Documentation Guide](security/README.md).
 
-Sprint 1 must add authenticated request boundaries and workspace authorization.
-Retrieved evidence must always be treated as data, not instructions, once RAG
-workflows are introduced.
+## Security Contract
+
+The Sprint 61 security contract is maintained across:
+
+- [Threat model](security/THREAT_MODEL.md)
+- [Data classification](security/DATA_CLASSIFICATION.md)
+- [Control matrix](security/CONTROL_MATRIX.md)
+- [Security architecture and trust boundaries](security/SECURITY_ARCHITECTURE.md)
+- [Abuse cases](security/ABUSE_CASES.md)
+
+The code-owned data types, tenant paths, memory-write paths, and twelve security
+invariants live in `apps/api/app/security/contracts.py`. Automated checks in
+`apps/api/app/tests/security/test_security_invariants.py` keep the contract tied
+to mapped tables and governed tool/memory surfaces. The older
+`docs/THREAT_MODEL.md` remains a concise Sprint 54 implementation snapshot; the
+files above are authoritative for the Sprint 61-68 hardening phase.
+
+## Auth And Authorization
+
+- `AUTH_MODE=dev` uses `X-Dev-User-*` headers for local-only identity setup.
+- `AUTH_MODE=jwt` verifies HS256 bearer tokens with issuer, audience, expiry,
+  active key IDs, revoked token IDs, role, and workspace-name claims.
+- `AUTH_MODE=api_key` verifies SHA-256 API key hashes and maps accepted keys to
+  a service-account workspace membership. Revoked key hashes are denied even if
+  they remain present in the accepted-key set.
+- `AUTH_MODE=oidc` verifies an asymmetric JWT against the configured JWKS,
+  issuer, audience, expiry, not-before time, subject, authorized party, and
+  algorithm allowlist. OIDC users and exact workspace memberships must be
+  provisioned in the database; token claims cannot create a tenant or replace
+  the stored role.
+- Dev auth headers are rejected outside `AUTH_MODE=dev`, and application
+  configuration fails validation when dev auth is selected outside
+  `APP_ENV=local`.
+- Project routes still enforce workspace scoping and role permissions through
+  a validated `Principal` carried by `AuthContext`, `WorkspaceMember`, and
+  `require_permission`.
+
+The HS256 JWT mode remains a portfolio/demo compatibility path. Hosted user
+authentication should use OIDC/JWKS and pre-provisioned membership. OIDC users
+are keyed by `oidc_external_auth_id(issuer, subject)`; account status and the
+database membership role are authoritative after token validation.
+
+## Database Tenant Isolation
+
+`bind_tenant_context` stores the validated principal on the SQLAlchemy session.
+For Postgres transactions it sets `app.workspace_id` and `app.user_id` with
+transaction-local `set_config` calls, equivalent to `SET LOCAL`. A session event
+reapplies both settings after every commit or rollback before the next query.
+
+Migration `0029_tenant_rls` enables and forces row-level security on the original
+38 tenant tables. Migrations `0030_workspace_data_keys` and
+`0031_authentication_events`, and `0032_session_revocations` add the restricted
+wrapped-key, immutable authentication-event, and hashed session-revocation
+tables, bringing the contract to 41 tenant tables.
+Thirty-three original tables compare their own `workspace_id`; five child/link
+tables authorize through their tenant-scoped parent. Missing context fails
+closed. Existing service-level workspace filters remain required.
+
+Database roles are separated:
+
+- `thesys_migration` owns schema changes and may bypass RLS; it is not a runtime
+  application role.
+- `thesys_api` and `thesys_worker` are non-superuser, non-owner,
+  `NOBYPASSRLS` roles with scoped table grants.
+- `thesys_readonly` receives `SELECT` only and remains subject to RLS.
+
+The local Postgres bootstrap uses development-only passwords. Hosted
+environments must provision independent managed credentials. Run the live
+direct-ORM policy test with `RLS_TEST_DATABASE_URL` pointing to a migrated
+database as `thesys_api`.
+
+## Expensive Workflow Policy
+
+`security_policy_service.guarded_workflow` protects AI-heavy routes before they
+start work:
+
+- per-user and per-workspace rate limits
+- per-user and per-workspace concurrency limits
+- pre-call token and cost budget checks against persisted `AIRun` usage
+- provider egress allowlist checks for live LLM, embedding, search, and
+  multimodal endpoints
+- denied-call audit events with redacted metadata
+
+The guard is applied to Ask Thesys, research sprint planning, source discovery,
+agentic research, evidence ingestion/retrieval/reembedding, opportunity briefs,
+competitor analysis, assumption/risk extraction, validation planning,
+validation interpretation, decision guidance, MCP tool calls, eval endpoints,
+and AI smoke tests.
+
+## URL Fetching And Uploads
+
+URL evidence ingestion validates each initial and redirected URL:
+
+- only `http` and `https` schemes
+- no embedded credentials
+- configured port allowlist
+- optional domain denylist and allowlist
+- DNS resolution blocks loopback, private, link-local, multicast, reserved, and
+  unspecified addresses
+- redirect revalidation on each hop
+- content-length and final response-size caps
+- fetched response content-type allowlist
+
+Uploads validate filenames, extensions, content types, file size, UTF-8 text,
+and lightweight magic bytes for PDF, PNG, JPEG, and WebP before storage or
+model/OCR processing.
+
+## Provider Egress
+
+Live provider clients fail closed unless their endpoint host is allowlisted:
+
+- LiteLLM chat completions and streaming
+- LiteLLM embeddings
+- LiteLLM multimodal extraction
+- Tavily external search
+- LiteLLM health checks
+
+Defaults permit local LiteLLM plus common hosted provider domains. Production
+deployments should narrow `PROVIDER_EGRESS_ALLOWED_HOSTS` to the actual gateway
+and provider endpoints in use.
+
+## Prompt Injection And Redaction
+
+Retrieved evidence is treated as untrusted source data. RAG and guide prompts
+wrap retrieved content in untrusted-content blocks and instruct models not to
+follow source instructions. Source provenance records prompt-injection markers.
+
+Logs, audit events, tool payloads, LangSmith metadata, approval requests, and
+UI-facing error paths use redaction helpers for API keys, bearer tokens,
+authorization headers, emails, and other sensitive strings.
+
+## Local Checks
+
+Run focused security checks:
+
+```bash
+python3 scripts/security_check.py
+```
+
+Run dependency audits:
+
+```bash
+python3 scripts/audit_dependencies.py
+python3 scripts/audit_dependencies.py --strict
+```
+
+The non-strict audit mode is useful on local machines where `pip-audit`, `pnpm`,
+or registry access may be unavailable. CI should use strict mode once those tools
+are installed and network policy is stable.
+
+## Remaining Production Work
+
+- Add an identity provisioning/admin workflow around the strict OIDC mapping.
+- Move rate/concurrency counters to Redis or another shared store for multi-node
+  deployments.
+- Add token rotation/revocation tables for API keys and service accounts.
+- Add provider-specific response-size enforcement where SDKs expose streaming
+  byte counters.
+- Run the direct Postgres RLS suite in CI and hosted pre-deploy checks.

@@ -1,5 +1,18 @@
 # Data Model
 
+The SQLAlchemy models and Alembic migrations are the authoritative schema. This
+document retains the historical domain-model milestones; use
+`apps/api/app/db/models/` and `apps/api/alembic/versions/` when a field-level
+or current migration answer matters.
+
+Current durable domains include project strategy, evidence/chunks/embeddings,
+artifacts/claims, approvals and governed tools, AI runs/steps, research sprints,
+memory, identity/membership, authentication events, session revocations,
+encrypted data keys, security events/alerts, MCP registry/credentials, and the
+per-workspace audit chain. Tenant-scoped PostgreSQL tables are protected by the
+RLS contract; see [Security Overview](security.md) and
+[Deployment And Security](DEPLOYMENT_SECURITY.md).
+
 Sprint 0 includes shared SQLAlchemy model infrastructure and an initial Alembic
 migration that enables `pgvector`.
 

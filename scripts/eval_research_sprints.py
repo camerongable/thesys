@@ -17,35 +17,23 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DATASET_PATH = REPO_ROOT / "apps/api/app/evals/research_sprint_cases.json"
-REQUIRED_CATEGORIES = {
-    "B2B SaaS",
-    "consumer app",
-    "developer tool",
-    "fitness/health",
-    "local services",
-    "marketplace",
-    "AI workflow tool",
-    "productivity tool",
-    "creator/consultant workflow",
-    "ecommerce/affiliate idea",
-}
-REQUIRED_CASE_FIELDS = {
-    "id",
-    "idea_type",
-    "idea",
-    "expected_competitor_types",
-    "expected_risky_assumptions",
-    "required_output_sections",
-    "unacceptable_claims",
-    "expected_next_action_type",
-}
+API_DIR = REPO_ROOT / "apps" / "api"
+
+if str(API_DIR) not in sys.path:
+    sys.path.insert(0, str(API_DIR))
+
+from app.features.evals import metric_records, research_cases  # noqa: E402
+
+DATASET_PATH = research_cases.dataset_path()
+REQUIRED_CATEGORIES = research_cases.REQUIRED_CATEGORIES
+REQUIRED_CASE_FIELDS = research_cases.REQUIRED_CASE_FIELDS
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate research sprint readiness.")
     parser.add_argument("--api-base", default="http://localhost:8000")
     parser.add_argument("--project-id", default=None)
+    parser.add_argument("--json", action="store_true", dest="json_output")
     args = parser.parse_args()
 
     cases = _load_cases()
@@ -58,79 +46,28 @@ def main() -> int:
     passed = sum(1 for metric in metrics if metric["passed"])
     total = len(metrics)
 
-    print("Research Sprint Eval")
-    print(f"Dataset: {DATASET_PATH}")
-    print(f"Result: {passed}/{total} checks passed")
-    for metric in metrics:
-        status = "PASS" if metric["passed"] else "FAIL"
-        print(f"- [{status}] {metric['label']}: {metric['observed']} (expected {metric['expected']})")
+    report = {"passed": passed == total, "score": passed, "total": total, "metrics": metrics}
+    if args.json_output:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print("Research Sprint Eval")
+        print(f"Dataset: {DATASET_PATH}")
+        print(f"Result: {passed}/{total} checks passed")
+        for metric in metrics:
+            status = "PASS" if metric["passed"] else "FAIL"
+            print(
+                f"- [{status}] {metric['label']}: {metric['observed']} "
+                f"(expected {metric['expected']})"
+            )
 
-    return 0 if passed == total else 1
+    return 0 if report["passed"] else 1
 
 
 def _load_cases() -> list[dict[str, Any]]:
-    return json.loads(DATASET_PATH.read_text(encoding="utf-8"))
+    return research_cases.load_raw_cases(DATASET_PATH)
 
 
-def _score_dataset(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    categories = {case.get("idea_type") for case in cases}
-    complete_cases = [
-        case
-        for case in cases
-        if REQUIRED_CASE_FIELDS.issubset(case)
-        and all(case.get(field) for field in REQUIRED_CASE_FIELDS)
-    ]
-    demo_ready_count = sum(1 for case in cases if case.get("demo_ready"))
-    required_sections = sum(
-        1 for case in cases if len(case.get("required_output_sections") or []) >= 4
-    )
-    safety_cases = sum(1 for case in cases if case.get("unacceptable_claims"))
-    next_actions = sum(1 for case in cases if case.get("expected_next_action_type"))
-    return [
-        _metric("dataset_case_count", "Dataset case count", len(cases) >= 10, len(cases), "10+"),
-        _metric(
-            "category_coverage",
-            "Category coverage",
-            REQUIRED_CATEGORIES.issubset(categories),
-            f"{len(categories)}/{len(REQUIRED_CATEGORIES)}",
-            "all required categories",
-        ),
-        _metric(
-            "case_schema",
-            "Case schema completeness",
-            len(complete_cases) == len(cases),
-            f"{len(complete_cases)}/{len(cases)}",
-            "all cases include Sprint 14 fields",
-        ),
-        _metric(
-            "demo_ready_cases",
-            "Demo-ready cases",
-            demo_ready_count >= 5,
-            demo_ready_count,
-            "5+",
-        ),
-        _metric(
-            "required_sections",
-            "Required output sections",
-            required_sections == len(cases),
-            f"{required_sections}/{len(cases)}",
-            "each case has 4+ sections",
-        ),
-        _metric(
-            "unacceptable_claims",
-            "Unacceptable claim guards",
-            safety_cases == len(cases),
-            f"{safety_cases}/{len(cases)}",
-            "each case defines unsafe/unacceptable claims",
-        ),
-        _metric(
-            "next_actions",
-            "Expected next action",
-            next_actions == len(cases),
-            f"{next_actions}/{len(cases)}",
-            "each case defines expected next action type",
-        ),
-    ]
+_score_dataset = research_cases.score_dataset
 
 
 def _fetch_project_metrics(api_base: str, project_id: str) -> list[dict[str, Any]]:
@@ -161,20 +98,7 @@ def _fetch_project_metrics(api_base: str, project_id: str) -> list[dict[str, Any
     ]
 
 
-def _metric(
-    key: str,
-    label: str,
-    passed: bool,
-    observed: Any,
-    expected: str,
-) -> dict[str, Any]:
-    return {
-        "key": key,
-        "label": label,
-        "passed": passed,
-        "observed": observed,
-        "expected": expected,
-    }
+_metric = metric_records.metric
 
 
 if __name__ == "__main__":

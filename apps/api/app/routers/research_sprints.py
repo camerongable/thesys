@@ -39,6 +39,7 @@ from app.services import (
     opportunity_brief_service,
     research_history_service,
     research_sprint_service,
+    security_policy_service,
     source_discovery_service,
     temporal_research_service,
 )
@@ -105,24 +106,36 @@ def start_research_sprint_plan(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> ResearchSprintPlanRunRead:
-    try:
-        result = research_sprint_service.start_research_sprint_plan(
-            db,
-            auth,
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="research_sprint_planning",
+        estimate=security_policy_service.merge_estimate(
             settings,
-            project_id,
-            payload,
-        )
-    except research_sprint_service.ResearchSprintWorkflowError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=public_error_detail("Research sprint planning failed.", exc),
-        ) from exc
-    except temporal_research_service.TemporalResearchWorkflowError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=public_error_detail("Temporal workflow start failed.", exc),
-        ) from exc
+            multiplier=1.5,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        try:
+            result = research_sprint_service.start_research_sprint_plan(
+                db,
+                auth,
+                settings,
+                project_id,
+                payload,
+            )
+        except research_sprint_service.ResearchSprintWorkflowError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=public_error_detail("Research sprint planning failed.", exc),
+            ) from exc
+        except temporal_research_service.TemporalResearchWorkflowError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=public_error_detail("Temporal workflow start failed.", exc),
+            ) from exc
 
     return ResearchSprintPlanRunRead(
         ai_run_id=result.run.id,
@@ -223,19 +236,27 @@ def start_durable_research_workflow(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> ResearchSprintExecutionActionRead:
-    try:
-        sprint = temporal_research_service.start_research_sprint_workflow(
-            db,
-            auth,
-            settings,
-            project_id,
-            sprint_id,
-        )
-    except temporal_research_service.TemporalResearchWorkflowError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=public_error_detail("Temporal workflow start failed.", exc),
-        ) from exc
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="temporal_research_start",
+        estimate=security_policy_service.merge_estimate(settings, multiplier=2.0),
+    ):
+        try:
+            sprint = temporal_research_service.start_research_sprint_workflow(
+                db,
+                auth,
+                settings,
+                project_id,
+                sprint_id,
+            )
+        except temporal_research_service.TemporalResearchWorkflowError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=public_error_detail("Temporal workflow start failed.", exc),
+            ) from exc
     return ResearchSprintExecutionActionRead(
         sprint=serialize_sprint(sprint),
         action="started",
@@ -254,19 +275,27 @@ def retry_durable_research_workflow(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> ResearchSprintExecutionActionRead:
-    try:
-        sprint = temporal_research_service.retry_research_sprint_workflow(
-            db,
-            auth,
-            settings,
-            project_id,
-            sprint_id,
-        )
-    except temporal_research_service.TemporalResearchWorkflowError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=public_error_detail("Temporal workflow retry failed.", exc),
-        ) from exc
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="temporal_research_retry",
+        estimate=security_policy_service.merge_estimate(settings, multiplier=2.0),
+    ):
+        try:
+            sprint = temporal_research_service.retry_research_sprint_workflow(
+                db,
+                auth,
+                settings,
+                project_id,
+                sprint_id,
+            )
+        except temporal_research_service.TemporalResearchWorkflowError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=public_error_detail("Temporal workflow retry failed.", exc),
+            ) from exc
     return ResearchSprintExecutionActionRead(
         sprint=serialize_sprint(sprint),
         action="retried",
@@ -330,7 +359,28 @@ def discover_sources(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> SourceDiscoveryRunRead:
-    result = source_discovery_service.discover_sources(db, auth, settings, project_id, sprint_id)
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="source_discovery",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=1.5,
+            provider_urls=(
+                security_policy_service.llm_provider_urls(settings)
+                + security_policy_service.search_provider_urls(settings)
+            ),
+        ),
+    ):
+        result = source_discovery_service.discover_sources(
+            db,
+            auth,
+            settings,
+            project_id,
+            sprint_id,
+        )
     return SourceDiscoveryRunRead(
         ai_run_id=result.run.id,
         ai_step_id=result.step.id,
@@ -353,14 +403,29 @@ def approve_discovered_source(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> DiscoveredSourceActionRead:
-    source = source_discovery_service.approve_source_candidate(
+    with security_policy_service.guarded_workflow(
         db,
         auth,
         settings,
-        project_id,
-        sprint_id,
-        source_id,
-    )
+        project_id=project_id,
+        workflow_type="source_candidate_ingestion",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=1.25,
+            provider_urls=(
+                security_policy_service.embedding_provider_urls(settings)
+                + security_policy_service.multimodal_provider_urls(settings)
+            ),
+        ),
+    ):
+        source = source_discovery_service.approve_source_candidate(
+            db,
+            auth,
+            settings,
+            project_id,
+            sprint_id,
+            source_id,
+        )
     return DiscoveredSourceActionRead(source=serialize_source(source))
 
 
@@ -417,13 +482,25 @@ def discover_competitors(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> CompetitorDiscoveryRunRead:
-    result = competitor_discovery_service.discover_competitors(
+    with security_policy_service.guarded_workflow(
         db,
         auth,
         settings,
-        project_id,
-        sprint_id,
-    )
+        project_id=project_id,
+        workflow_type="competitor_discovery",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=1.25,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        result = competitor_discovery_service.discover_competitors(
+            db,
+            auth,
+            settings,
+            project_id,
+            sprint_id,
+        )
     return CompetitorDiscoveryRunRead(
         ai_run_id=result.run.id,
         ai_step_id=result.step.id,
@@ -468,14 +545,22 @@ def approve_competitor_candidate(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> CompetitorCandidateActionRead:
-    candidate = competitor_discovery_service.approve_competitor_candidate(
+    with security_policy_service.guarded_workflow(
         db,
         auth,
         settings,
-        project_id,
-        sprint_id,
-        candidate_id,
-    )
+        project_id=project_id,
+        workflow_type="competitor_candidate_approval",
+        estimate=security_policy_service.merge_estimate(settings, multiplier=0.5),
+    ):
+        candidate = competitor_discovery_service.approve_competitor_candidate(
+            db,
+            auth,
+            settings,
+            project_id,
+            sprint_id,
+            candidate_id,
+        )
     return CompetitorCandidateActionRead(candidate=serialize_candidate(candidate))
 
 
@@ -511,19 +596,35 @@ def run_agentic_research(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> AgenticResearchRunRead:
-    try:
-        result = agentic_research_service.run_agentic_research(
-            db,
-            auth,
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="agentic_research",
+        estimate=security_policy_service.merge_estimate(
             settings,
-            project_id,
-            sprint_id,
-        )
-    except agentic_research_service.AgenticResearchWorkflowError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=public_error_detail("Agentic research failed.", exc),
-        ) from exc
+            multiplier=3.0,
+            provider_urls=(
+                security_policy_service.llm_provider_urls(settings)
+                + security_policy_service.search_provider_urls(settings)
+                + security_policy_service.embedding_provider_urls(settings)
+            ),
+        ),
+    ):
+        try:
+            result = agentic_research_service.run_agentic_research(
+                db,
+                auth,
+                settings,
+                project_id,
+                sprint_id,
+            )
+        except agentic_research_service.AgenticResearchWorkflowError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=public_error_detail("Agentic research failed.", exc),
+            ) from exc
     return AgenticResearchRunRead(
         ai_run_id=result.run.id,
         ai_step_id=result.step.id,

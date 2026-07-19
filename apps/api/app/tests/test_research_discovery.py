@@ -3,15 +3,18 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai import litellm_client
 from app.ai.litellm_client import LLMCompletion
 from app.ai.structured_output import StructuredOutputResult
 from app.core.config import get_settings
 from app.db.models import (
     AIRun,
+    AuditEvent,
     Competitor,
     CompetitorCandidate,
     CompetitorEvidenceLink,
@@ -19,6 +22,7 @@ from app.db.models import (
     EvidenceChunk,
     EvidenceSource,
     ResearchSprint,
+    SecurityEvent,
 )
 from app.schemas.research import (
     CompetitorDiscoveryCandidateDraft,
@@ -26,8 +30,9 @@ from app.schemas.research import (
     SourceDiscoveryCandidateDraft,
     SourceDiscoveryDraft,
 )
-from app.services import external_search_service
+from app.services import external_search_service, source_discovery_service
 from app.services.evidence_service import EvidenceIngestionError, ParsedSource
+from app.services.identity_service import ensure_dev_identity
 
 
 def _approved_research_sprint(client: TestClient) -> tuple[str, str]:
@@ -119,9 +124,7 @@ def test_source_discovery_generates_dedupes_and_ingests_approved_candidates(
     assert evidence.ingestion_status == "ready"
     assert evidence.url == approved["url"]
     assert fetched_text in (evidence.raw_text or "")
-    chunk = db_session.scalar(
-        select(EvidenceChunk).where(EvidenceChunk.source_id == evidence.id)
-    )
+    chunk = db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == evidence.id))
     assert chunk is not None
     assert chunk.chunk_metadata["origin"] == "source_discovery"
     assert chunk.chunk_metadata["research_sprint_id"] == sprint_id
@@ -242,13 +245,364 @@ def test_deterministic_external_search_preserves_provenance_through_ingestion(
     assert evidence.source_metadata["origin"] == "source_discovery"
     assert evidence.source_metadata["search_provider"] == "deterministic"
     assert evidence.source_metadata["search_result_rank"] == 1
-    chunk = db_session.scalar(
-        select(EvidenceChunk).where(EvidenceChunk.source_id == evidence.id)
-    )
+    chunk = db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == evidence.id))
     assert chunk is not None
     assert chunk.embedding is not None
     assert chunk.chunk_metadata["search_provider"] == "deterministic"
     assert chunk.chunk_metadata["source_metadata"]["search_provider"] == "deterministic"
+
+
+def test_source_discovery_reserves_external_query_budget_before_search(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint(client)
+    sprint = db_session.get(ResearchSprint, uuid.UUID(sprint_id))
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_external_queries": 1,
+    }
+    db_session.commit()
+    monkeypatch.setenv("EXTERNAL_SEARCH_ENABLED", "true")
+    monkeypatch.setenv("EXTERNAL_SEARCH_PROVIDER", "deterministic")
+    monkeypatch.setenv("EXTERNAL_SEARCH_MAX_QUERIES_PER_SPRINT", "6")
+    get_settings.cache_clear()
+    original_search = external_search_service._search_deterministic
+    calls: list[list[str]] = []
+
+    def _track_search(settings, queries):
+        calls.append(queries)
+        return original_search(settings, queries)
+
+    monkeypatch.setattr(external_search_service, "_search_deterministic", _track_search)
+
+    first_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+    )
+
+    assert first_response.status_code == 200
+    assert first_response.json()["search_diagnostics"]["query_count"] == 1
+    assert len(calls) == 1
+    assert len(calls[0]) == 1
+    db_session.refresh(sprint)
+    assert sprint.workflow_security_usage == {"external_queries": 1}
+
+    second_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+    )
+
+    assert second_response.status_code == 429
+    assert len(calls) == 1
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_external_query_budget_exceeded")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["max_external_queries"] == 1
+    assert audit.event_metadata["observed_external_queries"] == 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
+
+
+def test_source_discovery_reserves_model_budget_before_provider_call(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint(client)
+    sprint = db_session.get(ResearchSprint, uuid.UUID(sprint_id))
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_model_calls": 1,
+    }
+    db_session.commit()
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_API_KEY", "test-model-key")
+    monkeypatch.setenv("PROVIDER_EGRESS_POLICY_ENABLED", "false")
+    get_settings.cache_clear()
+    provider_calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "model": "test-model",
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"sources":[{"url":"https://example.com/model-budget",'
+                                '"title":"Model budget source",'
+                                '"snippet":"Provider-backed source candidate.",'
+                                '"source_type":"market_report",'
+                                '"relevance_score":0.9,'
+                                '"reason_selected":"Tests provider reservation.",'
+                                '"associated_research_question":"What evidence matters?"}]}'
+                            )
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+            }
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, _url: str, **kwargs: object) -> FakeResponse:
+            provider_calls.append(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr(litellm_client.httpx, "Client", FakeClient)
+
+    first_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+    )
+
+    assert first_response.status_code == 200
+    assert len(provider_calls) == 1
+    db_session.refresh(sprint)
+    assert sprint.workflow_security_usage == {
+        "model_calls": 1,
+        "tokens": 20,
+        "cost_usd": "0",
+    }
+
+    second_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+    )
+
+    assert second_response.status_code == 429
+    assert len(provider_calls) == 1
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_model_call_budget_exceeded")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["max_model_calls"] == 1
+    assert audit.event_metadata["observed_model_calls"] == 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
+
+
+@pytest.mark.parametrize(
+    ("budget_update", "response_headers", "event_type", "usage_key", "usage_value"),
+    [
+        (
+            {"max_tokens": 19},
+            {},
+            "workflow_token_budget_exceeded",
+            "tokens",
+            20,
+        ),
+        (
+            {"max_cost_usd": 0.01},
+            {"x-litellm-response-cost": "0.02"},
+            "workflow_cost_budget_exceeded",
+            "cost_usd",
+            "0.02",
+        ),
+    ],
+)
+def test_source_discovery_stops_after_provider_usage_exceeds_workflow_budget(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+    budget_update: dict[str, int | float],
+    response_headers: dict[str, str],
+    event_type: str,
+    usage_key: str,
+    usage_value: int | str,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint(client)
+    sprint = db_session.get(ResearchSprint, uuid.UUID(sprint_id))
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        **budget_update,
+    }
+    db_session.commit()
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_API_KEY", "test-model-key")
+    monkeypatch.setenv("PROVIDER_EGRESS_POLICY_ENABLED", "false")
+    get_settings.cache_clear()
+    provider_calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        headers = response_headers
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "model": "test-model",
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"sources":[{"url":"https://example.com/usage-budget",'
+                                '"title":"Usage budget source",'
+                                '"snippet":"Provider-backed source candidate.",'
+                                '"source_type":"market_report",'
+                                '"relevance_score":0.9,'
+                                '"reason_selected":"Tests usage accounting.",'
+                                '"associated_research_question":"What evidence matters?"}]}'
+                            )
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+            }
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, _url: str, **kwargs: object) -> FakeResponse:
+            provider_calls.append(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr(litellm_client.httpx, "Client", FakeClient)
+
+    response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+    )
+
+    assert response.status_code == 429
+    assert len(provider_calls) == 1
+    db_session.refresh(sprint)
+    assert sprint.workflow_security_usage["model_calls"] == 1
+    assert sprint.workflow_security_usage[usage_key] == usage_value
+    assert not list(
+        db_session.scalars(
+            select(DiscoveredSource).where(
+                DiscoveredSource.research_sprint_id == uuid.UUID(sprint_id)
+            )
+        )
+    )
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == event_type)
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
+
+
+def test_source_discovery_caps_structured_output_repairs_before_provider_call(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint(client)
+    sprint = db_session.get(ResearchSprint, uuid.UUID(sprint_id))
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_structured_output_repairs": 1,
+    }
+    db_session.commit()
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LLM_STRUCTURED_OUTPUT_REPAIR_ATTEMPTS", "2")
+    monkeypatch.setenv("LITELLM_API_KEY", "test-model-key")
+    monkeypatch.setenv("PROVIDER_EGRESS_POLICY_ENABLED", "false")
+    get_settings.cache_clear()
+    provider_calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "model": "test-model",
+                "choices": [{"message": {"content": "[]"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+            }
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, _url: str, **kwargs: object) -> FakeResponse:
+            provider_calls.append(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr(litellm_client.httpx, "Client", FakeClient)
+
+    response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+    )
+
+    assert response.status_code == 429
+    assert len(provider_calls) == 2
+    db_session.refresh(sprint)
+    assert sprint.workflow_security_usage == {
+        "model_calls": 2,
+        "tokens": 40,
+        "cost_usd": "0",
+        "structured_output_repairs": 1,
+    }
+    assert not list(
+        db_session.scalars(
+            select(DiscoveredSource).where(
+                DiscoveredSource.research_sprint_id == uuid.UUID(sprint_id)
+            )
+        )
+    )
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_structured_output_repair_budget_exceeded")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["max_structured_output_repairs"] == 1
+    assert audit.event_metadata["observed_structured_output_repairs"] == 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
 
 
 def test_prompt_injection_search_snippet_stays_review_only(
@@ -295,8 +649,41 @@ def test_prompt_injection_search_snippet_stays_review_only(
     assert db_session.scalar(select(EvidenceSource)) is None
 
 
+def test_source_fetching_kill_switch_denies_discovery_before_ai_run_creation(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("EXTERNAL_SEARCH_ENABLED", "true")
+    get_settings.cache_clear()
+    try:
+        project_id, sprint_id = _approved_research_sprint(client)
+        update_response = client.patch(
+            "/api/security/kill-switches",
+            json={"disable_source_fetching": True},
+        )
+        response = client.post(
+            f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert update_response.status_code == 200
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Source fetching is temporarily unavailable."}
+    assert db_session.scalar(select(AIRun).where(AIRun.workflow_type == "source_discovery")) is None
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "security_policy_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["workflow_type"] == "source_discovery"
+
+
 def test_tavily_adapter_normalizes_results_and_handles_rate_limits(
     monkeypatch,
+    db_session: Session,
 ) -> None:
     monkeypatch.setenv("EXTERNAL_SEARCH_ENABLED", "true")
     monkeypatch.setenv("EXTERNAL_SEARCH_PROVIDER", "tavily")
@@ -345,7 +732,18 @@ def test_tavily_adapter_normalizes_results_and_handles_rate_limits(
     monkeypatch.setattr(external_search_service.httpx, "Client", FakeClient)
 
     settings = get_settings()
-    batch = external_search_service.search_many(settings, ["fitness coach pricing"])
+    auth = ensure_dev_identity(
+        db_session,
+        email=settings.dev_auth_default_email,
+        display_name=settings.dev_auth_default_name,
+        role="owner",
+    )
+    batch = external_search_service.search_many(
+        db_session,
+        auth,
+        settings,
+        ["fitness coach pricing"],
+    )
 
     assert batch.provider == "tavily"
     assert batch.query_count == 1
@@ -375,7 +773,12 @@ def test_tavily_adapter_normalizes_results_and_handles_rate_limits(
             return RateLimitedResponse()
 
     monkeypatch.setattr(external_search_service.httpx, "Client", RateLimitedClient)
-    rate_limited = external_search_service.search_many(settings, ["fitness coach pricing"])
+    rate_limited = external_search_service.search_many(
+        db_session,
+        auth,
+        settings,
+        ["fitness coach pricing"],
+    )
 
     assert rate_limited.provider == "deterministic"
     assert rate_limited.fallback_used is True
@@ -570,9 +973,7 @@ def test_blocked_source_fetch_ingests_discovery_snapshot(
     assert ingested["evidence_source_id"] is not None
 
     evidence = db_session.scalar(
-        select(EvidenceSource).where(
-            EvidenceSource.id == uuid.UUID(ingested["evidence_source_id"])
-        )
+        select(EvidenceSource).where(EvidenceSource.id == uuid.UUID(ingested["evidence_source_id"]))
     )
     assert evidence is not None
     assert "Reason selected:" in (evidence.raw_text or "")
@@ -586,6 +987,67 @@ def test_blocked_source_fetch_ingests_discovery_snapshot(
     )
     assert retry_response.status_code == 200
     assert retry_response.json()["source"]["status"] == "ingested"
+
+
+def test_repeated_failed_source_fetch_stops_before_another_ingestion_attempt(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint(client)
+    discover_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+    )
+    assert discover_response.status_code == 200
+    source_id = uuid.UUID(discover_response.json()["sources"][0]["id"])
+    sprint = db_session.get(ResearchSprint, uuid.UUID(sprint_id))
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_failed_source_fetches": 1,
+    }
+    db_session.commit()
+
+    fetch_attempts: list[uuid.UUID] = []
+
+    def _failed_ingestion(*args, **kwargs):
+        fetch_attempts.append(source_id)
+        raise EvidenceIngestionError("source fetch failed")
+
+    monkeypatch.setattr(
+        source_discovery_service.evidence_service,
+        "add_discovered_url_source",
+        _failed_ingestion,
+    )
+    first_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/{source_id}/approve"
+    )
+
+    assert first_response.status_code == 200
+    assert first_response.json()["source"]["status"] == "failed"
+    stored_source = db_session.get(DiscoveredSource, source_id)
+    assert stored_source is not None
+    assert stored_source.provenance_metadata["failed_fetch_attempt_count"] == 1
+    second_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/{source_id}/approve"
+    )
+
+    assert second_response.status_code == 429
+    assert fetch_attempts == [source_id]
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_repeated_source_fetch_failure_detected")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.risk_level == "high"
+    assert audit.event_metadata["max_failed_source_fetches"] == 1
+    assert audit.event_metadata["observed_failed_fetches"] == 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
 
 
 def test_competitor_discovery_uses_structured_output_in_live_mode(
@@ -651,3 +1113,102 @@ def test_competitor_discovery_uses_structured_output_in_live_mode(
     assert run.model_provider == "litellm"
     assert run.model_name == "test-live-model"
     assert run.total_tokens == 32
+
+
+def test_competitor_discovery_reserves_model_budget_before_provider_call(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint(client)
+    sprint = db_session.get(ResearchSprint, uuid.UUID(sprint_id))
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_model_calls": 1,
+    }
+    db_session.commit()
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_API_KEY", "test-model-key")
+    monkeypatch.setenv("PROVIDER_EGRESS_POLICY_ENABLED", "false")
+    get_settings.cache_clear()
+    provider_calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "model": "test-model",
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"candidates":[{"name":"Model Budget Competitor",'
+                                '"url":"https://example.com/model-budget-competitor",'
+                                '"category":"direct_competitor",'
+                                '"target_user":"Fitness coaches",'
+                                '"positioning":"Provider-backed candidate.",'
+                                '"pricing_signal":"Pricing requires verification.",'
+                                '"core_features":["research"],'
+                                '"why_it_matters":"Tests provider reservation.",'
+                                '"threat_level":"medium",'
+                                '"relevance_score":0.9,"source_ids":[]}]}'
+                            )
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+            }
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, _url: str, **kwargs: object) -> FakeResponse:
+            provider_calls.append(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr(litellm_client.httpx, "Client", FakeClient)
+
+    first_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates/discover"
+    )
+
+    assert first_response.status_code == 200
+    assert len(provider_calls) == 1
+    db_session.refresh(sprint)
+    assert sprint.workflow_security_usage == {
+        "model_calls": 1,
+        "tokens": 20,
+        "cost_usd": "0",
+    }
+
+    second_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates/discover"
+    )
+
+    assert second_response.status_code == 429
+    assert len(provider_calls) == 1
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_model_call_budget_exceeded")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["max_model_calls"] == 1
+    assert audit.event_metadata["observed_model_calls"] == 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"

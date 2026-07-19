@@ -9,8 +9,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+from sqlalchemy.orm import Session
 
+from app.core.auth import AuthContext
 from app.core.config import Settings
+from app.security.secrets import SecretName, SecretProviderError, resolve_secret
+from app.services import model_data_policy_service
+from app.services.security_policy_service import (
+    ProviderEgressDeniedError,
+    enforce_provider_egress_policy,
+)
 
 TOKEN_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]*")
 
@@ -33,6 +41,68 @@ class EmbeddingResult:
 
 def embed_text(settings: Settings, text: str) -> list[float]:
     return embed_text_with_metadata(settings, text).vector
+
+
+def embed_text_with_metadata_cached(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    text: str,
+    *,
+    project_id: Any | None = None,
+) -> EmbeddingResult:
+    """Embed text with a workspace-scoped cache keyed by text hash and provider version."""
+
+    from app.services import ai_cache_service
+
+    key, family, versions = ai_cache_service.embedding_cache_payloads(auth, settings, text)
+    lookup = ai_cache_service.lookup(
+        db,
+        auth,
+        settings,
+        cache_type="embedding",
+        key_payload=key,
+        family_payload=family,
+        version_payload=versions,
+        project_id=project_id,
+        latency_saved_ms=50,
+    )
+    if lookup.value is not None:
+        value = lookup.value
+        embedded_at_raw = value.get("embedded_at")
+        embedded_at = (
+            datetime.fromisoformat(str(embedded_at_raw))
+            if embedded_at_raw
+            else datetime.now(UTC)
+        )
+        return EmbeddingResult(
+            vector=[float(item) for item in value.get("vector", [])],
+            provider=str(value.get("provider") or settings.embedding_provider),
+            model=str(value.get("model") or settings.embedding_model),
+            dimension=int(value.get("dimension") or settings.embedding_dimension),
+            version=str(value.get("version") or settings.embedding_version),
+            embedded_at=embedded_at,
+        )
+
+    result = embed_text_with_metadata(settings, text)
+    ai_cache_service.store(
+        db,
+        auth,
+        cache_type="embedding",
+        key_payload=key,
+        family_payload=family,
+        version_payload=versions,
+        value_payload={
+            "vector": result.vector,
+            "provider": result.provider,
+            "model": result.model,
+            "dimension": result.dimension,
+            "version": result.version,
+            "embedded_at": result.embedded_at.isoformat(),
+        },
+        project_id=project_id,
+    )
+    return result
 
 
 def embed_text_with_metadata(settings: Settings, text: str) -> EmbeddingResult:
@@ -72,10 +142,26 @@ def deterministic_hash_embedding(dimension: int, text: str) -> list[float]:
 
 
 def _embed_with_litellm(settings: Settings, text: str) -> list[float]:
-    payload = {"model": settings.embedding_model, "input": text}
+    try:
+        api_key = resolve_secret(settings, SecretName.LITELLM_API_KEY)
+    except SecretProviderError:
+        raise EmbeddingProviderError("LiteLLM embedding credentials are unavailable.") from None
+    try:
+        decision = model_data_policy_service.prepare_embedding_provider_text(
+            provider="litellm",
+            model=settings.embedding_model,
+            text=text,
+        )
+    except model_data_policy_service.ModelDataPolicyError as exc:
+        raise EmbeddingProviderError(str(exc)) from None
+    payload = {"model": settings.embedding_model, "input": decision.text}
     url = f"{settings.litellm_base_url.rstrip('/')}/v1/embeddings"
+    try:
+        enforce_provider_egress_policy(settings, url)
+    except ProviderEgressDeniedError as exc:
+        raise EmbeddingProviderError(f"LiteLLM embedding egress denied: {exc}") from exc
     headers = {
-        "Authorization": f"Bearer {settings.litellm_api_key}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     attempts = settings.embedding_retry_attempts + 1
@@ -94,12 +180,11 @@ def _embed_with_litellm(settings: Settings, text: str) -> list[float]:
                 raise EmbeddingProviderError("LiteLLM embedding response did not include a vector.")
             return [float(value) for value in vector]
         except httpx.HTTPStatusError as exc:
-            detail = exc.response.text[:500]
             last_error = EmbeddingProviderError(
-                f"LiteLLM embedding request failed with status {exc.response.status_code}: {detail}"
+                f"LiteLLM embedding request failed with status {exc.response.status_code}."
             )
-        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
-            last_error = EmbeddingProviderError(f"LiteLLM embedding request failed: {exc}")
+        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
+            last_error = EmbeddingProviderError("LiteLLM embedding request failed.")
 
         if attempt < attempts - 1:
             time.sleep(0.25 * (attempt + 1))

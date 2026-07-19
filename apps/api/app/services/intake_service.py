@@ -18,6 +18,7 @@ from langgraph.graph import END, StateGraph
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.ai.fallback_completion import fallback_completion
 from app.ai.fallback_policy import (
     should_use_fallback_after_error,
     should_use_fallback_without_model,
@@ -1008,23 +1009,7 @@ def _fallback_completion(
     fallback_name: str,
     error: BaseException | None = None,
 ) -> LLMCompletion:
-    content = intake.model_dump_json()
-    prompt_tokens = sum(len(message.content.split()) for message in messages)
-    completion_tokens = len(content.split())
-    return LLMCompletion(
-        content=content,
-        model_provider="local-fallback",
-        model_name=settings.litellm_model,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=prompt_tokens + completion_tokens,
-        total_cost=Decimal("0"),
-        raw_response={
-            "fallback": fallback_name,
-            "error": str(error)[:500] if error is not None else None,
-        },
-        used_stub=True,
-    )
+    return fallback_completion(settings, messages, intake, fallback_name, error)
 
 
 def _fallback_project_name(project_context: dict[str, Any], raw_idea: str) -> str:

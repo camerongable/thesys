@@ -6,6 +6,11 @@ from temporalio.worker import Worker
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.services.retention_provider_service import ensure_temporal_namespace_retention
+from app.services.retention_schedule_service import ensure_retention_cleanup_schedule
+from app.services.workflow_timeout_reconciliation_schedule_service import (
+    ensure_workflow_timeout_reconciliation_schedule,
+)
 from app.temporal.activities import (
     create_approval_request_activity,
     create_memory_update_proposals_activity,
@@ -15,12 +20,20 @@ from app.temporal.activities import (
     embed_evidence_activity,
     finalize_sprint_activity,
     ingest_sources_activity,
+    list_workspace_retention_cleanup_payloads_activity,
     persist_memory_update_activity,
+    purge_unscoped_authentication_events_activity,
+    reconcile_workspace_workflow_timeouts_activity,
     run_langgraph_research_activity,
     run_langsmith_eval_activity,
+    run_workspace_retention_cleanup_activity,
     wait_for_optional_source_competitor_review_activity,
 )
-from app.temporal.workflows import ResearchSprintWorkflow
+from app.temporal.workflows import (
+    ResearchSprintWorkflow,
+    RetentionCleanupWorkflow,
+    WorkflowTimeoutReconciliationWorkflow,
+)
 
 logger = logging.getLogger(__name__)
 TEMPORAL_CONNECT_ATTEMPTS = 30
@@ -36,6 +49,7 @@ async def run_worker() -> None:
             client = await Client.connect(
                 settings.temporal_address,
                 namespace=settings.temporal_namespace,
+                tls=settings.temporal_tls_enabled,
             )
             break
         except Exception:
@@ -56,6 +70,10 @@ async def run_worker() -> None:
     if client is None:
         raise RuntimeError("Temporal worker failed to initialize a client.")
 
+    await ensure_temporal_namespace_retention(client, settings)
+    await ensure_retention_cleanup_schedule(client, settings)
+    await ensure_workflow_timeout_reconciliation_schedule(client, settings)
+
     logger.info(
         "Starting Temporal worker task_queue=%s namespace=%s address=%s",
         settings.temporal_task_queue,
@@ -65,7 +83,11 @@ async def run_worker() -> None:
     worker = Worker(
         client,
         task_queue=settings.temporal_task_queue,
-        workflows=[ResearchSprintWorkflow],
+        workflows=[
+            ResearchSprintWorkflow,
+            RetentionCleanupWorkflow,
+            WorkflowTimeoutReconciliationWorkflow,
+        ],
         activities=[
             create_or_load_research_plan_activity,
             create_approval_request_activity,
@@ -76,6 +98,10 @@ async def run_worker() -> None:
             embed_evidence_activity,
             run_langgraph_research_activity,
             run_langsmith_eval_activity,
+            run_workspace_retention_cleanup_activity,
+            list_workspace_retention_cleanup_payloads_activity,
+            purge_unscoped_authentication_events_activity,
+            reconcile_workspace_workflow_timeouts_activity,
             create_memory_update_proposals_activity,
             persist_memory_update_activity,
             finalize_sprint_activity,

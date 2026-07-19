@@ -1,5 +1,7 @@
 """Governed project tool registry used by agents, guide chat, and MCP clients."""
 
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -7,12 +9,17 @@ from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
 
-from app.core.auth import AuthContext, normalized_role, require_permission
-from app.core.config import Settings
-from app.core.redaction import redact_payload
+from app.core.auth import (
+    AuthContext,
+    normalized_role,
+    record_cross_tenant_access_attempt,
+    require_permission,
+)
+from app.core.config import Settings, get_settings
+from app.core.redaction import redact_payload, redact_text
 from app.db.models import (
     Artifact,
     ArtifactVersion,
@@ -26,280 +33,44 @@ from app.db.models import (
     Risk,
     ToolInvocation,
 )
+from app.features.governance_tools import audit as tool_audit
+from app.features.governance_tools import registry as tool_registry
+from app.features.governance_tools import schema_guard
+from app.features.policy.opa import (
+    OpaPolicyClient,
+    OpaPolicyDecision,
+    OpaPolicyUnavailableError,
+    opa_policy_enforced,
+    require_opa_decision,
+    unavailable_opa_policy_denial,
+)
 from app.schemas.evidence import EvidenceRetrieveCreate
-from app.services import governance_service, memory_service, project_service, retrieval_service
+from app.security.workflow_budget import (
+    WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    WorkflowSecurityBudget,
+)
+from app.services import (
+    evidence_service,
+    governance_service,
+    memory_service,
+    project_service,
+    retrieval_service,
+    security_policy_service,
+)
 
-ToolAccessMode = Literal["read", "write", "proposal"]
-ToolRiskLevel = Literal["low", "medium", "high"]
-ApprovalPolicy = Literal["never_required", "required_for_write", "always_required"]
 RequestedBy = Literal["agent", "user", "system"]
-VALID_REQUESTED_BY: set[str] = {"agent", "user", "system"}
-MAX_TOOL_STRING_LENGTH = 4000
-MAX_TOOL_ARRAY_LENGTH = 100
-
-
-@dataclass(frozen=True)
-class ToolDefinition:
-    """Static contract for one app-defined agent tool."""
-
-    name: str
-    title: str
-    description: str
-    input_schema: dict[str, Any]
-    output_schema: dict[str, Any]
-    access_mode: ToolAccessMode
-    risk_level: ToolRiskLevel
-    approval_policy: ApprovalPolicy
-    allowed_project_roles: list[str]
+ToolDefinition = tool_registry.ToolDefinition
+TOOL_REGISTRY = tool_registry.TOOL_REGISTRY
+PROJECT_READ_ROLES = tool_registry.PROJECT_READ_ROLES
+PROJECT_MUTATION_ROLES = tool_registry.PROJECT_MUTATION_ROLES
+list_tool_definitions = tool_registry.list_tool_definitions
+ToolGuardViolation = schema_guard.ToolGuardViolation
 
 
 @dataclass(frozen=True)
 class ToolExecutionResult:
     invocation: ToolInvocation
     output: dict[str, Any]
-
-
-class ToolGuardViolation(ValueError):
-    def __init__(self, reason: str, detail: str) -> None:
-        super().__init__(detail)
-        self.reason = reason
-        self.detail = detail
-
-
-PROJECT_READ_ROLES = ["owner", "admin", "editor", "viewer"]
-PROJECT_MUTATION_ROLES = ["owner", "admin", "editor"]
-
-
-TOOL_REGISTRY: dict[str, ToolDefinition] = {
-    "get_project_summary": ToolDefinition(
-        name="get_project_summary",
-        title="Get project summary",
-        description="Read the structured thesis, customer segments, and problem hypotheses.",
-        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
-        output_schema={"type": "object", "properties": {"project": {"type": "object"}}},
-        access_mode="read",
-        risk_level="low",
-        approval_policy="never_required",
-        allowed_project_roles=PROJECT_READ_ROLES,
-    ),
-    "search_project_evidence": ToolDefinition(
-        name="search_project_evidence",
-        title="Search project evidence",
-        description="Run scoped retrieval against project evidence chunks.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "minLength": 1, "maxLength": 500},
-                "mode": {"type": "string", "enum": ["semantic", "keyword", "hybrid"]},
-                "top_k": {"type": "integer", "minimum": 1, "maximum": 25},
-                "source_types": {"type": "array", "maxItems": 5},
-                "competitor_id": {"type": ["string", "null"], "format": "uuid"},
-                "assumption_id": {"type": ["string", "null"], "format": "uuid"},
-                "research_sprint_id": {"type": ["string", "null"], "format": "uuid"},
-                "created_after": {"type": ["string", "null"]},
-                "created_before": {"type": ["string", "null"]},
-                "freshness_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 3650},
-            },
-            "required": ["query"],
-            "additionalProperties": False,
-        },
-        output_schema={"type": "object", "properties": {"results": {"type": "array"}}},
-        access_mode="read",
-        risk_level="low",
-        approval_policy="never_required",
-        allowed_project_roles=PROJECT_READ_ROLES,
-    ),
-    "list_project_sources": ToolDefinition(
-        name="list_project_sources",
-        title="List project sources",
-        description="List evidence sources and research source candidates for the project.",
-        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
-        output_schema={"type": "object", "properties": {"sources": {"type": "array"}}},
-        access_mode="read",
-        risk_level="low",
-        approval_policy="never_required",
-        allowed_project_roles=PROJECT_READ_ROLES,
-    ),
-    "list_competitors": ToolDefinition(
-        name="list_competitors",
-        title="List competitors",
-        description="List approved competitors and research competitor candidates.",
-        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
-        output_schema={"type": "object", "properties": {"competitors": {"type": "array"}}},
-        access_mode="read",
-        risk_level="low",
-        approval_policy="never_required",
-        allowed_project_roles=PROJECT_READ_ROLES,
-    ),
-    "list_assumptions": ToolDefinition(
-        name="list_assumptions",
-        title="List assumptions",
-        description="List current assumptions and risks.",
-        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
-        output_schema={
-            "type": "object",
-            "properties": {"assumptions": {"type": "array"}, "risks": {"type": "array"}},
-        },
-        access_mode="read",
-        risk_level="low",
-        approval_policy="never_required",
-        allowed_project_roles=PROJECT_READ_ROLES,
-    ),
-    "list_validation_plans": ToolDefinition(
-        name="list_validation_plans",
-        title="List validation plans",
-        description="List project experiments and validation-plan artifacts.",
-        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
-        output_schema={
-            "type": "object",
-            "properties": {"experiments": {"type": "array"}, "artifacts": {"type": "array"}},
-        },
-        access_mode="read",
-        risk_level="low",
-        approval_policy="never_required",
-        allowed_project_roles=PROJECT_READ_ROLES,
-    ),
-    "list_decisions": ToolDefinition(
-        name="list_decisions",
-        title="List decisions",
-        description="List recorded project decisions.",
-        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
-        output_schema={"type": "object", "properties": {"decisions": {"type": "array"}}},
-        access_mode="read",
-        risk_level="low",
-        approval_policy="never_required",
-        allowed_project_roles=PROJECT_READ_ROLES,
-    ),
-    "get_research_memo": ToolDefinition(
-        name="get_research_memo",
-        title="Get research memo",
-        description="Read the latest research memo or the memo for a research sprint.",
-        input_schema={
-            "type": "object",
-            "properties": {"research_sprint_id": {"type": "string", "format": "uuid"}},
-            "additionalProperties": False,
-        },
-        output_schema={"type": "object", "properties": {"memo": {"type": ["object", "null"]}}},
-        access_mode="read",
-        risk_level="low",
-        approval_policy="never_required",
-        allowed_project_roles=PROJECT_READ_ROLES,
-    ),
-    "list_project_memory": ToolDefinition(
-        name="list_project_memory",
-        title="List project memory",
-        description="List typed project memory items selected for a workflow or memory type.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "memory_type": {
-                    "type": ["string", "null"],
-                    "enum": [
-                        "working",
-                        "episodic",
-                        "semantic",
-                        "project",
-                        "procedural",
-                        "preference",
-                        None,
-                    ],
-                },
-                "workflow_type": {"type": ["string", "null"], "maxLength": 120},
-                "include_stale": {"type": "boolean"},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
-            },
-            "additionalProperties": False,
-        },
-        output_schema={"type": "object", "properties": {"memory_items": {"type": "array"}}},
-        access_mode="read",
-        risk_level="low",
-        approval_policy="never_required",
-        allowed_project_roles=PROJECT_READ_ROLES,
-    ),
-    "propose_research_plan": ToolDefinition(
-        name="propose_research_plan",
-        title="Propose research plan",
-        description="Create an auditable proposed research plan before user approval.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "summary": {"type": "string", "minLength": 1, "maxLength": 1000},
-                "objective": {"type": "string", "minLength": 1, "maxLength": 2000},
-            },
-            "required": ["summary", "objective"],
-            "additionalProperties": True,
-        },
-        output_schema={"type": "object", "properties": {"proposal": {"type": "object"}}},
-        access_mode="proposal",
-        risk_level="medium",
-        approval_policy="always_required",
-        allowed_project_roles=PROJECT_MUTATION_ROLES,
-    ),
-    "propose_memory_update": ToolDefinition(
-        name="propose_memory_update",
-        title="Propose memory update",
-        description="Propose assumption, risk, and recommendation updates without mutating state.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "summary": {"type": "string", "minLength": 1, "maxLength": 1000},
-                "research_sprint_id": {"type": "string", "format": "uuid"},
-            },
-            "required": ["summary"],
-            "additionalProperties": True,
-        },
-        output_schema={"type": "object", "properties": {"proposal": {"type": "object"}}},
-        access_mode="proposal",
-        risk_level="medium",
-        approval_policy="always_required",
-        allowed_project_roles=PROJECT_MUTATION_ROLES,
-    ),
-    "propose_validation_plan": ToolDefinition(
-        name="propose_validation_plan",
-        title="Propose validation plan",
-        description="Propose validation actions or experiments for human review.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "summary": {"type": "string", "minLength": 1, "maxLength": 1000},
-                "actions": {"type": "array", "maxItems": 20},
-                "research_sprint_id": {"type": "string", "format": "uuid"},
-            },
-            "required": ["summary"],
-            "additionalProperties": True,
-        },
-        output_schema={"type": "object", "properties": {"proposal": {"type": "object"}}},
-        access_mode="proposal",
-        risk_level="medium",
-        approval_policy="always_required",
-        allowed_project_roles=PROJECT_MUTATION_ROLES,
-    ),
-    "propose_decision": ToolDefinition(
-        name="propose_decision",
-        title="Propose decision",
-        description="Propose a decision record without writing it to the decision ledger.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "summary": {"type": "string", "minLength": 1, "maxLength": 1000},
-                "decision": {"type": "object"},
-                "research_sprint_id": {"type": "string", "format": "uuid"},
-            },
-            "required": ["summary"],
-            "additionalProperties": True,
-        },
-        output_schema={"type": "object", "properties": {"proposal": {"type": "object"}}},
-        access_mode="proposal",
-        risk_level="high",
-        approval_policy="always_required",
-        allowed_project_roles=PROJECT_MUTATION_ROLES,
-    ),
-}
-
-
-def list_tool_definitions() -> list[ToolDefinition]:
-    """Return the stable tool registry exposed to UI, agents, and MCP clients."""
-    return list(TOOL_REGISTRY.values())
 
 
 def list_tool_invocations(
@@ -330,11 +101,20 @@ def execute_tool(
     *,
     research_sprint_id: uuid.UUID | None = None,
     requested_by: RequestedBy = "agent",
+    remote_mcp_server_id: uuid.UUID | None = None,
 ) -> ToolExecutionResult:
     """Execute a read/write tool after schema, role, scope, and output guards."""
     definition = _definition(tool_name)
-    project_service.get_project(db, auth, project_id)
+    project = project_service.get_project(db, auth, project_id)
     _authorize_tool_invocation(db, auth, project_id, definition)
+    _enforce_agent_write_kill_switch(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        definition=definition,
+        requested_by=requested_by,
+    )
     try:
         guarded_input = _guard_tool_input(
             definition,
@@ -342,15 +122,136 @@ def execute_tool(
             research_sprint_id=research_sprint_id,
             requested_by=requested_by,
         )
+        _guard_tool_manifest_input(definition, guarded_input)
     except ToolGuardViolation as exc:
         _audit_tool_denial(db, auth, project_id, definition, exc.reason, detail=exc.detail)
         db.commit()
         raise HTTPException(status_code=422, detail=exc.detail) from exc
+    _enforce_workflow_tool_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
+    guarded_input, retrieved_chunk_limit = _cap_workflow_retrieval_input(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        definition=definition,
+        tool_input=guarded_input,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
     clean_input = redact_payload(guarded_input, redact_emails=True)
+    _enforce_workflow_memory_proposal_budget(
+        db,
+        auth,
+        settings=settings,
+        project_id=project_id,
+        definition=definition,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
+    _enforce_rejected_memory_proposal_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        definition=definition,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
+    policy_decision = _authorize_opa_tool_invocation(
+        db,
+        auth,
+        settings,
+        project,
+        definition,
+        requested_by=requested_by,
+        research_sprint_id=research_sprint_id,
+        allow_required_approval=(
+            remote_mcp_server_id is not None and definition.access_mode == "write"
+        ),
+    )
+    _enforce_repeated_retrieval_query_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        definition=definition,
+        input_json=clean_input,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
+    _enforce_no_progress_retrieval_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        definition=definition,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
+    _enforce_repeated_tool_invocation_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        definition=definition,
+        input_json=clean_input,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
+    _enforce_alternating_tool_cycle_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        definition=definition,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
+    if remote_mcp_server_id is not None:
+        from app.services import mcp_registry_service
+
+        if definition.access_mode == "write":
+            mcp_registry_service.prepare_remote_write_request(
+                db,
+                auth,
+                settings,
+                project_id=project_id,
+                registration_id=remote_mcp_server_id,
+                tool_name=definition.name,
+            )
+        else:
+            mcp_registry_service.prepare_tool_invocation(
+                db,
+                auth,
+                settings,
+                project_id=project_id,
+                registration_id=remote_mcp_server_id,
+                tool_name=definition.name,
+            )
+    if remote_mcp_server_id is not None and definition.access_mode == "write":
+        return _request_remote_write(
+            db,
+            auth,
+            project_id,
+            definition,
+            clean_input,
+            research_sprint_id=research_sprint_id,
+            requested_by=requested_by,
+            remote_mcp_server_id=remote_mcp_server_id,
+            policy_decision=policy_decision,
+        )
     invocation = ToolInvocation(
         workspace_id=auth.workspace_id,
         project_id=project_id,
         research_sprint_id=research_sprint_id,
+        remote_mcp_server_id=remote_mcp_server_id,
         tool_name=definition.name,
         access_mode=definition.access_mode,
         risk_level=definition.risk_level,
@@ -364,18 +265,18 @@ def execute_tool(
     governance_service.record_audit_event(
         db,
         auth,
-        event_type="tool_invocation_requested",
+        event_type=_tool_request_event_type(definition, requested_by),
         actor_type=requested_by,
         project_id=project_id,
         entity_type="tool_invocation",
         entity_id=invocation.id,
         risk_level=definition.risk_level,
         summary=f"{definition.title} requested.",
-        metadata={
-            "tool_name": definition.name,
-            "access_mode": definition.access_mode,
-            "approval_policy": definition.approval_policy,
-        },
+        metadata=_tool_invocation_requested_metadata(
+            definition,
+            include_approval_policy=True,
+            policy_decision=_opa_decision_metadata(policy_decision),
+        ),
     )
     try:
         output = _run_tool(
@@ -386,6 +287,8 @@ def execute_tool(
             definition,
             guarded_input,
             research_sprint_id,
+            invocation_id=invocation.id,
+            remote_mcp_server_id=remote_mcp_server_id,
         )
     except Exception as exc:
         invocation.status = "failed"
@@ -393,8 +296,10 @@ def execute_tool(
         invocation.executed_at = datetime.now(UTC)
         db.commit()
         raise
+    output = _limit_retrieved_chunk_output(definition, output, retrieved_chunk_limit)
     try:
         _guard_tool_output(definition, output)
+        _guard_tool_manifest_output(definition, output)
     except ToolGuardViolation as exc:
         invocation.status = "failed"
         invocation.output_summary = "Tool output failed guard validation."
@@ -406,7 +311,10 @@ def execute_tool(
             detail=exc.detail,
         ) from exc
     invocation.output_json = redact_payload(output, redact_emails=True)
-    invocation.output_summary = _summarize_output(definition.name, output)
+    invocation.output_summary = redact_text(
+        _summarize_output(definition.name, output),
+        redact_emails=True,
+    )
     if definition.access_mode != "proposal":
         invocation.status = "executed"
         invocation.executed_at = datetime.now(UTC)
@@ -420,7 +328,7 @@ def execute_tool(
             entity_id=invocation.id,
             risk_level=definition.risk_level,
             summary=f"{definition.title} executed.",
-            metadata={"tool_name": definition.name, "access_mode": definition.access_mode},
+            metadata=_tool_invocation_executed_metadata(definition),
         )
     else:
         _create_tool_approval_request(
@@ -437,6 +345,74 @@ def execute_tool(
     return ToolExecutionResult(invocation=invocation, output=output)
 
 
+def _request_remote_write(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    clean_input: dict[str, Any],
+    *,
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+    remote_mcp_server_id: uuid.UUID,
+    policy_decision: OpaPolicyDecision | None,
+) -> ToolExecutionResult:
+    preview = {
+        "summary": f"{definition.title} will run against the reviewed remote MCP server.",
+        "max_affected_records": definition.max_affected_records,
+        "reversible": definition.reversible,
+    }
+    invocation = ToolInvocation(
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+        remote_mcp_server_id=remote_mcp_server_id,
+        idempotency_key=uuid.uuid4().hex,
+        tool_name=definition.name,
+        access_mode=definition.access_mode,
+        risk_level=definition.risk_level,
+        input_json=clean_input,
+        output_json={"preview": preview},
+        output_summary=preview["summary"],
+        status="requested",
+        requested_by=requested_by,
+    )
+    db.add(invocation)
+    db.flush()
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type=_tool_request_event_type(definition, requested_by),
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="tool_invocation",
+        entity_id=invocation.id,
+        risk_level=definition.risk_level,
+        summary=f"{definition.title} requested.",
+        metadata=_tool_invocation_requested_metadata(
+            definition,
+            include_approval_policy=True,
+            policy_decision=_opa_decision_metadata(policy_decision),
+        ),
+    )
+    _create_tool_approval_request(
+        db,
+        auth,
+        project_id,
+        definition,
+        invocation,
+        requested_by=requested_by,
+        proposal={
+            "preview": preview,
+            "arguments": clean_input,
+            "remote_mcp_server_id": str(remote_mcp_server_id),
+        },
+    )
+    db.commit()
+    db.refresh(invocation)
+    return ToolExecutionResult(invocation=invocation, output={"preview": preview})
+
+
 def create_proposal(
     db: Session,
     auth: AuthContext,
@@ -447,13 +423,23 @@ def create_proposal(
     research_sprint_id: uuid.UUID | None = None,
     requested_by: RequestedBy = "agent",
     input_json: dict[str, Any] | None = None,
+    settings: Settings | None = None,
 ) -> ToolInvocation:
     """Create an approval-gated proposal tool invocation without mutating state."""
     definition = _definition(tool_name)
     if definition.access_mode != "proposal":
         raise ValueError(f"{tool_name} is not a proposal tool.")
-    project_service.get_project(db, auth, project_id)
+    project = project_service.get_project(db, auth, project_id)
     _authorize_tool_invocation(db, auth, project_id, definition)
+    effective_settings = settings or get_settings()
+    _enforce_agent_write_kill_switch(
+        db,
+        auth,
+        effective_settings,
+        project_id=project_id,
+        definition=definition,
+        requested_by=requested_by,
+    )
     try:
         guarded_proposal = _guard_proposal_payload(
             definition,
@@ -461,11 +447,69 @@ def create_proposal(
             research_sprint_id=research_sprint_id,
             requested_by=requested_by,
         )
+        _guard_tool_manifest_input(definition, guarded_proposal)
         guarded_input = _guard_tool_metadata(input_json or {})
     except ToolGuardViolation as exc:
         _audit_tool_denial(db, auth, project_id, definition, exc.reason, detail=exc.detail)
         db.commit()
         raise HTTPException(status_code=422, detail=exc.detail) from exc
+    _enforce_workflow_tool_budget(
+        db,
+        auth,
+        effective_settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
+    _enforce_workflow_memory_proposal_budget(
+        db,
+        auth,
+        settings=effective_settings,
+        project_id=project_id,
+        definition=definition,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
+    _enforce_rejected_memory_proposal_limit(
+        db,
+        auth,
+        effective_settings,
+        project_id=project_id,
+        definition=definition,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
+    policy_decision = _authorize_opa_tool_invocation(
+        db,
+        auth,
+        effective_settings,
+        project,
+        definition,
+        requested_by=requested_by,
+        research_sprint_id=research_sprint_id,
+    )
+    clean_input = redact_payload(guarded_input, redact_emails=True)
+    clean_proposal = redact_payload(guarded_proposal, redact_emails=True)
+    _enforce_repeated_tool_invocation_limit(
+        db,
+        auth,
+        effective_settings,
+        project_id=project_id,
+        definition=definition,
+        input_json=clean_input,
+        proposal=clean_proposal,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
+    _enforce_alternating_tool_cycle_limit(
+        db,
+        auth,
+        effective_settings,
+        project_id=project_id,
+        definition=definition,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
     invocation = ToolInvocation(
         workspace_id=auth.workspace_id,
         project_id=project_id,
@@ -473,9 +517,12 @@ def create_proposal(
         tool_name=definition.name,
         access_mode=definition.access_mode,
         risk_level=definition.risk_level,
-        input_json=redact_payload(guarded_input, redact_emails=True),
-        output_json=redact_payload({"proposal": guarded_proposal}, redact_emails=True),
-        output_summary=_summarize_output(definition.name, {"proposal": guarded_proposal}),
+        input_json=clean_input,
+        output_json={"proposal": clean_proposal},
+        output_summary=redact_text(
+            _summarize_output(definition.name, {"proposal": guarded_proposal}),
+            redact_emails=True,
+        ),
         status="requested",
         requested_by=requested_by,
     )
@@ -484,14 +531,18 @@ def create_proposal(
     governance_service.record_audit_event(
         db,
         auth,
-        event_type="tool_invocation_requested",
+        event_type=_tool_request_event_type(definition, requested_by),
         actor_type=requested_by,
         project_id=project_id,
         entity_type="tool_invocation",
         entity_id=invocation.id,
         risk_level=definition.risk_level,
         summary=f"{definition.title} requested.",
-        metadata={"tool_name": definition.name, "access_mode": definition.access_mode},
+        metadata=_tool_invocation_requested_metadata(
+            definition,
+            include_approval_policy=False,
+            policy_decision=_opa_decision_metadata(policy_decision),
+        ),
     )
     _create_tool_approval_request(
         db,
@@ -510,6 +561,7 @@ def create_proposal(
 def approve_tool_invocation(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
     invocation_id: uuid.UUID,
 ) -> ToolInvocation:
@@ -529,6 +581,13 @@ def approve_tool_invocation(
         require_permission(auth, "approve_high_risk_tools")
     else:
         require_permission(auth, "approve_memory_updates")
+    if invocation.idempotency_key is not None and invocation.access_mode == "write":
+        if invocation.remote_mcp_server_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The remote MCP write target is no longer available.",
+            )
+        return _approve_and_execute_remote_write(db, auth, settings, invocation)
     invocation.status = "approved"
     invocation.approved_by_user_id = auth.user_id
     invocation.executed_at = invocation.executed_at or datetime.now(UTC)
@@ -550,7 +609,129 @@ def approve_tool_invocation(
         entity_id=invocation.id,
         risk_level=invocation.risk_level,
         summary=f"Approved tool proposal {invocation.tool_name}.",
-        metadata={"tool_name": invocation.tool_name, "status": "approved"},
+        metadata=_tool_invocation_status_metadata(invocation.tool_name, "approved"),
+    )
+    db.commit()
+    db.refresh(invocation)
+    return invocation
+
+
+def _approve_and_execute_remote_write(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    invocation: ToolInvocation,
+) -> ToolInvocation:
+    if invocation.status != "requested" or invocation.idempotency_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only pending remote write requests can be approved.",
+        )
+    definition = _definition(invocation.tool_name)
+    project = project_service.get_project(db, auth, invocation.project_id)
+    _enforce_agent_write_kill_switch(
+        db,
+        auth,
+        settings,
+        project_id=invocation.project_id,
+        definition=definition,
+        requested_by=invocation.requested_by,
+    )
+    _authorize_opa_tool_invocation(
+        db,
+        auth,
+        settings,
+        project,
+        definition,
+        requested_by=invocation.requested_by,
+        research_sprint_id=invocation.research_sprint_id,
+        allow_required_approval=True,
+    )
+    from app.services import mcp_registry_service
+
+    mcp_registry_service.prepare_remote_write_request(
+        db,
+        auth,
+        settings,
+        project_id=invocation.project_id,
+        registration_id=invocation.remote_mcp_server_id,
+        tool_name=invocation.tool_name,
+    )
+    invocation.status = "approved"
+    invocation.approved_by_user_id = auth.user_id
+    governance_service.resolve_pending_approvals_for_entity(
+        db,
+        auth,
+        project_id=invocation.project_id,
+        entity_type="tool_invocation",
+        entity_id=invocation.id,
+        status_value="approved",
+    )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="tool_invocation_approved",
+        actor_type="user",
+        project_id=invocation.project_id,
+        entity_type="tool_invocation",
+        entity_id=invocation.id,
+        risk_level=invocation.risk_level,
+        summary=f"Approved remote write {invocation.tool_name} for execution.",
+        metadata=_tool_invocation_status_metadata(invocation.tool_name, "approved"),
+    )
+    db.commit()
+
+    try:
+        output = mcp_registry_service.invoke_approved_write_tool(
+            db,
+            auth,
+            settings,
+            project_id=invocation.project_id,
+            invocation_id=invocation.id,
+            registration_id=invocation.remote_mcp_server_id,
+            tool_name=invocation.tool_name,
+            arguments=invocation.input_json,
+            idempotency_key=invocation.idempotency_key,
+        )
+        _guard_tool_output(definition, output)
+        _guard_tool_manifest_output(definition, output)
+    except Exception:
+        invocation.status = "failed"
+        invocation.output_summary = "Approved remote write did not complete."
+        invocation.executed_at = datetime.now(UTC)
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="tool_invocation_failed",
+            actor_type="user",
+            project_id=invocation.project_id,
+            entity_type="tool_invocation",
+            entity_id=invocation.id,
+            risk_level=invocation.risk_level,
+            summary=f"Approved remote write {invocation.tool_name} failed.",
+            metadata=_tool_invocation_status_metadata(invocation.tool_name, "failed"),
+        )
+        db.commit()
+        raise
+
+    invocation.status = "executed"
+    invocation.output_json = redact_payload(output, redact_emails=True)
+    invocation.output_summary = redact_text(
+        _summarize_output(definition.name, output),
+        redact_emails=True,
+    )
+    invocation.executed_at = datetime.now(UTC)
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="tool_invocation_executed",
+        actor_type="user",
+        project_id=invocation.project_id,
+        entity_type="tool_invocation",
+        entity_id=invocation.id,
+        risk_level=invocation.risk_level,
+        summary=f"Executed approved remote write {invocation.tool_name}.",
+        metadata=_tool_invocation_executed_metadata(definition),
     )
     db.commit()
     db.refresh(invocation)
@@ -599,11 +780,604 @@ def reject_tool_invocation(
         entity_id=invocation.id,
         risk_level=invocation.risk_level,
         summary=f"Rejected tool proposal {invocation.tool_name}.",
-        metadata={"tool_name": invocation.tool_name, "status": "rejected"},
+        metadata=_tool_invocation_status_metadata(invocation.tool_name, "rejected"),
     )
     db.commit()
     db.refresh(invocation)
     return invocation
+
+
+def _enforce_workflow_tool_budget(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+) -> None:
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    if budget_context is None:
+        return
+    sprint, budget = budget_context
+    observed_tool_calls = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ToolInvocation)
+            .where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.research_sprint_id == research_sprint_id,
+            )
+        )
+        or 0
+    )
+    if observed_tool_calls < budget.max_tool_calls:
+        return
+
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_tool_budget_exceeded",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=research_sprint_id,
+        risk_level="high",
+        summary="Workflow tool-call budget was exhausted before tool execution.",
+        metadata={
+            "max_tool_calls": budget.max_tool_calls,
+            "observed_tool_calls": observed_tool_calls,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
+
+
+def _workflow_security_budget(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    research_sprint_id: uuid.UUID | None,
+) -> tuple[ResearchSprint, WorkflowSecurityBudget] | None:
+    if research_sprint_id is None:
+        return None
+    sprint = db.scalar(
+        select(ResearchSprint)
+        .where(
+            ResearchSprint.id == research_sprint_id,
+            ResearchSprint.workspace_id == auth.workspace_id,
+            ResearchSprint.project_id == project_id,
+        )
+        .with_for_update()
+    )
+    if sprint is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Research sprint not found.",
+        )
+    if not sprint.workflow_security_budget:
+        sprint.workflow_security_budget = WorkflowSecurityBudget.from_settings(
+            settings
+        ).as_payload()
+        db.flush()
+    return sprint, WorkflowSecurityBudget.from_payload(sprint.workflow_security_budget)
+
+
+def _enforce_repeated_tool_invocation_limit(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    input_json: dict[str, Any],
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+    proposal: dict[str, Any] | None = None,
+) -> None:
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    if budget_context is None:
+        return
+    sprint, budget = budget_context
+    candidate_digest = _tool_invocation_input_digest(input_json, proposal=proposal)
+    existing_invocations = db.execute(
+        select(ToolInvocation.input_json, ToolInvocation.output_json).where(
+            ToolInvocation.workspace_id == auth.workspace_id,
+            ToolInvocation.project_id == project_id,
+            ToolInvocation.research_sprint_id == research_sprint_id,
+            ToolInvocation.tool_name == definition.name,
+        )
+    )
+    observed_identical_invocations = sum(
+        _tool_invocation_input_digest(
+            stored_input,
+            proposal=_stored_tool_proposal(stored_output) if proposal is not None else None,
+        )
+        == candidate_digest
+        for stored_input, stored_output in existing_invocations
+    )
+    if observed_identical_invocations < budget.max_identical_tool_invocations:
+        return
+
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_repeated_tool_invocation_detected",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=research_sprint_id,
+        risk_level="high",
+        summary="Workflow stopped before repeating an identical tool invocation.",
+        metadata={
+            "tool_name": definition.name,
+            "input_sha256": candidate_digest,
+            "max_identical_tool_invocations": budget.max_identical_tool_invocations,
+            "observed_identical_invocations": observed_identical_invocations,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
+
+
+def _tool_invocation_input_digest(
+    input_json: dict[str, Any],
+    *,
+    proposal: dict[str, Any] | None = None,
+) -> str:
+    payload: dict[str, Any] = {"input": input_json}
+    if proposal is not None:
+        payload["proposal"] = proposal
+    canonical_payload = json.dumps(
+        payload,
+        default=str,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
+
+
+def _enforce_alternating_tool_cycle_limit(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+) -> None:
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    if budget_context is None:
+        return
+    sprint, budget = budget_context
+    observed_alternating_cycles = budget.max_alternating_tool_cycles + 1
+    required_invocations = observed_alternating_cycles * 2
+    recent_tool_names = list(
+        db.scalars(
+            select(ToolInvocation.tool_name)
+            .where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.research_sprint_id == research_sprint_id,
+            )
+            .order_by(ToolInvocation.created_at.desc(), ToolInvocation.id.desc())
+            .limit(required_invocations - 1)
+        )
+    )
+    sequence = [*reversed(recent_tool_names), definition.name]
+    if len(sequence) < required_invocations:
+        return
+    cycle = sequence[-required_invocations:]
+    alternating_pair = cycle[:2]
+    if alternating_pair[0] == alternating_pair[1] or cycle != (
+        alternating_pair * observed_alternating_cycles
+    ):
+        return
+
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_alternating_tool_cycle_detected",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=research_sprint_id,
+        risk_level="high",
+        summary="Workflow stopped before repeating an alternating tool cycle.",
+        metadata={
+            "tool_cycle": alternating_pair,
+            "max_alternating_tool_cycles": budget.max_alternating_tool_cycles,
+            "observed_alternating_cycles": observed_alternating_cycles,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
+
+
+def _stored_tool_proposal(output_json: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(output_json, dict):
+        return None
+    proposal = output_json.get("proposal")
+    return proposal if isinstance(proposal, dict) else None
+
+
+def _enforce_workflow_memory_proposal_budget(
+    db: Session,
+    auth: AuthContext,
+    *,
+    settings: Settings,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+) -> None:
+    if definition.name != "propose_memory_update":
+        return
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    if budget_context is None:
+        return
+    sprint, budget = budget_context
+    observed_memory_proposals = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ToolInvocation)
+            .where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.research_sprint_id == research_sprint_id,
+                ToolInvocation.tool_name == definition.name,
+            )
+        )
+        or 0
+    )
+    if observed_memory_proposals < budget.max_memory_proposals:
+        return
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_memory_proposal_budget_exceeded",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=research_sprint_id,
+        risk_level="high",
+        summary="Workflow memory-proposal budget was exhausted before proposal creation.",
+        metadata={
+            "max_memory_proposals": budget.max_memory_proposals,
+            "observed_memory_proposals": observed_memory_proposals,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
+
+
+def _enforce_rejected_memory_proposal_limit(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+) -> None:
+    if definition.name != "propose_memory_update":
+        return
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    if budget_context is None:
+        return
+    sprint, budget = budget_context
+    observed_rejections = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ToolInvocation)
+            .where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.research_sprint_id == research_sprint_id,
+                ToolInvocation.tool_name == definition.name,
+                ToolInvocation.status == "rejected",
+            )
+        )
+        or 0
+    )
+    if observed_rejections < budget.max_rejected_memory_proposals:
+        return
+
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_repeated_memory_proposal_rejection_detected",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=research_sprint_id,
+        risk_level="high",
+        summary="Workflow stopped before repeating a rejected memory proposal.",
+        metadata={
+            "max_rejected_memory_proposals": budget.max_rejected_memory_proposals,
+            "observed_rejections": observed_rejections,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
+
+
+def _cap_workflow_retrieval_input(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    tool_input: dict[str, Any],
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+) -> tuple[dict[str, Any], int | None]:
+    if definition.name != "search_project_evidence" or research_sprint_id is None:
+        return tool_input, None
+
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    assert budget_context is not None
+    sprint, budget = budget_context
+    observed_retrieved_chunks = sum(
+        _retrieved_chunk_count(output)
+        for output in db.scalars(
+            select(ToolInvocation.output_json).where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.research_sprint_id == research_sprint_id,
+                ToolInvocation.tool_name == definition.name,
+            )
+        )
+    )
+    if observed_retrieved_chunks >= budget.max_retrieved_chunks:
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="workflow_retrieved_chunk_budget_exceeded",
+            actor_type=requested_by,
+            project_id=project_id,
+            entity_type="research_sprint",
+            entity_id=research_sprint_id,
+            risk_level="high",
+            summary="Workflow retrieved-chunk budget was exhausted before retrieval.",
+            metadata={
+                "max_retrieved_chunks": budget.max_retrieved_chunks,
+                "observed_retrieved_chunks": observed_retrieved_chunks,
+                "temporal_workflow_id": sprint.temporal_workflow_id,
+            },
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+        )
+    remaining_chunks = budget.max_retrieved_chunks - observed_retrieved_chunks
+    requested_top_k = int(tool_input.get("top_k", 8))
+    return {**tool_input, "top_k": min(requested_top_k, remaining_chunks)}, remaining_chunks
+
+
+def _enforce_repeated_retrieval_query_limit(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    input_json: dict[str, Any],
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+) -> None:
+    if definition.name != "search_project_evidence" or research_sprint_id is None:
+        return
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    assert budget_context is not None
+    sprint, budget = budget_context
+    query_digest = _retrieval_query_digest(input_json)
+    observed_repeated_queries = sum(
+        _retrieval_query_digest(stored_input) == query_digest
+        for stored_input in db.scalars(
+            select(ToolInvocation.input_json).where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.research_sprint_id == research_sprint_id,
+                ToolInvocation.tool_name == definition.name,
+            )
+        )
+    )
+    if observed_repeated_queries < budget.max_repeated_retrieval_queries:
+        return
+
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_repeated_retrieval_query_detected",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=research_sprint_id,
+        risk_level="high",
+        summary="Workflow stopped before repeating an equivalent retrieval query.",
+        metadata={
+            "query_sha256": query_digest,
+            "max_repeated_retrieval_queries": budget.max_repeated_retrieval_queries,
+            "observed_repeated_queries": observed_repeated_queries,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
+
+
+def _retrieval_query_digest(input_json: dict[str, Any]) -> str:
+    payload = EvidenceRetrieveCreate.model_validate(input_json).model_dump(mode="json")
+    payload.pop("top_k", None)
+    payload["query"] = " ".join(payload["query"].casefold().split())
+    source_types = payload.get("source_types")
+    if isinstance(source_types, list):
+        payload["source_types"] = sorted(source_types)
+    canonical_payload = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
+
+
+def _enforce_no_progress_retrieval_limit(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+) -> None:
+    if definition.name != "search_project_evidence" or research_sprint_id is None:
+        return
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    assert budget_context is not None
+    sprint, budget = budget_context
+    recent_outputs = db.scalars(
+        select(ToolInvocation.output_json)
+        .where(
+            ToolInvocation.workspace_id == auth.workspace_id,
+            ToolInvocation.project_id == project_id,
+            ToolInvocation.research_sprint_id == research_sprint_id,
+            ToolInvocation.tool_name == definition.name,
+        )
+        .order_by(ToolInvocation.created_at.desc(), ToolInvocation.id.desc())
+        .limit(budget.max_consecutive_empty_retrievals)
+    )
+    observed_empty_retrievals = 0
+    for output in recent_outputs:
+        if _retrieved_chunk_count(output) > 0:
+            break
+        observed_empty_retrievals += 1
+    if observed_empty_retrievals < budget.max_consecutive_empty_retrievals:
+        return
+
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_no_progress_detected",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=research_sprint_id,
+        risk_level="high",
+        summary="Workflow stopped after consecutive retrievals produced no evidence.",
+        metadata={
+            "progress_signal": "retrieval_results",
+            "max_consecutive_empty_retrievals": budget.max_consecutive_empty_retrievals,
+            "observed_empty_retrievals": observed_empty_retrievals,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
+
+
+def _limit_retrieved_chunk_output(
+    definition: ToolDefinition,
+    output: dict[str, Any],
+    maximum_chunks: int | None,
+) -> dict[str, Any]:
+    if maximum_chunks is None or definition.name != "search_project_evidence":
+        return output
+    results = output.get("results")
+    if not isinstance(results, list):
+        return output
+    return {**output, "results": results[:maximum_chunks]}
+
+
+def _retrieved_chunk_count(output: dict[str, Any] | None) -> int:
+    if not isinstance(output, dict):
+        return 0
+    results = output.get("results")
+    return len(results) if isinstance(results, list) else 0
 
 
 def approve_pending_proposals_for_sprint(
@@ -685,7 +1459,23 @@ def _run_tool(
     definition: ToolDefinition,
     tool_input: dict[str, Any],
     research_sprint_id: uuid.UUID | None,
+    *,
+    invocation_id: uuid.UUID,
+    remote_mcp_server_id: uuid.UUID | None,
 ) -> dict[str, Any]:
+    if remote_mcp_server_id is not None:
+        from app.services import mcp_registry_service
+
+        return mcp_registry_service.invoke_tool(
+            db,
+            auth,
+            settings,
+            project_id=project_id,
+            invocation_id=invocation_id,
+            registration_id=remote_mcp_server_id,
+            tool_name=definition.name,
+            arguments=tool_input,
+        )
     if definition.name == "get_project_summary":
         return _get_project_summary(db, auth, project_id)
     if definition.name == "search_project_evidence":
@@ -702,7 +1492,7 @@ def _run_tool(
             "diagnostics": search.diagnostics.model_dump(mode="json"),
         }
     if definition.name == "list_project_sources":
-        return _list_project_sources(db, auth, project_id, research_sprint_id)
+        return _list_project_sources(db, auth, settings, project_id, research_sprint_id)
     if definition.name == "list_competitors":
         return _list_competitors(db, auth, project_id, research_sprint_id)
     if definition.name == "list_assumptions":
@@ -739,6 +1529,7 @@ def _get_project_summary(db: Session, auth: AuthContext, project_id: uuid.UUID) 
 def _list_project_sources(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
     research_sprint_id: uuid.UUID | None,
 ) -> dict[str, Any]:
@@ -749,6 +1540,7 @@ def _list_project_sources(
                 EvidenceSource.workspace_id == auth.workspace_id,
                 EvidenceSource.project_id == project_id,
             )
+            .options(selectinload(EvidenceSource.chunks))
             .order_by(EvidenceSource.created_at.desc())
             .limit(20)
         )
@@ -786,7 +1578,11 @@ def _list_project_sources(
                 "source_type": source.source_type,
                 "classification": source.classification,
                 "ingestion_status": source.ingestion_status,
-                "summary": source.summary,
+                "summary": (
+                    source.summary
+                    if evidence_service.source_content_is_eligible(auth, settings, source)
+                    else None
+                ),
             }
             for source in evidence_sources
         ],
@@ -1038,220 +1834,23 @@ def _list_project_memory(
     return {"memory_items": [memory_service.serialize_memory_item(item) for item in items]}
 
 
-def _guard_tool_input(
-    definition: ToolDefinition,
-    tool_input: dict[str, Any],
-    *,
-    research_sprint_id: uuid.UUID | None,
-    requested_by: RequestedBy,
-) -> dict[str, Any]:
-    """Validate model/client input before any tool logic sees it."""
-    _guard_requested_by(requested_by)
-    guarded = _validate_schema_payload(
-        definition.input_schema,
-        tool_input,
-        label=f"{definition.name} input",
-    )
-    _guard_research_sprint_scope(definition, guarded, research_sprint_id)
-    return guarded
+_guard_tool_input = schema_guard.guard_tool_input
+_guard_proposal_payload = schema_guard.guard_proposal_payload
+_guard_tool_metadata = schema_guard.guard_tool_metadata
+_guard_tool_output = schema_guard.guard_tool_output
+_guard_tool_manifest_input = schema_guard.guard_tool_manifest_input
+_guard_tool_manifest_output = schema_guard.guard_tool_manifest_output
+_guard_requested_by = schema_guard.guard_requested_by
+_guard_research_sprint_scope = schema_guard.guard_research_sprint_scope
+_validate_schema_payload = schema_guard.validate_schema_payload
+_validate_schema_value = schema_guard.validate_schema_value
+_validate_object_schema = schema_guard.validate_object_schema
+_validate_array_schema = schema_guard.validate_array_schema
+_validate_string_schema = schema_guard.validate_string_schema
+_validate_json_value = schema_guard.validate_json_value
 
 
-def _guard_proposal_payload(
-    definition: ToolDefinition,
-    proposal: dict[str, Any],
-    *,
-    research_sprint_id: uuid.UUID | None,
-    requested_by: RequestedBy,
-) -> dict[str, Any]:
-    _guard_requested_by(requested_by)
-    guarded = _validate_schema_payload(
-        definition.input_schema,
-        proposal,
-        label=f"{definition.name} proposal",
-    )
-    _guard_research_sprint_scope(definition, guarded, research_sprint_id)
-    if research_sprint_id is not None and "research_sprint_id" not in guarded:
-        raise ToolGuardViolation(
-            "scope_guard_failed",
-            f"{definition.name} proposal must include the scoped research_sprint_id.",
-        )
-    return guarded
-
-
-def _guard_tool_metadata(value: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ToolGuardViolation("input_guard_failed", "Tool metadata must be a JSON object.")
-    _validate_json_value(value, "tool metadata")
-    return value
-
-
-def _guard_tool_output(definition: ToolDefinition, output: dict[str, Any]) -> None:
-    _validate_schema_payload(
-        definition.output_schema,
-        output,
-        label=f"{definition.name} output",
-    )
-
-
-def _guard_requested_by(requested_by: str) -> None:
-    if requested_by not in VALID_REQUESTED_BY:
-        raise ToolGuardViolation(
-            "requested_by_guard_failed",
-            "Tool requested_by must be agent, user, or system.",
-        )
-
-
-def _guard_research_sprint_scope(
-    definition: ToolDefinition,
-    payload: dict[str, Any],
-    research_sprint_id: uuid.UUID | None,
-) -> None:
-    raw_sprint_id = payload.get("research_sprint_id")
-    if raw_sprint_id is None:
-        return
-    try:
-        payload_sprint_id = uuid.UUID(str(raw_sprint_id))
-    except ValueError as exc:
-        raise ToolGuardViolation(
-            "scope_guard_failed",
-            f"{definition.name} research_sprint_id must be a valid UUID.",
-        ) from exc
-    if research_sprint_id is not None and payload_sprint_id != research_sprint_id:
-        raise ToolGuardViolation(
-            "scope_guard_failed",
-            f"{definition.name} research_sprint_id does not match the scoped sprint.",
-        )
-
-
-def _validate_schema_payload(
-    schema: dict[str, Any],
-    value: Any,
-    *,
-    label: str,
-) -> dict[str, Any]:
-    _validate_schema_value(schema, value, label)
-    if not isinstance(value, dict):
-        raise ToolGuardViolation("input_guard_failed", f"{label} must be a JSON object.")
-    return value
-
-
-def _validate_schema_value(schema: dict[str, Any], value: Any, path: str) -> None:
-    expected_type = schema.get("type")
-    if isinstance(expected_type, list):
-        if value is None and "null" in expected_type:
-            return
-        non_null_types = [item for item in expected_type if item != "null"]
-        expected_type = non_null_types[0] if non_null_types else None
-    if "enum" in schema and value not in schema["enum"]:
-        raise ToolGuardViolation("input_guard_failed", f"{path} must be one of {schema['enum']}.")
-    if expected_type == "object":
-        _validate_object_schema(schema, value, path)
-    elif expected_type == "array":
-        _validate_array_schema(schema, value, path)
-    elif expected_type == "string":
-        _validate_string_schema(schema, value, path)
-    elif expected_type == "integer":
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise ToolGuardViolation("input_guard_failed", f"{path} must be an integer.")
-        if "minimum" in schema and value < schema["minimum"]:
-            raise ToolGuardViolation("input_guard_failed", f"{path} is below the minimum.")
-        if "maximum" in schema and value > schema["maximum"]:
-            raise ToolGuardViolation("input_guard_failed", f"{path} is above the maximum.")
-    elif expected_type == "number":
-        if not isinstance(value, (int, float)) or isinstance(value, bool):
-            raise ToolGuardViolation("input_guard_failed", f"{path} must be a number.")
-    elif expected_type == "boolean":
-        if not isinstance(value, bool):
-            raise ToolGuardViolation("input_guard_failed", f"{path} must be a boolean.")
-    else:
-        _validate_json_value(value, path)
-
-
-def _validate_object_schema(schema: dict[str, Any], value: Any, path: str) -> None:
-    if not isinstance(value, dict):
-        raise ToolGuardViolation("input_guard_failed", f"{path} must be a JSON object.")
-    _validate_json_value(value, path)
-    properties = schema.get("properties") or {}
-    for required_key in schema.get("required", []):
-        if required_key not in value:
-            raise ToolGuardViolation(
-                "input_guard_failed",
-                f"{path} is missing required field {required_key}.",
-            )
-    if schema.get("additionalProperties") is False:
-        unknown_keys = sorted(set(value) - set(properties))
-        if unknown_keys:
-            raise ToolGuardViolation(
-                "input_guard_failed",
-                f"{path} has unsupported field {unknown_keys[0]}.",
-            )
-    for key, property_schema in properties.items():
-        if key in value:
-            _validate_schema_value(property_schema, value[key], f"{path}.{key}")
-
-
-def _validate_array_schema(schema: dict[str, Any], value: Any, path: str) -> None:
-    if not isinstance(value, list):
-        raise ToolGuardViolation("input_guard_failed", f"{path} must be an array.")
-    max_items = min(int(schema.get("maxItems", MAX_TOOL_ARRAY_LENGTH)), MAX_TOOL_ARRAY_LENGTH)
-    if len(value) > max_items:
-        raise ToolGuardViolation("input_guard_failed", f"{path} has too many items.")
-    item_schema = schema.get("items")
-    for index, item in enumerate(value):
-        if isinstance(item_schema, dict):
-            _validate_schema_value(item_schema, item, f"{path}[{index}]")
-        else:
-            _validate_json_value(item, f"{path}[{index}]")
-
-
-def _validate_string_schema(schema: dict[str, Any], value: Any, path: str) -> None:
-    if not isinstance(value, str):
-        raise ToolGuardViolation("input_guard_failed", f"{path} must be a string.")
-    min_length = int(schema.get("minLength", 0))
-    max_length = min(int(schema.get("maxLength", MAX_TOOL_STRING_LENGTH)), MAX_TOOL_STRING_LENGTH)
-    if len(value) < min_length:
-        raise ToolGuardViolation("input_guard_failed", f"{path} is too short.")
-    if len(value) > max_length:
-        raise ToolGuardViolation("input_guard_failed", f"{path} is too long.")
-    if schema.get("format") == "uuid":
-        try:
-            uuid.UUID(value)
-        except ValueError as exc:
-            raise ToolGuardViolation(
-                "input_guard_failed",
-                f"{path} must be a valid UUID.",
-            ) from exc
-
-
-def _validate_json_value(value: Any, path: str) -> None:
-    if isinstance(value, dict):
-        if len(value) > MAX_TOOL_ARRAY_LENGTH:
-            raise ToolGuardViolation("input_guard_failed", f"{path} has too many fields.")
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise ToolGuardViolation("input_guard_failed", f"{path} keys must be strings.")
-            _validate_json_value(item, f"{path}.{key}")
-        return
-    if isinstance(value, list):
-        if len(value) > MAX_TOOL_ARRAY_LENGTH:
-            raise ToolGuardViolation("input_guard_failed", f"{path} has too many items.")
-        for index, item in enumerate(value):
-            _validate_json_value(item, f"{path}[{index}]")
-        return
-    if isinstance(value, str):
-        if len(value) > MAX_TOOL_STRING_LENGTH:
-            raise ToolGuardViolation("input_guard_failed", f"{path} is too long.")
-        return
-    if isinstance(value, (int, float, bool)) or value is None:
-        return
-    raise ToolGuardViolation("input_guard_failed", f"{path} must be JSON serializable.")
-
-
-def _definition(tool_name: str) -> ToolDefinition:
-    definition = TOOL_REGISTRY.get(tool_name)
-    if definition is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool not found.")
-    return definition
+_definition = tool_registry.definition
 
 
 def _authorize_tool_invocation(
@@ -1287,6 +1886,121 @@ def _authorize_tool_invocation(
         raise
 
 
+def _enforce_agent_write_kill_switch(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    requested_by: RequestedBy,
+) -> None:
+    if requested_by == "agent" and definition.access_mode != "read":
+        security_policy_service.enforce_agent_writes_allowed(
+            db,
+            auth,
+            settings,
+            project_id=project_id,
+            operation=definition.name,
+        )
+
+
+def _authorize_opa_tool_invocation(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project: Any,
+    definition: ToolDefinition,
+    *,
+    requested_by: RequestedBy,
+    research_sprint_id: uuid.UUID | None,
+    allow_required_approval: bool = False,
+) -> OpaPolicyDecision | None:
+    """Evaluate tool policy after deterministic scope and schema guards pass."""
+    if not opa_policy_enforced(settings):
+        return None
+
+    policy_input = {
+        "principal": {
+            "user_id": str(auth.user_id),
+            "workspace_id": str(auth.workspace_id),
+            "role": normalized_role(auth.role),
+            "authentication_method": auth.principal.authentication_method,
+        },
+        "project": {
+            "id": str(project.id),
+            "workspace_id": str(project.workspace_id),
+        },
+        "tool": {
+            "name": definition.name,
+            "version": definition.version,
+            "access_mode": definition.access_mode,
+            "risk_level": definition.risk_level,
+            "approval_policy": definition.approval_policy,
+            "required_scopes": list(definition.required_scopes),
+            "allowed_data_classifications": list(definition.allowed_data_classifications),
+            "allowed_network_destinations": list(definition.allowed_network_destinations),
+            "timeout_seconds": definition.timeout_seconds,
+            "max_output_bytes": definition.max_output_bytes,
+            "max_affected_records": definition.max_affected_records,
+            "reversible": definition.reversible,
+            "owner": definition.owner,
+        },
+        "request": {
+            "requested_by": requested_by,
+            "research_sprint_id": (
+                str(research_sprint_id) if research_sprint_id is not None else None
+            ),
+        },
+    }
+    try:
+        decision = OpaPolicyClient(settings).evaluate("tool_access", policy_input)
+    except OpaPolicyUnavailableError as exc:
+        denial = unavailable_opa_policy_denial(exc)
+        _audit_tool_denial(
+            db,
+            auth,
+            project.id,
+            definition,
+            "opa_policy_unavailable",
+            detail=denial.detail,
+        )
+        db.commit()
+        raise denial from exc
+    try:
+        approved_decision = require_opa_decision(decision)
+    except HTTPException as exc:
+        _audit_tool_denial(
+            db,
+            auth,
+            project.id,
+            definition,
+            "opa_policy_denied",
+            detail=str(exc.detail),
+            policy_decision=_opa_decision_metadata(decision),
+        )
+        db.commit()
+        raise
+    if (
+        approved_decision.requires_approval
+        and definition.access_mode != "proposal"
+        and not allow_required_approval
+    ):
+        detail = "Policy requires approval before this tool can execute."
+        _audit_tool_denial(
+            db,
+            auth,
+            project.id,
+            definition,
+            "opa_approval_required",
+            detail=detail,
+            policy_decision=_opa_decision_metadata(approved_decision),
+        )
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+    return approved_decision
+
+
 def _audit_tool_denial(
     db: Session,
     auth: AuthContext,
@@ -1295,6 +2009,7 @@ def _audit_tool_denial(
     reason: str,
     *,
     detail: str | None = None,
+    policy_decision: dict[str, Any] | None = None,
 ) -> None:
     governance_service.record_audit_event(
         db,
@@ -1306,15 +2021,26 @@ def _audit_tool_denial(
         entity_id=None,
         risk_level=definition.risk_level,
         summary=f"Denied {definition.title}.",
-        metadata={
-            "tool_name": definition.name,
-            "access_mode": definition.access_mode,
-            "approval_policy": definition.approval_policy,
-            "role": normalized_role(auth.role),
-            "reason": reason,
-            "detail": detail,
-        },
+        metadata=_tool_denial_metadata(
+            definition,
+            role=normalized_role(auth.role),
+            reason=reason,
+            detail=detail,
+            policy_decision=policy_decision,
+        ),
     )
+
+
+def _opa_decision_metadata(decision: OpaPolicyDecision | None) -> dict[str, Any] | None:
+    if decision is None:
+        return None
+    return {
+        "allow": decision.allow,
+        "requires_approval": decision.requires_approval,
+        "reason": decision.reason,
+        "allowed_scopes": list(decision.allowed_scopes),
+        "max_records": decision.max_records,
+    }
 
 
 def _create_tool_approval_request(
@@ -1336,27 +2062,33 @@ def _create_tool_approval_request(
         request_type=_approval_request_type_for_tool(definition.name),
         requested_by=requested_by,
         risk_level=definition.risk_level,
-        summary=invocation.output_summary or f"{definition.title} requires approval.",
-        proposed_change={
-            "tool_name": definition.name,
-            "tool_invocation_id": str(invocation.id),
-            "proposal": proposal or {},
-        },
+        summary=_tool_approval_summary(definition, invocation.output_summary),
+        proposed_change=_tool_approval_proposed_change(
+            definition,
+            invocation_id=invocation.id,
+            proposal=proposal,
+        ),
         entity_type="tool_invocation",
         entity_id=invocation.id,
     )
 
 
-def _approval_request_type_for_tool(tool_name: str) -> governance_service.ApprovalRequestType:
-    if tool_name == "propose_research_plan":
-        return "research_plan"
-    if tool_name == "propose_memory_update":
-        return "memory_update"
-    if tool_name == "propose_validation_plan":
-        return "validation_plan"
-    if tool_name == "propose_decision":
-        return "decision"
-    return "tool_invocation"
+_approval_request_type_for_tool = tool_registry.approval_request_type_for_tool
+_tool_invocation_requested_metadata = tool_audit.invocation_requested_metadata
+_tool_invocation_executed_metadata = tool_audit.invocation_executed_metadata
+_tool_invocation_status_metadata = tool_audit.invocation_status_metadata
+_tool_denial_metadata = tool_audit.denial_metadata
+_tool_approval_summary = tool_audit.approval_summary
+_tool_approval_proposed_change = tool_audit.approval_proposed_change
+
+
+def _tool_request_event_type(
+    definition: ToolDefinition,
+    requested_by: RequestedBy,
+) -> str:
+    if definition.risk_level == "high" and requested_by in {"agent", "system"}:
+        return "unexpected_high_risk_tool_request"
+    return "tool_invocation_requested"
 
 
 def _get_invocation(
@@ -1366,13 +2098,20 @@ def _get_invocation(
     invocation_id: uuid.UUID,
 ) -> ToolInvocation:
     invocation = db.scalar(
-        select(ToolInvocation).where(
+        select(ToolInvocation)
+        .where(
             ToolInvocation.id == invocation_id,
             ToolInvocation.workspace_id == auth.workspace_id,
             ToolInvocation.project_id == project_id,
         )
+        .with_for_update()
     )
     if invocation is None:
+        record_cross_tenant_access_attempt(
+            db,
+            auth,
+            reason_code="tool_invocation_scope_denied",
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tool invocation not found.",
@@ -1380,33 +2119,7 @@ def _get_invocation(
     return invocation
 
 
-def _summarize_output(tool_name: str, output: dict[str, Any]) -> str:
-    if tool_name == "search_project_evidence":
-        return f"Searched project evidence and returned {len(output.get('results', []))} result(s)."
-    if tool_name == "list_project_sources":
-        return (
-            f"Listed {len(output.get('sources', []))} evidence source(s) and "
-            f"{len(output.get('research_sources', []))} research source candidate(s)."
-        )
-    if tool_name == "list_competitors":
-        return (
-            f"Listed {len(output.get('competitors', []))} competitor(s) and "
-            f"{len(output.get('competitor_candidates', []))} candidate(s)."
-        )
-    if tool_name == "list_assumptions":
-        return (
-            f"Listed {len(output.get('assumptions', []))} assumption(s) and "
-            f"{len(output.get('risks', []))} risk(s)."
-        )
-    if tool_name.startswith("propose_"):
-        proposal = output.get("proposal") or {}
-        if isinstance(proposal, dict):
-            return str(proposal.get("summary") or "Project update proposed.")[:1000]
-        return "Project update proposed."
-    if tool_name == "get_project_summary":
-        project = output.get("project") or {}
-        return f"Loaded project summary for {project.get('name', 'project')}."
-    return f"Executed {tool_name}."
+_summarize_output = tool_registry.summarize_output
 
 
 def _decimal_to_float(value: Decimal | None) -> float | None:

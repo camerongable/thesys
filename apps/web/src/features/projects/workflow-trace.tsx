@@ -4,6 +4,7 @@ import { CheckCircle2, Circle, ExternalLink, Loader2, XCircle } from "lucide-rea
 import { useEffect, useRef, useState } from "react";
 
 import { getWorkflowEventsUrl, WorkflowRun, WorkflowStep } from "@/lib/api";
+import { SafeExternalLink } from "@/components/safe-external-link";
 
 type WorkflowTraceProps = {
   runId?: string | null;
@@ -123,15 +124,13 @@ export function WorkflowTrace({ runId, pending = false, pendingSteps = [] }: Wor
             Cost: {formatCost(run.total_cost)}
           </span>
           {run.langsmith_trace_url ? (
-            <a
+            <SafeExternalLink
               className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-primary hover:underline"
               href={run.langsmith_trace_url}
-              rel="noreferrer"
-              target="_blank"
             >
               <ExternalLink className="h-3 w-3" aria-hidden="true" />
               View trace
-            </a>
+            </SafeExternalLink>
           ) : null}
         </div>
       ) : null}

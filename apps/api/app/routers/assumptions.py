@@ -14,7 +14,7 @@ from app.schemas.validation import (
     AssumptionUpdate,
     RiskListRead,
 )
-from app.services import validation_service
+from app.services import security_policy_service, validation_service
 
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["assumptions"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -39,7 +39,18 @@ def extract_assumptions(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> AssumptionExtractionRead:
-    result = validation_service.extract_assumptions_and_risks(db, auth, settings, project_id)
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="assumption_extraction",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        result = validation_service.extract_assumptions_and_risks(db, auth, settings, project_id)
     return AssumptionExtractionRead(
         ai_run_id=result.run.id,
         ai_step_id=result.step.id,
@@ -89,7 +100,18 @@ def extract_risks(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> AssumptionExtractionRead:
-    result = validation_service.extract_assumptions_and_risks(db, auth, settings, project_id)
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="risk_extraction",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        result = validation_service.extract_assumptions_and_risks(db, auth, settings, project_id)
     return AssumptionExtractionRead(
         ai_run_id=result.run.id,
         ai_step_id=result.step.id,

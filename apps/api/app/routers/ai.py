@@ -21,7 +21,8 @@ from app.schemas.ai import (
     StructuredOutputTestCreate,
     StructuredOutputTestRead,
 )
-from app.services import ai_run_service, project_service
+from app.security.secrets import SecretName, SecretProviderError, has_secret, resolve_secret
+from app.services import ai_run_service, project_service, security_policy_service
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -51,6 +52,11 @@ def get_ai_status(
         embedding_version=settings.embedding_version,
         embedding_timeout_seconds=settings.embedding_timeout_seconds,
         embedding_retry_attempts=settings.embedding_retry_attempts,
+        ai_embedding_cache_enabled=settings.ai_embedding_cache_enabled,
+        ai_retrieval_cache_enabled=settings.ai_retrieval_cache_enabled,
+        ai_rerank_cache_enabled=settings.ai_rerank_cache_enabled,
+        ai_semantic_answer_cache_enabled=settings.ai_semantic_answer_cache_enabled,
+        ai_semantic_answer_cache_live_enabled=settings.ai_semantic_answer_cache_live_enabled,
         retrieval_vector_path=settings.retrieval_vector_path,
         retrieval_python_fallback_enabled=settings.retrieval_python_fallback_enabled,
         retrieval_reranking_enabled=settings.retrieval_reranking_enabled,
@@ -85,6 +91,29 @@ def test_structured_output(
     if project_id is not None:
         project_service.get_project(db, auth, project_id)
 
+    guard = security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="structured_output_smoke_test",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=0.5,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    )
+    with guard:
+        return _run_structured_output_test(payload, db, auth, settings, project_id)
+
+
+def _run_structured_output_test(
+    payload: StructuredOutputTestCreate,
+    db: Session,
+    auth,
+    settings: Settings,
+    project_id,
+) -> StructuredOutputTestRead:
     input_summary = payload.idea.strip()[:500]
     run = ai_run_service.start_run(
         db,
@@ -171,9 +200,12 @@ def test_structured_output(
 
 
 def _provider_key_status(settings: Settings) -> AIProviderKeyStatus:
-    openai = _has_secret(settings.openai_api_key)
-    anthropic = _has_secret(settings.anthropic_api_key)
-    gemini = _has_secret(settings.gemini_api_key)
+    try:
+        openai = has_secret(settings, SecretName.OPENAI_API_KEY)
+        anthropic = has_secret(settings, SecretName.ANTHROPIC_API_KEY)
+        gemini = has_secret(settings, SecretName.GEMINI_API_KEY)
+    except SecretProviderError:
+        openai = anthropic = gemini = False
     return AIProviderKeyStatus(
         openai=openai,
         anthropic=anthropic,
@@ -181,16 +213,14 @@ def _provider_key_status(settings: Settings) -> AIProviderKeyStatus:
         any_present=openai or anthropic or gemini,
     )
 
-
-def _has_secret(value: str | None) -> bool:
-    return bool(value and value.strip())
-
-
 def _check_litellm_reachability(settings: Settings) -> LiteLLMReachabilityStatus:
     base_url = settings.litellm_base_url.rstrip("/")
     endpoint = f"{base_url}/health/liveliness"
-    headers = {"Authorization": f"Bearer {settings.litellm_api_key}"}
     try:
+        headers = {
+            "Authorization": f"Bearer {resolve_secret(settings, SecretName.LITELLM_API_KEY)}"
+        }
+        security_policy_service.enforce_provider_egress_policy(settings, endpoint)
         with httpx.Client(timeout=min(settings.litellm_timeout_seconds, 3.0)) as client:
             response = client.get(endpoint, headers=headers)
         return LiteLLMReachabilityStatus(
@@ -198,15 +228,19 @@ def _check_litellm_reachability(settings: Settings) -> LiteLLMReachabilityStatus
             endpoint=endpoint,
             reachable=True,
             status_code=response.status_code,
-            error=None if response.status_code < 500 else response.text[:300],
+            error=None if response.status_code < 500 else "LiteLLM returned a server error.",
         )
-    except httpx.HTTPError as exc:
+    except (
+        httpx.HTTPError,
+        SecretProviderError,
+        security_policy_service.ProviderEgressDeniedError,
+    ):
         return LiteLLMReachabilityStatus(
             base_url=settings.litellm_base_url,
             endpoint=endpoint,
             reachable=False,
             status_code=None,
-            error=str(exc),
+            error="LiteLLM reachability check failed.",
         )
 
 

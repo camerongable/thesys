@@ -5,7 +5,6 @@ captures real-world results, uses structured LLM interpretation to propose
 project updates, and gates those updates behind approval records.
 """
 
-import json
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
@@ -16,6 +15,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.ai.fallback_completion import fallback_completion
 from app.ai.fallback_policy import (
     should_use_fallback_after_error,
     should_use_fallback_without_model,
@@ -23,13 +23,12 @@ from app.ai.fallback_policy import (
 from app.ai.litellm_client import ChatMessage, LLMCompletion
 from app.ai.prompts import (
     ASSUMPTION_EXTRACTION_PROMPT_VERSION,
-    UNTRUSTED_RETRIEVED_CONTENT_RULE,
     VALIDATION_PLAN_PROMPT_VERSION,
     VALIDATION_RESULT_INTERPRETATION_PROMPT_VERSION,
 )
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
-from app.core.auth import AuthContext, require_permission
-from app.core.config import Settings
+from app.core.auth import AuthContext, record_cross_tenant_access_attempt, require_permission
+from app.core.config import Settings, get_settings
 from app.db.models import (
     AIRun,
     AIStep,
@@ -49,16 +48,17 @@ from app.db.models import (
     ValidationMission,
     ValidationResultInterpretation,
 )
+from app.features.decisions import recommendation as decision_recommendation_feature
+from app.features.validation import generation as validation_generation
+from app.features.validation import plan_rendering, result_interpretation
 from app.schemas.artifacts import AssumptionDraft, RiskDraft
 from app.schemas.validation import (
     AssumptionExtractionDraft,
     AssumptionUpdate,
-    DecisionCoachActionRead,
     DecisionCoachChatRead,
     DecisionCreate,
     DecisionRecommendationRead,
     ExperimentResultCreate,
-    SuggestedDecisionRecordRead,
     ValidationMissionRead,
     ValidationPlanDraft,
     ValidationPlanGenerateCreate,
@@ -69,8 +69,10 @@ from app.schemas.validation import (
 )
 from app.services import (
     ai_run_service,
+    context_service,
     governance_service,
     langsmith_observability_service,
+    memory_service,
     project_service,
 )
 
@@ -236,14 +238,34 @@ def extract_assumptions_and_risks(
     )
     step: AIStep | None = None
     try:
+        project_state = _project_state(project)
+        memory_selection = memory_service.select_memory_for_context(
+            db,
+            auth,
+            project_id,
+            workflow_type="assumption_extraction",
+            limit=8,
+        )
+        context_pack = context_service.ContextCompiler(settings).compile_workflow_context(
+            workflow_type="assumption_extraction",
+            project_id=project_id,
+            query="Extract risky assumptions and strategic risks.",
+            domain_context={"project": project_state},
+            prompt_version=ASSUMPTION_EXTRACTION_PROMPT_VERSION,
+            expected_schema=AssumptionExtractionDraft.__name__,
+            memory_selection=memory_selection,
+        )
         step = ai_run_service.start_step(
             db,
             run,
             step_name="extract_assumptions_risks",
-            input_json={"project_id": str(project.id)},
+            input_json={
+                "project_id": str(project.id),
+                "context_pack": context_pack.prompt_metadata(),
+            },
         )
         started = perf_counter()
-        messages = _assumption_messages(project, _project_state(project))
+        messages = _assumption_messages(project, project_state)
         if should_use_fallback_without_model(settings):
             draft = _fallback_assumption_extraction(project)
             completion = _fallback_completion(
@@ -314,7 +336,13 @@ def extract_assumptions_and_risks(
                 error=str(exc),
             )
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise
     except Exception as exc:
         if step is not None:
@@ -330,7 +358,13 @@ def extract_assumptions_and_risks(
                 error=str(exc),
             )
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise ValidationWorkflowError("Assumption extraction failed.") from exc
 
     run = ai_run_service.complete_run(
@@ -346,6 +380,8 @@ def extract_assumptions_and_risks(
     langsmith_observability_service.complete_trace(
         settings,
         trace,
+        db=db,
+        run=run,
         output_summary=f"Created or updated {len(assumptions)} assumptions and {len(risks)} risks.",
         metrics={"assumption_count": len(assumptions), "risk_count": len(risks)},
     )
@@ -546,6 +582,33 @@ def interpret_validation_results(
     )
     step: AIStep | None = None
     try:
+        memory_selection = memory_service.select_memory_for_context(
+            db,
+            auth,
+            project_id,
+            workflow_type="validation_result_interpretation",
+            limit=12,
+        )
+        context_pack = context_service.ContextCompiler(settings).compile_workflow_context(
+            workflow_type="validation_result_interpretation",
+            project_id=project_id,
+            query=mission.mission_title,
+            domain_context={
+                "project": _project_state(project),
+                "mission": _decision_mission_context(mission),
+            },
+            prompt_version=VALIDATION_RESULT_INTERPRETATION_PROMPT_VERSION,
+            expected_schema=ValidationResultInterpretationDraft.__name__,
+            memory_selection=memory_selection,
+            untrusted_inputs=[
+                {
+                    "type": "validation",
+                    "title": "Validation notes",
+                    "content": raw_notes,
+                    "source": "validation_result_notes",
+                }
+            ],
+        )
         step = ai_run_service.start_step(
             db,
             run,
@@ -555,6 +618,7 @@ def interpret_validation_results(
                 "validation_mission_id": str(mission.id),
                 "experiment_id": str(mission.experiment_id) if mission.experiment_id else None,
                 "assumption_id": str(mission.assumption_id),
+                "context_pack": context_pack.prompt_metadata(),
             },
         )
         started = perf_counter()
@@ -647,7 +711,13 @@ def interpret_validation_results(
                 error=str(exc),
             )
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise
     except Exception as exc:
         if step is not None:
@@ -663,7 +733,13 @@ def interpret_validation_results(
                 error=str(exc),
             )
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise ValidationWorkflowError("Validation result interpretation failed.") from exc
 
     run = ai_run_service.complete_run(
@@ -680,6 +756,8 @@ def interpret_validation_results(
     langsmith_observability_service.complete_trace(
         settings,
         trace,
+        db=db,
+        run=run,
         output_summary=interpretation.signal_summary[:1000],
         metrics={
             "proposed_confidence_delta": float(interpretation.proposed_confidence_delta),
@@ -759,6 +837,34 @@ def generate_validation_plan(
     )
     step: AIStep | None = None
     try:
+        memory_selection = memory_service.select_memory_for_context(
+            db,
+            auth,
+            project_id,
+            workflow_type="validation_plan",
+            limit=12,
+        )
+        context_pack = context_service.ContextCompiler(settings).compile_workflow_context(
+            workflow_type="validation_plan",
+            project_id=project_id,
+            query="validation plan",
+            domain_context={
+                "project": _project_state(project),
+                "assumptions": [
+                    {
+                        "id": str(assumption.id),
+                        "text": assumption.text,
+                        "category": assumption.category,
+                        "importance": assumption.importance,
+                        "uncertainty": assumption.uncertainty,
+                    }
+                    for assumption in assumptions
+                ],
+            },
+            prompt_version=VALIDATION_PLAN_PROMPT_VERSION,
+            expected_schema=ValidationPlanSetDraft.__name__,
+            memory_selection=memory_selection,
+        )
         step = ai_run_service.start_step(
             db,
             run,
@@ -766,6 +872,7 @@ def generate_validation_plan(
             input_json={
                 "project_id": str(project.id),
                 "assumption_ids": [str(item.id) for item in assumptions],
+                "context_pack": context_pack.prompt_metadata(),
             },
         )
         started = perf_counter()
@@ -842,7 +949,13 @@ def generate_validation_plan(
                 error=str(exc),
             )
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise
     except Exception as exc:
         if step is not None:
@@ -858,7 +971,13 @@ def generate_validation_plan(
                 error=str(exc),
             )
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise ValidationWorkflowError("Validation plan generation failed.") from exc
 
     run = ai_run_service.complete_run(
@@ -874,6 +993,8 @@ def generate_validation_plan(
     langsmith_observability_service.complete_trace(
         settings,
         trace,
+        db=db,
+        run=run,
         output_summary=draft.summary[:1000],
         metrics={"experiment_count": len(experiments)},
     )
@@ -1010,6 +1131,7 @@ def get_decision(
         .options(selectinload(Decision.links))
     )
     if decision is None:
+        record_cross_tenant_access_attempt(db, auth, reason_code="decision_scope_denied")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Decision not found.")
     return decision
 
@@ -1097,6 +1219,12 @@ def get_decision_recommendation(
         missing_evidence=missing_evidence,
         interpretation=interpretation,
     )
+    evidence_labels = _decision_evidence_labels(
+        recommendation=recommendation,
+        supporting_evidence=supporting_evidence,
+        missing_evidence=missing_evidence,
+        interpretation=interpretation,
+    )
     suggested_record = _suggested_decision_record(
         recommendation=recommendation,
         rationale=rationale,
@@ -1110,14 +1238,47 @@ def get_decision_recommendation(
         interpretation=interpretation,
         mission=mission,
     )
+    memory_selection = memory_service.select_memory_for_context(
+        db,
+        auth,
+        project_id,
+        workflow_type="decision_recommendation",
+    )
+    context_pack = context_service.ContextCompiler(get_settings()).compile_workflow_context(
+        workflow_type="decision_recommendation",
+        project_id=project_id,
+        query="Recommend whether to proceed, pivot, pause, kill, or continue research.",
+        domain_context=_decision_context_domain(
+            assumptions=assumptions,
+            risks=risks,
+            evidence_sources=evidence_sources,
+            experiments=experiments,
+            interpretation=interpretation,
+            mission=mission,
+            recommendation=recommendation,
+            supporting_evidence=supporting_evidence,
+            missing_evidence=missing_evidence,
+            risk_texts=risk_texts,
+        ),
+        prompt_version="decision-recommendation:deterministic:v1",
+        expected_schema="DecisionRecommendationRead",
+        memory_selection=memory_selection,
+        untrusted_inputs=_decision_context_untrusted_inputs(
+            evidence_sources=evidence_sources,
+            interpretation=interpretation,
+            experiments=experiments,
+        ),
+    )
     return DecisionRecommendationRead(
         recommendation=recommendation,
         rationale=rationale,
         supporting_evidence=supporting_evidence,
         missing_evidence=missing_evidence,
         risks=risk_texts,
+        evidence_labels=evidence_labels,
         suggested_decision_record=suggested_record,
         action_cards=_decision_action_cards(project_id, recommendation, bool(mission)),
+        context_pack=context_pack,
     )
 
 
@@ -1181,6 +1342,7 @@ def chat_decision_coach(
         rationale=recommendation.rationale,
         supporting_evidence=recommendation.supporting_evidence,
         missing_evidence=recommendation.missing_evidence,
+        evidence_labels=recommendation.evidence_labels,
         action_cards=recommendation.action_cards,
     )
 
@@ -1263,370 +1425,50 @@ def _decision_validation_mission(
     )
 
 
-def _decision_recommendation_value(
-    *,
-    assumptions: list[Assumption],
-    experiments: list[Experiment],
-    interpretation: ValidationResultInterpretation | None,
-) -> str:
-    if interpretation is not None:
-        if (
-            interpretation.decision_recommendation == "proceed"
-            and interpretation.willingness_to_pay in {"medium", "strong"}
-            and interpretation.switching_signal in {"medium", "strong"}
-        ):
-            return "proceed"
-        if interpretation.decision_recommendation in {"pivot", "pause", "kill"}:
-            return interpretation.decision_recommendation
-        return "continue_research"
-    if any(experiment.results for experiment in experiments):
-        return "continue_research"
-    if any(
-        assumption.status == "invalidated" and assumption.kill_risk for assumption in assumptions
-    ):
-        return "pivot"
-    return "continue_research"
-
-
-def _decision_supporting_evidence(
-    *,
-    assumptions: list[Assumption],
-    evidence_sources: list[EvidenceSource],
-    experiments: list[Experiment],
-    interpretation: ValidationResultInterpretation | None,
-) -> list[str]:
-    evidence: list[str] = []
-    if interpretation is not None:
-        evidence.append(_shorten(interpretation.signal_summary, 240))
-        evidence.extend(_shorten(item, 240) for item in interpretation.what_strengthened[:3])
-        if interpretation.quotes:
-            evidence.append(f"Validation quote: {_shorten(interpretation.quotes[0], 200)}")
-    for experiment in experiments:
-        if experiment.results:
-            latest_result = experiment.results[0]
-            evidence.append(
-                f"Logged result for {experiment.name}: "
-                f"{_shorten(latest_result.result_summary, 180)}"
-            )
-            break
-    validated = next((item for item in assumptions if item.status == "validated"), None)
-    if validated is not None:
-        evidence.append(f"Validated blocker: {_shorten(validated.text, 180)}")
-    if evidence_sources:
-        evidence.append(
-            f"{len(evidence_sources)} evidence source"
-            f"{'' if len(evidence_sources) == 1 else 's'} in the project trail."
-        )
-    return _dedupe_strings(evidence)[:6]
-
-
-def _decision_missing_evidence(
-    *,
-    assumptions: list[Assumption],
-    evidence_sources: list[EvidenceSource],
-    experiments: list[Experiment],
-    interpretation: ValidationResultInterpretation | None,
-    mission: ValidationMission | None,
-) -> list[str]:
-    missing: list[str] = []
-    if not evidence_sources:
-        missing.append("Add source-backed evidence for the core customer and market claim.")
-    if not assumptions:
-        missing.append("Identify the biggest unknown or must-be-true blocker.")
-    if mission is None:
-        missing.append("Create a validation mission tied to the top blocker.")
-    if not any(experiment.results for experiment in experiments):
-        missing.append("Log real validation results before recording a proceed decision.")
-    if interpretation is None:
-        missing.append("Interpret validation notes/results before changing the decision.")
-    else:
-        if interpretation.willingness_to_pay not in {"medium", "strong"}:
-            missing.append(
-                "Get stronger willingness-to-pay proof from target users or a pilot commitment."
-            )
-        if interpretation.switching_signal not in {"medium", "strong"}:
-            missing.append("Show that users will switch from their current workaround.")
-        if interpretation.pain_severity not in {"medium", "high"}:
-            missing.append("Confirm the problem is painful and frequent enough to matter.")
-    return _dedupe_strings(missing)
-
-
-def _decision_risks(
-    assumptions: list[Assumption],
-    risks: list[Risk],
-    interpretation: ValidationResultInterpretation | None,
-) -> list[str]:
-    risk_texts = [
-        _shorten(assumption.text, 220)
-        for assumption in assumptions
-        if assumption.kill_risk and assumption.status != "validated"
-    ]
-    risk_texts.extend(_shorten(risk.text, 220) for risk in risks[:3])
-    if interpretation is not None:
-        risk_texts.extend(_shorten(item, 220) for item in interpretation.what_weakened[:2])
-        risk_texts.extend(_shorten(item, 220) for item in interpretation.objections[:2])
-    return _dedupe_strings(risk_texts)[:7]
-
-
-def _decision_recommendation_rationale(
-    *,
-    recommendation: str,
-    supporting_evidence: list[str],
-    missing_evidence: list[str],
-    interpretation: ValidationResultInterpretation | None,
-) -> str:
-    if recommendation == "proceed":
-        return (
-            "Proceed only with the narrow wedge that was validated. The latest result "
-            "shows enough pain, willingness to pay, and switching signal to justify a "
-            "small build or pilot."
-        )
-    if recommendation == "pivot":
-        return (
-            "Pivot before building. The current validation signal weakens the existing "
-            "wedge, so the next move is to change the target user, problem focus, or "
-            "positioning and run a sharper test."
-        )
-    if recommendation == "pause":
-        return (
-            "Pause active work until new evidence changes the picture. The current "
-            "evidence does not justify more execution effort."
-        )
-    if recommendation == "kill":
-        return (
-            "Kill the current version if the blocker is invalidated and another small "
-            "test is unlikely to change the conclusion."
-        )
-    if interpretation is not None:
-        return (
-            "Continue research. The validation result produced useful learning, but "
-            "there is not enough decision-grade proof to proceed yet."
-        )
-    if supporting_evidence and missing_evidence:
-        return (
-            "Continue research. Some project evidence exists, but the missing proof is "
-            "still material to a build, pivot, pause, or kill decision."
-        )
-    return (
-        "Continue research. The project does not yet have enough validation evidence "
-        "to support a durable proceed, pivot, pause, or kill decision."
-    )
-
-
-def _suggested_decision_record(
-    *,
-    recommendation: str,
-    rationale: str,
-    supporting_evidence: list[str],
-    missing_evidence: list[str],
-    risks: list[str],
-    assumptions: list[Assumption],
-    risks_rows: list[Risk],
-    evidence_sources: list[EvidenceSource],
-    experiments: list[Experiment],
-    interpretation: ValidationResultInterpretation | None,
-    mission: ValidationMission | None,
-) -> SuggestedDecisionRecordRead:
-    decision_type = _decision_type_for_recommendation(recommendation)
-    title = _decision_title_for_recommendation(recommendation)
-    revisit_trigger = _decision_revisit_trigger(recommendation, mission)
-    linked_assumption_ids = _decision_linked_assumption_ids(assumptions, interpretation, mission)
-    linked_experiment_ids = _decision_linked_experiment_ids(experiments, interpretation, mission)
-    record_rationale = _decision_record_markdown(
-        rationale=rationale,
-        supporting_evidence=supporting_evidence,
-        missing_evidence=missing_evidence,
-        risks=risks,
-    )
-    expected_outcome = (
-        f"{_decision_expected_outcome(recommendation)}\n\nRevisit trigger: {revisit_trigger}"
-    )
-    return SuggestedDecisionRecordRead(
-        decision_type=decision_type,
-        title=title,
-        rationale=record_rationale,
-        expected_outcome=expected_outcome,
-        revisit_trigger=revisit_trigger,
-        linked_assumption_ids=linked_assumption_ids,
-        linked_risk_ids=[risk.id for risk in risks_rows[:2]],
-        linked_evidence_source_ids=[source.id for source in evidence_sources[:3]],
-        linked_artifact_ids=[],
-        linked_competitor_ids=[],
-        linked_experiment_ids=linked_experiment_ids,
-        validation_mission_id=mission.id if mission is not None else None,
-    )
-
-
-def _decision_linked_assumption_ids(
-    assumptions: list[Assumption],
-    interpretation: ValidationResultInterpretation | None,
-    mission: ValidationMission | None,
-) -> list[uuid.UUID]:
-    ids: list[uuid.UUID] = []
-    if interpretation is not None and interpretation.assumption_id is not None:
-        ids.append(interpretation.assumption_id)
-    if mission is not None:
-        ids.append(mission.assumption_id)
-    if assumptions:
-        ids.append(assumptions[0].id)
-    return _dedupe_uuids(ids)[:3]
-
-
-def _decision_linked_experiment_ids(
-    experiments: list[Experiment],
-    interpretation: ValidationResultInterpretation | None,
-    mission: ValidationMission | None,
-) -> list[uuid.UUID]:
-    ids: list[uuid.UUID] = []
-    if interpretation is not None and interpretation.experiment_id is not None:
-        ids.append(interpretation.experiment_id)
-    if mission is not None and mission.experiment_id is not None:
-        ids.append(mission.experiment_id)
-    ids.extend(experiment.id for experiment in experiments if experiment.results)
-    return _dedupe_uuids(ids)[:3]
-
-
-def _decision_action_cards(
-    project_id: uuid.UUID,
-    recommendation: str,
-    has_mission: bool,
-) -> list[DecisionCoachActionRead]:
-    actions = [
-        DecisionCoachActionRead(
-            id="prepare_recommended_record",
-            label="Prepare recommended record",
-            description="Prefill the decision record from this recommendation.",
-            target_route=f"/projects/{project_id}#record-decision-panel",
-            target_modal="record-decision-panel",
-        ),
-        DecisionCoachActionRead(
-            id="show_blocker_evidence",
-            label="Show evidence behind the blocker",
-            description="Review the evidence and validation trail behind this decision.",
-            target_route=f"/projects/{project_id}#evidence",
-        ),
-    ]
-    if has_mission and recommendation != "proceed":
-        actions.insert(
-            1,
-            DecisionCoachActionRead(
-                id="open_validation_mission",
-                label="Open validation mission",
-                description="Run or inspect the blocker test before deciding.",
-                target_route=f"/projects/{project_id}#validation-mission",
-                target_modal="validation-mission",
-            ),
-        )
-    return actions
-
-
-def _decision_record_markdown(
-    *,
-    rationale: str,
-    supporting_evidence: list[str],
-    missing_evidence: list[str],
-    risks: list[str],
-) -> str:
-    sections = [rationale]
-    if supporting_evidence:
-        sections.append(
-            "Supporting evidence:\n" + "\n".join(f"- {item}" for item in supporting_evidence)
-        )
-    if missing_evidence:
-        sections.append("Missing proof:\n" + "\n".join(f"- {item}" for item in missing_evidence))
-    if risks:
-        sections.append("Risks:\n" + "\n".join(f"- {item}" for item in risks[:5]))
-    return "\n\n".join(sections)
-
-
-def _decision_type_for_recommendation(recommendation: str) -> str:
-    return {
-        "proceed": "build",
-        "pivot": "pivot",
-        "pause": "pause",
-        "kill": "kill",
-        "continue_research": "run_experiment",
-    }[recommendation]
-
-
-def _decision_title_for_recommendation(recommendation: str) -> str:
-    return {
-        "proceed": "Proceed with a narrow validated wedge",
-        "pivot": "Pivot from the current wedge",
-        "pause": "Pause until evidence improves",
-        "kill": "Kill the current idea",
-        "continue_research": "Continue research before building",
-    }[recommendation]
-
-
-def _decision_expected_outcome(recommendation: str) -> str:
-    return {
-        "proceed": "Start a narrow build or pilot tied to the validated wedge.",
-        "pivot": "Change the wedge, target user, or positioning before further build work.",
-        "pause": "Stop active work until a specific new learning goal appears.",
-        "kill": "Stop active work and preserve the decision trail for future reference.",
-        "continue_research": (
-            "Run the next validation test and revisit the decision with stronger proof."
-        ),
-    }[recommendation]
-
-
-def _decision_revisit_trigger(
-    recommendation: str,
-    mission: ValidationMission | None,
-) -> str:
-    if recommendation == "proceed":
-        return "Revisit if pilot users do not activate, pay, or switch as expected."
-    if recommendation == "pivot":
-        return (
-            "Revisit after a new wedge has a cleaner pain, urgency, or willingness-to-pay signal."
-        )
-    if recommendation == "pause":
-        return "Revisit only when new evidence changes the biggest unknown."
-    if recommendation == "kill":
-        return "Reopen only if a materially different target user, wedge, or market signal appears."
-    if mission is not None:
-        return f"Revisit after completing: {mission.mission_title}."
-    return "Revisit after direct validation results are logged and interpreted."
-
-
-def _decision_recommendation_label(recommendation: str) -> str:
-    return {
-        "proceed": "Proceed",
-        "pivot": "Pivot",
-        "pause": "Pause",
-        "kill": "Kill",
-        "continue_research": "Continue research",
-    }[recommendation]
-
-
-def _format_bullets(items: list[str]) -> str:
-    if not items:
-        return "no major gaps are currently flagged"
-    return "; ".join(items)
-
-
-def _dedupe_strings(items: list[str]) -> list[str]:
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for item in items:
-        normalized = _normalize_key(item)
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        deduped.append(item)
-    return deduped
-
-
-def _dedupe_uuids(items: list[uuid.UUID]) -> list[uuid.UUID]:
-    seen: set[uuid.UUID] = set()
-    deduped: list[uuid.UUID] = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        deduped.append(item)
-    return deduped
+_decision_context_domain = decision_recommendation_feature.decision_context_domain
+_decision_interpretation_context = (
+    decision_recommendation_feature.decision_interpretation_context
+)
+_decision_mission_context = decision_recommendation_feature.decision_mission_context
+_decision_context_untrusted_inputs = (
+    decision_recommendation_feature.decision_context_untrusted_inputs
+)
+_decision_recommendation_value = decision_recommendation_feature.decision_recommendation_value
+_decision_supporting_evidence = decision_recommendation_feature.decision_supporting_evidence
+_decision_missing_evidence = decision_recommendation_feature.decision_missing_evidence
+_decision_risks = decision_recommendation_feature.decision_risks
+_decision_recommendation_rationale = (
+    decision_recommendation_feature.decision_recommendation_rationale
+)
+_decision_evidence_labels = decision_recommendation_feature.decision_evidence_labels
+_suggested_decision_record = decision_recommendation_feature.suggested_decision_record
+_decision_linked_assumption_ids = (
+    decision_recommendation_feature.decision_linked_assumption_ids
+)
+_decision_linked_experiment_ids = (
+    decision_recommendation_feature.decision_linked_experiment_ids
+)
+_decision_action_cards = decision_recommendation_feature.decision_action_cards
+_decision_record_markdown = decision_recommendation_feature.decision_record_markdown
+_decision_type_for_recommendation = (
+    decision_recommendation_feature.decision_type_for_recommendation
+)
+_decision_title_for_recommendation = (
+    decision_recommendation_feature.decision_title_for_recommendation
+)
+_decision_expected_outcome = decision_recommendation_feature.decision_expected_outcome
+_decision_revisit_trigger = decision_recommendation_feature.decision_revisit_trigger
+_decision_recommendation_label = decision_recommendation_feature.decision_recommendation_label
+_format_bullets = decision_recommendation_feature.format_bullets
+_dedupe_strings = decision_recommendation_feature.dedupe_strings
+_dedupe_uuids = decision_recommendation_feature.dedupe_uuids
+_validation_mission_context = result_interpretation.validation_mission_context
+_validation_result_interpretation_prompt_messages = (
+    result_interpretation.validation_result_interpretation_messages
+)
+_validation_interpretation_proposed_updates = (
+    result_interpretation.validation_interpretation_proposed_updates
+)
 
 
 def current_version(artifact: Artifact) -> ArtifactVersion | None:
@@ -1652,68 +1494,18 @@ def _project_state(project: Project) -> dict[str, Any]:
 
 
 def _assumption_messages(project: Project, project_state: dict[str, Any]) -> list[ChatMessage]:
-    payload = {"project_state": project_state}
-    return [
-        ChatMessage(
-            role="system",
-            content=(
-                "Extract concrete, testable founder assumptions and risks. Prioritize "
-                "kill-risk assumptions, uncertainty, and validation usefulness. Avoid vague "
-                "startup advice. "
-                f"{UNTRUSTED_RETRIEVED_CONTENT_RULE}"
-            ),
-        ),
-        ChatMessage(
-            role="user",
-            content=(
-                f"Return structured assumptions and risks for {project.name} as JSON only.\n\n"
-                f"{json.dumps(payload, indent=2, sort_keys=True)}"
-            ),
-        ),
-    ]
+    return validation_generation.assumption_messages(project.name, project_state)
 
 
 def _validation_plan_messages(
     project: Project,
     assumptions: list[Assumption],
 ) -> list[ChatMessage]:
-    payload = {
-        "project_state": _project_state(project),
-        "assumptions": [
-            {
-                "id": str(assumption.id),
-                "text": assumption.text,
-                "category": assumption.category,
-                "importance": assumption.importance,
-                "uncertainty": assumption.uncertainty,
-                "kill_risk": assumption.kill_risk,
-                "confidence_score": str(assumption.confidence_score)
-                if assumption.confidence_score is not None
-                else None,
-            }
-            for assumption in assumptions
-        ],
-    }
-    return [
-        ChatMessage(
-            role="system",
-            content=(
-                "Generate validation experiments for founder assumptions. Echo each provided "
-                "assumption id exactly. Plans must be operational: target respondent, steps, "
-                "screener questions, interview questions, survey questions, landing page copy, "
-                "outreach copy, note-taking template, interpretation rubric, success criteria, "
-                "failure threshold, and expected signal strength. Make the first test specific "
-                "enough to run this week. Prefer willingness-to-pay or switching-behavior tests "
-                "when the business risk is unclear. State what should not be built until the "
-                "test result is known. "
-                f"{UNTRUSTED_RETRIEVED_CONTENT_RULE}"
-            ),
-        ),
-        ChatMessage(
-            role="user",
-            content=f"Return validation plans as JSON only.\n\n{json.dumps(payload, indent=2)}",
-        ),
-    ]
+    return validation_generation.validation_plan_messages(
+        project.name,
+        _project_state(project),
+        assumptions,
+    )
 
 
 def _validation_result_interpretation_messages(
@@ -1721,301 +1513,26 @@ def _validation_result_interpretation_messages(
     mission: ValidationMission,
     raw_notes: str,
 ) -> list[ChatMessage]:
-    payload = {
-        "project_state": _project_state(project),
-        "validation_mission": {
-            "id": str(mission.id),
-            "mission_title": mission.mission_title,
-            "why_it_matters": mission.why_it_matters,
-            "target_user": mission.target_user,
-            "test_type": mission.test_type,
-            "success_criteria": mission.success_criteria,
-            "failure_criteria": mission.failure_criteria,
-        },
-        "raw_validation_notes": raw_notes,
-    }
-    return [
-        ChatMessage(
-            role="system",
-            content=(
-                "Interpret founder validation results skeptically. Extract only signals "
-                "supported by the notes. Focus on pain severity, current workaround, urgency, "
-                "willingness to pay, switching intent, objections, confidence change, and the "
-                "next decision. Do not overstate weak evidence. Recommend proceed only when "
-                "pain, urgency, and willingness-to-pay or switching signals are all strong. "
-                "Return JSON only. "
-                f"{UNTRUSTED_RETRIEVED_CONTENT_RULE}"
-            ),
-        ),
-        ChatMessage(
-            role="user",
-            content=(
-                "Return a validation result interpretation as JSON only.\n\n"
-                f"{json.dumps(payload, indent=2, sort_keys=True)}"
-            ),
-        ),
-    ]
+    return _validation_result_interpretation_prompt_messages(
+        project_state=_project_state(project),
+        mission_context=_validation_mission_context(mission),
+        raw_notes=raw_notes,
+    )
 
 
 def _fallback_assumption_extraction(project: Project) -> AssumptionExtractionDraft:
-    project_label = project.name or "this project"
-    return AssumptionExtractionDraft(
-        assumptions=[
-            AssumptionDraft(
-                text=("Target users experience the problem frequently enough to seek a new tool."),
-                category="demand",
-                importance="critical",
-                uncertainty="high",
-                kill_risk=True,
-                confidence_score=0.35,
-                recommended_test=(
-                    "Interview target users and ask them to reconstruct the last three "
-                    "times they handled this workflow."
-                ),
-            ),
-            AssumptionDraft(
-                text=(
-                    f"Target users understand the value of {project_label} quickly enough "
-                    "to try a lightweight prototype."
-                ),
-                category="activation",
-                importance="high",
-                uncertainty="high",
-                kill_risk=True,
-                confidence_score=0.35,
-                recommended_test=(
-                    "Run a concept test with a clickable prototype and ask users to explain "
-                    "what they would use it for."
-                ),
-            ),
-            AssumptionDraft(
-                text=(
-                    "The product can create a differentiated experience beyond generic "
-                    "search, notes, or one-off AI answers."
-                ),
-                category="differentiation",
-                importance="high",
-                uncertainty="medium",
-                kill_risk=True,
-                confidence_score=0.3,
-                recommended_test=(
-                    "Compare the prototype against current alternatives and ask users which "
-                    "workflow they would repeat weekly."
-                ),
-            ),
-        ],
-        risks=[
-            RiskDraft(
-                text=(
-                    "The current evidence base may be too thin to support confident prioritization."
-                ),
-                category="evidence",
-                severity="high",
-                likelihood="high",
-                mitigation="Add direct user interviews and source-backed competitor evidence.",
-            ),
-            RiskDraft(
-                text="Users may treat the product as nice-to-have educational content.",
-                category="adoption",
-                severity="high",
-                likelihood="unknown",
-                mitigation="Validate a repeated urgent workflow before broadening scope.",
-            ),
-        ],
-    )
-
-
-def _fallback_validation_interpretation(
-    mission: ValidationMission,
-    raw_notes: str,
-) -> ValidationResultInterpretationDraft:
-    lowered = raw_notes.casefold()
-    positive_terms = (
-        "pay",
-        "paid",
-        "pilot",
-        "urgent",
-        "pain",
-        "painful",
-        "switch",
-        "trial",
-        "yes",
-        "interested",
-    )
-    negative_terms = (
-        "free",
-        "not pay",
-        "no budget",
-        "not urgent",
-        "happy with",
-        "declined",
-        "wouldn't",
-        "would not",
-    )
-    positive_count = sum(1 for term in positive_terms if term in lowered)
-    negative_count = sum(1 for term in negative_terms if term in lowered)
-
-    if positive_count >= negative_count + 3:
-        pain = "high"
-        urgency = "high"
-        willingness = "strong" if "pay" in lowered or "paid" in lowered else "medium"
-        switching = "strong" if "switch" in lowered or "pilot" in lowered else "medium"
-        confidence_change = "increase"
-        confidence_delta = 0.18
-        status_value = "validated"
-        decision = "continue_research" if willingness != "strong" else "proceed"
-        signal_summary = "Strong validation signal with meaningful pain and action intent."
-        strengthened = [
-            "Target users appear to experience the problem with enough urgency to keep testing.",
-            "The notes contain a concrete signal that the mission assumption may be true.",
-        ]
-        weakened = [
-            "The result still needs more evidence before expanding beyond this wedge.",
-        ]
-        next_action = (
-            "If willingness-to-pay was explicit, prepare a narrow pilot. Otherwise run a "
-            "pricing-specific follow-up test before building."
-        )
-    elif negative_count > positive_count:
-        pain = "low"
-        urgency = "low"
-        willingness = "weak"
-        switching = "weak"
-        confidence_change = "decrease"
-        confidence_delta = -0.18
-        status_value = "invalidated"
-        decision = "pivot"
-        signal_summary = "Weak validation signal; the notes do not support the current mission."
-        strengthened = ["The test clarified where the current thesis is weak."]
-        weakened = [
-            "The notes suggest low urgency, weak willingness to pay, or satisfaction "
-            "with existing alternatives.",
-        ]
-        next_action = (
-            "Do not build the current version. Revisit the wedge or run a sharper test with "
-            "a better-qualified respondent profile."
-        )
-    else:
-        pain = "medium" if positive_count > 0 else "low"
-        urgency = "medium" if positive_count > 0 else "low"
-        willingness = "weak"
-        switching = "weak"
-        confidence_change = "no_change"
-        confidence_delta = 0.0
-        status_value = "inconclusive"
-        decision = "continue_research"
-        signal_summary = "Mixed or incomplete validation signal."
-        strengthened = [
-            "The notes contain some useful learning about the target user or current workaround.",
-        ]
-        weakened = [
-            "The result does not yet prove willingness to pay or a strong switching trigger.",
-        ]
-        next_action = (
-            "Run a tighter follow-up test focused on willingness to pay, switching behavior, "
-            "or the clearest objection."
-        )
-
-    quotes = _extract_quotes(raw_notes)
-    objections = _extract_objections(raw_notes)
-    return ValidationResultInterpretationDraft(
-        signal_summary=signal_summary,
-        what_strengthened=strengthened,
-        what_weakened=weakened,
-        signal={
-            "pain_severity": pain,
-            "current_workaround": _fallback_current_workaround(raw_notes),
-            "urgency": urgency,
-            "willingness_to_pay": willingness,
-            "switching_signal": switching,
-            "objections": objections,
-            "quotes": quotes,
-            "confidence_change": confidence_change,
-            "recommended_next_action": next_action,
-        },
-        confidence_rationale=(
-            "This interpretation is based on the validation notes and mission criteria, not "
-            "on general market assumptions."
-        ),
-        proposed_confidence_delta=confidence_delta,
-        proposed_assumption_status=status_value,
-        decision_recommendation=decision,
-    )
+    return validation_generation.fallback_assumption_extraction(project.name)
 
 
 def _fallback_validation_plan(
     project: Project,
     assumptions: list[Assumption],
 ) -> ValidationPlanSetDraft:
-    project_label = project.name or "this project"
-    return ValidationPlanSetDraft(
-        summary=(
-            f"Validate {project_label} by testing the highest-risk assumptions with direct "
-            "target-user conversations and lightweight prototype tasks."
-        ),
-        plans=[_fallback_validation_plan_item(assumption) for assumption in assumptions],
-    )
+    return validation_generation.fallback_validation_plan(project.name, assumptions)
 
 
 def _fallback_validation_plan_item(assumption: Assumption) -> ValidationPlanDraft:
-    return ValidationPlanDraft(
-        assumption_id=assumption.id,
-        assumption_text=assumption.text,
-        method="customer_discovery_interviews",
-        target_respondent=(
-            "People who match the target user profile and recently tried to solve this problem."
-        ),
-        screener_questions=[
-            "Are you part of the target customer segment for this workflow?",
-            "Have you experienced this problem in the last 30 days?",
-            "Did you use a tool, spreadsheet, person, or workaround to solve it?",
-        ],
-        steps=[
-            "Recruit five target users with recent experience of the problem.",
-            "Ask each participant to describe the last time the problem occurred.",
-            "Show a low-fidelity workflow or concept and ask what they would do next.",
-            "Capture current alternatives, switching triggers, objections, and willingness to try.",
-        ],
-        interview_questions=[
-            "When did this problem last happen, and what did you do?",
-            "What tools, people, or workarounds did you use?",
-            "What made the current solution frustrating or acceptable?",
-            "What would make this workflow worth trying again next week?",
-        ],
-        survey_questions=[
-            "How often does this problem occur?",
-            "How satisfied are you with your current workaround?",
-            "How likely would you be to try this workflow in the next month?",
-        ],
-        landing_page_copy=(
-            "Turn a messy, repeated workflow into a clear next action. Join the validation "
-            "pilot if this problem is already costing you time each week."
-        ),
-        outreach_message=(
-            "I am testing a focused workflow for people who recently dealt with this problem. "
-            "Could I ask you 20 minutes of questions about how you handle it today? No sales "
-            "pitch; I am trying to learn whether this is painful enough to solve."
-        ),
-        note_taking_template=(
-            "Recent example:\nCurrent workaround:\nTime or money spent:\nTrigger to switch:\n"
-            "Objections:\nWillingness-to-pay signal:\nFollow-up permission:"
-        ),
-        result_interpretation_rubric=(
-            "Proceed if users describe recent painful examples, name repeated current "
-            "workarounds, and ask for access. Pivot if pain exists but the proposed workflow "
-            "does not match their buying trigger. Kill or pause if the problem is rare, "
-            "low-stakes, or fully satisfied by existing alternatives."
-        ),
-        success_criteria=(
-            "At least three of five participants describe a recent painful example and ask "
-            "to try or see the workflow again."
-        ),
-        failure_threshold=(
-            "Fewer than two participants report recent pain, or most prefer their current "
-            "workaround after seeing the concept."
-        ),
-        expected_signal_strength="medium",
-    )
+    return validation_generation.fallback_validation_plan_item(assumption)
 
 
 def _fallback_completion(
@@ -2025,23 +1542,7 @@ def _fallback_completion(
     fallback_name: str,
     error: BaseException | None = None,
 ) -> LLMCompletion:
-    content = draft.model_dump_json()
-    prompt_tokens = sum(len(message.content.split()) for message in messages)
-    completion_tokens = len(content.split())
-    return LLMCompletion(
-        content=content,
-        model_provider="local-fallback",
-        model_name=settings.litellm_model,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=prompt_tokens + completion_tokens,
-        total_cost=Decimal("0"),
-        raw_response={
-            "fallback": fallback_name,
-            "error": str(error)[:500] if error is not None else None,
-        },
-        used_stub=True,
-    )
+    return fallback_completion(settings, messages, draft, fallback_name, error)
 
 
 def _selected_assumptions(
@@ -2220,7 +1721,11 @@ def _write_validation_plan_artifact(
         artifact_id=artifact.id,
         version=_next_artifact_version(db, artifact.id),
         markdown_content=_render_validation_plan_markdown(project, draft),
-        structured_content=draft.model_dump(mode="json"),
+        structured_content={
+            **draft.model_dump(mode="json"),
+            "citation_outcomes": [],
+            "citation_verification_status": "not_applicable_no_claim_citations",
+        },
         generated_by_ai_run_id=run.id,
         langsmith_trace_id=trace.trace_id,
         langsmith_trace_url=trace.trace_url,
@@ -2381,29 +1886,6 @@ def _write_validation_interpretation(
     return interpretation
 
 
-def _validation_interpretation_proposed_updates(
-    mission: ValidationMission,
-    draft: ValidationResultInterpretationDraft,
-) -> dict[str, Any]:
-    return {
-        "validation_mission_id": str(mission.id),
-        "experiment_id": str(mission.experiment_id) if mission.experiment_id else None,
-        "assumption_id": str(mission.assumption_id),
-        "confidence_change": draft.signal.confidence_change,
-        "proposed_confidence_delta": round(draft.proposed_confidence_delta, 4),
-        "proposed_assumption_status": draft.proposed_assumption_status,
-        "decision_recommendation": draft.decision_recommendation,
-        "recommended_next_action": draft.signal.recommended_next_action,
-        "signal_summary": draft.signal_summary,
-        "thesis_evolution_event": {
-            "event_type": "validation_blocker",
-            "title": "Validation results interpreted",
-            "change_summary": draft.signal_summary,
-            "reason": draft.confidence_rationale,
-        },
-    }
-
-
 def _create_validation_interpretation_approval(
     db: Session,
     auth: AuthContext,
@@ -2448,6 +1930,7 @@ def apply_validation_interpretation_approval(
     interpretation = _get_validation_interpretation(db, auth, project_id, approval.entity_id)
     approval = governance_service.approve_approval_request(db, auth, project_id, approval_id)
     project = project_service.get_project(db, auth, project_id)
+    memory_item_id: uuid.UUID | None = None
     if interpretation.assumption_id is not None:
         assumption = get_assumption(db, auth, project_id, interpretation.assumption_id)
         current_score = assumption.confidence_score or Decimal("0.5")
@@ -2456,6 +1939,24 @@ def apply_validation_interpretation_approval(
         )
         if interpretation.proposed_assumption_status:
             assumption.status = interpretation.proposed_assumption_status
+        memory_item = memory_service.upsert_from_assumption(
+            db,
+            auth,
+            project_id,
+            assumption,
+            source_entity_type="validation_interpretation",
+            source_entity_id=interpretation.id,
+            source_metadata={
+                "approval_request_id": str(approval.id),
+                "validation_mission_id": str(interpretation.mission_id),
+                "decision_recommendation": interpretation.decision_recommendation,
+                "recommendation_source": "validation_result_interpretation",
+                "ai_run_id": str(interpretation.ai_run_id)
+                if interpretation.ai_run_id is not None
+                else None,
+            },
+        )
+        memory_item_id = memory_item.id
     mission = _get_validation_mission(db, auth, project_id, interpretation.mission_id)
     mission.status = "interpreted"
     _recalculate_project_confidence(db, auth, project_id)
@@ -2490,6 +1991,7 @@ def apply_validation_interpretation_approval(
             else None,
             "confidence_delta": str(interpretation.proposed_confidence_delta),
             "decision_recommendation": interpretation.decision_recommendation,
+            "memory_item_id": str(memory_item_id) if memory_item_id is not None else None,
         },
     )
     db.commit()
@@ -2622,81 +2124,10 @@ def _mission_why_it_matters(assumption: Assumption) -> str:
     )
 
 
-def _mission_steps(plan: ValidationPlanDraft) -> list[str]:
-    if plan.steps:
-        return plan.steps[:12]
-    return [
-        f"Recruit target respondents: {plan.target_respondent}.",
-        "Run the interview or test script.",
-        "Ask about the current workaround and urgency.",
-        "Test willingness to pay or switching intent.",
-        "Log the result and raw notes.",
-        "Review the decision recommendation.",
-    ]
-
-
-def _mission_assets(plan: ValidationPlanDraft) -> list[dict[str, str]]:
-    return [
-        {
-            "type": "interview_script",
-            "title": "Interview script",
-            "content": _asset_content(
-                [
-                    f"Target respondent: {plan.target_respondent}",
-                    "Interview questions:",
-                    *_numbered_asset_lines(plan.interview_questions),
-                ]
-            ),
-        },
-        {
-            "type": "screener_questions",
-            "title": "Screener questions",
-            "content": _asset_content(_numbered_asset_lines(plan.screener_questions)),
-        },
-        {
-            "type": "survey_questions",
-            "title": "Survey questions",
-            "content": _asset_content(_numbered_asset_lines(plan.survey_questions)),
-        },
-        {
-            "type": "outreach_message",
-            "title": "Outreach message",
-            "content": plan.outreach_message
-            or (
-                f"I am testing {plan.assumption_text.lower()} and looking for quick "
-                "feedback from people who have dealt with this recently. Would you be "
-                "open to a short conversation?"
-            ),
-        },
-        {
-            "type": "landing_page_copy",
-            "title": "Landing page copy",
-            "content": plan.landing_page_copy
-            or f"Validate demand for this workflow before building: {plan.assumption_text}",
-        },
-        {
-            "type": "note_taking_template",
-            "title": "Note-taking template",
-            "content": plan.note_taking_template
-            or "Pain observed:\nCurrent workaround:\nUrgency:\nWillingness to pay:\nObjections:",
-        },
-        {
-            "type": "results_rubric",
-            "title": "Result interpretation rubric",
-            "content": plan.result_interpretation_rubric
-            or (f"Success: {plan.success_criteria}\n\nFailure: {plan.failure_threshold}"),
-        },
-    ]
-
-
-def _numbered_asset_lines(values: list[str]) -> list[str]:
-    if not values:
-        return ["Not generated yet."]
-    return [f"{index}. {value}" for index, value in enumerate(values, start=1)]
-
-
-def _asset_content(parts: list[str]) -> str:
-    return "\n".join(part for part in parts if part).strip() or "Not generated yet."
+_mission_steps = plan_rendering.mission_steps
+_mission_assets = plan_rendering.mission_assets
+_numbered_asset_lines = plan_rendering.numbered_asset_lines
+_asset_content = plan_rendering.asset_content
 
 
 def _get_artifact(
@@ -2726,118 +2157,17 @@ def _next_artifact_version(db: Session, artifact_id: uuid.UUID) -> int:
     return int(current_max or 0) + 1
 
 
-def _render_validation_plan_markdown(project: Project, draft: ValidationPlanSetDraft) -> str:
-    sections = [f"# Validation Plan: {project.name}", f"## Summary\n{draft.summary}"]
-    for index, plan in enumerate(draft.plans, start=1):
-        sections.append(
-            "\n\n".join(
-                [
-                    f"## Experiment {index}: {plan.assumption_text}",
-                    f"**Method:** {plan.method}",
-                    f"**Target respondent:** {plan.target_respondent}",
-                    "### Screener Questions\n" + _markdown_list(plan.screener_questions),
-                    "### Steps\n" + _markdown_list(plan.steps),
-                    "### Interview Questions\n" + _markdown_list(plan.interview_questions),
-                    "### Survey Questions\n" + _markdown_list(plan.survey_questions),
-                    f"### Landing Page Copy\n{plan.landing_page_copy or 'Not generated.'}",
-                    f"### Outreach Message\n{plan.outreach_message or 'Not generated.'}",
-                    f"### Note-Taking Template\n{plan.note_taking_template or 'Not generated.'}",
-                    "### Result Interpretation Rubric\n"
-                    + (plan.result_interpretation_rubric or "Not generated."),
-                    f"### Success Criteria\n{plan.success_criteria}",
-                    f"### Failure Threshold\n{plan.failure_threshold}",
-                    f"### Expected Signal Strength\n{plan.expected_signal_strength}",
-                ]
-            )
-        )
-    return "\n\n".join(sections)
+_render_validation_plan_markdown = plan_rendering.render_validation_plan_markdown
+_render_experiment_plan = plan_rendering.render_experiment_plan
+_markdown_list = plan_rendering.markdown_list
 
 
-def _render_experiment_plan(plan: dict[str, Any]) -> str:
-    return "\n\n".join(
-        [
-            f"Target respondent: {plan.get('target_respondent')}",
-            "Screener questions:\n" + _markdown_list(plan.get("screener_questions") or []),
-            "Steps:\n" + _markdown_list(plan.get("steps") or []),
-            "Interview questions:\n" + _markdown_list(plan.get("interview_questions") or []),
-            "Survey questions:\n" + _markdown_list(plan.get("survey_questions") or []),
-            f"Landing page copy: {plan.get('landing_page_copy') or 'Not generated.'}",
-            f"Outreach message: {plan.get('outreach_message') or 'Not generated.'}",
-            f"Note-taking template: {plan.get('note_taking_template') or 'Not generated.'}",
-            "Result interpretation rubric: "
-            + str(plan.get("result_interpretation_rubric") or "Not generated."),
-            f"Expected signal strength: {plan.get('expected_signal_strength')}",
-        ]
-    )
-
-
-def _markdown_list(values: list[str]) -> str:
-    return "\n".join(f"- {value}" for value in values) or "- None"
-
-
-def _result_delta(payload: ExperimentResultCreate) -> Decimal:
-    if payload.confidence_delta is not None:
-        return Decimal(str(round(payload.confidence_delta, 4)))
-    defaults = {
-        "positive": Decimal("0.15"),
-        "negative": Decimal("-0.20"),
-        "mixed": Decimal("0.05"),
-        "inconclusive": Decimal("0.00"),
-    }
-    return defaults[payload.outcome]
-
-
-def _extract_quotes(raw_notes: str) -> list[str]:
-    quoted: list[str] = []
-    fragments = raw_notes.replace("“", '"').replace("”", '"').split('"')
-    for index, fragment in enumerate(fragments):
-        if index % 2 == 1:
-            stripped = fragment.strip()
-            if stripped:
-                quoted.append(_shorten(stripped, 240))
-    if quoted:
-        return quoted[:5]
-    lines = [
-        _shorten(line.strip("-• \t"), 240)
-        for line in raw_notes.splitlines()
-        if len(line.strip()) >= 20
-    ]
-    return lines[:3]
-
-
-def _extract_objections(raw_notes: str) -> list[str]:
-    objections: list[str] = []
-    for line in raw_notes.splitlines():
-        lowered = line.casefold()
-        if any(term in lowered for term in ("objection", "concern", "worried", "but ", "however")):
-            objections.append(_shorten(line.strip("-• \t"), 240))
-    if objections:
-        return objections[:5]
-    lowered = raw_notes.casefold()
-    defaults: list[str] = []
-    if "free" in lowered:
-        defaults.append("Existing free alternatives may cap willingness to pay.")
-    if "budget" in lowered:
-        defaults.append("Budget ownership or willingness to pay is unclear.")
-    if "switch" in lowered and "not" in lowered:
-        defaults.append("Switching from the current workaround may be difficult.")
-    return defaults[:5]
-
-
-def _fallback_current_workaround(raw_notes: str) -> str:
-    for line in raw_notes.splitlines():
-        lowered = line.casefold()
-        if "workaround" in lowered or "today" in lowered or "currently" in lowered:
-            return _shorten(line.strip("-• \t"), 500)
-    return "The current workaround was not clearly isolated in the notes."
-
-
-def _assumption_status_for_outcome(outcome: str) -> str:
-    if outcome == "positive":
-        return "validated"
-    if outcome == "negative":
-        return "invalidated"
-    return "inconclusive"
+_fallback_validation_interpretation = result_interpretation.fallback_validation_interpretation
+_result_delta = result_interpretation.result_delta
+_extract_quotes = result_interpretation.extract_quotes
+_extract_objections = result_interpretation.extract_objections
+_fallback_current_workaround = result_interpretation.fallback_current_workaround
+_assumption_status_for_outcome = result_interpretation.assumption_status_for_outcome
 
 
 def _recalculate_project_confidence(

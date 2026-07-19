@@ -12,12 +12,14 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
 from app.core.config import Settings
-from app.core.redaction import redact_payload
-from app.db.models import AIRun, AIStep, ArtifactVersion, Project, ResearchSprint
+from app.db.models import AIRun, AIStep, ArtifactVersion, Project, ResearchSprint, SecurityEvent
+from app.security.secrets import SecretName, SecretProviderError, has_secret, resolve_secret
+from app.services.data_protection_service import data_protection_service
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +67,19 @@ def ensure_research_sprint_trace(
         attach_run_trace(db, run, trace_id, trace_url)
     db.flush()
 
-    if _langsmith_enabled(settings):
+    if langsmith_enabled(settings):
+        _record_trace_payload_pii(
+            db,
+            settings,
+            run=run,
+            trace_id=trace_id,
+            payload={
+                "inputs": {
+                    "objective": sprint.plan.objective,
+                    "research_questions": sprint.plan.research_questions,
+                }
+            },
+        )
         _safe_create_run(
             settings,
             run_id=trace_id,
@@ -82,7 +96,7 @@ def ensure_research_sprint_trace(
     return TraceContext(
         trace_id=trace_id,
         trace_url=trace_url,
-        enabled=_langsmith_enabled(settings),
+        enabled=langsmith_enabled(settings),
         metadata=metadata,
     )
 
@@ -101,7 +115,14 @@ def ensure_run_trace(
     attach_run_trace(db, run, trace_id, trace_url)
     db.flush()
 
-    if _langsmith_enabled(settings):
+    if langsmith_enabled(settings):
+        _record_trace_payload_pii(
+            db,
+            settings,
+            run=run,
+            trace_id=trace_id,
+            payload={"inputs": {"input_summary": run.input_summary}},
+        )
         _safe_create_run(
             settings,
             run_id=trace_id,
@@ -115,7 +136,7 @@ def ensure_run_trace(
     return TraceContext(
         trace_id=trace_id,
         trace_url=trace_url,
-        enabled=_langsmith_enabled(settings),
+        enabled=langsmith_enabled(settings),
         metadata=metadata,
     )
 
@@ -174,6 +195,17 @@ def record_step_span(
             "model_provider": run.model_provider,
             "model_name": run.model_name,
         }
+        _record_trace_payload_pii(
+            db,
+            settings,
+            run=run,
+            trace_id=trace.trace_id,
+            payload={
+                "inputs": input_json or {},
+                "outputs": output_json or {},
+                "error": error,
+            },
+        )
         _safe_create_run(
             settings,
             run_id=span_id,
@@ -193,6 +225,8 @@ def complete_trace(
     settings: Settings,
     trace: TraceContext,
     *,
+    db: Session,
+    run: AIRun,
     output_summary: str | None = None,
     error: str | None = None,
     metrics: dict[str, int | float | str | Decimal | None] | None = None,
@@ -201,18 +235,28 @@ def complete_trace(
 
     if not trace.enabled:
         return
+    _record_trace_payload_pii(
+        db,
+        settings,
+        run=run,
+        trace_id=trace.trace_id,
+        payload={"summary": output_summary, "metrics": metrics or {}, "error": error},
+    )
     try:
         from langsmith import Client
 
-        client = Client(api_key=settings.langsmith_api_key, api_url=settings.langsmith_endpoint)
+        client = Client(
+            api_key=resolve_secret(settings, SecretName.LANGSMITH_API_KEY),
+            api_url=settings.langsmith_endpoint,
+        )
         client.update_run(
             trace.trace_id,
             outputs=_sanitize({"summary": output_summary, "metrics": metrics or {}}),
-            error=error,
+            error=_sanitize(error) if error else None,
             end_time=datetime.now(UTC),
         )
-    except Exception as exc:  # pragma: no cover - best-effort external telemetry
-        logger.warning("LangSmith trace completion failed: %s", exc)
+    except Exception:  # pragma: no cover - best-effort external telemetry
+        logger.warning("LangSmith trace completion failed.")
 
 
 def sanitize_for_observability(value: Any) -> Any:
@@ -221,8 +265,14 @@ def sanitize_for_observability(value: Any) -> Any:
     return _sanitize(value)
 
 
-def _langsmith_enabled(settings: Settings) -> bool:
-    return bool(settings.langsmith_tracing and settings.langsmith_api_key)
+def langsmith_enabled(settings: Settings) -> bool:
+    if not settings.langsmith_tracing:
+        return False
+    try:
+        return has_secret(settings, SecretName.LANGSMITH_API_KEY)
+    except SecretProviderError:
+        logger.warning("LangSmith credentials are unavailable; tracing is disabled.")
+        return False
 
 
 def _trace_url(settings: Settings, trace_id: str) -> str:
@@ -246,7 +296,10 @@ def _safe_create_run(
     try:
         from langsmith import Client
 
-        client = Client(api_key=settings.langsmith_api_key, api_url=settings.langsmith_endpoint)
+        client = Client(
+            api_key=resolve_secret(settings, SecretName.LANGSMITH_API_KEY),
+            api_url=settings.langsmith_endpoint,
+        )
         client.create_run(
             name=name,
             run_type=run_type,
@@ -255,14 +308,74 @@ def _safe_create_run(
             project_name=settings.langsmith_project,
             inputs=_sanitize(inputs),
             outputs=_sanitize(outputs or {}),
-            error=error,
+            error=_sanitize(error) if error else None,
             start_time=datetime.now(UTC),
             end_time=datetime.now(UTC),
-            extra={"metadata": _sanitize(metadata)},
+            extra={
+                "metadata": _sanitize(
+                    {**metadata, "data_classification": _classification(inputs, outputs)}
+                )
+            },
         )
-    except Exception as exc:  # pragma: no cover - best-effort external telemetry
-        logger.warning("LangSmith trace upload failed for %s: %s", name, exc)
+    except Exception:  # pragma: no cover - best-effort external telemetry
+        logger.warning("LangSmith trace upload failed for %s.", name)
+
+
+def _record_trace_payload_pii(
+    db: Session,
+    settings: Settings,
+    *,
+    run: AIRun | None,
+    trace_id: str,
+    payload: object,
+) -> None:
+    if run is None:
+        return
+    inspection = data_protection_service.inspect_trace_payload(
+        payload,
+        project_id=run.project_id,
+    )
+    if not inspection.pii_entity_types:
+        return
+    existing = db.scalar(
+        select(SecurityEvent.id).where(
+            SecurityEvent.workspace_id == run.workspace_id,
+            SecurityEvent.ai_run_id == run.id,
+            SecurityEvent.langsmith_trace_id == trace_id,
+            SecurityEvent.event_type == "pii_redaction_in_trace_payload",
+        )
+    )
+    if existing is not None:
+        return
+    from app.services import security_event_service
+
+    security_event_service.record_security_event(
+        db,
+        workspace_id=run.workspace_id,
+        project_id=run.project_id,
+        user_id=run.created_by,
+        ai_run_id=run.id,
+        langsmith_trace_id=trace_id,
+        event_type="pii_redaction_in_trace_payload",
+        severity="medium",
+        source="workflow",
+        summary="Redacted sensitive entities before a trace provider request.",
+        attributes={
+            "trace_destination": "langsmith",
+            "pii_entity_types": list(inspection.pii_entity_types[:20]),
+            "redacted_value_count": min(inspection.redacted_value_count, 100),
+        },
+        settings=settings,
+    )
 
 
 def _sanitize(value: Any, *, key: str | None = None) -> Any:
-    return redact_payload(value, key=key, redact_emails=True, max_string_length=2000)
+    del key
+    return data_protection_service.redact_for_trace(value)
+
+
+def _classification(inputs: dict[str, Any], outputs: dict[str, Any] | None) -> str:
+    values = [str(inputs), str(outputs or {})]
+    classifications = [data_protection_service.classify_text(value) for value in values]
+    order = {"public": 0, "internal": 1, "confidential": 2, "restricted": 3}
+    return max(classifications, key=lambda item: order[item.value]).value

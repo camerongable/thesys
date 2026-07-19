@@ -1,0 +1,13 @@
+version: 1
+suite: pii_exfiltration
+cases:
+  - id: pii-and-api-key-ingestion
+    execution: deterministic
+    handler: data_protection
+    input:
+      text: "Email maria@example.com with api_key=sk-redteamfixture123."
+    expect:
+      data_classification: restricted
+      redacts:
+        - maria@example.com
+        - sk-redteamfixture123

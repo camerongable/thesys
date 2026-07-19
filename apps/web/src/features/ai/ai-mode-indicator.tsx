@@ -54,11 +54,20 @@ export function AiModeIndicator() {
       ? "inline-flex h-10 max-w-full min-w-0 items-center gap-2 rounded-md border border-success-border bg-success-muted px-3 py-2 text-xs text-success-foreground"
       : "inline-flex h-10 max-w-full min-w-0 items-center gap-2 rounded-md border border-warning-border bg-warning-muted px-3 py-2 text-xs text-warning-foreground"
     : "inline-flex h-10 max-w-full min-w-0 items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground";
+  const cacheText = `cache emb ${status.ai_embedding_cache_enabled ? "on" : "off"}/retrieval ${
+    status.ai_retrieval_cache_enabled ? "on" : "off"
+  }/rerank ${status.ai_rerank_cache_enabled ? "on" : "off"}/answer ${
+    status.ai_semantic_answer_cache_enabled
+      ? status.ai_semantic_answer_cache_live_enabled
+        ? "live"
+        : "stub-only"
+      : "off"
+  }`;
 
   return (
     <div
       className={statusClassName}
-      title={`${status.resolved_mode} · ${status.litellm_model} · ${status.embedding_provider}/${status.embedding_model} · retrieval ${status.retrieval_vector_path} · reranker ${status.retrieval_reranker_provider}${status.retrieval_reranking_enabled ? "" : " off"} · context ${status.retrieval_context_token_budget} tokens · ${status.litellm_base_url} · ${operationalText}`}
+      title={`${status.resolved_mode} · ${status.litellm_model} · ${status.embedding_provider}/${status.embedding_model} · retrieval ${status.retrieval_vector_path} · reranker ${status.retrieval_reranker_provider}${status.retrieval_reranking_enabled ? "" : " off"} · context ${status.retrieval_context_token_budget} tokens · ${cacheText} · ${status.litellm_base_url} · ${operationalText}`}
     >
       <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
       <span className="min-w-0 truncate font-medium">

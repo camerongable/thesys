@@ -13,6 +13,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { SafeExternalLink } from "@/components/safe-external-link";
 import { DomainError, DomainHeader, DomainPanel } from "@/features/projects/decision-room";
 import {
   analyzeCompetitors,
@@ -502,15 +503,13 @@ function CompetitorProfile({
 
       <div className="mt-4 border-t border-border pt-4">
         {competitor.url ? (
-          <a
+          <SafeExternalLink
             className="inline-flex max-w-full items-center gap-1 truncate text-sm text-primary hover:underline"
             href={competitor.url}
-            rel="noreferrer"
-            target="_blank"
           >
             <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span className="truncate">{competitor.url}</span>
-          </a>
+          </SafeExternalLink>
         ) : null}
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -584,15 +583,13 @@ function CompetitorDetailPanel({ competitor }: { competitor: Competitor | null }
       </div>
 
       {competitor.url ? (
-        <a
+        <SafeExternalLink
           className="mt-4 inline-flex max-w-full items-center gap-1 truncate text-sm text-primary hover:underline"
           href={competitor.url}
-          rel="noreferrer"
-          target="_blank"
         >
           <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="truncate">{competitor.url}</span>
-        </a>
+        </SafeExternalLink>
       ) : null}
 
       <div className="mt-4 space-y-4 border-t border-border pt-4">

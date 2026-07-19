@@ -16,7 +16,7 @@ from app.schemas.artifacts import (
     ArtifactVersionRead,
     OpportunityBriefGenerateRead,
 )
-from app.services import opportunity_brief_service
+from app.services import opportunity_brief_service, security_policy_service
 
 router = APIRouter(prefix="/api/projects/{project_id}/artifacts", tags=["artifacts"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -57,12 +57,24 @@ def generate_opportunity_brief(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> OpportunityBriefGenerateRead:
-    result = opportunity_brief_service.generate_opportunity_brief(
+    with security_policy_service.guarded_workflow(
         db,
         auth,
         settings,
-        project_id,
-    )
+        project_id=project_id,
+        workflow_type="opportunity_brief",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=1.5,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        result = opportunity_brief_service.generate_opportunity_brief(
+            db,
+            auth,
+            settings,
+            project_id,
+        )
     return OpportunityBriefGenerateRead(
         ai_run_id=result.run.id,
         ai_step_id=result.step.id,

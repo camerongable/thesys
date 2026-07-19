@@ -1,0 +1,19 @@
+title = "Thesys secret scanning configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Explicit fake credentials used to verify redaction behavior in tests."
+targetRules = ["generic-api-key"]
+regexTarget = "match"
+regexes = [
+  '''(?i)api_key=sk-pdfsecret123''',
+  '''(?i)access_token=caption-secret-123''',
+  '''(?i)api_key=sk-logsecret123''',
+  '''(?i)api_key=sk-testsecret1234567890''',
+  '''(?i)api_key=sk-mcpparitysecret123456789''',
+  '''(?i)api_key=sk-testsecret123456789''',
+  '''(?i)api_key": "sk-test-secret-123456789''',
+  '''(?i)secret = "sk-testsecret123456789''',
+]

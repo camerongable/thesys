@@ -1,7 +1,23 @@
 import pytest
 
 from app.core.config import Settings
-from app.services import embedding_service
+from app.services import embedding_service, model_data_policy_service
+
+
+def test_embedding_provider_scope_is_explicitly_non_generating() -> None:
+    scope = model_data_policy_service.EMBEDDING_PROVIDER_SCOPE
+
+    assert scope.purpose == "embedding"
+    assert scope.generates_content is False
+    assert scope.requires_guardrail_gateway is False
+    assert scope.required_controls == (
+        "data_classification",
+        "pii_and_secret_redaction",
+        "provider_model_policy",
+        "credential_resolution",
+        "egress_policy",
+        "vector_dimension_validation",
+    )
 
 
 def test_litellm_embedding_provider_parses_vector(monkeypatch: pytest.MonkeyPatch) -> None:

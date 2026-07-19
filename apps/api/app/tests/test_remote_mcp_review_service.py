@@ -1,0 +1,484 @@
+import json
+import uuid
+
+import pytest
+from pydantic import SecretStr
+
+from app.core.config import Settings
+from app.db.models import MCPServerRegistration
+from app.services import remote_mcp_review_service
+
+
+class _Response:
+    def __init__(self, payload: dict[str, object], headers: dict[str, str] | None = None) -> None:
+        self._payload = payload
+        self.headers = headers or {}
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, object]:
+        return self._payload
+
+
+class _Client:
+    def __init__(self, responses: list[_Response]) -> None:
+        self._responses = responses
+        self.requests: list[dict[str, object]] = []
+
+    def __enter__(self) -> "_Client":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def post(self, _url: str, **kwargs: object) -> _Response:
+        self.requests.append(kwargs)
+        return self._responses.pop(0)
+
+
+class _SseResponse:
+    def __init__(self, lines: list[str], *, content_type: str = "text/event-stream") -> None:
+        self._lines = lines
+        self.headers = {"Content-Type": content_type}
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def iter_lines(self):
+        yield from self._lines
+
+
+class _StreamContext:
+    def __init__(self, response: _SseResponse) -> None:
+        self._response = response
+
+    def __enter__(self) -> _SseResponse:
+        return self._response
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+
+class _SseClient(_Client):
+    def __init__(self, responses: list[_Response], stream_response: _SseResponse) -> None:
+        super().__init__(responses)
+        self._stream_response = stream_response
+        self.stream_requests: list[tuple[str, str, dict[str, object]]] = []
+
+    def stream(self, method: str, url: str, **kwargs: object) -> _StreamContext:
+        self.stream_requests.append((method, url, kwargs))
+        return _StreamContext(self._stream_response)
+
+
+def _registration() -> MCPServerRegistration:
+    input_schema = {"type": "object", "properties": {"query": {"type": "string"}}}
+    output_schema = {"type": "object", "properties": {"result": {"type": "string"}}}
+    return MCPServerRegistration(
+        workspace_id=uuid.uuid4(),
+        name="Reviewed server",
+        base_url="https://mcp.example.test/v1",
+        transport="streamable_http",
+        server_fingerprint="a" * 64,
+        approved_version="1.2.3",
+        allowed_tools=["search_project_evidence"],
+        tool_schema_snapshot={
+            "search_project_evidence": {
+                "version": "1.0.0",
+                "input_schema": input_schema,
+                "output_schema": output_schema,
+            }
+        },
+        oauth_issuer=None,
+        enabled=False,
+        reviewed_by=uuid.uuid4(),
+    )
+
+
+def _tool_catalog(registration: MCPServerRegistration) -> dict[str, object]:
+    return {
+        "tools": [
+            {
+                "name": "search_project_evidence",
+                "inputSchema": registration.tool_schema_snapshot["search_project_evidence"][
+                    "input_schema"
+                ],
+                "outputSchema": registration.tool_schema_snapshot["search_project_evidence"][
+                    "output_schema"
+                ],
+                "annotations": {"manifestVersion": "1.0.0"},
+            }
+        ]
+    }
+
+
+def _sse_event(event: str, payload: dict[str, object] | str) -> list[str]:
+    data = payload if isinstance(payload, str) else json.dumps(payload)
+    return [f"event: {event}", f"data: {data}", ""]
+
+
+def test_review_registration_verifies_tls_version_and_full_manifest(monkeypatch) -> None:
+    registration = _registration()
+    registration.oauth_issuer = "https://issuer.example.test"
+    client = _Client(
+        [
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {"serverInfo": {"name": "remote", "version": "1.2.3"}},
+                },
+                {"Mcp-Session-Id": "session-1"},
+            ),
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "search_project_evidence",
+                                "inputSchema": registration.tool_schema_snapshot[
+                                    "search_project_evidence"
+                                ]["input_schema"],
+                                "outputSchema": registration.tool_schema_snapshot[
+                                    "search_project_evidence"
+                                ]["output_schema"],
+                                "annotations": {"manifestVersion": "1.0.0"},
+                            }
+                        ]
+                    },
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        remote_mcp_review_service,
+        "_certificate_fingerprint",
+        lambda *_args, **_kwargs: "a" * 64,
+    )
+    monkeypatch.setattr(remote_mcp_review_service.httpx, "Client", lambda **_kwargs: client)
+
+    review = remote_mcp_review_service.review_registration(
+        Settings(),
+        registration,
+        authorization=SecretStr("server-scoped-token"),
+    )
+
+    assert review.server_name == "remote"
+    assert review.server_version == "1.2.3"
+    assert review.tool_count == 1
+    assert client.requests[1]["headers"] == {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "Mcp-Session-Id": "session-1",
+        "Authorization": "Bearer server-scoped-token",
+    }
+
+
+def test_review_registration_rejects_live_schema_drift(monkeypatch) -> None:
+    registration = _registration()
+    client = _Client(
+        [
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {"serverInfo": {"name": "remote", "version": "1.2.3"}},
+                }
+            ),
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "search_project_evidence",
+                                "inputSchema": {"type": "object", "properties": {}},
+                                "outputSchema": registration.tool_schema_snapshot[
+                                    "search_project_evidence"
+                                ]["output_schema"],
+                                "annotations": {"manifestVersion": "1.0.0"},
+                            }
+                        ]
+                    },
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        remote_mcp_review_service,
+        "_certificate_fingerprint",
+        lambda *_args, **_kwargs: "a" * 64,
+    )
+    monkeypatch.setattr(remote_mcp_review_service.httpx, "Client", lambda **_kwargs: client)
+
+    with pytest.raises(remote_mcp_review_service.RemoteMcpReviewError) as exc_info:
+        remote_mcp_review_service.review_registration(Settings(), registration)
+
+    assert exc_info.value.reason_code == "tool_schema_drift"
+
+
+def test_invoke_registration_revalidates_session_and_returns_schema_checked_output(
+    monkeypatch,
+) -> None:
+    registration = _registration()
+    registration.enabled = True
+    registration.oauth_issuer = "https://issuer.example.test"
+    client = _Client(
+        [
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {"serverInfo": {"name": "remote", "version": "1.2.3"}},
+                },
+                {"Mcp-Session-Id": "session-1"},
+            ),
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "search_project_evidence",
+                                "inputSchema": registration.tool_schema_snapshot[
+                                    "search_project_evidence"
+                                ]["input_schema"],
+                                "outputSchema": registration.tool_schema_snapshot[
+                                    "search_project_evidence"
+                                ]["output_schema"],
+                                "annotations": {"manifestVersion": "1.0.0"},
+                            }
+                        ]
+                    },
+                }
+            ),
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "result": {
+                        "content": [{"type": "text", "text": "ignored"}],
+                        "structuredContent": {"result": "approved output"},
+                        "isError": False,
+                    },
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        remote_mcp_review_service,
+        "_certificate_fingerprint",
+        lambda *_args, **_kwargs: "a" * 64,
+    )
+    monkeypatch.setattr(remote_mcp_review_service.httpx, "Client", lambda **_kwargs: client)
+
+    invocation = remote_mcp_review_service.invoke_registration(
+        Settings(),
+        registration,
+        tool_name="search_project_evidence",
+        arguments={"query": "reviewed query"},
+        authorization=SecretStr("server-scoped-token"),
+        idempotency_key="reviewed-idempotency-key",
+    )
+
+    assert invocation.tool_name == "search_project_evidence"
+    assert invocation.output == {"result": "approved output"}
+    assert client.requests[2]["headers"] == {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "Mcp-Session-Id": "session-1",
+        "Authorization": "Bearer server-scoped-token",
+    }
+    assert client.requests[2]["json"] == {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "search_project_evidence",
+            "arguments": {"query": "reviewed query"},
+            "_meta": {"thesys/idempotencyKey": "reviewed-idempotency-key"},
+        },
+    }
+
+
+def test_invoke_registration_rejects_disabled_unapproved_and_invalid_output(monkeypatch) -> None:
+    registration = _registration()
+    with pytest.raises(remote_mcp_review_service.RemoteMcpReviewError) as disabled_exc:
+        remote_mcp_review_service.invoke_registration(
+            Settings(),
+            registration,
+            tool_name="search_project_evidence",
+            arguments={"query": "reviewed query"},
+        )
+
+    registration.enabled = True
+    with pytest.raises(remote_mcp_review_service.RemoteMcpReviewError) as tool_exc:
+        remote_mcp_review_service.invoke_registration(
+            Settings(),
+            registration,
+            tool_name="unapproved_tool",
+            arguments={},
+        )
+
+    client = _Client(
+        [
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {"serverInfo": {"name": "remote", "version": "1.2.3"}},
+                },
+                {"Mcp-Session-Id": "session-1"},
+            ),
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "search_project_evidence",
+                                "inputSchema": registration.tool_schema_snapshot[
+                                    "search_project_evidence"
+                                ]["input_schema"],
+                                "outputSchema": registration.tool_schema_snapshot[
+                                    "search_project_evidence"
+                                ]["output_schema"],
+                                "annotations": {"manifestVersion": "1.0.0"},
+                            }
+                        ]
+                    },
+                }
+            ),
+            _Response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "result": {"structuredContent": {"result": 7}, "isError": False},
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        remote_mcp_review_service,
+        "_certificate_fingerprint",
+        lambda *_args, **_kwargs: "a" * 64,
+    )
+    monkeypatch.setattr(remote_mcp_review_service.httpx, "Client", lambda **_kwargs: client)
+
+    with pytest.raises(remote_mcp_review_service.RemoteMcpReviewError) as output_exc:
+        remote_mcp_review_service.invoke_registration(
+            Settings(),
+            registration,
+            tool_name="search_project_evidence",
+            arguments={"query": "reviewed query"},
+        )
+
+    assert disabled_exc.value.reason_code == "server_not_enabled"
+    assert tool_exc.value.reason_code == "tool_not_approved"
+    assert output_exc.value.reason_code == "tool_output_invalid"
+
+
+def test_invoke_registration_uses_reviewed_legacy_sse_session(monkeypatch) -> None:
+    registration = _registration()
+    registration.enabled = True
+    registration.transport = "sse"
+    sse_messages = _sse_event("endpoint", "/messages?sessionId=reviewed")
+    sse_messages += _sse_event(
+        "message",
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"serverInfo": {"name": "remote", "version": "1.2.3"}},
+        },
+    )
+    sse_messages += _sse_event(
+        "message",
+        {"jsonrpc": "2.0", "method": "notifications/progress", "params": {}},
+    )
+    sse_messages += _sse_event(
+        "message",
+        {"jsonrpc": "2.0", "id": 2, "result": _tool_catalog(registration)},
+    )
+    sse_messages += _sse_event(
+        "message",
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "result": {"structuredContent": {"result": "approved output"}, "isError": False},
+        },
+    )
+    client = _SseClient(
+        [_Response({}), _Response({}), _Response({})],
+        _SseResponse(sse_messages),
+    )
+    monkeypatch.setattr(
+        remote_mcp_review_service,
+        "_certificate_fingerprint",
+        lambda *_args, **_kwargs: "a" * 64,
+    )
+    monkeypatch.setattr(remote_mcp_review_service.httpx, "Client", lambda **_kwargs: client)
+
+    invocation = remote_mcp_review_service.invoke_registration(
+        Settings(),
+        registration,
+        tool_name="search_project_evidence",
+        arguments={"query": "reviewed query"},
+        authorization=SecretStr("server-scoped-token"),
+        idempotency_key="reviewed-idempotency-key",
+    )
+
+    assert invocation.output == {"result": "approved output"}
+    assert client.stream_requests == [
+        (
+            "GET",
+            registration.base_url,
+            {
+                "headers": {
+                    "Accept": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "Authorization": "Bearer server-scoped-token",
+                }
+            },
+        )
+    ]
+    assert client.requests[0]["headers"] == {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": "Bearer server-scoped-token",
+    }
+    assert client.requests[2]["json"] == {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "search_project_evidence",
+            "arguments": {"query": "reviewed query"},
+            "_meta": {"thesys/idempotencyKey": "reviewed-idempotency-key"},
+        },
+    }
+
+
+def test_review_registration_rejects_cross_origin_sse_endpoint(monkeypatch) -> None:
+    registration = _registration()
+    registration.transport = "sse"
+    client = _SseClient(
+        [],
+        _SseResponse(_sse_event("endpoint", "https://attacker.example.test/messages")),
+    )
+    monkeypatch.setattr(
+        remote_mcp_review_service,
+        "_certificate_fingerprint",
+        lambda *_args, **_kwargs: "a" * 64,
+    )
+    monkeypatch.setattr(remote_mcp_review_service.httpx, "Client", lambda **_kwargs: client)
+
+    with pytest.raises(remote_mcp_review_service.RemoteMcpReviewError) as exc_info:
+        remote_mcp_review_service.review_registration(Settings(), registration)
+
+    assert exc_info.value.reason_code == "sse_endpoint_url_invalid"
+    assert client.requests == []

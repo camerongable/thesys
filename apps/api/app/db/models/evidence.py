@@ -31,7 +31,7 @@ class EvidenceSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="ck_evidence_sources_source_type",
         ),
         CheckConstraint(
-            "ingestion_status in ('pending','processing','ready','failed')",
+            "ingestion_status in ('pending','processing','ready','failed','quarantined')",
             name="ck_evidence_sources_ingestion_status",
         ),
     )
@@ -72,6 +72,42 @@ class EvidenceSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="EvidenceChunk.chunk_index",
     )
+
+
+class EvidenceSourceTombstone(UUIDPrimaryKeyMixin, Base):
+    """Non-content deletion record for an evidence source and its derivatives."""
+
+    __tablename__ = "evidence_source_tombstones"
+    __table_args__ = (
+        CheckConstraint(
+            "deletion_reason in ('user_deleted','retention_expired')",
+            name="ck_evidence_source_tombstones_deletion_reason",
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, unique=True)
+    source_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    deletion_reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    deletion_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"),
+        nullable=False,
+        default=dict,
+    )
+    deleted_by: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
+    deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class EvidenceChunk(UUIDPrimaryKeyMixin, Base):

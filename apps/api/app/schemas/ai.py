@@ -109,10 +109,15 @@ class AIStatusRead(BaseModel):
     embedding_version: str
     embedding_timeout_seconds: float
     embedding_retry_attempts: int
+    ai_embedding_cache_enabled: bool
+    ai_retrieval_cache_enabled: bool
+    ai_rerank_cache_enabled: bool
+    ai_semantic_answer_cache_enabled: bool
+    ai_semantic_answer_cache_live_enabled: bool
     retrieval_vector_path: Literal["auto", "sql", "python"]
     retrieval_python_fallback_enabled: bool
     retrieval_reranking_enabled: bool
-    retrieval_reranker_provider: Literal["deterministic", "litellm"]
+    retrieval_reranker_provider: Literal["none", "deterministic", "litellm"]
     retrieval_context_token_budget: int
     retrieval_max_chunks_per_source: int
     retrieval_min_context_score: float

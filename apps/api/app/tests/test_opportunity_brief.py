@@ -15,6 +15,7 @@ from app.db.models import (
     Claim,
     ClaimEvidenceLink,
     Risk,
+    SecurityEvent,
 )
 
 
@@ -76,6 +77,21 @@ def test_generate_opportunity_brief_retrieves_cites_and_persists(
     assert run is not None
     assert run.workflow_type == "opportunity_brief"
     assert run.status == "succeeded"
+    verification_event = db_session.scalar(
+        select(SecurityEvent).where(
+            SecurityEvent.event_type == "artifact_claim_verification_failed",
+            SecurityEvent.ai_run_id == run.id,
+        )
+    )
+    assert verification_event is not None
+    assert verification_event.severity == "medium"
+    assert verification_event.source == "workflow"
+    assert verification_event.attributes == {
+        "artifact_type": "opportunity_brief",
+        "unverified_claim_count": len(body["unsupported_claims"]),
+    }
+    assert body["unsupported_claims"][0] not in verification_event.summary
+    assert body["unsupported_claims"][0] not in str(verification_event.attributes)
 
     steps = list(
         db_session.scalars(

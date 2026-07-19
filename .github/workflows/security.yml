@@ -1,0 +1,264 @@
+name: Security
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_garak:
+        description: Run the Garak target scan (requires protected target secrets)
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+env:
+  UV_LOCKED: "1"
+  PROMPTFOO_DISABLE_UPDATE: "true"
+
+jobs:
+  documentation:
+    name: Documentation integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - run: python3 scripts/check_documentation_links.py
+
+  python-security:
+    name: Python security
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          version: "0.8.14"
+      - run: uv sync --project apps/api --locked --all-extras
+      - run: uv run --project apps/api ruff check apps/api/app
+      - run: uv run --project apps/api pytest apps/api/app/tests/security
+      - run: uvx --from bandit==1.8.6 bandit -q -r apps/api/app -x apps/api/app/tests -ll
+      - run: uv export --project apps/api --locked --no-dev --output-file /tmp/api-requirements.txt
+      - name: Python dependency baseline audit
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        run: uvx --from pip-audit==2.9.0 pip-audit --strict -r /tmp/api-requirements.txt
+      - run: uvx --with 'setuptools<81' --from semgrep==1.130.0 semgrep scan --config auto --error apps/api/app
+
+  web-security:
+    name: Web security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: "10.12.1"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter thesys-web test
+      - run: pnpm --filter thesys-web typecheck
+      - run: pnpm audit --audit-level=high
+
+  promptfoo-fast:
+    name: Promptfoo fast suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          version: "0.8.14"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: "10.12.1"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --project apps/api --locked --all-extras
+      - run: pnpm security:redteam:fast
+
+  model-prompt-security-evals:
+    name: Model and prompt security evals
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          version: "0.8.14"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: "10.12.1"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --project apps/api --locked --all-extras
+      - name: Quality, PII, grounding, tool, budget, and latency regressions
+        run: |
+          uv run --project apps/api pytest \
+            apps/api/app/tests/security/test_approved_model_registry.py \
+            apps/api/app/tests/security/test_approved_prompt_registry.py \
+            apps/api/app/tests/security/test_guardrail_gateway.py \
+            apps/api/app/tests/security/test_litellm_data_protection.py \
+            apps/api/app/tests/security/test_workflow_security_budget.py \
+            apps/api/app/tests/test_retrieval_quality_eval.py \
+            apps/api/app/tests/test_demo_eval_workflows.py \
+            apps/api/app/tests/test_tool_boundary.py
+      - name: Prompt and model adversarial regressions
+        run: pnpm security:redteam:fast
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_VERSION: "8.30.1"
+
+  osv-pr:
+    name: OSV scan (new PR vulnerabilities)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - name: Materialize base dependency lockfiles
+        run: |
+          mkdir -p .osv-baseline/apps/api
+          git show "${{ github.event.pull_request.base.sha }}:apps/api/uv.lock" > .osv-baseline/apps/api/uv.lock
+          git show "${{ github.event.pull_request.base.sha }}:pnpm-lock.yaml" > .osv-baseline/pnpm-lock.yaml
+      - name: Scan base dependency lockfiles
+        uses: google/osv-scanner-action/osv-scanner-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        continue-on-error: true
+        with:
+          scan-args: |
+            --format=json
+            --output=.osv-baseline.json
+            --lockfile=.osv-baseline/apps/api/uv.lock
+            --lockfile=.osv-baseline/pnpm-lock.yaml
+      - name: Scan current dependency lockfiles
+        uses: google/osv-scanner-action/osv-scanner-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        continue-on-error: true
+        with:
+          scan-args: |
+            --format=json
+            --output=.osv-current.json
+            --lockfile=apps/api/uv.lock
+            --lockfile=pnpm-lock.yaml
+      - name: Fail only newly introduced OSV findings
+        run: python3 scripts/check_osv_pr_delta.py --baseline .osv-baseline.json --current .osv-current.json
+
+  osv-full:
+    name: OSV scan (full dependency baseline)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Scan full dependency baseline
+        uses: google/osv-scanner-action/osv-scanner-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        with:
+          scan-args: |
+            --lockfile=apps/api/uv.lock
+            --lockfile=pnpm-lock.yaml
+
+  sbom:
+    name: SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: .
+          format: cyclonedx-json
+
+  nightly-security:
+    name: Nightly security regression suite
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          version: "0.8.14"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: "10.12.1"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --project apps/api --locked --all-extras
+      - name: Full red-team, tenant, PII, memory, and budget regressions
+        run: uv run --project apps/api pytest apps/api/app/tests/security
+      - name: Full Promptfoo suite
+        run: pnpm security:redteam:full
+      - name: Configure Garak REST target
+        if: github.event_name == 'schedule' || inputs.run_garak == true
+        env:
+          GARAK_TARGET_URI: ${{ secrets.GARAK_TARGET_URI }}
+          GARAK_TARGET_AUTHORIZATION: ${{ secrets.GARAK_TARGET_AUTHORIZATION }}
+        run: |
+          uv run --project apps/api python scripts/write_garak_rest_config.py \
+            --target-uri "$GARAK_TARGET_URI" \
+            --authorization "$GARAK_TARGET_AUTHORIZATION" \
+            --output artifacts/garak-rest.json
+      - name: Garak application endpoint scan
+        if: github.event_name == 'schedule' || inputs.run_garak == true
+        run: |
+          uvx --from garak==0.15.1 garak \
+            --target_type rest \
+            --generator_option_file artifacts/garak-rest.json \
+            --probes promptinject,encoding \
+            --generations 1 \
+            --report_prefix artifacts/garak
+      - name: Build API image for nightly scan
+        run: docker build --file apps/api/Dockerfile --tag thesys-api:nightly-security .
+      - name: Build web image for nightly scan
+        run: docker build --file apps/web/Dockerfile --tag thesys-web:nightly-security .
+      - name: Scan API image
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: thesys-api:nightly-security
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Scan web image
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: thesys-web:nightly-security
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Scan Kubernetes configuration
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: infra/k8s/base
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true

@@ -1,40 +1,83 @@
 """Evidence ingestion, extraction, chunking, embedding, and source serialization."""
 
-import re
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from html.parser import HTMLParser
-from io import BytesIO
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from time import perf_counter
 from typing import Any
 
 import httpx
 from fastapi import HTTPException, UploadFile, status
-from pypdf import PdfReader
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.prompts import EVIDENCE_INGESTION_PROMPT_VERSION
-from app.core.auth import AuthContext
+from app.common import metadata as metadata_utils
+from app.core.auth import AuthContext, record_cross_tenant_access_attempt, require_permission
 from app.core.config import Settings
-from app.core.security import SecurityValidationError, validate_upload, validate_url_fetch_target
-from app.db.models import EvidenceChunk, EvidenceSource
+from app.core.security import (
+    SecurityValidationError,
+    validate_upload,
+    validate_url_fetch_target,
+    validate_url_response_content_type,
+)
+from app.db.models import (
+    AssumptionEvidenceLink,
+    AuditEvent,
+    Claim,
+    ClaimEvidenceLink,
+    CompetitorCandidate,
+    CompetitorEvidenceLink,
+    Decision,
+    DecisionLink,
+    DiscoveredSource,
+    EvidenceChunk,
+    EvidenceSource,
+    EvidenceSourceTombstone,
+    ProjectMemoryItem,
+)
+from app.features.evidence import extraction as evidence_extraction
+from app.features.retrieval.security_policy import RetrievalSecurityPolicy
 from app.schemas.evidence import EvidenceNoteCreate, EvidenceUrlCreate
 from app.services import (
     ai_run_service,
     embedding_service,
     governance_service,
+    malware_scanning_service,
     multimodal_extraction_service,
     object_storage_service,
     project_service,
+    pseudonymization_service,
+    retention_service,
+    secure_file_parser_service,
+    secure_image_service,
+    secure_ingestion_state_service,
+    security_event_service,
+    security_policy_service,
     source_provenance_service,
 )
-from app.services.common import metadata as metadata_utils
 from app.services.common import workflow as workflow_utils
+from app.services.data_protection_service import data_protection_service
 
-TOKEN_RE = re.compile(r"\S+")
-SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+ParsedSource = evidence_extraction.ParsedSource
+_chunk_text = evidence_extraction.chunk_text
+_classify = evidence_extraction.classify_text
+_decode_bytes = evidence_extraction.decode_bytes
+_direct_response_metadata = evidence_extraction.direct_response_metadata
+_file_metadata = evidence_extraction.file_metadata
+_image_upload_metadata = evidence_extraction.image_upload_metadata
+_normalize_text = evidence_extraction.normalize_text
+_parse_html = evidence_extraction.parse_html
+_pdf_ocr_fallback_metadata = evidence_extraction.pdf_ocr_fallback_metadata
+_pdf_text_metadata = evidence_extraction.pdf_text_metadata
+_preview = evidence_extraction.preview_text
+_summarize = evidence_extraction.summarize_text
+_text_upload_metadata = evidence_extraction.text_upload_metadata
+_tokens = evidence_extraction.tokens
+_truncate = evidence_extraction.truncate_text
+
+_AUTHORIZED_DOWNLOAD_AUDIT_EVENT_TYPES = ("signed_url_created", "object_download_authorized")
 
 
 class EvidenceIngestionError(RuntimeError):
@@ -43,16 +86,6 @@ class EvidenceIngestionError(RuntimeError):
 
 class EvidenceSecurityError(EvidenceIngestionError):
     pass
-
-
-@dataclass(frozen=True)
-class ParsedSource:
-    """Normalized extraction result passed into the chunking/embedding pipeline."""
-
-    title: str | None
-    text: str
-    content_type: str | None = None
-    metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +142,12 @@ def get_source(
         .options(selectinload(EvidenceSource.chunks))
     )
     if source is None:
+        record_cross_tenant_access_attempt(
+            db,
+            auth,
+            reason_code="evidence_source_scope_denied",
+            project_id=project_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Evidence source not found.",
@@ -128,12 +167,14 @@ def add_note_source(
         workspace_id=auth.workspace_id,
         project_id=project_id,
         source_type=payload.source_type,
-        title=payload.title.strip(),
-        raw_text=_normalize_text(payload.text),
+        title=data_protection_service.redact_for_model(
+            payload.title.strip(), project_id=project_id
+        ),
         source_date=payload.source_date,
         ingestion_status="processing",
         created_by=auth.user_id,
     )
+    secure_ingestion_state_service.initialize(source)
     db.add(source)
     db.commit()
     db.refresh(source)
@@ -142,7 +183,7 @@ def add_note_source(
         auth,
         settings,
         source,
-        text=source.raw_text or "",
+        text=payload.text,
         title=source.title,
         content_type="text/plain",
     )
@@ -161,16 +202,28 @@ def add_url_source(
     existing = _find_ready_url_source(db, auth, project_id, canonical_url)
     if existing is not None:
         return get_source(db, auth, project_id, existing.id)
+    security_policy_service.enforce_source_fetching_allowed(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="evidence_url_ingestion",
+    )
 
     source = EvidenceSource(
         workspace_id=auth.workspace_id,
         project_id=project_id,
         source_type="url",
-        title=payload.title.strip() if payload.title else None,
+        title=(
+            data_protection_service.redact_for_model(payload.title.strip(), project_id=project_id)
+            if payload.title
+            else None
+        ),
         url=canonical_url,
         ingestion_status="processing",
         created_by=auth.user_id,
     )
+    secure_ingestion_state_service.initialize(source)
     db.add(source)
     db.commit()
     db.refresh(source)
@@ -235,21 +288,36 @@ def add_discovered_url_source(
     existing = _find_ready_url_source(db, auth, project_id, canonical_url)
     if existing is not None:
         if metadata:
-            existing.source_metadata = _merge_metadata(existing.source_metadata or {}, metadata)
-            _merge_source_chunk_metadata(db, existing, metadata)
+            sanitized_metadata = _sanitize_metadata_for_storage(metadata, project_id=project_id)
+            existing.source_metadata = _merge_metadata(
+                existing.source_metadata or {}, sanitized_metadata
+            )
+            _merge_source_chunk_metadata(db, existing, sanitized_metadata)
             db.commit()
         return get_source(db, auth, project_id, existing.id)
+    security_policy_service.enforce_source_fetching_allowed(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="discovered_source_ingestion",
+    )
 
     source = EvidenceSource(
         workspace_id=auth.workspace_id,
         project_id=project_id,
         source_type="url",
-        title=title.strip() if title else None,
+        title=(
+            data_protection_service.redact_for_model(title.strip(), project_id=project_id)
+            if title
+            else None
+        ),
         url=canonical_url,
         source_date=datetime.now(UTC),
         ingestion_status="processing",
         created_by=auth.user_id,
     )
+    secure_ingestion_state_service.initialize(source)
     db.add(source)
     db.commit()
     db.refresh(source)
@@ -334,12 +402,16 @@ def add_discovered_url_snapshot(
         workspace_id=auth.workspace_id,
         project_id=project_id,
         source_type="url",
-        title=title.strip() if title else None,
+        title=(
+            data_protection_service.redact_for_model(title.strip(), project_id=project_id)
+            if title
+            else None
+        ),
         url=canonical_url,
-        raw_text=_normalize_text(text),
         ingestion_status="processing",
         created_by=auth.user_id,
     )
+    secure_ingestion_state_service.initialize(source)
     db.add(source)
     db.commit()
     db.refresh(source)
@@ -348,7 +420,7 @@ def add_discovered_url_snapshot(
         auth,
         settings,
         source,
-        text=source.raw_text or text,
+        text=text,
         title=source.title or canonical_url,
         content_type="text/plain",
         metadata={
@@ -369,7 +441,15 @@ def add_file_source(
 ) -> EvidenceSource:
     """Validate and ingest an uploaded evidence file."""
     project_service.get_project(db, auth, project_id)
+    require_permission(auth, "write_project")
     body = upload.file.read()
+    security_policy_service.enforce_file_upload_rate_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        size_bytes=len(body),
+    )
     try:
         upload_validation = validate_upload(
             filename=upload.filename,
@@ -401,26 +481,121 @@ def add_file_source(
 
     filename = upload_validation.filename
     content_type = upload_validation.content_type
-    storage_key = (
-        f"workspaces/{auth.workspace_id}/projects/{project_id}/evidence/{uuid.uuid4()}-{filename}"
-    )
-    object_storage_service.put_object(
-        settings,
-        key=storage_key,
-        body=body,
-        content_type=content_type,
-    )
+    detected_content_type = upload_validation.detected_content_type
+    source_id = uuid.uuid4()
+    scan_result = malware_scanning_service.scan_upload(settings, body)
+    if scan_result.status is not malware_scanning_service.MalwareScanStatus.CLEAN:
+        _quarantine_file_upload(
+            db,
+            auth,
+            project_id=project_id,
+            source_id=source_id,
+            filename=filename,
+            content_type=content_type,
+            size_bytes=len(body),
+            scan_result=scan_result,
+        )
+        raise EvidenceIngestionError("File evidence ingestion failed.")
+
+    image_sanitization: secure_image_service.SanitizedImage | None = None
+    try:
+        pdf_extraction = _preflight_file_content(settings, content_type=content_type, body=body)
+        if multimodal_extraction_service.is_image_content(filename, content_type):
+            image_sanitization = secure_image_service.sanitize_image(
+                settings,
+                content_type=content_type,
+                body=body,
+            )
+            body = image_sanitization.body
+    except (EvidenceSecurityError, secure_image_service.ImageSecurityError) as exc:
+        _record_ingestion_security_event(
+            db,
+            auth,
+            project_id=project_id,
+            source_id=None,
+            event_type="evidence_upload_rejected",
+            summary="Rejected unsafe evidence upload.",
+            reason=str(exc),
+            metadata={
+                "filename": filename,
+                "content_type": content_type,
+                "detected_content_type": detected_content_type,
+                "size_bytes": len(body),
+            },
+        )
+        raise EvidenceIngestionError("File evidence ingestion failed.") from exc
+
+    try:
+        storage_key = object_storage_service.put_evidence_object(
+            settings,
+            workspace_id=auth.workspace_id,
+            project_id=project_id,
+            source_id=source_id,
+            filename=filename,
+            body=body,
+            content_type=content_type,
+        )
+    except object_storage_service.ObjectStorageError:
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="object_storage_write_denied",
+            actor_type="user",
+            project_id=project_id,
+            entity_type="evidence_source",
+            entity_id=source_id,
+            risk_level="medium",
+            summary="Evidence object storage failed closed.",
+            metadata={"content_type": content_type, "size_bytes": len(body)},
+        )
+        db.commit()
+        raise EvidenceIngestionError("File evidence ingestion failed.") from None
 
     source = EvidenceSource(
+        id=source_id,
         workspace_id=auth.workspace_id,
         project_id=project_id,
         source_type="file",
-        title=filename,
+        title=data_protection_service.redact_for_model(filename, project_id=project_id),
         object_storage_key=storage_key,
+        source_metadata={
+            "content_type": content_type,
+            "detected_content_type": detected_content_type,
+            "security": {
+                "security_status": "quarantined",
+                "classification_status": "pending",
+                "malware_status": "clean",
+            },
+        },
         ingestion_status="processing",
         created_by=auth.user_id,
     )
+    secure_ingestion_state_service.initialize(source)
+    secure_ingestion_state_service.transition(
+        source,
+        secure_ingestion_state_service.SecureIngestionState.MALWARE_SCANNING,
+    )
+    secure_ingestion_state_service.transition(
+        source,
+        secure_ingestion_state_service.SecureIngestionState.EXTRACTION_PENDING,
+    )
     db.add(source)
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="object_stored",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="evidence_source",
+        entity_id=source_id,
+        risk_level="low",
+        summary="Stored a private evidence object.",
+        metadata={
+            "content_type": content_type,
+            "size_bytes": len(body),
+            "storage_mode": settings.object_storage_mode,
+        },
+    )
     db.commit()
     db.refresh(source)
 
@@ -430,6 +605,8 @@ def add_file_source(
             filename=filename,
             content_type=content_type,
             body=body,
+            pdf_extraction=pdf_extraction,
+            image_security_metadata=image_sanitization.metadata if image_sanitization else None,
         )
     except Exception as exc:
         _mark_source_failed(db, source, str(exc))
@@ -460,6 +637,11 @@ def reprocess_source(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Source has no parsed text to reprocess.",
         )
+    secure_ingestion_state_service.initialize(source)
+    secure_ingestion_state_service.transition(
+        source,
+        secure_ingestion_state_service.SecureIngestionState.EXTRACTION_PENDING,
+    )
     source.ingestion_status = "processing"
     source.ingestion_error = None
     db.commit()
@@ -478,12 +660,225 @@ def reprocess_source(
 def delete_source(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    source_id: uuid.UUID,
+    *,
+    deletion_reason: str = "user_deleted",
+) -> None:
+    source = get_source(db, auth, project_id, source_id)
+    require_permission(auth, "write_project")
+    if deletion_reason not in {"user_deleted", "retention_expired"}:
+        raise ValueError("Unsupported evidence-source deletion reason.")
+    deletion_impact = _invalidate_source_derivatives(db, source)
+    tombstone = _create_source_tombstone(
+        source,
+        deleted_by=auth.user_id,
+        deletion_reason=deletion_reason,
+        deletion_impact=deletion_impact,
+    )
+    db.add(tombstone)
+    if source.object_storage_key:
+        object_storage_service.delete_evidence_object(
+            settings,
+            workspace_id=auth.workspace_id,
+            project_id=project_id,
+            source_id=source.id,
+            key=source.object_storage_key,
+        )
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="object_deleted",
+            actor_type="user",
+            project_id=project_id,
+            entity_type="evidence_source",
+            entity_id=source.id,
+            risk_level="medium",
+            summary="Deleted a private evidence object.",
+            metadata={"storage_mode": settings.object_storage_mode},
+        )
+    db.delete(source)
+    db.flush()
+    remaining_chunks = db.scalar(
+        select(func.count()).select_from(EvidenceChunk).where(EvidenceChunk.source_id == source_id)
+    )
+    if remaining_chunks:
+        raise EvidenceIngestionError("Evidence deletion did not remove all retrievable chunks.")
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="evidence_source_deletion_propagated",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="evidence_source",
+        entity_id=source_id,
+        risk_level="high",
+        summary="Deleted evidence source and invalidated dependent derived data.",
+        metadata={
+            **deletion_impact,
+            "object_deleted": source.object_storage_key is not None,
+            "retrieval_revoked": True,
+            "tombstone_id": str(tombstone.id),
+        },
+    )
+    db.commit()
+
+
+def prepare_source_download(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project_id: uuid.UUID,
+    source_id: uuid.UUID,
+) -> object_storage_service.ObjectDownload:
+    source = get_source(db, auth, project_id, source_id)
+    if not source_content_is_eligible(auth, settings, source):
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="evidence_source_content_access_denied",
+            actor_type="user",
+            project_id=project_id,
+            entity_type="evidence_source",
+            entity_id=source.id,
+            risk_level="medium",
+            summary="Denied evidence source content because retrieval policy did not allow it.",
+            metadata={"reason": "retrieval_policy_denied"},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Evidence source content is not available in its current security state.",
+        )
+    if not source.object_storage_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Evidence source has no stored object.",
+        )
+    content_type = str(
+        (source.source_metadata or {}).get("content_type") or "application/octet-stream"
+    )
+    _record_mass_export_attempt_if_needed(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        source_id=source.id,
+    )
+    security_policy_service.enforce_signed_url_rate_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+    )
+    try:
+        download = object_storage_service.prepare_evidence_download(
+            settings,
+            workspace_id=auth.workspace_id,
+            project_id=project_id,
+            source_id=source.id,
+            key=source.object_storage_key,
+            filename=source.title or "evidence-download",
+            content_type=content_type,
+        )
+    except object_storage_service.ObjectStorageError:
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="signed_url_denied",
+            actor_type="user",
+            project_id=project_id,
+            entity_type="evidence_source",
+            entity_id=source.id,
+            risk_level="medium",
+            summary="Denied an evidence object download.",
+            metadata={"storage_mode": settings.object_storage_mode},
+        )
+        db.commit()
+        raise
+
+    event_type = (
+        "signed_url_created"
+        if download.storage_mode == "s3"
+        else "object_download_authorized"
+    )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type=event_type,
+        actor_type="user",
+        project_id=project_id,
+        entity_type="evidence_source",
+        entity_id=source.id,
+        risk_level="low",
+        summary="Authorized an evidence object download.",
+        metadata={
+            "storage_mode": download.storage_mode,
+            "expires_at": download.expires_at.isoformat(),
+            "content_type": download.content_type,
+        },
+    )
+    db.commit()
+    return download
+
+
+def _record_mass_export_attempt_if_needed(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
     project_id: uuid.UUID,
     source_id: uuid.UUID,
 ) -> None:
-    source = get_source(db, auth, project_id, source_id)
-    db.delete(source)
-    db.commit()
+    window_start = datetime.now(UTC) - timedelta(
+        seconds=settings.security_alert_detection_window_seconds
+    )
+    source_ids = set(
+        db.scalars(
+            select(AuditEvent.entity_id).where(
+                AuditEvent.workspace_id == auth.workspace_id,
+                AuditEvent.project_id == project_id,
+                AuditEvent.user_id == auth.user_id,
+                AuditEvent.entity_type == "evidence_source",
+                AuditEvent.event_type.in_(_AUTHORIZED_DOWNLOAD_AUDIT_EVENT_TYPES),
+                AuditEvent.created_at >= window_start,
+            )
+        )
+    )
+    source_ids.discard(None)
+    source_ids.add(source_id)
+    distinct_source_count = len(source_ids)
+    if distinct_source_count < settings.security_mass_export_distinct_source_threshold:
+        return
+    if (
+        db.scalar(
+            select(AuditEvent.id)
+            .where(
+                AuditEvent.workspace_id == auth.workspace_id,
+                AuditEvent.project_id == project_id,
+                AuditEvent.user_id == auth.user_id,
+                AuditEvent.event_type == "mass_export_attempt",
+                AuditEvent.created_at >= window_start,
+            )
+            .limit(1)
+        )
+        is not None
+    ):
+        return
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="mass_export_attempt",
+        actor_type="user",
+        project_id=project_id,
+        risk_level="high",
+        summary="Evidence downloads exceeded the configured export threshold.",
+        metadata={
+            "distinct_source_count": distinct_source_count,
+            "window_seconds": settings.security_alert_detection_window_seconds,
+        },
+    )
 
 
 def reembed_evidence(
@@ -498,21 +893,38 @@ def reembed_evidence(
 ) -> ReembedResult:
     """Refresh embeddings when provider/model/dimension/version settings change."""
     project_service.get_project(db, auth, project_id)
-    stmt = select(EvidenceChunk).where(EvidenceChunk.workspace_id == auth.workspace_id)
+    stmt = (
+        select(EvidenceChunk, EvidenceSource)
+        .join(EvidenceSource, EvidenceSource.id == EvidenceChunk.source_id)
+        .where(EvidenceChunk.workspace_id == auth.workspace_id)
+    )
     if scope == "project":
         stmt = stmt.where(EvidenceChunk.project_id == project_id)
     elif scope != "workspace":
         raise ValueError(f"Unsupported re-embedding scope: {scope}")
 
-    chunks = list(db.scalars(stmt.order_by(EvidenceChunk.created_at.asc())))
-    eligible = [chunk for chunk in chunks if force or _chunk_needs_reembedding(chunk, settings)]
+    rows = list(db.execute(stmt.order_by(EvidenceChunk.created_at.asc())).all())
+    chunks = [chunk for chunk, _source in rows]
+    eligible = [
+        chunk
+        for chunk, source in rows
+        if data_protection_service.is_source_approved(source.source_metadata)
+        and data_protection_service.is_chunk_retrievable(chunk.chunk_metadata)
+        and (force or _chunk_needs_reembedding(chunk, settings))
+    ]
     failures: list[ReembedFailure] = []
     reembedded_count = 0
 
     if not dry_run:
         for chunk in eligible:
             try:
-                embedding = embedding_service.embed_text_with_metadata(settings, chunk.text)
+                embedding = embedding_service.embed_text_with_metadata_cached(
+                    db,
+                    auth,
+                    settings,
+                    chunk.text,
+                    project_id=chunk.project_id,
+                )
                 chunk.embedding = embedding.vector
                 chunk.embedding_provider = embedding.provider
                 chunk.embedding_model = embedding.model
@@ -576,6 +988,19 @@ def serialize_source(source: EvidenceSource) -> dict[str, Any]:
     }
 
 
+def source_content_is_eligible(
+    auth: AuthContext,
+    settings: Settings,
+    source: EvidenceSource,
+) -> bool:
+    """Allow source text only when at least one current chunk is retrievable."""
+    policy = RetrievalSecurityPolicy.for_auth(
+        auth,
+        minimum_source_trust_score=settings.retrieval_min_source_trust_score,
+    )
+    return any(policy.allows(source=source, chunk=chunk) for chunk in source.chunks)
+
+
 def _chunk_needs_reembedding(chunk: EvidenceChunk, settings: Settings) -> bool:
     return (
         chunk.embedding is None
@@ -608,7 +1033,7 @@ def _process_source_text(
         auth,
         workflow_type="evidence_ingestion",
         prompt_version=EVIDENCE_INGESTION_PROMPT_VERSION,
-        input_summary=(title or source.url or str(source.id))[:500],
+        input_summary=str(source.id),
         project_id=source.project_id,
         model_provider=settings.embedding_provider,
         model_name=settings.embedding_model,
@@ -626,6 +1051,26 @@ def _process_source_text(
     started = perf_counter()
 
     try:
+        secure_ingestion_state_service.initialize(source)
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.EXTRACTION_PENDING,
+        )
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.EXTRACTED,
+        )
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.CLASSIFICATION_PENDING,
+        )
+        protected_source_text = pseudonymization_service.create_searchable_copy(
+            db,
+            auth,
+            settings,
+            project_id=source.project_id,
+            text=text,
+        )
         normalized = _normalize_text(text)
         if not normalized:
             raise EvidenceIngestionError("Evidence source did not contain extractable text.")
@@ -634,27 +1079,104 @@ def _process_source_text(
                 f"Extracted text exceeds {settings.max_extracted_text_chars} character limit."
             )
 
-        chunks = _chunk_text(normalized)
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.CLASSIFIED,
+        )
+        if protected_source_text.pii_status == "redacted":
+            secure_ingestion_state_service.transition(
+                source,
+                secure_ingestion_state_service.SecureIngestionState.PII_REVIEW_PENDING,
+            )
+            _record_pii_redaction_security_event(
+                db,
+                auth,
+                source,
+                data_classification=protected_source_text.data_classification.value,
+                pii_entity_count=len(protected_source_text.pii_entity_types),
+                sanitization_version=protected_source_text.sanitization_version,
+            )
+
+        searchable_text = _normalize_text(protected_source_text.text)
+        chunks = _chunk_text(searchable_text)
         if not chunks:
             raise EvidenceIngestionError("Evidence source did not produce chunks.")
 
         content_hash = source_provenance_service.content_hash(normalized)
+        duplicate_source_count = _duplicate_content_source_count(
+            db,
+            source,
+            content_hash=content_hash,
+        )
+        sanitized_metadata = _sanitize_metadata_for_storage(
+            metadata or {},
+            project_id=source.project_id,
+        )
+        base_metadata = _merge_metadata(
+            {
+                "content_type": content_type,
+                "content_hash": content_hash,
+                "domain": source_provenance_service.source_domain(source.url),
+            },
+            sanitized_metadata,
+        )
+        extraction_method = str(
+            base_metadata.get("extraction_method")
+            or base_metadata.get("pdf_text_extraction")
+            or base_metadata.get("text_extraction")
+            or "normalized_text"
+        )
+        existing_security = (source.source_metadata or {}).get("security")
+        malware_status = (
+            existing_security.get("malware_status")
+            if isinstance(existing_security, dict)
+            else "not_scanned"
+        )
+        source_security_metadata = {
+            "data_classification": protected_source_text.data_classification.value,
+            "pii_status": protected_source_text.pii_status,
+            "pii_entity_types": list(protected_source_text.pii_entity_types),
+            "security_status": "approved",
+            "classification_status": "approved",
+            "malware_status": malware_status,
+            "sanitization_version": protected_source_text.sanitization_version,
+            "retention_expires_at": retention_service.expires_at(
+                settings,
+                retention_service.RetentionAsset.SANITIZED_TEXT,
+                created_at=source.created_at,
+            ).isoformat(),
+        }
         processed_metadata = _merge_metadata(
             source.source_metadata or {},
             _merge_metadata(
-                {
-                    "content_type": content_type,
-                    "content_hash": content_hash,
-                    "domain": source_provenance_service.source_domain(source.url),
-                },
-                metadata,
+                base_metadata,
+                source_provenance_service.extraction_artifacts(
+                    text=protected_source_text.text,
+                    metadata=base_metadata,
+                    extraction_method=extraction_method,
+                ),
             ),
         )
-        prompt_markers = source_provenance_service.detect_prompt_injection_markers(normalized)
+        processed_metadata["security"] = source_security_metadata
+        processed_metadata["retention"] = retention_service.evidence_retention_metadata(
+            settings,
+            created_at=source.created_at,
+        )
+        prompt_markers = source_provenance_service.detect_prompt_injection_markers(searchable_text)
         if prompt_markers:
             processed_metadata["prompt_injection_markers"] = prompt_markers
+        source_trust = source_provenance_service.assess_source_trust(
+            source_type=source.source_type,
+            text=searchable_text,
+            metadata=processed_metadata,
+            approved_by=source.created_by,
+            duplicate_source_count=duplicate_source_count,
+        )
+        source_security_metadata["security_status"] = source_trust.security_status
+        processed_metadata["security"] = source_security_metadata
+        processed_metadata["source_trust"] = source_trust.metadata()
 
-        if source.source_type == "url":
+        if source.source_type == "url" and source_trust.security_status == "approved":
             duplicate = _find_ready_source_by_content_hash(
                 db,
                 auth,
@@ -688,15 +1210,31 @@ def _process_source_text(
                 return existing
 
         db.execute(delete(EvidenceChunk).where(EvidenceChunk.source_id == source.id))
-        source.title = _truncate(title or source.title or source.url or "Untitled evidence", 500)
-        source.raw_text = normalized
-        source.summary = _summarize(normalized)
-        source.classification = _classify(source.source_type, source.title, normalized)
+        source.title = _truncate(
+            data_protection_service.redact_for_model(
+                title or source.title or source.url or "Untitled evidence",
+                project_id=source.project_id,
+            ),
+            500,
+        )
+        source.raw_text = searchable_text
+        source.summary = _truncate(
+            data_protection_service.redact_for_model(
+                _summarize(searchable_text),
+                project_id=source.project_id,
+            ),
+            500,
+        )
+        source.classification = _classify(source.source_type, source.title, searchable_text)
         source.ingested_at = datetime.now(UTC)
         source.credibility_score = source_provenance_service.adjusted_credibility_score(
             source_type=source.source_type,
             url=source.url,
             metadata=processed_metadata,
+        )
+        source.credibility_score = min(
+            source.credibility_score,
+            Decimal(str(source_trust.trust_score)),
         )
         source.source_metadata = _merge_metadata(
             processed_metadata,
@@ -710,29 +1248,144 @@ def _process_source_text(
                 metadata=processed_metadata,
             ),
         )
+        if source_trust.security_status != "approved":
+            _quarantine_source_for_trust(
+                db,
+                auth,
+                source,
+                source_trust=source_trust,
+            )
+            db.commit()
+            db.refresh(source)
+            source = get_source(db, auth, source.project_id, source.id)
+            workflow_utils.complete_zero_cost_step_and_run(
+                db,
+                run=run,
+                step=step,
+                output_json={
+                    "source_id": str(source.id),
+                    "chunk_count": 0,
+                    "security_status": source_trust.security_status,
+                    "source_trust": source_trust.metadata(),
+                },
+                latency_ms=int((perf_counter() - started) * 1000),
+                output_summary="Quarantined evidence source pending trust review.",
+                model_provider=settings.embedding_provider,
+                model_name=settings.embedding_model,
+            )
+            return source
+
+        embedded_chunks = [
+            (
+                chunk_info,
+                embedding_service.embed_text_with_metadata_cached(
+                    db,
+                    auth,
+                    settings,
+                    chunk_info.text,
+                    project_id=source.project_id,
+                ),
+            )
+            for chunk_info in chunks
+        ]
+        anomalous_embedding_cluster_count = _anomalous_embedding_cluster_source_count(
+            db,
+            source,
+            candidate_vectors=[embedding.vector for _chunk_info, embedding in embedded_chunks],
+            content_hash=content_hash,
+        )
+        if anomalous_embedding_cluster_count:
+            source_trust = source_provenance_service.assess_source_trust(
+                source_type=source.source_type,
+                text=searchable_text,
+                metadata=processed_metadata,
+                approved_by=source.created_by,
+                duplicate_source_count=duplicate_source_count,
+                anomalous_embedding_cluster_count=anomalous_embedding_cluster_count,
+            )
+            source_security_metadata["security_status"] = source_trust.security_status
+            source.source_metadata = _merge_metadata(
+                source.source_metadata or {},
+                {
+                    "security": source_security_metadata,
+                    "source_trust": source_trust.metadata(),
+                },
+            )
+            if source_trust.security_status != "approved":
+                _quarantine_source_for_trust(
+                    db,
+                    auth,
+                    source,
+                    source_trust=source_trust,
+                )
+                db.commit()
+                db.refresh(source)
+                source = get_source(db, auth, source.project_id, source.id)
+                workflow_utils.complete_zero_cost_step_and_run(
+                    db,
+                    run=run,
+                    step=step,
+                    output_json={
+                        "source_id": str(source.id),
+                        "chunk_count": 0,
+                        "security_status": source_trust.security_status,
+                        "source_trust": source_trust.metadata(),
+                    },
+                    latency_ms=int((perf_counter() - started) * 1000),
+                    output_summary="Quarantined evidence source after embedding-cluster review.",
+                    model_provider=settings.embedding_provider,
+                    model_name=settings.embedding_model,
+                )
+                return source
+
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.APPROVED_FOR_EMBEDDING,
+        )
         source.ingestion_status = "ready"
         source.ingestion_error = None
 
-        for index, chunk_text in enumerate(chunks):
-            embedding = embedding_service.embed_text_with_metadata(settings, chunk_text)
+        for index, (chunk_info, embedding) in enumerate(embedded_chunks):
+            quote_provenance = source_provenance_service.chunk_quote_provenance(
+                source_metadata=source.source_metadata or {},
+                chunk_text=chunk_info.text,
+                char_start=chunk_info.char_start,
+                char_end=chunk_info.char_end,
+                chunk_index=index,
+            )
+            chunk_security_metadata = {
+                "data_classification": protected_source_text.data_classification.value,
+                "pii_status": protected_source_text.pii_status,
+                "retrieval_allowed": True,
+                "sanitization_version": protected_source_text.sanitization_version,
+                "source_security_status": "approved",
+                "retention_expires_at": retention_service.expires_at(
+                    settings,
+                    retention_service.RetentionAsset.EMBEDDING,
+                    created_at=source.created_at,
+                ).isoformat(),
+            }
             chunk_metadata = _merge_metadata(
-                {
-                    "source_title": source.title,
-                    "source_type": source.source_type,
-                    "url": source.url,
-                    "content_hash": content_hash,
-                    "source_metadata": source.source_metadata or {},
-                    **embedding_service.embedding_metadata(settings),
-                },
-                source.source_metadata,
+                _merge_metadata(
+                    {
+                        "source_title": source.title,
+                        "source_type": source.source_type,
+                        "url": source.url,
+                        "content_hash": content_hash,
+                        "source_metadata": source.source_metadata or {},
+                        **embedding_service.embedding_metadata(settings),
+                    },
+                    _merge_metadata(source.source_metadata, quote_provenance),
+                ),
+                {"security": chunk_security_metadata},
             )
             chunk = EvidenceChunk(
                 workspace_id=source.workspace_id,
                 project_id=source.project_id,
                 source_id=source.id,
                 chunk_index=index,
-                text=chunk_text,
-                token_count=len(_tokens(chunk_text)),
+                text=chunk_info.text,
+                token_count=len(_tokens(chunk_info.text)),
                 embedding=embedding.vector,
                 embedding_provider=embedding.provider,
                 embedding_model=embedding.model,
@@ -743,6 +1396,15 @@ def _process_source_text(
                 chunk_metadata=chunk_metadata,
             )
             db.add(chunk)
+
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.EMBEDDED,
+        )
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.RETRIEVABLE,
+        )
 
         db.commit()
         db.refresh(source)
@@ -761,6 +1423,7 @@ def _process_source_text(
                 "embedding_model": settings.embedding_model,
                 "embedding_dimension": settings.embedding_dimension,
                 "embedding_version": settings.embedding_version,
+                "source_trust": source_trust.metadata(),
             },
             latency_ms=latency_ms,
             output_summary=source.summary or "",
@@ -783,6 +1446,34 @@ def _process_source_text(
         raise EvidenceIngestionError("Evidence source processing failed.") from exc
 
 
+def _sanitize_metadata_for_storage(
+    value: Any,
+    *,
+    project_id: uuid.UUID,
+) -> Any:
+    """Remove provider-produced sensitive strings before source metadata is persisted."""
+    if isinstance(value, dict):
+        return {
+            data_protection_service.redact_for_model(str(key), project_id=project_id): (
+                _sanitize_metadata_for_storage(item, project_id=project_id)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_metadata_for_storage(item, project_id=project_id) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_metadata_for_storage(item, project_id=project_id) for item in value)
+    if isinstance(value, str):
+        try:
+            uuid.UUID(value)
+        except ValueError:
+            pass
+        else:
+            return value
+        return data_protection_service.redact_for_model(value, project_id=project_id)
+    return value
+
+
 def _mark_source_failed(
     db: Session,
     source: EvidenceSource,
@@ -790,11 +1481,167 @@ def _mark_source_failed(
     *,
     metadata: dict[str, Any] | None = None,
 ) -> None:
+    secure_ingestion_state_service.initialize(source)
+    current_state = secure_ingestion_state_service.state(source)
+    if current_state is secure_ingestion_state_service.SecureIngestionState.RETRIEVABLE:
+        return
+    if current_state not in {
+        secure_ingestion_state_service.SecureIngestionState.FAILED,
+        secure_ingestion_state_service.SecureIngestionState.QUARANTINED,
+    }:
+        secure_ingestion_state_service.transition(
+            source,
+            secure_ingestion_state_service.SecureIngestionState.FAILED,
+        )
     source.ingestion_status = "failed"
-    source.ingestion_error = error[:2000]
+    source.ingestion_error = str(
+        data_protection_service.redact_for_trace(error, project_id=source.project_id)
+    )[:2000]
     if metadata:
-        source.source_metadata = _merge_metadata(source.source_metadata or {}, metadata)
+        source.source_metadata = _merge_metadata(
+            source.source_metadata or {},
+            _sanitize_metadata_for_storage(metadata, project_id=source.project_id),
+        )
     db.commit()
+
+
+def _quarantine_source_for_trust(
+    db: Session,
+    auth: AuthContext,
+    source: EvidenceSource,
+    *,
+    source_trust: source_provenance_service.SourceTrust,
+) -> None:
+    """Stop processing before embedding when source text trips poisoning controls."""
+    invalidation_impact = _invalidate_source_derivatives(
+        db,
+        source,
+        reason="quarantined",
+    )
+    db.execute(delete(EvidenceChunk).where(EvidenceChunk.source_id == source.id))
+    secure_ingestion_state_service.transition(
+        source,
+        secure_ingestion_state_service.SecureIngestionState.QUARANTINED,
+    )
+    source.ingestion_status = "quarantined"
+    source.ingestion_error = "Evidence source quarantined pending trust review."
+    security_event_service.record_security_event(
+        db,
+        workspace_id=auth.workspace_id,
+        project_id=source.project_id,
+        user_id=auth.user_id,
+        event_type="evidence_source_quarantined",
+        severity="high",
+        source="guardrail",
+        summary="Quarantined evidence because source trust checks failed.",
+        attributes={
+            "quarantine_reason": "source_trust",
+            "injection_score": source_trust.injection_score,
+            "poisoning_score": source_trust.poisoning_score,
+            "signal_count": len(source_trust.signals),
+            "retrieval_revoked": True,
+        },
+        containment_status="quarantined",
+    )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="evidence_source_quarantined",
+        actor_type="system",
+        project_id=source.project_id,
+        entity_type="evidence_source",
+        entity_id=source.id,
+        risk_level="medium",
+        summary="Quarantined evidence before embedding because source trust failed.",
+        metadata={
+            "injection_score": source_trust.injection_score,
+            "poisoning_score": source_trust.poisoning_score,
+            "signals": list(source_trust.signals),
+            **invalidation_impact,
+            "retrieval_revoked": True,
+        },
+    )
+
+
+def quarantine_source_for_recommendation_shift(
+    db: Session,
+    auth: AuthContext,
+    source: EvidenceSource,
+) -> source_provenance_service.SourceTrust:
+    """Quarantine a retrievable source that alone causes a decision reversal."""
+    return _quarantine_source_for_post_ingestion_trust(
+        db,
+        auth,
+        source,
+        recommendation_shift_count=1,
+    )
+
+
+def quarantine_source_for_conflicting_claim(
+    db: Session,
+    auth: AuthContext,
+    source: EvidenceSource,
+) -> source_provenance_service.SourceTrust:
+    """Quarantine a source that alone introduces a conflicting supported claim."""
+    return _quarantine_source_for_post_ingestion_trust(
+        db,
+        auth,
+        source,
+        conflicting_claim_count=1,
+    )
+
+
+def _quarantine_source_for_post_ingestion_trust(
+    db: Session,
+    auth: AuthContext,
+    source: EvidenceSource,
+    *,
+    recommendation_shift_count: int = 0,
+    conflicting_claim_count: int = 0,
+) -> source_provenance_service.SourceTrust:
+    metadata = dict(source.source_metadata or {})
+    previous_trust = metadata.get("source_trust")
+    duplicate_source_count = _trust_metadata_int(previous_trust, "duplicate_source_count")
+    anomalous_cluster_count = _trust_metadata_int(
+        previous_trust,
+        "anomalous_embedding_cluster_count",
+    )
+    source_trust = source_provenance_service.assess_source_trust(
+        source_type=source.source_type,
+        text=source.raw_text or source.summary or source.title or "",
+        metadata=metadata,
+        approved_by=source.created_by,
+        duplicate_source_count=duplicate_source_count,
+        anomalous_embedding_cluster_count=anomalous_cluster_count,
+        recommendation_shift_count=max(
+            recommendation_shift_count,
+            _trust_metadata_int(previous_trust, "recommendation_shift_count"),
+        ),
+        conflicting_claim_count=max(
+            conflicting_claim_count,
+            _trust_metadata_int(previous_trust, "conflicting_claim_count"),
+        ),
+    )
+    security_metadata = dict(metadata.get("security") or {})
+    security_metadata["security_status"] = source_trust.security_status
+    source.source_metadata = _merge_metadata(
+        metadata,
+        {"security": security_metadata, "source_trust": source_trust.metadata()},
+    )
+    if source.credibility_score is not None:
+        source.credibility_score = min(
+            source.credibility_score,
+            Decimal(str(source_trust.trust_score)),
+        )
+    _quarantine_source_for_trust(db, auth, source, source_trust=source_trust)
+    return source_trust
+
+
+def _trust_metadata_int(metadata: object, key: str) -> int:
+    if not isinstance(metadata, dict):
+        return 0
+    value = metadata.get(key)
+    return value if isinstance(value, int) and value >= 0 else 0
 
 
 def _find_ready_url_source(
@@ -813,6 +1660,61 @@ def _find_ready_url_source(
         )
         .options(selectinload(EvidenceSource.chunks))
     )
+
+
+def _duplicate_content_source_count(
+    db: Session,
+    source: EvidenceSource,
+    *,
+    content_hash: str,
+) -> int:
+    """Count prior identical source bodies without relying on a JSON dialect feature."""
+    candidates = db.scalars(
+        select(EvidenceSource).where(
+            EvidenceSource.workspace_id == source.workspace_id,
+            EvidenceSource.project_id == source.project_id,
+            EvidenceSource.id != source.id,
+            EvidenceSource.ingestion_status.in_(("processing", "ready", "quarantined")),
+        )
+    )
+    return sum(
+        1
+        for candidate in candidates
+        if (candidate.source_metadata or {}).get("content_hash") == content_hash
+    )
+
+
+def _anomalous_embedding_cluster_source_count(
+    db: Session,
+    source: EvidenceSource,
+    *,
+    candidate_vectors: list[list[float]],
+    content_hash: str,
+) -> int:
+    if not candidate_vectors:
+        return 0
+    matched_source_ids: set[uuid.UUID] = set()
+    rows = db.execute(
+        select(EvidenceChunk, EvidenceSource)
+        .join(EvidenceSource, EvidenceSource.id == EvidenceChunk.source_id)
+        .where(
+            EvidenceChunk.workspace_id == source.workspace_id,
+            EvidenceChunk.project_id == source.project_id,
+            EvidenceSource.id != source.id,
+            EvidenceSource.ingestion_status == "ready",
+            EvidenceChunk.embedding.is_not(None),
+        )
+    )
+    for peer_chunk, peer_source in rows:
+        if (peer_source.source_metadata or {}).get("content_hash") == content_hash:
+            continue
+        if any(
+            embedding_service.cosine_similarity(candidate, peer_chunk.embedding)
+            >= source_provenance_service.ANOMALOUS_EMBEDDING_SIMILARITY_THRESHOLD
+            for candidate in candidate_vectors
+        ):
+            matched_source_ids.add(peer_source.id)
+    return len(matched_source_ids)
 
 
 def _find_ready_source_by_content_hash(
@@ -848,7 +1750,185 @@ def _merge_source_chunk_metadata(
     metadata: dict[str, Any],
 ) -> None:
     for chunk in source.chunks:
-        chunk.chunk_metadata = _merge_metadata(chunk.chunk_metadata or {}, metadata)
+        existing = chunk.chunk_metadata or {}
+        merged = _merge_metadata(existing, metadata)
+        existing_security = existing.get("security")
+        incoming_security = metadata.get("security")
+        if isinstance(existing_security, dict) and isinstance(incoming_security, dict):
+            merged["security"] = {**existing_security, **incoming_security}
+        chunk.chunk_metadata = merged
+
+
+def _invalidate_source_derivatives(
+    db: Session,
+    source: EvidenceSource,
+    *,
+    reason: str = "deleted",
+) -> dict[str, int]:
+    """Invalidate dependent records when a source can no longer support them."""
+    source_claim_links = list(
+        db.scalars(
+            select(ClaimEvidenceLink).where(ClaimEvidenceLink.evidence_source_id == source.id)
+        )
+    )
+    linked_claim_ids = {link.claim_id for link in source_claim_links}
+    linked_claims = {
+        claim.id: claim
+        for claim in db.scalars(
+            select(Claim).where(Claim.id.in_(linked_claim_ids))
+        )
+    }
+    invalidated_claims: list[Claim] = []
+    for claim in linked_claims.values():
+        alternate_link = db.scalar(
+            select(ClaimEvidenceLink.id)
+            .where(
+                ClaimEvidenceLink.claim_id == claim.id,
+                ClaimEvidenceLink.evidence_source_id != source.id,
+            )
+            .limit(1)
+        )
+        if alternate_link is None:
+            claim.support_level = "unsupported"
+            invalidated_claims.append(claim)
+
+    db.execute(delete(ClaimEvidenceLink).where(ClaimEvidenceLink.evidence_source_id == source.id))
+    db.execute(
+        delete(AssumptionEvidenceLink).where(AssumptionEvidenceLink.evidence_source_id == source.id)
+    )
+    db.execute(
+        delete(CompetitorEvidenceLink).where(CompetitorEvidenceLink.evidence_source_id == source.id)
+    )
+    db.execute(
+        update(DiscoveredSource)
+        .where(DiscoveredSource.evidence_source_id == source.id)
+        .values(evidence_source_id=None)
+    )
+    candidates = list(
+        db.scalars(
+            select(CompetitorCandidate).where(
+                CompetitorCandidate.workspace_id == source.workspace_id,
+                CompetitorCandidate.project_id == source.project_id,
+            )
+        )
+    )
+    source_id = str(source.id)
+    candidate_reference_count = 0
+    for candidate in candidates:
+        references_source = (
+            candidate.evidence_source_id == source.id or source_id in candidate.source_ids
+        )
+        if not references_source:
+            continue
+        candidate_reference_count += 1
+        if candidate.evidence_source_id == source.id:
+            candidate.evidence_source_id = None
+        candidate.source_ids = [item for item in candidate.source_ids if item != source_id]
+
+    decision_links = list(
+        db.scalars(
+            select(DecisionLink).where(
+                DecisionLink.linked_type == "evidence",
+                DecisionLink.linked_id == source.id,
+            )
+        )
+    )
+    linked_decision_ids = {link.decision_id for link in decision_links}
+    decisions_requiring_review = 0
+    if linked_decision_ids:
+        review_due = datetime.now(UTC).date()
+        for decision in db.scalars(select(Decision).where(Decision.id.in_(linked_decision_ids))):
+            if decision.review_date is None or decision.review_date > review_due:
+                decision.review_date = review_due
+            decisions_requiring_review += 1
+        db.execute(
+            delete(DecisionLink).where(
+                DecisionLink.linked_type == "evidence",
+                DecisionLink.linked_id == source.id,
+            )
+        )
+
+    invalidated_version_ids = {
+        claim.artifact_version_id
+        for claim in invalidated_claims
+        if claim.artifact_version_id is not None
+    }
+    stale_memory_count = 0
+    for item in db.scalars(
+        select(ProjectMemoryItem).where(
+            ProjectMemoryItem.workspace_id == source.workspace_id,
+            ProjectMemoryItem.project_id == source.project_id,
+        )
+    ):
+        provenance_source_ids = (item.provenance_metadata or {}).get("source_ids")
+        references_source = (
+            (item.source_entity_type == "evidence_source" and item.source_entity_id == source.id)
+            or (item.entity_type == "evidence_source" and item.entity_id == source.id)
+            or (
+                item.source_entity_type == "artifact_version"
+                and item.source_entity_id in invalidated_version_ids
+            )
+            or (
+                isinstance(provenance_source_ids, list)
+                and str(source.id) in {str(item_id) for item_id in provenance_source_ids}
+            )
+        )
+        if not references_source or item.status not in {"active", "proposed"}:
+            continue
+        item.status = "stale"
+        item.provenance_metadata = {
+            **(item.provenance_metadata or {}),
+            f"evidence_{reason}": True,
+            "requires_reverification": True,
+        }
+        stale_memory_count += 1
+
+    chunk_count = len(source.chunks)
+    return {
+        "chunks_deleted": chunk_count,
+        "claim_links_deleted": len(source_claim_links),
+        "claims_invalidated": len(invalidated_claims),
+        "competitor_references_cleared": candidate_reference_count,
+        "decision_links_deleted": len(decision_links),
+        "decisions_requiring_review": decisions_requiring_review,
+        "memory_items_staled": stale_memory_count,
+    }
+
+
+def _create_source_tombstone(
+    source: EvidenceSource,
+    *,
+    deleted_by: uuid.UUID | None,
+    deletion_reason: str,
+    deletion_impact: dict[str, int],
+) -> EvidenceSourceTombstone:
+    metadata = source.source_metadata or {}
+    security = metadata.get("security")
+    source_trust = metadata.get("source_trust")
+    content_hash = metadata.get("content_hash")
+    return EvidenceSourceTombstone(
+        workspace_id=source.workspace_id,
+        project_id=source.project_id,
+        source_id=source.id,
+        source_type=source.source_type,
+        content_hash=content_hash if isinstance(content_hash, str) else None,
+        deletion_reason=deletion_reason,
+        deletion_metadata={
+            "ingestion_status": source.ingestion_status,
+            "data_classification": security.get("data_classification")
+            if isinstance(security, dict)
+            else None,
+            "security_status": security.get("security_status")
+            if isinstance(security, dict)
+            else None,
+            "source_trust_status": source_trust.get("security_status")
+            if isinstance(source_trust, dict)
+            else None,
+            "deletion_impact": deletion_impact,
+        },
+        deleted_by=deleted_by,
+        deleted_at=datetime.now(UTC),
+    )
 
 
 def _merge_metadata(
@@ -860,7 +1940,7 @@ def _merge_metadata(
 
 def _fetch_url(settings: Settings, url: str) -> ParsedSource:
     """Fetch a URL with redirect revalidation and response-size limits."""
-    _validate_fetch_target(url)
+    _validate_fetch_target(url, settings)
     fetched_at = datetime.now(UTC)
 
     try:
@@ -871,7 +1951,7 @@ def _fetch_url(settings: Settings, url: str) -> ParsedSource:
             current_url = url
             response: httpx.Response | None = None
             for redirect_count in range(settings.url_fetch_max_redirects + 1):
-                _validate_fetch_target(current_url)
+                _validate_fetch_target(current_url, settings)
                 response = client.get(current_url, follow_redirects=False)
                 if response.is_redirect:
                     if redirect_count >= settings.url_fetch_max_redirects:
@@ -891,6 +1971,10 @@ def _fetch_url(settings: Settings, url: str) -> ParsedSource:
         raise EvidenceIngestionError(f"Could not fetch URL: {exc}") from exc
 
     content_type = response.headers.get("content-type", "").split(";")[0].strip().casefold()
+    try:
+        validate_url_response_content_type(content_type, settings)
+    except SecurityValidationError as exc:
+        raise EvidenceSecurityError(exc.reason) from exc
     content_length = response.headers.get("content-length")
     if content_length:
         try:
@@ -910,23 +1994,17 @@ def _fetch_url(settings: Settings, url: str) -> ParsedSource:
         )
 
     text = _decode_bytes(response.content)
-    canonical_url = source_provenance_service.canonicalize_url(str(response.url))
-    markers = source_provenance_service.detect_prompt_injection_markers(text)
     return ParsedSource(
         title=None,
         text=text,
         content_type=content_type or None,
-        metadata={
-            "canonical_url": canonical_url,
-            "final_url": str(response.url),
-            "domain": source_provenance_service.source_domain(canonical_url),
-            "fetched_at": fetched_at.isoformat(),
-            "retrieved_at": fetched_at.isoformat(),
-            "response_content_type": content_type or None,
-            "response_byte_length": len(response.content),
-            "prompt_injection_markers": markers,
-            "extraction_method": "direct_response_decode",
-        },
+        metadata=_direct_response_metadata(
+            content=response.content,
+            text=text,
+            content_type=content_type or None,
+            final_url=str(response.url),
+            fetched_at=fetched_at,
+        ),
     )
 
 
@@ -936,14 +2014,11 @@ def _parse_file(
     filename: str,
     content_type: str,
     body: bytes,
+    pdf_extraction: secure_file_parser_service.PDFExtraction | None = None,
+    image_security_metadata: dict[str, int | str | bool] | None = None,
 ) -> ParsedSource:
     """Route supported uploads through text, PDF, image, or multimodal extraction."""
     lowered = filename.casefold()
-    file_metadata = {
-        "filename": filename,
-        "file_size_bytes": len(body),
-        "file_content_hash": source_provenance_service.byte_hash(body),
-    }
     if multimodal_extraction_service.is_image_content(filename, content_type):
         extraction = multimodal_extraction_service.extract_file(
             settings,
@@ -957,41 +2032,31 @@ def _parse_file(
             text=extraction.text,
             content_type=content_type,
             metadata=_merge_metadata(
-                file_metadata,
-                _merge_metadata(
-                    extraction.metadata,
-                    {
-                        "image_metadata": {
-                            "content_type": content_type,
-                            "byte_length": len(body),
-                            "content_hash": source_provenance_service.byte_hash(body),
-                        }
-                    },
+                _image_upload_metadata(
+                    filename=filename,
+                    content_type=content_type,
+                    body=body,
+                    extraction_metadata=extraction.metadata,
                 ),
+                {"image_security": image_security_metadata} if image_security_metadata else None,
             ),
         )
 
     if content_type == "application/pdf" or lowered.endswith(".pdf"):
-        try:
-            reader = PdfReader(BytesIO(body))
-        except Exception as exc:
-            raise EvidenceIngestionError("PDF could not be parsed safely.") from exc
-        page_texts = [page.extract_text() or "" for page in reader.pages]
+        if pdf_extraction is None:
+            try:
+                pdf_extraction = secure_file_parser_service.extract_pdf(settings, body=body)
+            except secure_file_parser_service.PDFParserError as exc:
+                raise EvidenceIngestionError("PDF could not be parsed safely.") from exc
+        page_texts = pdf_extraction.page_texts
         text = "\n\n".join(page_texts)
         normalized = _normalize_text(text)
-        metadata: dict[str, Any] = {
-            **file_metadata,
-            "media_type": "pdf",
-            "content_type": "application/pdf",
-            "pdf_text_extraction": "pypdf",
-            "pdf_page_count": len(page_texts),
-            "pdf_page_lineage": source_provenance_service.pdf_page_lineage(page_texts),
-            "table_extraction": {
-                "enabled": False,
-                "reason": "table extraction extension point is not configured",
-            },
-            "extracted_text_length": len(normalized),
-        }
+        metadata = _pdf_text_metadata(
+            filename=filename,
+            body=body,
+            page_texts=page_texts,
+            normalized_text=normalized,
+        )
         if (
             settings.multimodal_pdf_fallback_enabled
             and len(normalized) < settings.multimodal_pdf_min_text_chars
@@ -1003,14 +2068,13 @@ def _parse_file(
                 body=body,
                 media_type="pdf",
             )
-            metadata = _merge_metadata(
-                metadata,
-                {
-                    **extraction.metadata,
-                    "pdf_text_extraction": "multimodal_fallback",
-                    "pypdf_extracted_text_length": len(normalized),
-                    "ocr_fallback_used": True,
-                },
+            metadata = _pdf_ocr_fallback_metadata(
+                base_metadata=metadata,
+                extraction_metadata=extraction.metadata,
+                extraction_provider=extraction.provider,
+                extraction_model=extraction.model,
+                extraction_warnings=extraction.warnings,
+                pypdf_text_length=len(normalized),
             )
             return ParsedSource(
                 title=extraction.title or filename,
@@ -1035,12 +2099,11 @@ def _parse_file(
             title=filename,
             text=_decode_bytes(body),
             content_type=content_type,
-            metadata={
-                **file_metadata,
-                "media_type": "text",
-                "content_type": content_type,
-                "text_extraction": "direct_decode",
-            },
+            metadata=_text_upload_metadata(
+                filename=filename,
+                content_type=content_type,
+                body=body,
+            ),
         )
 
     raise EvidenceIngestionError(
@@ -1048,114 +2111,134 @@ def _parse_file(
     )
 
 
-def _parse_html(
-    html: str,
+def _preflight_file_content(
+    settings: Settings,
     *,
     content_type: str,
-    final_url: str | None = None,
-    fetched_at: datetime | None = None,
-) -> ParsedSource:
-    """Extract readable page text plus snapshot and section-lineage metadata."""
-    parser = _ReadableHtmlParser()
-    parser.feed(html)
-    title = _normalize_text(parser.title) or None
-    text = _normalize_text(" ".join(parser.text_parts))
-    canonical_url = source_provenance_service.canonicalize_url(final_url) if final_url else None
-    markers = source_provenance_service.detect_prompt_injection_markers(text)
-    metadata: dict[str, Any] = {
-        "canonical_url": canonical_url,
-        "final_url": final_url,
-        "domain": source_provenance_service.source_domain(canonical_url),
-        "fetched_at": fetched_at.isoformat() if fetched_at else None,
-        "retrieved_at": fetched_at.isoformat() if fetched_at else None,
-        "response_content_type": content_type,
-        "extraction_method": "readable_html_parser_v2",
-        "prompt_injection_markers": markers,
-        "text_lineage": {
-            "page_title": title,
-            "sections": parser.sections[:50],
-        },
-    }
-    if final_url and fetched_at:
-        metadata = _merge_metadata(
-            metadata,
-            source_provenance_service.html_snapshot_metadata(
-                html=html,
-                final_url=final_url,
-                fetched_at=fetched_at,
-            ),
-        )
-    return ParsedSource(title=title, text=text, content_type=content_type, metadata=metadata)
-
-
-def _decode_bytes(body: bytes) -> str:
-    try:
-        return body.decode("utf-8")
-    except UnicodeDecodeError:
-        return body.decode("latin-1", errors="ignore")
-
-
-def _normalize_text(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def _chunk_text(text: str, *, target_tokens: int = 950, overlap_tokens: int = 150) -> list[str]:
-    tokens = _tokens(text)
-    if len(tokens) <= target_tokens:
-        return [text] if text else []
-
-    chunks: list[str] = []
-    start = 0
-    while start < len(tokens):
-        end = min(start + target_tokens, len(tokens))
-        chunks.append(" ".join(tokens[start:end]))
-        if end == len(tokens):
-            break
-        start = max(0, end - overlap_tokens)
-    return chunks
-
-
-def _tokens(text: str) -> list[str]:
-    return [match.group(0) for match in TOKEN_RE.finditer(text)]
-
-
-def _summarize(text: str) -> str:
-    sentences = [sentence.strip() for sentence in SENTENCE_RE.split(text) if sentence.strip()]
-    if not sentences:
-        return _truncate(text, 500)
-    return _truncate(" ".join(sentences[:2]), 700)
-
-
-def _classify(source_type: str, title: str | None, text: str) -> str:
-    combined = f"{title or ''} {text[:3000]}".casefold()
-    if source_type == "transcript" or any(
-        word in combined for word in ["interview", "customer said", "respondent"]
-    ):
-        return "customer_discovery"
-    if any(word in combined for word in ["pricing", "features", "competitor", "alternative"]):
-        return "competitor_research"
-    if any(word in combined for word in ["market", "report", "trend", "industry", "category"]):
-        return "market_research"
-    if any(word in combined for word in ["assumption", "risk", "experiment", "validation"]):
-        return "validation"
-    return "project_note"
-
-
-def _preview(text: str | None) -> str | None:
-    if not text:
+    body: bytes,
+) -> secure_file_parser_service.PDFExtraction | None:
+    if content_type != "application/pdf":
         return None
-    return _truncate(text, 220)
-
-
-def _truncate(value: str, max_length: int) -> str:
-    return value[:max_length]
-
-
-def _validate_fetch_target(url: str) -> None:
     try:
-        validate_url_fetch_target(url)
+        return secure_file_parser_service.extract_pdf(settings, body=body)
+    except secure_file_parser_service.PDFSecurityError as exc:
+        raise EvidenceSecurityError(str(exc)) from exc
+    except secure_file_parser_service.PDFResourceLimitError as exc:
+        raise EvidenceSecurityError(str(exc)) from exc
+    except secure_file_parser_service.PDFParserError as exc:
+        raise EvidenceSecurityError("PDF could not be parsed safely.") from exc
+
+
+def _validate_fetch_target(url: str, settings: Settings | None = None) -> None:
+    try:
+        validate_url_fetch_target(url, settings)
     except SecurityValidationError as exc:
         raise EvidenceSecurityError(exc.reason) from exc
+
+
+def _quarantine_file_upload(
+    db: Session,
+    auth: AuthContext,
+    *,
+    project_id: uuid.UUID,
+    source_id: uuid.UUID,
+    filename: str,
+    content_type: str,
+    size_bytes: int,
+    scan_result: malware_scanning_service.MalwareScanResult,
+) -> None:
+    source = EvidenceSource(
+        id=source_id,
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        source_type="file",
+        title=data_protection_service.redact_for_model(filename, project_id=project_id),
+        ingestion_status="quarantined",
+        ingestion_error="File was quarantined before parsing.",
+        source_metadata={
+            "content_type": content_type,
+            "file_size_bytes": size_bytes,
+            "security": {
+                "data_classification": "restricted",
+                "pii_status": "not_scanned",
+                "pii_entity_types": [],
+                "security_status": "quarantined",
+                "classification_status": "pending",
+                "malware_status": scan_result.status.value,
+            },
+        },
+        created_by=auth.user_id,
+    )
+    secure_ingestion_state_service.initialize(source)
+    secure_ingestion_state_service.transition(
+        source,
+        secure_ingestion_state_service.SecureIngestionState.MALWARE_SCANNING,
+    )
+    secure_ingestion_state_service.transition(
+        source,
+        secure_ingestion_state_service.SecureIngestionState.QUARANTINED,
+    )
+    db.add(source)
+    security_event_service.record_security_event(
+        db,
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        user_id=auth.user_id,
+        event_type="evidence_source_quarantined",
+        severity="high",
+        source="api",
+        summary="Quarantined an evidence upload before parsing.",
+        attributes={
+            "quarantine_reason": "malware_scan",
+            "malware_status": scan_result.status.value,
+        },
+        containment_status="quarantined",
+    )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="evidence_upload_quarantined",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="evidence_source",
+        entity_id=source_id,
+        risk_level="medium",
+        summary="Quarantined an evidence upload before parsing.",
+        metadata={
+            "content_type": content_type,
+            "size_bytes": size_bytes,
+            "malware_status": scan_result.status.value,
+            "signature": scan_result.signature,
+            "reason": scan_result.reason,
+        },
+    )
+    db.commit()
+
+
+def _record_pii_redaction_security_event(
+    db: Session,
+    auth: AuthContext,
+    source: EvidenceSource,
+    *,
+    data_classification: str,
+    pii_entity_count: int,
+    sanitization_version: str,
+) -> None:
+    security_event_service.record_security_event(
+        db,
+        workspace_id=auth.workspace_id,
+        project_id=source.project_id,
+        user_id=auth.user_id,
+        event_type="pii_redaction_applied",
+        severity="medium",
+        source="api",
+        summary="Redacted sensitive entities before evidence indexing.",
+        attributes={
+            "data_classification": data_classification,
+            "pii_entity_count": pii_entity_count,
+            "sanitization_version": sanitization_version,
+        },
+    )
 
 
 def _record_ingestion_security_event(
@@ -1179,56 +2262,9 @@ def _record_ingestion_security_event(
         entity_id=source_id,
         risk_level="medium",
         summary=summary,
-        metadata={"reason": reason, **metadata},
+        metadata=_sanitize_metadata_for_storage(
+            {"reason": reason, **metadata},
+            project_id=project_id,
+        ),
     )
     db.commit()
-
-
-class _ReadableHtmlParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.title = ""
-        self.text_parts: list[str] = []
-        self.sections: list[dict[str, Any]] = []
-        self._skip_depth = 0
-        self._in_title = False
-        self._heading_tag: str | None = None
-        self._heading_parts: list[str] = []
-        self._current_heading: str | None = None
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in {"script", "style", "noscript", "svg"}:
-            self._skip_depth += 1
-        if tag == "title":
-            self._in_title = True
-        if tag in {"h1", "h2", "h3"} and self._skip_depth == 0:
-            self._heading_tag = tag
-            self._heading_parts = []
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in {"script", "style", "noscript", "svg"} and self._skip_depth > 0:
-            self._skip_depth -= 1
-        if tag == "title":
-            self._in_title = False
-        if tag == self._heading_tag:
-            heading = _normalize_text(" ".join(self._heading_parts))
-            if heading:
-                self._current_heading = heading[:200]
-            self._heading_tag = None
-            self._heading_parts = []
-
-    def handle_data(self, data: str) -> None:
-        if self._in_title:
-            self.title += f" {data}"
-        if self._skip_depth == 0:
-            text = data.strip()
-            if text:
-                if self._heading_tag:
-                    self._heading_parts.append(text)
-                self.text_parts.append(text)
-                self.sections.append(
-                    {
-                        "section": self._current_heading or _normalize_text(self.title) or None,
-                        "text_preview": _truncate(text, 300),
-                    }
-                )

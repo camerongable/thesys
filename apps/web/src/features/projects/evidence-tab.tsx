@@ -13,12 +13,14 @@ import { ChangeEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { SafeExternalLink } from "@/components/safe-external-link";
 import { DomainError, DomainHeader, DomainPanel } from "@/features/projects/decision-room";
 import {
   addEvidenceNote,
   addEvidenceUrl,
   Claim,
   deleteEvidenceSource,
+  EvidenceRetrievalResult,
   EvidenceSource,
   getProjectOverview,
   listArtifacts,
@@ -493,6 +495,7 @@ export function EvidenceTab({ projectId }: EvidenceTabProps) {
                         {result.embedding_model ?? "unknown model"} ·{" "}
                         {result.embedding_version ?? "unknown version"}
                       </p>
+                      <RetrievalResultMetadataDetails result={result} />
                     </details>
                   ))
                 )}
@@ -564,15 +567,25 @@ function RetrievalDiagnosticsLine({
   const quality = diagnostics.quality_report
     ? `precision ${diagnostics.quality_report.precision_proxy.toFixed(2)} · recall ${diagnostics.quality_report.recall_proxy.toFixed(2)}`
     : null;
+  const cache = cacheStatusText(diagnostics.cache);
   return (
     <div className="pb-3 text-xs leading-5 text-muted-foreground">
       Retrieval: {path} · {diagnostics.embedding_provider} · {diagnostics.embedding_model} ·{" "}
       {diagnostics.candidate_count} candidates · {diagnostics.query_latency_ms}ms ·{" "}
       {subqueryCount} subquer{subqueryCount === 1 ? "y" : "ies"} · reranker {reranker} · {context}
       {quality ? ` · ${quality}` : ""}
+      {cache ? ` · cache ${cache}` : ""}
       {diagnostics.fallback_reason ? ` · ${diagnostics.fallback_reason}` : ""}
     </div>
   );
+}
+
+function cacheStatusText(cache: Record<string, unknown> | null | undefined) {
+  if (!cache || typeof cache.status !== "string") {
+    return null;
+  }
+  const reason = typeof cache.reason === "string" && cache.reason ? ` (${cache.reason})` : "";
+  return `${cache.status.replace("_", " ")}${reason}`;
 }
 
 function EvidenceFindingsPanel({
@@ -786,14 +799,12 @@ function SourceDetailPanel({ source }: { source: EvidenceSource | null }) {
           </div>
           <h3 className="mt-3 text-sm font-semibold">{source.title ?? "Untitled source"}</h3>
           {source.url ? (
-            <a
+            <SafeExternalLink
               className="mt-2 block break-all text-xs text-primary hover:underline"
               href={source.url}
-              rel="noreferrer"
-              target="_blank"
             >
               {source.url}
-            </a>
+            </SafeExternalLink>
           ) : null}
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             {source.summary ?? source.text_preview ?? "No summary available."}
@@ -824,6 +835,28 @@ function SourceMetadataDetails({ metadata }: { metadata: Record<string, unknown>
     <details className="mt-3 border-t border-border pt-3">
       <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
         Show provenance and extraction details
+      </summary>
+      <dl className="mt-3 grid gap-2 text-xs text-muted-foreground">
+        {entries.map(([label, value]) => (
+          <div key={label} className="grid gap-1 sm:grid-cols-[150px_minmax(0,1fr)]">
+            <dt className="font-medium text-foreground">{label}</dt>
+            <dd className="min-w-0 break-words">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
+function RetrievalResultMetadataDetails({ result }: { result: EvidenceRetrievalResult }) {
+  const entries = retrievalMetadataEntries(result);
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <details className="mt-3 border-t border-border pt-3">
+      <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+        Show retrieval provenance
       </summary>
       <dl className="mt-3 grid gap-2 text-xs text-muted-foreground">
         {entries.map(([label, value]) => (
@@ -948,14 +981,12 @@ function SourceRow({
               Source Details
             </h4>
             {source.url ? (
-              <a
+              <SafeExternalLink
                 className="mt-2 block truncate text-sm text-primary hover:underline"
                 href={source.url}
-                rel="noreferrer"
-                target="_blank"
               >
                 {source.url}
-              </a>
+              </SafeExternalLink>
             ) : null}
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               {source.text_preview ?? source.summary ?? "No preview available."}
@@ -999,23 +1030,89 @@ function truncate(value: string, maxLength: number) {
 function metadataEntries(metadata: Record<string, unknown>) {
   // Show AI/retrieval provenance first so extraction providers, source ranks,
   // and safety flags do not get buried behind arbitrary metadata ordering.
-  const preferred = [
-    "search_provider",
-    "search_query",
-    "search_result_rank",
-    "retrieved_at",
-    "risk_level",
-    "media_type",
-    "content_type",
-    "extraction_provider",
-    "extraction_model",
-    "pdf_text_extraction",
-    "extracted_text_length",
-    "warnings",
-  ];
-  return preferred
-    .filter((key) => metadata[key] !== undefined && metadata[key] !== null && metadata[key] !== "")
-    .map((key) => [formatLabel(key), formatMetadataValue(metadata[key])] as const);
+  const entries: Array<readonly [string, string]> = [];
+  addMetadataEntry(entries, "Search provider", metadata.search_provider);
+  addMetadataEntry(entries, "Search query", metadata.search_query);
+  addMetadataEntry(entries, "Search result rank", metadata.search_result_rank);
+  addMetadataEntry(entries, "Retrieved at", metadata.retrieved_at);
+  addMetadataEntry(entries, "Media type", metadata.media_type);
+  addMetadataEntry(entries, "Content type", metadata.content_type);
+  addMetadataEntry(entries, "Extraction method", metadata.extraction_method);
+  addMetadataEntry(entries, "Extraction provider", metadata.extraction_provider);
+  addMetadataEntry(entries, "Extraction model", metadata.extraction_model);
+  addMetadataEntry(entries, "Extraction confidence", metadata.extraction_confidence);
+  addMetadataEntry(entries, "OCR confidence", metadata.ocr_confidence);
+  addMetadataEntry(entries, "PDF text extraction", metadata.pdf_text_extraction);
+  addMetadataEntry(entries, "Extracted text length", metadata.extracted_text_length);
+  addMetadataEntry(entries, "Source snapshot", metadata.source_snapshot_id);
+
+  const quality = asRecord(metadata.source_quality);
+  addMetadataEntry(entries, "Source quality", quality?.explanation);
+  addMetadataEntry(entries, "Quality risk", quality?.risk_level);
+  addMetadataEntry(entries, "Retrieval weight", quality?.retrieval_weight);
+  addMetadataEntry(entries, "Quality policy", quality?.policy_version);
+
+  const textLineage = asRecord(metadata.text_lineage);
+  const sections = Array.isArray(textLineage?.sections) ? textLineage.sections : [];
+  addMetadataEntry(entries, "Text sections", sections.length > 0 ? `${sections.length}` : null);
+
+  const pageLineage = Array.isArray(metadata.pdf_page_lineage) ? metadata.pdf_page_lineage : [];
+  addMetadataEntry(entries, "PDF pages", pageLineage.length > 0 ? `${pageLineage.length}` : null);
+
+  const tableExtraction = asRecord(metadata.table_extraction);
+  addMetadataEntry(entries, "Tables", tableExtraction?.table_count);
+  addMetadataEntry(entries, "Table confidence", tableExtraction?.confidence);
+
+  const snapshot = asRecord(metadata.snapshot);
+  const screenshot = asRecord(snapshot?.screenshot);
+  addMetadataEntry(entries, "Screenshot available", screenshot?.available ?? screenshot?.captured);
+  addMetadataEntry(entries, "Snapshot storage", snapshot?.storage_key ?? snapshot?.storage_absent_reason);
+  addMetadataEntry(entries, "Snapshot retention", snapshot?.retention_policy);
+  addMetadataEntry(entries, "Warnings", metadata.warnings);
+  return entries;
+}
+
+function retrievalMetadataEntries(result: EvidenceRetrievalResult) {
+  const metadata = result.metadata ?? {};
+  const entries: Array<readonly [string, string]> = [];
+  addMetadataEntry(entries, "Final rank", result.final_rank);
+  addMetadataEntry(entries, "Rerank score", result.rerank_score);
+  addMetadataEntry(entries, "Selection reason", result.selection_reason);
+  addMetadataEntry(entries, "Context included", result.context_included);
+  addMetadataEntry(entries, "Extraction method", metadata.extraction_method);
+  addMetadataEntry(entries, "Extraction confidence", metadata.extraction_confidence);
+  addMetadataEntry(entries, "Source snapshot", metadata.source_snapshot_id);
+  addMetadataEntry(entries, "Page", metadata.page_number);
+  addMetadataEntry(entries, "Section", metadata.section_heading);
+  addMetadataEntry(entries, "Table", metadata.table_id);
+  addMetadataEntry(entries, "Region", metadata.region);
+  addMetadataEntry(entries, "Quote offsets", metadata.quote_offsets);
+
+  const quality = asRecord(metadata.source_quality);
+  addMetadataEntry(entries, "Source quality", quality?.explanation ?? metadata.source_quality_explanation);
+  addMetadataEntry(
+    entries,
+    "Retrieval weight",
+    quality?.retrieval_weight ?? metadata.source_quality_retrieval_weight,
+  );
+
+  const snapshot = asRecord(metadata.snapshot);
+  const rawSnapshot = asRecord(metadata.raw_html_snapshot);
+  const screenshot = asRecord(snapshot?.screenshot) ?? asRecord(rawSnapshot?.screenshot);
+  addMetadataEntry(entries, "Screenshot available", screenshot?.available ?? screenshot?.captured);
+  addMetadataEntry(entries, "Warnings", metadata.warnings);
+  return entries;
+}
+
+function addMetadataEntry(
+  entries: Array<readonly [string, string]>,
+  label: string,
+  value: unknown,
+) {
+  if (value === undefined || value === null || value === "") {
+    return;
+  }
+  entries.push([label, formatMetadataValue(value)] as const);
 }
 
 function formatMetadataValue(value: unknown) {
@@ -1028,10 +1125,10 @@ function formatMetadataValue(value: unknown) {
   return String(value);
 }
 
-function formatLabel(value: string) {
-  return value
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (character) => character.toUpperCase());
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function stringsFromUnknown(value: unknown) {

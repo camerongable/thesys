@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session, selectinload
 from temporalio import activity
 
@@ -22,11 +22,14 @@ from app.db.models import (
     WorkspaceMember,
 )
 from app.db.session import SessionLocal
+from app.db.tenant import bind_tenant_context
+from app.security.workflow_budget import WorkflowSecurityBudget
 from app.services import (
     agentic_research_service,
     competitor_discovery_service,
     eval_service,
     governance_service,
+    retention_service,
     source_discovery_service,
 )
 
@@ -319,6 +322,183 @@ async def finalize_sprint_activity(payload: Payload) -> Payload:
     return await _run_db_activity(payload, "finalize_research_sprint", _finalize)
 
 
+@activity.defn(name="run_workspace_retention_cleanup_activity")
+async def run_workspace_retention_cleanup_activity(payload: Payload) -> Payload:
+    """Run one tenant's retention purge from a scheduled worker invocation."""
+    return await asyncio.to_thread(_run_workspace_retention_cleanup_sync, payload)
+
+
+def _run_workspace_retention_cleanup_sync(payload: Payload) -> Payload:
+    settings = get_settings()
+    with SessionLocal() as db:
+        try:
+            auth = _auth_from_payload(db, payload)
+            bind_tenant_context(db, auth.principal)
+            result = retention_service.purge_expired_local_records(db, auth, settings)
+            return {
+                "workspace_id": str(auth.workspace_id),
+                "retention_cleanup": result.as_dict(),
+            }
+        except Exception:
+            db.rollback()
+            raise
+
+
+@activity.defn(name="reconcile_workspace_workflow_timeouts_activity")
+async def reconcile_workspace_workflow_timeouts_activity(payload: Payload) -> Payload:
+    """Persist the outcome of a Temporal workflow that outlived its durable budget."""
+    return await asyncio.to_thread(_reconcile_workspace_workflow_timeouts_sync, payload)
+
+
+def _reconcile_workspace_workflow_timeouts_sync(payload: Payload) -> Payload:
+    settings = get_settings()
+    with SessionLocal() as db:
+        try:
+            auth = _auth_from_payload(db, payload)
+            bind_tenant_context(db, auth.principal)
+            expired = _reconcile_workspace_workflow_timeouts(db, auth, settings)
+            db.commit()
+            return {
+                "workspace_id": str(auth.workspace_id),
+                "workflow_duration_exhausted": expired,
+            }
+        except Exception:
+            db.rollback()
+            raise
+
+
+@activity.defn(name="purge_unscoped_authentication_events_activity")
+async def purge_unscoped_authentication_events_activity() -> Payload:
+    """Purge expired credential-validation failures via the worker-only DB path."""
+    return await asyncio.to_thread(_purge_unscoped_authentication_events_sync)
+
+
+def _purge_unscoped_authentication_events_sync() -> Payload:
+    settings = get_settings()
+    with SessionLocal() as db:
+        try:
+            return {
+                "unscoped_authentication_events_deleted": (
+                    retention_service.purge_expired_unscoped_authentication_events(db, settings)
+                )
+            }
+        except Exception:
+            db.rollback()
+            raise
+
+
+@activity.defn(name="list_workspace_retention_cleanup_payloads_activity")
+async def list_workspace_retention_cleanup_payloads_activity() -> list[Payload]:
+    """Return active tenant principals for a worker-owned retention sweep."""
+    return await asyncio.to_thread(_list_workspace_retention_cleanup_payloads)
+
+
+def _list_workspace_retention_cleanup_payloads() -> list[Payload]:
+    with SessionLocal() as db:
+        return _retention_cleanup_payloads(db)
+
+
+def _retention_cleanup_payloads(db: Session) -> list[Payload]:
+    owner_first = case((WorkspaceMember.role == "owner", 0), else_=1)
+    memberships = db.execute(
+        select(WorkspaceMember.workspace_id, WorkspaceMember.user_id)
+        .join(User, User.id == WorkspaceMember.user_id)
+        .where(User.status == "active")
+        .order_by(WorkspaceMember.workspace_id, owner_first, WorkspaceMember.created_at)
+    ).all()
+    payloads: list[Payload] = []
+    seen_workspaces: set[uuid.UUID] = set()
+    for workspace_id, user_id in memberships:
+        if workspace_id in seen_workspaces:
+            continue
+        seen_workspaces.add(workspace_id)
+        payloads.append({"workspace_id": str(workspace_id), "user_id": str(user_id)})
+    return payloads
+
+
+def _reconcile_workspace_workflow_timeouts(
+    db: Session,
+    auth: AuthContext,
+    settings: Any,
+    *,
+    now: datetime | None = None,
+) -> int:
+    observed_at = now or datetime.now(UTC)
+    active_sprints = list(
+        db.scalars(
+            select(ResearchSprint)
+            .where(
+                ResearchSprint.workspace_id == auth.workspace_id,
+                ResearchSprint.started_at.is_not(None),
+                ResearchSprint.status.in_(
+                    (
+                        "waiting_for_approval",
+                        "approved",
+                        "running",
+                        "needs_review",
+                        "waiting_for_memory_approval",
+                    )
+                ),
+            )
+            .with_for_update()
+        )
+    )
+    expired = 0
+    for sprint in active_sprints:
+        budget = _workflow_security_budget_for_reconciliation(sprint, settings)
+        observed_duration_seconds = _workflow_duration_seconds(sprint.started_at, observed_at)
+        if observed_duration_seconds < budget.max_duration_seconds:
+            continue
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="workflow_duration_exceeded",
+            actor_type="system",
+            project_id=sprint.project_id,
+            entity_type="research_sprint",
+            entity_id=sprint.id,
+            risk_level="high",
+            summary="Temporal workflow exceeded its configured duration limit.",
+            metadata={
+                "max_duration_seconds": budget.max_duration_seconds,
+                "observed_duration_seconds": observed_duration_seconds,
+                "temporal_workflow_id": sprint.temporal_workflow_id,
+                "temporal_run_id": sprint.temporal_run_id,
+            },
+        )
+        _update_sprint(
+            sprint,
+            status="failed",
+            current_step="workflow_duration_exceeded",
+            failed_step="workflow_duration_exceeded",
+            failure_message=(
+                "Workflow exceeded its safe execution duration. No further workflow work was run."
+            ),
+            completed=True,
+        )
+        expired += 1
+    return expired
+
+
+def _workflow_security_budget_for_reconciliation(
+    sprint: ResearchSprint,
+    settings: Any,
+) -> WorkflowSecurityBudget:
+    if sprint.workflow_security_budget:
+        return WorkflowSecurityBudget.from_payload(sprint.workflow_security_budget)
+    return WorkflowSecurityBudget.from_settings(settings)
+
+
+def _workflow_duration_seconds(started_at: datetime | None, observed_at: datetime) -> int:
+    if started_at is None:
+        return 0
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=UTC)
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=UTC)
+    return max(int((observed_at - started_at).total_seconds()), 0)
+
+
 async def _run_db_activity(
     payload: Payload,
     step_name: str,
@@ -337,8 +517,9 @@ def _run_db_activity_sync(
     with SessionLocal() as db:
         sprint: ResearchSprint | None = None
         try:
-            sprint = _get_sprint(db, uuid.UUID(str(payload["research_sprint_id"])))
             auth = _auth_from_payload(db, payload)
+            bind_tenant_context(db, auth.principal)
+            sprint = _get_sprint(db, uuid.UUID(str(payload["research_sprint_id"])))
             _update_sprint(sprint, status=sprint.status, current_step=step_name)
             db.commit()
             return fn(db, auth, settings, sprint)
@@ -371,8 +552,14 @@ def _auth_from_payload(db: Session, payload: Payload) -> AuthContext:
             WorkspaceMember.workspace_id == workspace_id,
         )
     )
-    role = membership.role if membership else "owner"
-    return AuthContext(user=user, workspace=workspace, role=role)
+    if membership is None or user.status != "active":
+        raise RuntimeError("Temporal activity identity is not an active workspace member.")
+    return AuthContext.from_identity(
+        user=user,
+        workspace=workspace,
+        role=membership.role,
+        authentication_method="temporal_workflow",
+    )
 
 
 def _get_sprint(db: Session, sprint_id: uuid.UUID) -> ResearchSprint:

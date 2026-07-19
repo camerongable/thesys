@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 EvidenceSourceType = Literal["url", "file", "note", "transcript", "manual"]
-EvidenceIngestionStatus = Literal["pending", "processing", "ready", "failed"]
+EvidenceIngestionStatus = Literal["pending", "processing", "ready", "failed", "quarantined"]
 RetrievalMode = Literal["semantic", "keyword", "hybrid"]
 
 
@@ -106,8 +106,10 @@ class RetrievalQueryPlanRead(BaseModel):
 class RetrievalRerankerDiagnosticsRead(BaseModel):
     enabled: bool
     provider: str
+    adapter: str | None = None
     fallback_used: bool = False
     fallback_reason: str | None = None
+    cache: dict[str, object] | None = None
 
 
 class RetrievalContextDiagnosticsRead(BaseModel):
@@ -117,17 +119,38 @@ class RetrievalContextDiagnosticsRead(BaseModel):
     dropped_count: int
     deduped_count: int
     max_chunks_per_source: int
+    max_chunks_per_domain: int | None = None
+    max_chunks_per_source_type: int | None = None
+    max_chunks_per_competitor: int | None = None
+    mmr_enabled: bool = False
+    mmr_lambda: float | None = None
     min_context_score: float
 
 
 class RetrievalQualityReportRead(BaseModel):
     recall_proxy: float
     precision_proxy: float
+    recall_at_k: float | None = None
+    precision_at_k: float | None = None
+    mrr: float | None = None
+    ndcg_proxy: float | None = None
     citation_coverage_proxy: float
+    citation_support_rate: float | None = None
     unsupported_claim_count: int
+    unsupported_claim_rate: float | None = None
     average_retrieval_latency_ms: int
     reranker_used: bool
     context_token_count: int
+
+
+class RetrievalSufficiencyRead(BaseModel):
+    relevant_source_count: int
+    source_diversity: float
+    average_relevance: float
+    trusted_source_ratio: float
+    coverage_by_subquestion: dict[str, float] = Field(default_factory=dict)
+    sufficient: bool
+    reasons: list[str] = Field(default_factory=list)
 
 
 class RetrievalDiagnosticsRead(BaseModel):
@@ -146,6 +169,8 @@ class RetrievalDiagnosticsRead(BaseModel):
     reranker: RetrievalRerankerDiagnosticsRead | None = None
     context: RetrievalContextDiagnosticsRead | None = None
     quality_report: RetrievalQualityReportRead | None = None
+    sufficiency: RetrievalSufficiencyRead | None = None
+    cache: dict[str, object] | None = None
 
 
 class EvidenceRetrieveRead(BaseModel):

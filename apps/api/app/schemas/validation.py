@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +15,7 @@ from app.schemas.artifacts import (
     RiskDraft,
     RiskRead,
 )
+from app.schemas.context import ContextPack
 
 ExperimentStatus = Literal["planned", "running", "completed", "cancelled"]
 ExperimentOutcome = Literal["positive", "negative", "mixed", "inconclusive"]
@@ -30,6 +31,7 @@ ValidationSignalStrength = Literal["none", "weak", "medium", "strong"]
 ValidationSignalLevel = Literal["none", "low", "medium", "high"]
 ValidationConfidenceChange = Literal["decrease", "no_change", "increase"]
 DecisionRecommendation = Literal["proceed", "pivot", "pause", "kill", "continue_research"]
+DecisionEvidenceSeverity = Literal["info", "warning", "success"]
 DecisionType = Literal[
     "build",
     "pivot",
@@ -335,14 +337,23 @@ class DecisionCoachActionRead(BaseModel):
     target_modal: str | None = None
 
 
+class DecisionEvidenceLabelRead(BaseModel):
+    id: str
+    label: str
+    severity: DecisionEvidenceSeverity
+    reason: str
+
+
 class DecisionRecommendationRead(BaseModel):
     recommendation: DecisionRecommendation
     rationale: str
     supporting_evidence: list[str] = Field(default_factory=list)
     missing_evidence: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
+    evidence_labels: list[DecisionEvidenceLabelRead] = Field(default_factory=list)
     suggested_decision_record: SuggestedDecisionRecordRead
     action_cards: list[DecisionCoachActionRead] = Field(default_factory=list)
+    context_pack: ContextPack | dict[str, Any] | None = None
 
 
 class DecisionCoachChatCreate(BaseModel):
@@ -355,6 +366,7 @@ class DecisionCoachChatRead(BaseModel):
     rationale: str
     supporting_evidence: list[str] = Field(default_factory=list)
     missing_evidence: list[str] = Field(default_factory=list)
+    evidence_labels: list[DecisionEvidenceLabelRead] = Field(default_factory=list)
     action_cards: list[DecisionCoachActionRead] = Field(default_factory=list)
 
 

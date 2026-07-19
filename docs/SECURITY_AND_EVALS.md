@@ -1,6 +1,14 @@
-# Security and Evals
+# Security And Evals
 
-The AI surfaces are designed to fail closed around untrusted content, state mutation, and secrets.
+The AI surfaces are designed to fail closed around untrusted content, state
+mutation, and secrets. This is a concise bridge between the product/evaluation
+documentation and the authoritative security material; it is not the complete
+security architecture.
+
+For the full control set, start with [Security Overview](security.md),
+[Security Documentation Guide](security/README.md),
+[Security Architecture](security/SECURITY_ARCHITECTURE.md), and
+[Dependencies And Tooling](DEPENDENCIES.md).
 
 ## Security Boundaries
 
@@ -35,6 +43,19 @@ The AI eval gate checks static and optional live project gates for:
 - source provenance
 - prompt-injection marker coverage
 - multimodal lineage
+
+## Security Verification
+
+The deterministic security suite lives under `apps/api/app/tests/security/`.
+Promptfoo provides fast and full adversarial suites through
+`pnpm security:redteam:fast` and `pnpm security:redteam:full`. Pull-request,
+nightly, and release behavior is defined in `.github/workflows/security.yml`
+and `.github/workflows/release-security.yml`.
+
+Local tests prove implementation contracts. Hosted OIDC, object storage,
+Garak-target, signed-release, and branch-protection claims require their
+separate deployment/repository evidence; see
+[Deployment And Security](DEPLOYMENT_SECURITY.md).
 
 Live project evals are available at:
 

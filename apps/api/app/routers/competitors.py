@@ -17,7 +17,7 @@ from app.schemas.competitors import (
     CompetitorRead,
     CompetitorUpdate,
 )
-from app.services import competitor_service
+from app.services import competitor_service, security_policy_service
 
 router = APIRouter(prefix="/api/projects/{project_id}/competitors", tags=["competitors"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -79,7 +79,23 @@ def analyze_competitors(
     auth: AuthContextDep,
     settings: SettingsDep,
 ) -> CompetitorAnalysisRead:
-    result = competitor_service.analyze_competitors(db, auth, settings, project_id, payload)
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="competitor_analysis",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=1.5,
+            provider_urls=(
+                security_policy_service.llm_provider_urls(settings)
+                + security_policy_service.search_provider_urls(settings)
+                + security_policy_service.embedding_provider_urls(settings)
+            ),
+        ),
+    ):
+        result = competitor_service.analyze_competitors(db, auth, settings, project_id, payload)
     return CompetitorAnalysisRead(
         ai_run_id=result.run.id,
         ai_step_id=result.step.id,

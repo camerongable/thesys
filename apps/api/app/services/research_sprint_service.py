@@ -5,7 +5,6 @@ persists it as a draft, and only an explicit approval starts the execution path
 or resolves pending tool proposals.
 """
 
-import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -18,17 +17,15 @@ from langgraph.graph import END, StateGraph
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.ai.fallback_completion import fallback_completion
 from app.ai.fallback_policy import (
     should_use_fallback_after_error,
     should_use_fallback_without_model,
 )
 from app.ai.litellm_client import ChatMessage, LLMCompletion
-from app.ai.prompts import (
-    RESEARCH_SPRINT_PLANNING_PROMPT_VERSION,
-    UNTRUSTED_RETRIEVED_CONTENT_RULE,
-)
+from app.ai.prompts import RESEARCH_SPRINT_PLANNING_PROMPT_VERSION
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
-from app.core.auth import AuthContext, require_permission
+from app.core.auth import AuthContext, record_cross_tenant_access_attempt, require_permission
 from app.core.config import Settings
 from app.db.models import (
     AIRun,
@@ -41,18 +38,22 @@ from app.db.models import (
     ResearchPlan,
     ResearchSprint,
 )
+from app.features.research import planning as research_planning
 from app.schemas.research import (
     ResearchPlanDraft,
     ResearchPlanUpdate,
     ResearchSprintPlanCreate,
 )
+from app.security.workflow_budget import WorkflowSecurityBudget
 from app.services import (
     ai_run_service,
     governance_service,
     langsmith_observability_service,
     project_service,
+    security_policy_service,
     temporal_research_service,
     tool_service,
+    workflow_budget_service,
 )
 
 
@@ -115,6 +116,12 @@ def start_research_sprint_plan(
 
     require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
+    security_policy_service.enforce_research_sprint_rate_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+    )
     input_summary = payload.objective or _default_objective(project)
     run = ai_run_service.start_run(
         db,
@@ -204,6 +211,7 @@ def start_research_sprint_plan(
             research_plan_id=research_plan.id,
             ai_run_id=run.id,
             status="planned",
+            workflow_security_budget=WorkflowSecurityBudget.from_settings(settings).as_payload(),
             created_by=auth.user_id,
         )
         db.add(sprint)
@@ -260,7 +268,13 @@ def start_research_sprint_plan(
     # The graph makes planning phases observable: context loading, model
     # generation, then durable draft persistence for human approval.
     try:
-        state = graph.compile().invoke({"objective": payload.objective})
+        with workflow_budget_service.model_call_rate_scope(
+            db,
+            auth,
+            settings,
+            project_id=project_id,
+        ):
+            state = graph.compile().invoke({"objective": payload.objective})
     except (StructuredOutputError, RuntimeError) as exc:
         _fail_generation(db, run, step_holder["step"], exc)
         raise ResearchSprintWorkflowError("Research sprint planning failed.") from exc
@@ -536,6 +550,7 @@ def _get_plan(
         )
     )
     if plan is None:
+        record_cross_tenant_access_attempt(db, auth, reason_code="research_plan_scope_denied")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Research plan not found.",
@@ -559,6 +574,7 @@ def _get_sprint(
         select(ResearchSprint).where(*filters).options(selectinload(ResearchSprint.plan))
     )
     if sprint is None:
+        record_cross_tenant_access_attempt(db, auth, reason_code="research_sprint_scope_denied")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Research sprint not found.",
@@ -641,95 +657,8 @@ def _project_context(db: Session, auth: AuthContext, project: Project) -> dict[s
     }
 
 
-def _planning_messages(
-    project_context: dict[str, Any],
-    objective: str | None,
-) -> list[ChatMessage]:
-    payload = {"project_context": project_context, "objective": objective}
-    return [
-        ChatMessage(
-            role="system",
-            content=(
-                "You plan bounded strategic research sprints for solo founders. Produce a "
-                "specific, approval-ready research plan. Do not browse, claim sources were "
-                "found, or perform research. The plan should identify what to investigate, "
-                "which sources to inspect later, which competitors/substitutes to look for, "
-                "and which assumptions the research should test. "
-                f"{UNTRUSTED_RETRIEVED_CONTENT_RULE}"
-            ),
-        ),
-        ChatMessage(
-            role="user",
-            content=(
-                "Create a research sprint plan for this project. Return only the requested "
-                "JSON fields.\n\n"
-                f"{json.dumps(payload, indent=2, sort_keys=True)}"
-            ),
-        ),
-    ]
-
-
-def _fallback_research_plan(
-    project_context: dict[str, Any],
-    objective: str | None,
-) -> ResearchPlanDraft:
-    project_name = str(project_context.get("name") or "the opportunity").strip()
-    target_users = [
-        str(user).strip() for user in project_context.get("target_users", []) if str(user).strip()
-    ]
-    primary_user = target_users[0] if target_users else "the first target customer segment"
-    plan_objective = objective or (
-        f"Investigate whether {project_name} has a specific, evidence-backed wedge for "
-        f"{primary_user}."
-    )
-    return ResearchPlanDraft(
-        objective=plan_objective,
-        target_customer_hypotheses=[
-            primary_user,
-            "Adjacent users currently solving this through manual work or generic AI tools.",
-        ],
-        research_questions=[
-            f"What urgent, repeated pain does {primary_user} have?",
-            "Which current alternatives are users already paying for or tolerating?",
-            "Which competitor or substitute creates the biggest positioning risk?",
-            "What evidence would make this opportunity worth validating next?",
-        ],
-        competitor_queries=[
-            f"{project_name} competitors",
-            f"{primary_user} software alternatives",
-            f"{primary_user} AI workflow tools",
-        ],
-        market_queries=[
-            f"{primary_user} pain points",
-            f"{primary_user} market trends",
-            f"{project_name} market landscape",
-        ],
-        substitute_queries=[
-            f"how {primary_user} solves this manually",
-            f"{primary_user} spreadsheet workflow",
-            f"{primary_user} using ChatGPT for this workflow",
-        ],
-        source_types=[
-            "company websites",
-            "pricing pages",
-            "product pages",
-            "reviews",
-            "forums",
-            "blog posts",
-            "directories",
-        ],
-        assumptions_to_test=[
-            f"{primary_user} has frequent enough pain to switch tools.",
-            "The market has a narrow wedge that direct competitors do not already own.",
-            "Public evidence can identify credible validation targets.",
-        ],
-        expected_outputs=[
-            "cited research memo",
-            "competitor candidate list",
-            "ranked assumptions and risks",
-            "recommended validation actions",
-        ],
-    )
+_planning_messages = research_planning.planning_messages
+_fallback_research_plan = research_planning.fallback_research_plan
 
 
 def _fallback_completion(
@@ -739,22 +668,13 @@ def _fallback_completion(
     fallback_name: str,
     error: BaseException | None = None,
 ) -> LLMCompletion:
-    content = plan.model_dump_json()
-    prompt_tokens = sum(len(message.content.split()) for message in messages)
-    completion_tokens = len(content.split())
-    return LLMCompletion(
-        content=content,
-        model_provider="local-fallback",
-        model_name=settings.litellm_model,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=prompt_tokens + completion_tokens,
-        total_cost=Decimal("0"),
-        raw_response={
-            "fallback": f"research_sprint_planning_{fallback_name}",
-            "error": str(error)[:500] if error is not None else None,
-        },
-        used_stub=True,
+    return fallback_completion(
+        settings,
+        messages,
+        plan,
+        fallback_name,
+        error,
+        fallback_prefix="research_sprint_planning",
     )
 
 

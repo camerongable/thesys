@@ -17,6 +17,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.ai.fallback_completion import fallback_completion
 from app.ai.fallback_policy import (
     should_use_fallback_after_error,
     should_use_fallback_without_model,
@@ -46,7 +47,15 @@ from app.schemas.artifacts import (
     RiskDraft,
 )
 from app.schemas.evidence import EvidenceRetrieveCreate
-from app.services import ai_run_service, project_service, retrieval_service
+from app.services import (
+    ai_run_service,
+    citation_verifier_service,
+    context_service,
+    memory_service,
+    project_service,
+    retrieval_service,
+    security_event_service,
+)
 
 
 class OpportunityBriefWorkflowError(RuntimeError):
@@ -155,8 +164,10 @@ def generate_opportunity_brief(
         retrieval_results = _retrieve_evidence_step(db, auth, settings, run, project, project_state)
         draft, completion, generate_step = _generate_draft_step(
             db,
+            auth,
             settings,
             run,
+            project.id,
             project_state,
             retrieval_results,
         )
@@ -283,13 +294,32 @@ def _retrieve_evidence_step(
 
 def _generate_draft_step(
     db: Session,
+    auth: AuthContext,
     settings: Settings,
     run: AIRun,
+    project_id: uuid.UUID,
     project_state: dict[str, Any],
     retrieval_results,
 ):
     """Ask the configured model for a Pydantic-validated opportunity brief."""
 
+    memory_selection = memory_service.select_memory_for_context(
+        db,
+        auth,
+        project_id,
+        workflow_type="opportunity_brief",
+        limit=12,
+    )
+    context_pack = context_service.ContextCompiler(settings).compile_workflow_context(
+        workflow_type="opportunity_brief",
+        project_id=project_id,
+        query=_brief_retrieval_query(project_state),
+        domain_context=project_state,
+        prompt_version=OPPORTUNITY_BRIEF_PROMPT_VERSION,
+        expected_schema=OpportunityBriefDraft.__name__,
+        memory_selection=memory_selection,
+        evidence_results=list(retrieval_results),
+    )
     messages = _brief_messages(project_state, _evidence_bundles(retrieval_results))
     step = ai_run_service.start_step(
         db,
@@ -297,6 +327,7 @@ def _generate_draft_step(
         step_name="generate_structured_brief",
         input_json={
             "schema": OpportunityBriefDraft.__name__,
+            "context_pack": context_pack.prompt_metadata(),
             "messages": [message.model_dump() for message in messages],
         },
     )
@@ -371,6 +402,9 @@ def _citation_audit_step(
     )
     started = perf_counter()
     audited = _audit_citations(draft, retrieval_results)
+    citation_outcomes = citation_verifier_service.claim_outcome_records(
+        citation_verifier_service.verify_claims(draft.claims, retrieval_results)
+    )
     ai_run_service.complete_step(
         db,
         step,
@@ -378,6 +412,7 @@ def _citation_audit_step(
             "claim_count": len(audited.claims),
             "citation_count": len(audited.citations),
             "unsupported_claim_count": len(audited.unsupported_claims),
+            "citation_outcomes": citation_outcomes,
         },
         latency_ms=int((perf_counter() - started) * 1000),
         tokens=None,
@@ -413,13 +448,26 @@ def _write_artifact_step(
         artifact_id=artifact.id,
         version=version_number,
         markdown_content=markdown,
-        structured_content=draft.model_dump(mode="json"),
+        structured_content={
+            **draft.model_dump(mode="json"),
+            "citation_outcomes": citation_verifier_service.audited_claim_outcome_records(
+                draft.claims
+            ),
+        },
         generated_by_ai_run_id=run.id,
         created_by=auth.user_id,
     )
     db.add(version)
     db.flush()
     artifact.current_version_id = version.id
+    security_event_service.record_artifact_claim_verification_failure(
+        db,
+        auth,
+        project_id=project.id,
+        ai_run_id=run.id,
+        artifact_type="opportunity_brief",
+        unverified_claim_count=len(draft.unsupported_claims),
+    )
 
     claims = _write_claims(db, auth, project, version, draft.claims)
     assumptions = _upsert_assumptions(db, auth, project, draft.assumptions)
@@ -658,16 +706,7 @@ def _fallback_citations(retrieval_results) -> list[Citation]:
         if key in seen:
             continue
         seen.add(key)
-        citations.append(
-            Citation(
-                source_id=result.source_id,
-                chunk_id=result.chunk_id,
-                title=result.title,
-                url=result.url,
-                quote=quote,
-                relevance_score=result.score,
-            )
-        )
+        citations.append(citation_verifier_service.citation_from_evidence(result))
     return citations[:3]
 
 
@@ -678,56 +717,42 @@ def _fallback_completion(
     fallback_name: str,
     error: BaseException | None = None,
 ) -> LLMCompletion:
-    content = draft.model_dump_json()
-    prompt_tokens = sum(len(message.content.split()) for message in messages)
-    completion_tokens = len(content.split())
-    return LLMCompletion(
-        content=content,
-        model_provider="local-fallback",
-        model_name=settings.litellm_model,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=prompt_tokens + completion_tokens,
-        total_cost=Decimal("0"),
-        raw_response={
-            "fallback": fallback_name,
-            "error": str(error)[:500] if error is not None else None,
-        },
-        used_stub=True,
-    )
+    return fallback_completion(settings, messages, draft, fallback_name, error)
 
 
 def _audit_citations(
     draft: OpportunityBriefDraft,
     retrieval_results,
 ) -> OpportunityBriefDraft:
-    valid_by_chunk = {result.chunk_id: result for result in retrieval_results}
-    valid_by_source = {result.source_id: result for result in retrieval_results}
     unsupported_claims = list(dict.fromkeys(draft.unsupported_claims))
     audited_claims: list[ClaimDraft] = []
     global_citations: list[Citation] = []
 
-    for claim in draft.claims:
-        valid_citations = [
-            citation
-            for citation in claim.citations
-            if _citation_is_valid(citation, valid_by_chunk, valid_by_source)
-        ]
-        if claim.support_level == "supported" and not valid_citations:
-            unsupported_claims.append(claim.text)
+    for verification in citation_verifier_service.verify_claims(draft.claims, retrieval_results):
+        claim = verification.claim
+        if verification.unsupported_reason:
+            unsupported_claims.append(f"{claim.text} ({verification.outcome})")
             audited_claims.append(
                 claim.model_copy(update={"support_level": "unsupported", "citations": []})
             )
             continue
-        if claim.support_level in {"partial", "supported"} and valid_citations:
-            audited_claims.append(claim.model_copy(update={"citations": valid_citations}))
-            global_citations.extend(valid_citations)
-            continue
-        audited_claims.append(claim.model_copy(update={"citations": valid_citations}))
-        global_citations.extend(valid_citations)
+        support_level = "partial" if verification.outcome != "supported" else claim.support_level
+        audited_claims.append(
+            claim.model_copy(
+                update={
+                    "support_level": support_level,
+                    "citations": verification.verified_citations,
+                }
+            )
+        )
+        global_citations.extend(verification.verified_citations)
 
     for citation in draft.citations:
-        if _citation_is_valid(citation, valid_by_chunk, valid_by_source):
+        if citation_verifier_service.citation_is_supported(
+            citation,
+            citation.quote or citation.title or "",
+            retrieval_results,
+        ).supported:
             global_citations.append(citation)
 
     return draft.model_copy(
@@ -739,26 +764,8 @@ def _audit_citations(
     )
 
 
-def _citation_is_valid(
-    citation: Citation,
-    valid_by_chunk: dict[uuid.UUID, Any],
-    valid_by_source: dict[uuid.UUID, Any],
-) -> bool:
-    if citation.chunk_id is not None:
-        return citation.chunk_id in valid_by_chunk
-    return citation.source_id in valid_by_source
-
-
-def _dedupe_citations(citations: list[Citation]) -> list[Citation]:
-    seen: set[tuple[str, str | None]] = set()
-    deduped: list[Citation] = []
-    for citation in citations:
-        key = (str(citation.source_id), str(citation.chunk_id) if citation.chunk_id else None)
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(citation)
-    return deduped
+_citation_is_valid = citation_verifier_service.citation_has_retrieved_id
+_dedupe_citations = citation_verifier_service.dedupe_citations
 
 
 def _get_or_create_opportunity_brief_artifact(

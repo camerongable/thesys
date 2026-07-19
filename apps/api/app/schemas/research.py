@@ -116,6 +116,7 @@ class ResearchSprintRead(BaseModel):
     current_step: str | None = None
     failed_step: str | None = None
     failure_message: str | None = None
+    workflow_security_budget: dict[str, int | float]
     started_at: datetime | None
     completed_at: datetime | None
     langsmith_trace_id: str | None = None

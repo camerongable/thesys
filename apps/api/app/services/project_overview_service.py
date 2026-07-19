@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.auth import AuthContext
+from app.core.config import get_settings
 from app.db.models import (
     AIRun,
     Artifact,
@@ -42,7 +43,7 @@ from app.schemas.overview import (
     StrategicUpdateRead,
 )
 from app.schemas.projects import ProjectRead
-from app.services import project_service, research_history_service
+from app.services import project_service, research_history_service, workflow_service
 
 
 @dataclass(frozen=True)
@@ -952,6 +953,7 @@ def _workflow_updates(
         db.scalars(
             select(AIRun)
             .where(AIRun.workspace_id == auth.workspace_id, AIRun.project_id == project_id)
+            .options(selectinload(AIRun.steps))
             .order_by(AIRun.created_at.desc())
             .limit(5)
         )
@@ -960,6 +962,7 @@ def _workflow_updates(
     for run in runs:
         if run.workflow_type in {"evidence_retrieval"}:
             continue
+        serialized_run = workflow_service.serialize_run(db, auth, get_settings(), run)
         title = (
             f"{_format_label(run.workflow_type)} completed"
             if run.status == "succeeded"
@@ -970,8 +973,8 @@ def _workflow_updates(
                 id=f"workflow:{run.id}",
                 project_id=project_id,
                 title=title,
-                summary=run.output_summary
-                or run.input_summary
+                summary=serialized_run.output_summary
+                or serialized_run.input_summary
                 or "Workflow activity was recorded.",
                 why_it_matters=(
                     "Workflow traces keep strategic changes inspectable, but the "

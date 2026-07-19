@@ -1,6 +1,7 @@
 """External search provider boundary for source discovery."""
 
 import hashlib
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -8,8 +9,20 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from app.core.auth import AuthContext
 from app.core.config import Settings
+from app.db.models import ResearchSprint
+from app.security.secrets import SecretName, SecretProviderError, resolve_secret
+from app.security.workflow_budget import WORKFLOW_BUDGET_EXHAUSTED_DETAIL, WorkflowSecurityBudget
+from app.services import governance_service, model_data_policy_service, security_policy_service
+from app.services.security_policy_service import (
+    ProviderEgressDeniedError,
+    enforce_provider_egress_policy,
+)
 
 
 class ExternalSearchError(RuntimeError):
@@ -43,7 +56,15 @@ class ExternalSearchBatch:
     results: list[ExternalSearchResult]
 
 
-def search_many(settings: Settings, queries: list[str]) -> ExternalSearchBatch:
+def search_many(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    queries: list[str],
+    *,
+    project_id: uuid.UUID | None = None,
+    research_sprint_id: uuid.UUID | None = None,
+) -> ExternalSearchBatch:
     """Run bounded external search with deterministic fallback for local demos."""
     cleaned_queries = _clean_queries(queries)[: settings.external_search_max_queries_per_sprint]
     if not settings.external_search_enabled:
@@ -56,6 +77,22 @@ def search_many(settings: Settings, queries: list[str]) -> ExternalSearchBatch:
             fallback_used=False,
             fallback_reason=None,
             results=[],
+        )
+    security_policy_service.enforce_source_fetching_allowed(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="external_search",
+    )
+    if research_sprint_id is not None:
+        cleaned_queries = _reserve_workflow_external_queries(
+            db,
+            auth,
+            settings,
+            project_id=project_id,
+            research_sprint_id=research_sprint_id,
+            queries=cleaned_queries,
         )
 
     provider = settings.external_search_provider
@@ -88,6 +125,76 @@ def search_many(settings: Settings, queries: list[str]) -> ExternalSearchBatch:
     )
 
 
+def _reserve_workflow_external_queries(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID | None,
+    research_sprint_id: uuid.UUID,
+    queries: list[str],
+) -> list[str]:
+    if not queries:
+        return queries
+    if project_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    sprint = db.scalar(
+        select(ResearchSprint)
+        .where(
+            ResearchSprint.id == research_sprint_id,
+            ResearchSprint.workspace_id == auth.workspace_id,
+            ResearchSprint.project_id == project_id,
+        )
+        .with_for_update()
+    )
+    if sprint is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Research sprint not found.",
+        )
+    if not sprint.workflow_security_budget:
+        sprint.workflow_security_budget = WorkflowSecurityBudget.from_settings(
+            settings
+        ).as_payload()
+        db.flush()
+    budget = WorkflowSecurityBudget.from_payload(sprint.workflow_security_budget)
+    usage = dict(sprint.workflow_security_usage or {})
+    observed_queries = _nonnegative_usage_count(usage.get("external_queries", 0))
+    if observed_queries >= budget.max_external_queries:
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="workflow_external_query_budget_exceeded",
+            actor_type="agent",
+            project_id=project_id,
+            entity_type="research_sprint",
+            entity_id=research_sprint_id,
+            risk_level="high",
+            summary="Workflow external-query budget was exhausted before provider search.",
+            metadata={
+                "max_external_queries": budget.max_external_queries,
+                "observed_external_queries": observed_queries,
+                "temporal_workflow_id": sprint.temporal_workflow_id,
+            },
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+        )
+    reserved_queries = queries[: budget.max_external_queries - observed_queries]
+    usage["external_queries"] = observed_queries + len(reserved_queries)
+    sprint.workflow_security_usage = usage
+    db.commit()
+    return reserved_queries
+
+
+def _nonnegative_usage_count(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("Workflow security usage is invalid.")
+    return value
+
+
 def diagnostics(batch: ExternalSearchBatch) -> dict[str, Any]:
     """Return compact search diagnostics safe for traces and evals."""
     return {
@@ -102,19 +209,42 @@ def diagnostics(batch: ExternalSearchBatch) -> dict[str, Any]:
 
 
 def _search_tavily(settings: Settings, queries: list[str]) -> list[ExternalSearchResult]:
-    if not settings.tavily_api_key or not settings.tavily_api_key.strip():
+    try:
+        api_key = resolve_secret(settings, SecretName.TAVILY_API_KEY, required=False)
+    except SecretProviderError:
+        raise ExternalSearchError("Tavily credentials are unavailable.") from None
+    if api_key is None:
         raise ExternalSearchError("Tavily search requires TAVILY_API_KEY.")
+
+    try:
+        sanitized_queries = [
+            model_data_policy_service.prepare_provider_text(
+                provider="tavily",
+                model="search",
+                text=query,
+                purpose="external_search",
+            ).text
+            for query in queries
+        ]
+    except model_data_policy_service.ModelDataPolicyError as exc:
+        raise ExternalSearchError(str(exc)) from None
+
+    endpoint = "https://api.tavily.com/search"
+    try:
+        enforce_provider_egress_policy(settings, endpoint)
+    except ProviderEgressDeniedError as exc:
+        raise ExternalSearchError(f"Tavily egress denied: {exc}") from exc
 
     results: list[ExternalSearchResult] = []
     headers = {
-        "Authorization": f"Bearer {settings.tavily_api_key}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     try:
         with httpx.Client(timeout=settings.external_search_timeout_seconds) as client:
-            for query in queries:
+            for query in sanitized_queries:
                 response = client.post(
-                    "https://api.tavily.com/search",
+                    endpoint,
                     headers=headers,
                     json={
                         "query": query,

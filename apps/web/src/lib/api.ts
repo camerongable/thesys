@@ -411,6 +411,7 @@ export type RetrievalRerankerDiagnostics = {
   provider: string;
   fallback_used: boolean;
   fallback_reason: string | null;
+  cache: Record<string, unknown> | null;
 };
 
 export type RetrievalContextDiagnostics = {
@@ -449,6 +450,7 @@ export type RetrievalDiagnostics = {
   reranker: RetrievalRerankerDiagnostics | null;
   context: RetrievalContextDiagnostics | null;
   quality_report: RetrievalQualityReport | null;
+  cache: Record<string, unknown> | null;
 };
 
 export type EvidenceRetrieveResult = {
@@ -827,6 +829,7 @@ export type DecisionCoachRecommendation = {
   risks: string[];
   suggested_decision_record: SuggestedDecisionRecord;
   action_cards: DecisionCoachAction[];
+  context_pack: Record<string, unknown> | null;
 };
 
 export type DecisionCoachChatResponse = {
@@ -846,6 +849,18 @@ export type Citation = {
   quote: string | null;
   retrieved_at: string | null;
   relevance_score: number | null;
+  source_type?: string | null;
+  metadata?: Record<string, unknown>;
+  provenance?: Record<string, unknown>;
+  source_quality?: Record<string, unknown>;
+  extraction?: Record<string, unknown>;
+  snapshot?: Record<string, unknown>;
+  page_number?: number | null;
+  section_heading?: string | null;
+  table_id?: string | null;
+  region?: Record<string, unknown> | null;
+  quote_offsets?: Record<string, unknown> | null;
+  warnings?: string[];
 };
 
 export type OpportunityBriefGenerateResult = {
@@ -1334,6 +1349,65 @@ export type ApprovalRequest = {
   resolved_at: string | null;
 };
 
+export type MemoryType =
+  | "working"
+  | "episodic"
+  | "semantic"
+  | "project"
+  | "procedural"
+  | "preference";
+export type MemoryStatus = "active" | "stale" | "archived" | "superseded" | "proposed";
+export type MemoryWritePolicy =
+  | "direct"
+  | "approval_required"
+  | "derived_read_only"
+  | "transient";
+
+export type ProjectMemoryItem = {
+  id: string;
+  project_id: string;
+  memory_type: MemoryType;
+  status: MemoryStatus;
+  write_policy: MemoryWritePolicy;
+  entity_type: string | null;
+  entity_id: string | null;
+  source_entity_type: string | null;
+  source_entity_id: string | null;
+  title: string;
+  summary: string;
+  content: Record<string, unknown>;
+  provenance_metadata: Record<string, unknown>;
+  confidence_score: string | null;
+  expires_at: string | null;
+  superseded_by_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectMemoryExcluded = {
+  id: string;
+  memory_type: MemoryType;
+  status: MemoryStatus;
+  title: string;
+  reason: string;
+};
+
+export type ProjectMemoryConflict = {
+  conflict_group_id: string;
+  reason: string;
+  memory_item_ids: string[];
+  titles: string[];
+};
+
+export type ProjectMemoryInspect = {
+  workflow_type: string;
+  selected_memory: ProjectMemoryItem[];
+  excluded_memory: ProjectMemoryExcluded[];
+  proposed_memory: ProjectMemoryItem[];
+  conflicts: ProjectMemoryConflict[];
+  policy: Record<string, unknown>;
+};
+
 export type AuditActorType = "user" | "agent" | "system";
 
 export type AuditEvent = {
@@ -1348,6 +1422,36 @@ export type AuditEvent = {
   risk_level: ToolRiskLevel | null;
   event_metadata: Record<string, unknown>;
   created_at: string;
+};
+
+export type KillSwitchStatus = {
+  name: string;
+  enabled: boolean;
+  workspace_enabled: boolean;
+  environment_enabled: boolean;
+};
+
+export type MCPServerSecurityStatus = {
+  name: string;
+  enabled: boolean;
+  approved_version: string;
+  reviewed_at: string;
+};
+
+export type SecurityOverview = {
+  project_id: string;
+  generated_at: string;
+  high_or_critical_event_count: number;
+  blocked_prompt_attack_count: number;
+  denied_tool_count: number;
+  pending_high_risk_approval_count: number;
+  pii_redaction_count: number;
+  memory_quarantine_count: number;
+  anomalous_retrieval_count: number;
+  budget_alert_count: number;
+  active_workflow_count: number;
+  active_kill_switches: KillSwitchStatus[];
+  mcp_servers: MCPServerSecurityStatus[];
 };
 
 export type DemoSeedResult = {
@@ -1418,6 +1522,58 @@ export type V1ResearchEval = {
   dataset_cases: ResearchEvalCase[];
   dataset_case_count: number;
   demo_ready_case_count: number;
+};
+
+export type ContextEvalMetric = {
+  key: string;
+  label: string;
+  passed: boolean;
+  observed: number | boolean | string | null;
+  expected: string;
+};
+
+export type ContextEval = {
+  project_id: string;
+  passed: boolean;
+  score: number;
+  total: number;
+  metrics: ContextEvalMetric[];
+  report: {
+    context_pack_id?: string;
+    workflow_type?: string;
+    token_count?: number;
+    token_budget?: number;
+    item_count?: number;
+    dropped_count?: number;
+    available_citation_ids?: string[];
+    included_items?: Array<Record<string, unknown>>;
+    dropped_items?: Array<Record<string, unknown>>;
+    excluded_memory?: Array<Record<string, unknown>>;
+    metadata?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+};
+
+export type EvalReport = {
+  report: Record<string, unknown>;
+};
+
+export type EvalTrendList = {
+  trends: Array<Record<string, unknown>>;
+};
+
+export type EvalMetricPoint = {
+  name: string;
+  value: number;
+  unit: string;
+  attributes: Record<string, string>;
+  temporality: string;
+};
+
+export type EvalObservabilityMetrics = {
+  generated_at: string;
+  project_id: string;
+  metrics: EvalMetricPoint[];
 };
 
 export type StrategicRecommendation = {
@@ -1598,12 +1754,37 @@ export type GuideChatTurn = {
   content: string;
 };
 
+export type GuideCitationDetail = {
+  source_id: string;
+  chunk_id: string | null;
+  title: string | null;
+  url: string | null;
+  source_type: string | null;
+  excerpt: string | null;
+  score: number | null;
+  verifier_status: "supported" | "weak" | "missing" | "filtered";
+  context_item_ids: string[];
+  memory_ids: string[];
+  metadata: Record<string, unknown>;
+  provenance: Record<string, unknown>;
+  source_quality: Record<string, unknown>;
+  extraction: Record<string, unknown>;
+  snapshot: Record<string, unknown>;
+  page_number: number | null;
+  section_heading: string | null;
+  table_id: string | null;
+  region: Record<string, unknown> | null;
+  quote_offsets: Record<string, unknown> | null;
+  warnings: string[];
+};
+
 export type GuideChatResponse = {
   answer: string;
   recommended_action: GuideAction | null;
   action_cards: GuideAction[];
   related_entities: GuideRelatedEntity[];
   cited_evidence_ids: string[];
+  citation_details: GuideCitationDetail[];
   assumption_ids: string[];
   confidence_level: GuideConfidenceLevel;
   unsupported_or_missing_evidence: string[];
@@ -1613,6 +1794,28 @@ export type GuideChatResponse = {
   proposal_invocation_id: string | null;
   approval_request_id: string | null;
   ai_run_id: string | null;
+};
+
+export type GuideStreamEventName =
+  | "message_started"
+  | "context_compiled"
+  | "retrieval_started"
+  | "retrieval_result"
+  | "tool_call_started"
+  | "tool_call_completed"
+  | "proposal_created"
+  | "answer_delta"
+  | "metadata"
+  | "timeout"
+  | "cancelled"
+  | "error"
+  | "final";
+
+export type GuideStreamCallbacks = {
+  onEvent?: (event: GuideStreamEventName, payload: Record<string, unknown>) => void;
+  onDelta?: (text: string) => void;
+  onFinal?: (response: GuideChatResponse) => void;
+  onError?: (payload: Record<string, unknown>) => void;
 };
 
 export type ProjectNudgeSeverity = "info" | "warning" | "action_required";
@@ -1670,10 +1873,15 @@ export type AIStatus = {
   embedding_version: string;
   embedding_timeout_seconds: number;
   embedding_retry_attempts: number;
+  ai_embedding_cache_enabled: boolean;
+  ai_retrieval_cache_enabled: boolean;
+  ai_rerank_cache_enabled: boolean;
+  ai_semantic_answer_cache_enabled: boolean;
+  ai_semantic_answer_cache_live_enabled: boolean;
   retrieval_vector_path: "auto" | "sql" | "python";
   retrieval_python_fallback_enabled: boolean;
   retrieval_reranking_enabled: boolean;
-  retrieval_reranker_provider: "deterministic" | "litellm";
+  retrieval_reranker_provider: "none" | "deterministic" | "litellm";
   retrieval_context_token_budget: number;
   retrieval_max_chunks_per_source: number;
   retrieval_min_context_score: number;
@@ -1913,6 +2121,10 @@ export function getProjectOverview(projectId: string) {
   return apiFetch<ProjectOverview>(`/api/projects/${projectId}/overview`);
 }
 
+export function getProjectSecurityOverview(projectId: string) {
+  return apiFetch<SecurityOverview>(`/api/projects/${projectId}/security-overview`);
+}
+
 export function getIdeaReadiness(projectId: string) {
   return apiFetch<IdeaReadiness>(`/api/projects/${projectId}/readiness`);
 }
@@ -1952,6 +2164,114 @@ export function askProjectGuide(
     method: "POST",
     body: JSON.stringify({ message, recent_turns: recentTurns.slice(-6) }),
   });
+}
+
+export async function streamProjectGuide(
+  projectId: string,
+  message: string,
+  recentTurns: GuideChatTurn[] = [],
+  callbacks: GuideStreamCallbacks = {},
+  signal?: AbortSignal,
+) {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/guide/chat/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, recent_turns: recentTurns.slice(-6) }),
+      signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
+    throw new ApiError(
+      "Thesys could not reach the guide stream. Check that the local services are running, then retry.",
+      { retryable: true },
+    );
+  }
+
+  if (!response.ok) {
+    throw new ApiError(statusFallbackMessage(response.status), { status: response.status });
+  }
+  if (!response.body) {
+    throw new ApiError("The guide stream did not include a readable response body.", {
+      retryable: true,
+      status: response.status,
+    });
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResponse: GuideChatResponse | null = null;
+
+  function processFrame(frame: string): GuideChatResponse | null {
+    const parsed = parseSseFrame(frame);
+    if (!parsed) {
+      return null;
+    }
+    callbacks.onEvent?.(parsed.event, parsed.payload);
+    if (parsed.event === "answer_delta") {
+      const text = typeof parsed.payload.text === "string" ? parsed.payload.text : "";
+      callbacks.onDelta?.(text);
+    } else if (parsed.event === "final") {
+      const finalPayload = parsed.payload as GuideChatResponse;
+      callbacks.onFinal?.(finalPayload);
+      return finalPayload;
+    } else if (parsed.event === "error") {
+      callbacks.onError?.(parsed.payload);
+    }
+    return null;
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      finalResponse = processFrame(frame) ?? finalResponse;
+    }
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    finalResponse = processFrame(buffer) ?? finalResponse;
+  }
+  if (!finalResponse) {
+    throw new ApiError("The guide stream ended before a final response arrived.", {
+      retryable: true,
+      status: response.status,
+    });
+  }
+  return finalResponse;
+}
+
+function parseSseFrame(frame: string): {
+  event: GuideStreamEventName;
+  payload: Record<string, unknown>;
+} | null {
+  const lines = frame.split(/\r?\n/);
+  const eventLine = lines.find((line) => line.startsWith("event:"));
+  const dataLines = lines
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice("data:".length).trimStart());
+  if (!eventLine || dataLines.length === 0) {
+    return null;
+  }
+  const event = eventLine.slice("event:".length).trim() as GuideStreamEventName;
+  try {
+    const payload = JSON.parse(dataLines.join("\n")) as Record<string, unknown>;
+    return { event, payload };
+  } catch {
+    return {
+      event: "error",
+      payload: { message: "Guide stream returned malformed event data.", raw_event: event },
+    };
+  }
 }
 
 export async function getProjectNudges(projectId: string) {
@@ -2503,6 +2823,26 @@ export async function rejectApprovalRequest(projectId: string, approvalId: strin
   return response.approval;
 }
 
+export function inspectProjectMemory(projectId: string, workflowType = "guide_chat") {
+  return apiFetch<ProjectMemoryInspect>(
+    `/api/projects/${projectId}/memory/inspect?workflow_type=${encodeURIComponent(workflowType)}`,
+  );
+}
+
+export async function approveProjectMemory(projectId: string, memoryId: string) {
+  return apiFetch<ProjectMemoryItem>(
+    `/api/projects/${projectId}/memory/${memoryId}/approve`,
+    { method: "POST" },
+  );
+}
+
+export async function rejectProjectMemory(projectId: string, memoryId: string) {
+  return apiFetch<ProjectMemoryItem>(
+    `/api/projects/${projectId}/memory/${memoryId}/reject`,
+    { method: "POST" },
+  );
+}
+
 export async function listAuditEvents(projectId: string) {
   const response = await apiFetch<{ events: AuditEvent[] }>(
     `/api/projects/${projectId}/audit-events`,
@@ -2520,6 +2860,24 @@ export function getMvpEval(projectId: string) {
 
 export function getV1ResearchEval(projectId: string) {
   return apiFetch<V1ResearchEval>(`/api/projects/${projectId}/evals/v1-research`);
+}
+
+export function getContextEval(projectId: string) {
+  return apiFetch<ContextEval>(`/api/projects/${projectId}/evals/context`);
+}
+
+export function getLatestEvalReport(projectId: string) {
+  return apiFetch<EvalReport>(`/api/projects/${projectId}/evals/reports/latest`);
+}
+
+export function getEvalTrends(projectId: string) {
+  return apiFetch<EvalTrendList>(`/api/projects/${projectId}/evals/reports/trends`);
+}
+
+export function getEvalObservabilityMetrics(projectId: string) {
+  return apiFetch<EvalObservabilityMetrics>(
+    `/api/projects/${projectId}/evals/observability-metrics`,
+  );
 }
 
 export function getAIStatus() {

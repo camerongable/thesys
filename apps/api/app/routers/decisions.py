@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.core.auth import AuthContextDep
+from app.core.auth import AuthContextDep, SettingsDep
 from app.db.session import get_db
 from app.schemas.validation import (
     DecisionCoachChatCreate,
@@ -14,7 +14,7 @@ from app.schemas.validation import (
     DecisionRead,
     DecisionRecommendationRead,
 )
-from app.services import validation_service
+from app.services import security_policy_service, validation_service
 
 router = APIRouter(prefix="/api/projects/{project_id}/decisions", tags=["decisions"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -37,8 +37,21 @@ def get_decision_recommendation(
     project_id: uuid.UUID,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> DecisionRecommendationRead:
-    return validation_service.get_decision_recommendation(db, auth, project_id)
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="decision_recommendation",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=0.5,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        return validation_service.get_decision_recommendation(db, auth, project_id)
 
 
 @router.post("/coach", response_model=DecisionCoachChatRead)
@@ -47,8 +60,21 @@ def chat_with_decision_coach(
     payload: DecisionCoachChatCreate,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> DecisionCoachChatRead:
-    return validation_service.chat_decision_coach(db, auth, project_id, payload.message)
+    with security_policy_service.guarded_workflow(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="decision_coach",
+        estimate=security_policy_service.merge_estimate(
+            settings,
+            multiplier=0.5,
+            provider_urls=security_policy_service.llm_provider_urls(settings),
+        ),
+    ):
+        return validation_service.chat_decision_coach(db, auth, project_id, payload.message)
 
 
 @router.post("", response_model=DecisionRead, status_code=status.HTTP_201_CREATED)

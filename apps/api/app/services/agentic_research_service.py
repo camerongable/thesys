@@ -5,7 +5,6 @@ context, select retrieval/tool strategies, synthesize a cited memo, critique the
 citations, then stop for human approval before strategic memory is updated.
 """
 
-import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -15,20 +14,17 @@ from typing import Any, Literal, TypedDict
 
 from fastapi import HTTPException, status
 from langgraph.graph import END, StateGraph
-from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.ai.fallback_completion import fallback_completion
 from app.ai.fallback_policy import (
     should_use_fallback_after_error,
     should_use_fallback_without_model,
 )
 from app.ai.litellm_client import ChatMessage, LLMCompletion
-from app.ai.prompts import (
-    AGENTIC_RESEARCH_PROMPT_VERSION,
-    UNTRUSTED_RETRIEVED_CONTENT_RULE,
-)
+from app.ai.prompts import AGENTIC_RESEARCH_PROMPT_VERSION
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
 from app.core.auth import AuthContext, require_permission
 from app.core.config import Settings
@@ -43,13 +39,16 @@ from app.db.models import (
     ClaimEvidenceLink,
     Competitor,
     CompetitorCandidate,
+    Decision,
     DiscoveredSource,
-    EvidenceChunk,
     EvidenceSource,
     Project,
     ResearchSprint,
     Risk,
 )
+from app.features.research import citation_audit, graph_state, memo_prompting, memo_rendering
+from app.features.research import proposals as research_proposals
+from app.features.research import strategy as research_strategy
 from app.schemas.artifacts import Citation, ClaimDraft
 from app.schemas.evidence import EvidenceRetrievalResultRead, EvidenceRetrieveCreate
 from app.schemas.research import (
@@ -62,12 +61,16 @@ from app.services import (
     ai_run_service,
     citation_verifier_service,
     context_service,
+    evidence_service,
     governance_service,
     langsmith_observability_service,
     memory_service,
     project_service,
     retrieval_service,
+    security_event_service,
+    source_provenance_service,
     tool_service,
+    workflow_budget_service,
 )
 
 
@@ -322,9 +325,11 @@ def run_agentic_research(
     def synthesizer(state: AgenticResearchState) -> AgenticResearchState:
         memo, completion, memo_context_pack = _generate_memo(
             db,
+            auth,
             settings,
             run,
             project_id,
+            sprint.id,
             state["project_context"],
             state["subquestions"],
             state["selected_evidence"],
@@ -335,19 +340,27 @@ def run_agentic_research(
         return {"memo": memo, "context_pack": memo_context_pack}
 
     def critic(state: AgenticResearchState) -> AgenticResearchState:
-        audited, critique = _step(
+        with workflow_budget_service.workflow_budget_scope(
             db,
-            run,
-            "critic",
-            {
-                "claim_count": len(state["memo"].claims),
-                "selected_evidence_count": len(state["selected_evidence"]),
-            },
-            lambda: _critic_review(state["memo"], state["selected_evidence"], state["gaps"]),
-            settings=settings,
-            trace=trace,
-            span_name="critique",
-        )
+            auth,
+            settings,
+            project_id=project_id,
+            research_sprint_id=sprint.id,
+        ):
+            workflow_budget_service.reserve_critique_loop()
+            audited, critique = _step(
+                db,
+                run,
+                "critic",
+                {
+                    "claim_count": len(state["memo"].claims),
+                    "selected_evidence_count": len(state["selected_evidence"]),
+                },
+                lambda: _critic_review(state["memo"], state["selected_evidence"], state["gaps"]),
+                settings=settings,
+                trace=trace,
+                span_name="critique",
+            )
         return {"memo": audited, "critic": critique}
 
     def final_memo_writer(state: AgenticResearchState) -> AgenticResearchState:
@@ -451,6 +464,8 @@ def run_agentic_research(
         langsmith_observability_service.complete_trace(
             settings,
             trace,
+            db=db,
+            run=run,
             error="Agentic research failed.",
         )
         raise
@@ -458,7 +473,13 @@ def run_agentic_research(
         sprint.status = "failed"
         db.commit()
         ai_run_service.fail_run(db, run, error=str(exc))
-        langsmith_observability_service.complete_trace(settings, trace, error=str(exc))
+        langsmith_observability_service.complete_trace(
+            settings,
+            trace,
+            db=db,
+            run=run,
+            error=str(exc),
+        )
         raise AgenticResearchWorkflowError("Agentic research failed.") from exc
 
     completion = completion_holder.get("completion")
@@ -591,6 +612,8 @@ def approve_research_memo(
     langsmith_observability_service.complete_trace(
         settings,
         trace,
+        db=db,
+        run=run,
         output_summary="Research memo approved and memory updates written.",
         metrics={
             "assumptions_written": len(memory_summary.get("assumption_ids", [])),
@@ -718,6 +741,8 @@ def reject_research_memo(
     langsmith_observability_service.complete_trace(
         settings,
         trace,
+        db=db,
+        run=run,
         output_summary="Research memo memory updates rejected by human reviewer.",
         metrics={"memory_updates_written": 0},
     )
@@ -775,6 +800,11 @@ def _write_approved_memory_updates(
             assumption,
             source_entity_type="artifact_version",
             source_entity_id=version.id,
+            source_metadata={
+                "research_sprint_id": str(sprint.id),
+                "decision_recommendation": memo.decision_recommendation,
+                "recommendation_source": "agentic_research_memo",
+            },
         )
         for assumption in assumptions
     ]
@@ -786,6 +816,11 @@ def _write_approved_memory_updates(
             risk,
             source_entity_type="artifact_version",
             source_entity_id=version.id,
+            source_metadata={
+                "research_sprint_id": str(sprint.id),
+                "decision_recommendation": memo.decision_recommendation,
+                "recommendation_source": "agentic_research_memo",
+            },
         )
         for risk in risks
     )
@@ -942,45 +977,8 @@ def _refresh_project_confidence_from_research(
         project.confidence_score = Decimal(str(round(sum(scores) / Decimal(len(scores)), 4)))
 
 
-def _fallback_research_assumptions(
-    memo: AgenticResearchMemoDraft,
-) -> list[ResearchAssumptionDraft]:
-    assumption_text = (
-        memo.unsupported_claims[0]
-        if memo.unsupported_claims
-        else "The target user has urgent enough pain to try a focused validation workflow."
-    )
-    return [
-        ResearchAssumptionDraft(
-            text=assumption_text,
-            category="validation",
-            importance="critical",
-            uncertainty="high",
-            kill_risk=True,
-            confidence_score=0.3,
-            recommended_test=_first_recommended_validation_action(memo),
-            evidence_strength="weak",
-            citations=memo.citations[:2],
-        )
-    ]
-
-
-def _fallback_research_risks(memo: AgenticResearchMemoDraft) -> list[ResearchRiskDraft]:
-    risk_text = (
-        memo.evidence_gaps[0]
-        if memo.evidence_gaps
-        else "The evidence base may still be too weak to justify a build decision."
-    )
-    return [
-        ResearchRiskDraft(
-            text=risk_text,
-            category="evidence",
-            severity="high",
-            likelihood="high",
-            mitigation=_first_recommended_validation_action(memo),
-            citations=memo.citations[:2],
-        )
-    ]
+_fallback_research_assumptions = memo_rendering.fallback_research_assumptions
+_fallback_research_risks = memo_rendering.fallback_research_risks
 
 
 def _assumption_confidence_from_research(draft: ResearchAssumptionDraft) -> Decimal | None:
@@ -994,12 +992,7 @@ def _assumption_confidence_from_research(draft: ResearchAssumptionDraft) -> Deci
     return defaults[draft.evidence_strength]
 
 
-def _first_recommended_validation_action(memo: AgenticResearchMemoDraft) -> str:
-    return (
-        memo.recommended_validation_actions[0]
-        if memo.recommended_validation_actions
-        else "Run five target-customer interviews focused on the riskiest assumption."
-    )
+_first_recommended_validation_action = memo_rendering.first_recommended_validation_action
 
 
 def _step(
@@ -1106,7 +1099,7 @@ def _trace_from_sprint(
     return langsmith_observability_service.TraceContext(
         trace_id=trace_id,
         trace_url=trace_url,
-        enabled=bool(settings.langsmith_tracing and settings.langsmith_api_key),
+        enabled=langsmith_observability_service.langsmith_enabled(settings),
         metadata=metadata,
     )
 
@@ -1227,70 +1220,19 @@ def _research_context(
 
 
 def _plan_subquestions(sprint: ResearchSprint) -> list[str]:
-    candidates = [
-        *sprint.plan.research_questions,
-        f"What evidence supports or weakens this objective: {sprint.plan.objective}",
-        "Which competitor or substitute creates the largest positioning risk?",
-        "What evidence is missing before deciding what to validate next?",
-    ]
-    return _clean_list(candidates)[:MAX_SUBQUESTIONS]
+    return research_strategy.plan_subquestions(sprint, max_subquestions=MAX_SUBQUESTIONS)
 
 
 def _select_tool_calls(
     sprint: ResearchSprint,
     subquestions: list[str],
 ) -> list[ResearchToolCall]:
-    calls: list[ResearchToolCall] = [
-        {
-            "tool": "project_memory_lookup",
-            "query": sprint.plan.objective,
-            "mode": "hybrid",
-            "top_k": 1,
-            "reason": "Load structured project memory before retrieval.",
-        },
-        {
-            "tool": "competitor_lookup",
-            "query": "competitors and substitute behaviors",
-            "mode": "hybrid",
-            "top_k": 8,
-            "reason": "Include approved competitor records and candidates.",
-        },
-        {
-            "tool": "artifact_lookup",
-            "query": "prior briefs and validation artifacts",
-            "mode": "hybrid",
-            "top_k": 6,
-            "reason": "Use existing artifacts as project memory.",
-        },
-        {
-            "tool": "assumption_lookup",
-            "query": "existing assumptions and risks",
-            "mode": "hybrid",
-            "top_k": 8,
-            "reason": "Connect research to current validation priorities.",
-        },
-    ]
-    for index, question in enumerate(subquestions[:MAX_SUBQUESTIONS]):
-        mode: Literal["semantic", "keyword"] = "semantic" if index % 2 == 0 else "keyword"
-        calls.append(
-            {
-                "tool": f"{mode}_search",
-                "query": question,
-                "mode": mode,
-                "top_k": INITIAL_TOP_K,
-                "reason": "Retrieve evidence for a research subquestion.",
-            }
-        )
-    calls.append(
-        {
-            "tool": "source_reader",
-            "query": "approved research sources",
-            "mode": "hybrid",
-            "top_k": 8,
-            "reason": "Read source summaries and snippets before synthesis.",
-        }
+    return research_strategy.select_tool_calls(
+        sprint,
+        subquestions,
+        max_subquestions=MAX_SUBQUESTIONS,
+        initial_top_k=INITIAL_TOP_K,
     )
-    return calls
 
 
 def _execute_tool_calls(
@@ -1342,7 +1284,7 @@ def _execute_tool_calls(
                 research_sprint_id=sprint_id,
                 requested_by="agent",
             )
-            source_results = _source_reader_results(db, auth, project_id)
+            source_results = _source_reader_results(db, auth, settings, project_id)
             retrieval_results.extend(source_results)
             completed_calls.append({**call, "result_count": len(source_results)})
         else:
@@ -1367,70 +1309,25 @@ def _execute_tool_calls(
     }
 
 
-def _lookup_tool_name(tool: ResearchTool) -> str | None:
-    if tool == "competitor_lookup":
-        return "list_competitors"
-    if tool == "artifact_lookup":
-        return "get_research_memo"
-    if tool == "assumption_lookup":
-        return "list_assumptions"
-    if tool == "project_memory_lookup":
-        return "list_project_memory"
-    return None
+_lookup_tool_name = research_strategy.lookup_tool_name
 
 
-def _lookup_tool_payload(
-    project_context: dict[str, Any],
-    tool: ResearchTool,
-) -> list[dict[str, Any]]:
-    if tool == "competitor_lookup":
-        return list(project_context.get("competitors", [])) + list(
-            project_context.get("competitor_candidates", [])
-        )
-    if tool == "artifact_lookup":
-        return list(project_context.get("artifacts", []))
-    if tool == "assumption_lookup":
-        return list(project_context.get("assumptions", []))
-    if tool == "project_memory_lookup":
-        return list(project_context.get("project_memory", []))
-    return []
+_lookup_tool_payload = research_strategy.lookup_tool_payload
 
 
 def _source_reader_results(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
 ) -> list[EvidenceRetrievalResultRead]:
-    rows = db.execute(
-        select(EvidenceChunk, EvidenceSource)
-        .join(EvidenceSource, EvidenceSource.id == EvidenceChunk.source_id)
-        .where(
-            EvidenceChunk.workspace_id == auth.workspace_id,
-            EvidenceChunk.project_id == project_id,
-            EvidenceSource.workspace_id == auth.workspace_id,
-            EvidenceSource.project_id == project_id,
-            EvidenceSource.ingestion_status == "ready",
-        )
-        .order_by(EvidenceSource.ingested_at.desc().nullslast(), EvidenceChunk.chunk_index)
-        .limit(8)
-    ).all()
-    return [
-        EvidenceRetrievalResultRead(
-            source_id=source.id,
-            chunk_id=chunk.id,
-            title=source.title,
-            url=source.url,
-            source_type=source.source_type,
-            chunk_index=chunk.chunk_index,
-            text=chunk.text,
-            score=0.5,
-            semantic_score=0.0,
-            keyword_score=0.5,
-            metadata=chunk.chunk_metadata or {},
-            created_at=chunk.created_at,
-        )
-        for chunk, source in rows
-    ]
+    return retrieval_service.read_recent_evidence_results(
+        db,
+        auth,
+        settings,
+        project_id,
+        limit=8,
+    )
 
 
 def _select_evidence(
@@ -1462,21 +1359,12 @@ def _detect_gaps(
     subquestions: list[str],
     selected_evidence: list[EvidenceRetrievalResultRead],
 ) -> list[str]:
-    gaps: list[str] = []
-    evidence_text = " ".join(result.text for result in selected_evidence).casefold()
-    for question in subquestions:
-        terms = [term for term in _term_set(question) if len(term) > 4]
-        if not terms or not any(term in evidence_text for term in terms[:5]):
-            gaps.append(f"Weak evidence for: {question}")
-    if len(selected_evidence) < 3:
-        gaps.append("Too few retrieved evidence chunks to support a confident memo.")
-    has_pricing_signal = any(
-        "pricing" in result.text.casefold() or "pay" in result.text.casefold()
-        for result in selected_evidence
+    return research_strategy.detect_gaps(
+        subquestions,
+        selected_evidence,
+        min_evidence_count=3,
+        max_gaps=6,
     )
-    if not has_pricing_signal:
-        gaps.append("Willingness-to-pay and pricing evidence is still weak.")
-    return _clean_list(gaps)[:6]
 
 
 def _follow_up_retrieval(
@@ -1515,15 +1403,24 @@ def _follow_up_retrieval(
 
 def _generate_memo(
     db: Session,
+    auth: AuthContext,
     settings: Settings,
     run: AIRun,
     project_id: uuid.UUID,
+    research_sprint_id: uuid.UUID,
     project_context: dict[str, Any],
     subquestions: list[str],
     selected_evidence: list[EvidenceRetrievalResultRead],
     gaps: list[str],
     trace: langsmith_observability_service.TraceContext,
 ) -> tuple[AgenticResearchMemoDraft, LLMCompletion, dict[str, Any]]:
+    memory_selection = memory_service.select_memory_for_context(
+        db,
+        auth,
+        project_id,
+        workflow_type="agentic_research",
+        limit=20,
+    )
     context_pack = context_service.build_research_context_pack(
         settings,
         project_id=project_id,
@@ -1534,6 +1431,7 @@ def _generate_memo(
         gaps=gaps,
         prompt_version=AGENTIC_RESEARCH_PROMPT_VERSION,
         expected_schema=AgenticResearchMemoDraft.__name__,
+        memory_selection=memory_selection,
     )
     context_pack_payload = context_pack.model_dump(mode="json")
     messages = _memo_messages(context_pack)
@@ -1562,14 +1460,21 @@ def _generate_memo(
             )
         else:
             try:
-                result = generate_structured_output(
+                with workflow_budget_service.workflow_budget_scope(
+                    db,
+                    auth,
                     settings,
-                    AgenticResearchMemoDraft,
-                    messages,
-                    model=settings.litellm_model,
-                    temperature=0.0,
-                    max_tokens=MEMO_MAX_TOKENS,
-                )
+                    project_id=project_id,
+                    research_sprint_id=research_sprint_id,
+                ):
+                    result = generate_structured_output(
+                        settings,
+                        AgenticResearchMemoDraft,
+                        messages,
+                        model=settings.litellm_model,
+                        temperature=0.0,
+                        max_tokens=MEMO_MAX_TOKENS,
+                    )
                 memo = AgenticResearchMemoDraft.model_validate(result.parsed)
                 completion = result.completion
             except (StructuredOutputError, RuntimeError) as exc:
@@ -1618,67 +1523,7 @@ def _generate_memo(
     return memo, completion, context_pack_payload
 
 
-def _memo_messages(
-    context_pack,
-) -> list[ChatMessage]:
-    trusted_items = [
-        item.model_dump(mode="json") for item in context_pack.items if not item.untrusted
-    ]
-    untrusted_items = [
-        item.model_dump(mode="json") for item in context_pack.items if item.untrusted
-    ]
-    payload = {
-        "context_pack_metadata": context_pack.prompt_metadata(),
-        "trusted_context_items": trusted_items,
-        "required_behavior": [
-            "Answer using only project state and selected evidence.",
-            "Cite factual claims with source_id and chunk_id from context item provenance.",
-            "Mark unsupported factual claims as unsupported_claims.",
-            "Be opinionated, skeptical, and specific about what to validate next.",
-            "The executive verdict must be a strategic recommendation, not a workflow instruction.",
-            "Include what not to build yet and what evidence is still missing inside "
-            "the decision recommendation or evidence gaps.",
-            "Avoid generic language like 'has potential' unless it is followed by a "
-            "concrete do-not-build-yet warning and next test.",
-        ],
-    }
-    payload_json = json.dumps(payload, ensure_ascii=True, default=str, separators=(",", ":"))
-    evidence_json = json.dumps(
-        {"context_items": untrusted_items},
-        ensure_ascii=True,
-        default=str,
-        separators=(",", ":"),
-    )
-    return [
-        ChatMessage(
-            role="system",
-            content=(
-                "You are the synthesizer node in an agentic RAG workflow for founder "
-                "strategic research. "
-                f"{UNTRUSTED_RETRIEVED_CONTENT_RULE} "
-                "Never fabricate citations. If evidence is thin, say so directly."
-            ),
-        ),
-        ChatMessage(
-            role="user",
-            content=(
-                "Generate the final cited research memo as structured JSON. Keep every "
-                "narrative field concise. Include the V1 memo sections: market landscape, "
-                "customer pain signals, competitor landscape, substitute behaviors, "
-                "pricing or business model signals, key risks, riskiest assumptions, "
-                "evidence summary, what remains unknown, recommended validation actions, "
-                "and a decision recommendation. The result must make these fields obvious: "
-                "Verdict, Best Wedge, Top Competitors/Substitutes, Biggest Risk, "
-                "Riskiest Assumption, First Validation Test, What Not To Build Yet, "
-                "Evidence Still Missing, and Recommended Decision. Include claims with "
-                "citations and mark unsupported claims explicitly.\n\n"
-                f"{payload_json}"
-                "\n\n<untrusted_retrieved_content>\n"
-                f"{evidence_json}"
-                "\n</untrusted_retrieved_content>"
-            ),
-        ),
-    ]
+_memo_messages = memo_prompting.memo_messages
 
 
 def _critic_review(
@@ -1734,6 +1579,19 @@ def _write_research_memo_step(
     started = perf_counter()
     try:
         artifact = _get_or_create_research_memo_artifact(db, auth, project)
+        claim_conflict = _single_source_claim_conflict(
+            db,
+            auth,
+            project.id,
+            memo.claims,
+            selected_evidence,
+        )
+        if claim_conflict.detected:
+            for source_id in claim_conflict.controlling_source_ids:
+                source = db.get(EvidenceSource, uuid.UUID(source_id))
+                if source is not None:
+                    evidence_service.quarantine_source_for_conflicting_claim(db, auth, source)
+            memo = _suppress_conflicting_claim(memo, claim_conflict)
         version_number = _next_artifact_version(db, artifact.id)
         version = ArtifactVersion(
             workspace_id=auth.workspace_id,
@@ -1755,6 +1613,9 @@ def _write_research_memo_step(
                 "selected_evidence": [
                     result.model_dump(mode="json") for result in selected_evidence
                 ],
+                "citation_outcomes": citation_verifier_service.claim_outcome_records(
+                    citation_verifier_service.verify_claims(memo.claims, selected_evidence)
+                ),
                 "evidence_gaps": gaps,
                 "critic": critic,
                 "memory_update_status": "pending_human_approval",
@@ -1768,60 +1629,128 @@ def _write_research_memo_step(
         db.add(version)
         db.flush()
         artifact.current_version_id = version.id
+        security_event_service.record_artifact_claim_verification_failure(
+            db,
+            auth,
+            project_id=project.id,
+            ai_run_id=run.id,
+            artifact_type="research_memo",
+            unverified_claim_count=len(memo.unsupported_claims),
+            temporal_workflow_id=sprint.temporal_workflow_id,
+        )
         claims = _write_claims(db, auth, project, version, memo.claims)
+        if claim_conflict.detected:
+            content = dict(version.structured_content)
+            content["conflicting_claim"] = {
+                "proposed_claim": claim_conflict.proposed_claim,
+                "existing_claim": claim_conflict.existing_claim,
+                "controlling_source_ids": list(claim_conflict.controlling_source_ids),
+                "action": "source_quarantined_pending_independent_corroboration",
+            }
+            version.structured_content = content
+            flag_modified(version, "structured_content")
+            governance_service.record_audit_event(
+                db,
+                auth,
+                event_type="conflicting_claim_detected",
+                actor_type="system",
+                project_id=project.id,
+                entity_type="artifact_version",
+                entity_id=version.id,
+                risk_level="high",
+                summary=(
+                    "A single newly added source introduced a claim that conflicts with "
+                    "existing supported evidence."
+                ),
+                metadata={
+                    "proposed_claim": claim_conflict.proposed_claim,
+                    "existing_claim": claim_conflict.existing_claim,
+                    "controlling_source_ids": list(claim_conflict.controlling_source_ids),
+                },
+            )
+        recommendation_shift = _recommendation_shift(
+            db,
+            auth,
+            project.id,
+            memo.decision_recommendation,
+            selected_evidence,
+        )
+        if recommendation_shift.detected:
+            for source_id in recommendation_shift.controlling_source_ids:
+                source = db.get(EvidenceSource, uuid.UUID(source_id))
+                if source is not None:
+                    evidence_service.quarantine_source_for_recommendation_shift(db, auth, source)
+            content = dict(version.structured_content)
+            content["recommendation_shift"] = {
+                "previous_recommendation": recommendation_shift.previous_recommendation,
+                "proposed_recommendation": recommendation_shift.proposed_recommendation,
+                "controlling_source_ids": list(recommendation_shift.controlling_source_ids),
+                "action": "source_quarantined_pending_independent_corroboration",
+            }
+            version.structured_content = content
+            flag_modified(version, "structured_content")
+            governance_service.record_audit_event(
+                db,
+                auth,
+                event_type="recommendation_shift_detected",
+                actor_type="system",
+                project_id=project.id,
+                entity_type="artifact_version",
+                entity_id=version.id,
+                risk_level="high",
+                summary=(
+                    "A single newly added source attempted to reverse a decision recommendation."
+                ),
+                metadata={
+                    "previous_recommendation": recommendation_shift.previous_recommendation,
+                    "proposed_recommendation": recommendation_shift.proposed_recommendation,
+                    "controlling_source_ids": list(recommendation_shift.controlling_source_ids),
+                },
+            )
+        proposal_payloads = _research_memo_proposal_payloads(
+            memo,
+            research_sprint_id=sprint.id,
+            artifact_version_id=version.id,
+        )
+        if claim_conflict.detected:
+            proposal_payloads = _replace_conflicting_claim_proposals(
+                proposal_payloads,
+                claim_conflict,
+            )
+        if recommendation_shift.detected:
+            proposal_payloads = _replace_recommendation_shift_proposals(
+                proposal_payloads,
+                recommendation_shift,
+            )
         memory_update_invocation = tool_service.create_proposal(
             db,
             auth,
             project.id,
             "propose_memory_update",
-            {
-                "summary": (
-                    "Research memo proposes assumption, risk, and validation priority updates."
-                ),
-                "research_sprint_id": str(sprint.id),
-                "artifact_version_id": str(version.id),
-                "assumptions": [
-                    draft.model_dump(mode="json") for draft in memo.riskiest_assumptions
-                ],
-                "risks": [draft.model_dump(mode="json") for draft in memo.key_risks],
-                "recommended_validation_actions": memo.recommended_validation_actions,
-                "decision_recommendation": memo.decision_recommendation,
-            },
+            proposal_payloads.memory_update,
             research_sprint_id=sprint.id,
             requested_by="agent",
-            input_json={"artifact_version_id": str(version.id)},
+            input_json=proposal_payloads.memory_update_input,
         )
         validation_invocation = tool_service.create_proposal(
             db,
             auth,
             project.id,
             "propose_validation_plan",
-            {
-                "summary": (
-                    "Research memo proposes validation actions for the riskiest assumptions."
-                ),
-                "research_sprint_id": str(sprint.id),
-                "artifact_version_id": str(version.id),
-                "actions": memo.recommended_validation_actions,
-            },
+            proposal_payloads.validation_plan,
             research_sprint_id=sprint.id,
             requested_by="agent",
-            input_json={"action_count": len(memo.recommended_validation_actions)},
+            input_json=proposal_payloads.validation_plan_input,
         )
         decision_invocation = tool_service.create_proposal(
             db,
             auth,
             project.id,
             "propose_decision",
-            {
-                "summary": "Research memo proposes a decision recommendation for review.",
-                "research_sprint_id": str(sprint.id),
-                "artifact_version_id": str(version.id),
-                "decision_recommendation": memo.decision_recommendation,
-            },
+            proposal_payloads.decision,
             research_sprint_id=sprint.id,
             requested_by="agent",
-            input_json={"artifact_version_id": str(version.id)},
+            input_json=proposal_payloads.decision_input,
         )
         content = dict(version.structured_content)
         content["proposal_tool_invocation_ids"] = [
@@ -2087,66 +2016,7 @@ def _load_claims_for_version(db: Session, version_id: uuid.UUID) -> list[Claim]:
     )
 
 
-def _render_markdown_memo(project: Project, memo: AgenticResearchMemoDraft) -> str:
-    findings = (
-        "\n".join(
-            f"- **{finding.subquestion}**: {finding.finding} ({finding.evidence_strength} evidence)"
-            for finding in memo.findings
-        )
-        or "- No findings generated."
-    )
-    risks = (
-        "\n".join(
-            f"- **{risk.severity}**: {risk.text}"
-            + (f" Mitigation: {risk.mitigation}" if risk.mitigation else "")
-            for risk in memo.key_risks
-        )
-        or "- No research-derived risks generated."
-    )
-    assumptions = (
-        "\n".join(
-            f"- **{assumption.importance} / {assumption.uncertainty} uncertainty**: "
-            f"{assumption.text}"
-            + (f" Test: {assumption.recommended_test}" if assumption.recommended_test else "")
-            for assumption in memo.riskiest_assumptions
-        )
-        or "- No research-derived assumptions generated."
-    )
-    gaps = "\n".join(f"- {gap}" for gap in memo.evidence_gaps) or "- None"
-    unknowns = "\n".join(f"- {unknown}" for unknown in memo.what_we_still_do_not_know) or gaps
-    actions = "\n".join(f"- {action}" for action in memo.recommended_validation_actions) or "- None"
-    citations = (
-        "\n".join(
-            f"- {citation.title or citation.source_id}: {citation.quote or 'No quote captured.'}"
-            for citation in memo.citations
-        )
-        or "- No cited evidence available."
-    )
-    unsupported = "\n".join(f"- {claim}" for claim in memo.unsupported_claims) or "- None"
-    return "\n\n".join(
-        [
-            f"# Research Memo: {project.name}",
-            f"## Executive Verdict\n{memo.executive_verdict}",
-            f"## Best Wedge\n{memo.best_wedge}",
-            f"## Market Landscape\n{memo.market_landscape or 'Not enough evidence yet.'}",
-            f"## Customer Pain Signals\n{memo.customer_pain_signals or 'Not enough evidence yet.'}",
-            f"## Competitor Landscape\n{memo.competitor_landscape or 'Not enough evidence yet.'}",
-            f"## Substitute Behaviors\n{memo.substitute_behaviors or 'Not enough evidence yet.'}",
-            "## Pricing / Business Model Signals\n"
-            + (memo.pricing_business_model_signals or "Not enough evidence yet."),
-            f"## Key Risks\n{risks}",
-            f"## Riskiest Assumptions\n{assumptions}",
-            f"## Evidence Summary\n{memo.evidence_summary or 'No evidence summary generated.'}",
-            f"## Findings\n{findings}",
-            f"## What We Still Do Not Know\n{unknowns}",
-            f"## Recommended Validation Actions\n{actions}",
-            f"## Decision Recommendation\n{memo.decision_recommendation}",
-            "## MVP Brief Comparison\n"
-            + (memo.comparison_to_mvp_brief or "No prior opportunity brief comparison generated."),
-            f"## Evidence Appendix\n{citations}",
-            f"## Unsupported Claims / Open Questions\n{unsupported}",
-        ]
-    )
+_render_markdown_memo = memo_rendering.render_markdown_memo
 
 
 def _fallback_memo(
@@ -2314,167 +2184,216 @@ def _fallback_completion(
     fallback_name: str,
     error: BaseException | None = None,
 ) -> LLMCompletion:
-    content = memo.model_dump_json()
-    prompt_tokens = sum(len(message.content.split()) for message in messages)
-    completion_tokens = len(content.split())
-    return LLMCompletion(
-        content=content,
-        model_provider="stub" if settings.should_use_llm_stub else "local-fallback",
-        model_name=(
-            f"deterministic-dev-stub:{settings.litellm_model}"
-            if settings.should_use_llm_stub
-            else settings.litellm_model
-        ),
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=prompt_tokens + completion_tokens,
-        total_cost=Decimal("0"),
-        raw_response={
-            "fallback": f"agentic_research_{fallback_name}",
-            "error": str(error)[:500] if error is not None else None,
-        },
-        used_stub=True,
+    return fallback_completion(
+        settings,
+        messages,
+        memo,
+        fallback_name,
+        error,
+        fallback_prefix="agentic_research",
+        use_stub_provider=True,
     )
 
 
-def _audit_citations(
-    memo: AgenticResearchMemoDraft,
-    selected_evidence: list[EvidenceRetrievalResultRead],
-) -> AgenticResearchMemoDraft:
-    unsupported = list(memo.unsupported_claims)
-    claims: list[ClaimDraft] = []
-    citations: list[Citation] = []
-    for verification in citation_verifier_service.verify_claims(memo.claims, selected_evidence):
-        claim = verification.claim
-        if verification.unsupported_reason:
-            unsupported.append(f"{claim.text} ({verification.unsupported_reason})")
-            claims.append(
-                claim.model_copy(update={"support_level": "unsupported", "citations": []})
-            )
-            continue
-        support_level = "partial" if verification.weak_citations else claim.support_level
-        claims.append(
-            claim.model_copy(
-                update={
-                    "support_level": support_level,
-                    "citations": verification.verified_citations,
-                }
-            )
-        )
-        if verification.weak_citations and claim.support_level == "supported":
-            unsupported.append(f"{claim.text} (weak_text_overlap)")
-        citations.extend(verification.verified_citations)
-
-    audited_findings: list[ResearchFindingDraft] = []
-    for finding in memo.findings:
-        valid_citations = [
-            citation
-            for citation in finding.citations
-            if citation_verifier_service.citation_is_supported(
-                citation,
-                finding.finding,
-                selected_evidence,
-            ).supported
-        ]
-        audited_findings.append(finding.model_copy(update={"citations": valid_citations}))
-        citations.extend(valid_citations)
-
-    for citation in memo.citations:
-        if citation_verifier_service.citation_is_supported(
-            citation,
-            citation.quote or citation.title or "",
-            selected_evidence,
-        ).supported:
-            citations.append(citation)
-
-    return memo.model_copy(
-        update={
-            "findings": audited_findings,
-            "claims": claims,
-            "citations": _dedupe_citations(citations),
-            "unsupported_claims": _clean_list(unsupported),
-        }
-    )
+_audit_citations = citation_audit.audit_citations
 
 
-def _citation_is_valid(
-    citation: Citation,
-    valid_by_chunk: dict[uuid.UUID, EvidenceRetrievalResultRead],
-    valid_by_source: dict[uuid.UUID, EvidenceRetrievalResultRead],
-) -> bool:
-    if citation.chunk_id is not None:
-        return citation.chunk_id in valid_by_chunk
-    return citation.source_id in valid_by_source
+_citation_is_valid = citation_verifier_service.citation_has_retrieved_id
 
 
 def _fallback_citations(results: list[EvidenceRetrievalResultRead]) -> list[Citation]:
     citations: list[Citation] = []
     for result in results[:5]:
         citations.append(
-            Citation(
-                source_id=result.source_id,
-                chunk_id=result.chunk_id,
-                title=result.title,
-                url=result.url,
-                quote=result.text[:260],
-                retrieved_at=datetime.now(UTC),
-                relevance_score=result.score,
+            citation_verifier_service.citation_from_evidence(result).model_copy(
+                update={"retrieved_at": datetime.now(UTC)}
             )
         )
     return _dedupe_citations(citations)
 
 
-def _dedupe_citations(citations: list[Citation]) -> list[Citation]:
-    seen: set[tuple[str, str | None]] = set()
-    deduped: list[Citation] = []
-    for citation in citations:
-        key = (str(citation.source_id), str(citation.chunk_id) if citation.chunk_id else None)
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(citation)
-    return deduped
+_dedupe_citations = citation_verifier_service.dedupe_citations
 
 
 def _evidence_bundles(results: list[EvidenceRetrievalResultRead]) -> list[dict[str, Any]]:
-    return [
-        {
-            "source_id": str(result.source_id),
-            "chunk_id": str(result.chunk_id),
-            "title": result.title,
-            "url": result.url,
-            "source_type": result.source_type,
-            "text": result.text[:EVIDENCE_TEXT_LIMIT],
-            "score": result.score,
-        }
-        for result in results
+    return memo_rendering.evidence_bundles(results, text_limit=EVIDENCE_TEXT_LIMIT)
+
+
+_memory_update_preview = memo_rendering.memory_update_preview
+_research_memo_proposal_payloads = research_proposals.research_memo_proposal_payloads
+
+
+def _recommendation_shift(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    proposed_recommendation: str,
+    selected_evidence: list[EvidenceRetrievalResultRead],
+):
+    latest_decision = db.scalar(
+        select(Decision)
+        .where(
+            Decision.workspace_id == auth.workspace_id,
+            Decision.project_id == project_id,
+        )
+        .order_by(Decision.created_at.desc())
+        .limit(1)
+    )
+    selected_source_ids = {result.source_id for result in selected_evidence}
+    newly_added_source_ids: set[object] = set()
+    if latest_decision is not None and selected_source_ids:
+        newly_added_source_ids = set(
+            db.scalars(
+                select(EvidenceSource.id).where(
+                    EvidenceSource.workspace_id == auth.workspace_id,
+                    EvidenceSource.project_id == project_id,
+                    EvidenceSource.id.in_(selected_source_ids),
+                    EvidenceSource.created_at > latest_decision.created_at,
+                )
+            )
+        )
+    return source_provenance_service.assess_recommendation_shift(
+        previous_recommendation=latest_decision.decision_type if latest_decision else None,
+        proposed_recommendation=proposed_recommendation,
+        selected_source_ids=selected_source_ids,
+        newly_added_source_ids=newly_added_source_ids,
+    )
+
+
+def _single_source_claim_conflict(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    proposed_claims: list[ClaimDraft],
+    selected_evidence: list[EvidenceRetrievalResultRead],
+):
+    existing_claims = list(
+        db.scalars(
+            select(Claim)
+            .join(ClaimEvidenceLink, ClaimEvidenceLink.claim_id == Claim.id)
+            .where(
+                Claim.workspace_id == auth.workspace_id,
+                Claim.project_id == project_id,
+                Claim.support_level.in_(("supported", "partial")),
+            )
+            .distinct()
+            .order_by(Claim.created_at.desc())
+        )
+    )
+    if not existing_claims:
+        return source_provenance_service.ClaimConflict(
+            detected=False,
+            proposed_claim=None,
+            existing_claim=None,
+            controlling_source_ids=(),
+        )
+
+    selected_source_ids = {result.source_id for result in selected_evidence}
+    proposed_claim_sources = [
+        (draft.text, {citation.source_id for citation in draft.citations})
+        for draft in proposed_claims
     ]
-
-
-def _memory_update_preview(memo: AgenticResearchMemoDraft) -> dict[str, Any]:
-    assumptions = memo.riskiest_assumptions or _fallback_research_assumptions(memo)
-    risks = memo.key_risks or _fallback_research_risks(memo)
-    return {
-        "assumptions": [
-            {
-                "text": assumption.text,
-                "importance": assumption.importance,
-                "uncertainty": assumption.uncertainty,
-                "kill_risk": assumption.kill_risk,
-                "evidence_strength": assumption.evidence_strength,
-            }
-            for assumption in assumptions
-        ],
-        "risks": [
-            {
-                "text": risk.text,
-                "severity": risk.severity,
-                "likelihood": risk.likelihood,
-            }
-            for risk in risks
-        ],
-        "recommended_validation_actions": memo.recommended_validation_actions,
+    cited_source_ids = {
+        source_id
+        for _, source_ids in proposed_claim_sources
+        for source_id in source_ids
+        if source_id in selected_source_ids
     }
+    newest_existing_claim = max(claim.created_at for claim in existing_claims)
+    newly_added_source_ids = set(
+        db.scalars(
+            select(EvidenceSource.id).where(
+                EvidenceSource.workspace_id == auth.workspace_id,
+                EvidenceSource.project_id == project_id,
+                EvidenceSource.id.in_(cited_source_ids),
+                EvidenceSource.created_at > newest_existing_claim,
+                EvidenceSource.ingestion_status == "ready",
+            )
+        )
+    )
+    return source_provenance_service.assess_single_source_claim_conflict(
+        proposed_claims=proposed_claim_sources,
+        existing_claims=[claim.text for claim in existing_claims],
+        newly_added_source_ids=newly_added_source_ids,
+    )
+
+
+def _suppress_conflicting_claim(
+    memo: AgenticResearchMemoDraft,
+    claim_conflict: source_provenance_service.ClaimConflict,
+) -> AgenticResearchMemoDraft:
+    controlling_source_ids = {
+        uuid.UUID(source_id) for source_id in claim_conflict.controlling_source_ids
+    }
+    claims = [
+        claim.model_copy(update={"support_level": "unsupported", "citations": []})
+        if claim.text == claim_conflict.proposed_claim
+        and {citation.source_id for citation in claim.citations} == controlling_source_ids
+        else claim
+        for claim in memo.claims
+    ]
+    unsupported_claims = list(
+        dict.fromkeys([*memo.unsupported_claims, claim_conflict.proposed_claim])
+    )
+    return memo.model_copy(update={"claims": claims, "unsupported_claims": unsupported_claims[:12]})
+
+
+def _replace_recommendation_shift_proposals(proposal_payloads, recommendation_shift):
+    abstention = (
+        "Do not change the decision from this source alone. Collect independent "
+        "corroborating evidence before making a recommendation."
+    )
+    shift_metadata = {
+        "previous_recommendation": recommendation_shift.previous_recommendation,
+        "proposed_recommendation": recommendation_shift.proposed_recommendation,
+        "controlling_source_ids": list(recommendation_shift.controlling_source_ids),
+        "requires_independent_corroboration": True,
+    }
+    return research_proposals.ResearchMemoProposalPayloads(
+        memory_update={
+            **proposal_payloads.memory_update,
+            "decision_recommendation": abstention,
+            "recommendation_shift": shift_metadata,
+        },
+        validation_plan=proposal_payloads.validation_plan,
+        decision={
+            **proposal_payloads.decision,
+            "decision_recommendation": abstention,
+            "recommendation_shift": shift_metadata,
+        },
+        memory_update_input=proposal_payloads.memory_update_input,
+        validation_plan_input=proposal_payloads.validation_plan_input,
+        decision_input=proposal_payloads.decision_input,
+    )
+
+
+def _replace_conflicting_claim_proposals(proposal_payloads, claim_conflict):
+    abstention = (
+        "Do not make a decision from a claim introduced by one source that conflicts "
+        "with existing evidence. Collect independent corroboration first."
+    )
+    conflict_metadata = {
+        "proposed_claim": claim_conflict.proposed_claim,
+        "existing_claim": claim_conflict.existing_claim,
+        "controlling_source_ids": list(claim_conflict.controlling_source_ids),
+        "requires_independent_corroboration": True,
+    }
+    return research_proposals.ResearchMemoProposalPayloads(
+        memory_update={
+            **proposal_payloads.memory_update,
+            "decision_recommendation": abstention,
+            "conflicting_claim": conflict_metadata,
+        },
+        validation_plan=proposal_payloads.validation_plan,
+        decision={
+            **proposal_payloads.decision,
+            "decision_recommendation": abstention,
+            "conflicting_claim": conflict_metadata,
+        },
+        memory_update_input=proposal_payloads.memory_update_input,
+        validation_plan_input=proposal_payloads.validation_plan_input,
+        decision_input=proposal_payloads.decision_input,
+    )
 
 
 def _research_sources(
@@ -2567,27 +2486,8 @@ def _project_assumptions(
     )
 
 
-def _to_jsonable(value: Any) -> Any:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, dict):
-        return {str(key): _to_jsonable(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_to_jsonable(item) for item in value]
-    if isinstance(value, tuple):
-        return [_to_jsonable(item) for item in value]
-    if isinstance(value, uuid.UUID | datetime | Decimal):
-        return str(value)
-    return value
-
-
-def _json_safe(value: Any) -> dict[str, Any]:
-    value = _to_jsonable(value)
-    if isinstance(value, list):
-        return {"items": value}
-    if isinstance(value, dict):
-        return value
-    return {"value": value}
+_to_jsonable = graph_state.to_jsonable
+_json_safe = graph_state.json_safe
 
 
 def _decimal_score(value: float | None) -> Decimal | None:
@@ -2603,24 +2503,8 @@ def _optional_truncate(value: str | None, max_length: int) -> str | None:
     return stripped[:max_length] or None
 
 
-def _clean_list(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    cleaned: list[str] = []
-    for value in values:
-        text = " ".join(str(value).split())
-        key = text.casefold()
-        if text and key not in seen:
-            cleaned.append(text)
-            seen.add(key)
-    return cleaned
-
-
-def _term_set(text: str) -> set[str]:
-    return {
-        term
-        for term in (part.strip(".,:;!?()[]{}\"'").casefold() for part in text.split())
-        if len(term) > 2
-    }
+_clean_list = research_strategy.clean_list
+_term_set = research_strategy.term_set
 
 
 def _normalize_key(value: str) -> str:

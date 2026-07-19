@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.db.models import AIRun
 from app.routers import workflows
 
@@ -192,6 +193,7 @@ def test_workflow_event_stream_heartbeats_until_terminal(monkeypatch) -> None:
     stream = workflows._event_stream(
         SimpleNamespace(expire_all=lambda: None),
         SimpleNamespace(),
+        get_settings(),
         run_id,
     )
 

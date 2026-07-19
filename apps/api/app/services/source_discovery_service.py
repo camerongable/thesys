@@ -7,25 +7,23 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from time import perf_counter
 from typing import Any
-from urllib.parse import quote_plus
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.ai.fallback_completion import fallback_completion
 from app.ai.fallback_policy import (
     should_use_fallback_after_error,
     should_use_fallback_without_model,
 )
 from app.ai.litellm_client import ChatMessage, LLMCompletion
-from app.ai.prompts import (
-    SOURCE_DISCOVERY_PROMPT_VERSION,
-    UNTRUSTED_RETRIEVED_CONTENT_RULE,
-)
+from app.ai.prompts import SOURCE_DISCOVERY_PROMPT_VERSION
 from app.ai.structured_output import StructuredOutputError, generate_structured_output
 from app.core.auth import AuthContext, require_permission
 from app.core.config import Settings
 from app.db.models import AIRun, AIStep, DiscoveredSource, ResearchSprint
+from app.features.research import source_discovery as source_discovery_feature
 from app.schemas.research import SourceDiscoveryDraft
 from app.services import (
     ai_run_service,
@@ -33,6 +31,8 @@ from app.services import (
     external_search_service,
     langsmith_observability_service,
     project_service,
+    security_policy_service,
+    workflow_budget_service,
 )
 
 
@@ -73,6 +73,14 @@ def discover_sources(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Approve the research plan before discovering sources.",
+        )
+    if settings.external_search_enabled:
+        security_policy_service.enforce_source_fetching_allowed(
+            db,
+            auth,
+            settings,
+            project_id=project_id,
+            workflow_type="source_discovery",
         )
 
     run = ai_run_service.start_run(
@@ -116,15 +124,26 @@ def discover_sources(
     try:
         if settings.external_search_enabled:
             search_batch = external_search_service.search_many(
+                db,
+                auth,
                 settings,
                 _search_queries_for_sprint(sprint),
+                project_id=project_id,
+                research_sprint_id=sprint.id,
             )
             draft = SourceDiscoveryDraft(sources=[])
             completion = _external_search_completion(settings, messages, search_batch)
             specs = _candidate_specs_from_search(search_batch)
             search_diagnostics = external_search_service.diagnostics(search_batch)
         else:
-            draft, completion = _generate_source_draft(settings, sprint, messages)
+            with workflow_budget_service.workflow_budget_scope(
+                db,
+                auth,
+                settings,
+                project_id=project_id,
+                research_sprint_id=sprint.id,
+            ):
+                draft, completion = _generate_source_draft(settings, sprint, messages)
             specs = _candidate_specs_from_draft(draft)
             search_diagnostics = {
                 "enabled": False,
@@ -269,6 +288,17 @@ def ingest_source_candidate(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only candidate, approved, or failed sources can be ingested.",
         )
+    with workflow_budget_service.workflow_budget_scope(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=sprint_id,
+    ):
+        workflow_budget_service.enforce_repeated_source_fetch_failure_limit(
+            source_id=source.id,
+            observed_failed_fetches=_failed_fetch_attempt_count(source),
+        )
     source.status = "approved"
     source.ingestion_error = None
     db.commit()
@@ -287,6 +317,9 @@ def ingest_source_candidate(
         source = _get_source(db, auth, project_id, sprint_id, source_id)
         source.status = "failed"
         source.ingestion_error = str(exc)[:2000]
+        metadata = dict(source.provenance_metadata or {})
+        metadata["failed_fetch_attempt_count"] = _failed_fetch_attempt_count(source) + 1
+        source.provenance_metadata = metadata
         db.commit()
         db.refresh(source)
         return source
@@ -299,6 +332,13 @@ def ingest_source_candidate(
     db.commit()
     db.refresh(source)
     return source
+
+
+def _failed_fetch_attempt_count(source: DiscoveredSource) -> int:
+    value = (source.provenance_metadata or {}).get("failed_fetch_attempt_count", 0)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
 
 
 def reject_source_candidate(
@@ -418,103 +458,7 @@ def _generate_source_draft(
         return draft, _fallback_completion(settings, messages, draft, "emergency", exc)
 
 
-def _source_discovery_messages(sprint: ResearchSprint) -> list[ChatMessage]:
-    plan = sprint.plan
-    payload = {
-        "objective": plan.objective,
-        "target_customer_hypotheses": plan.target_customer_hypotheses,
-        "research_questions": plan.research_questions,
-        "competitor_queries": plan.competitor_queries,
-        "market_queries": plan.market_queries,
-        "substitute_queries": plan.substitute_queries,
-        "requested_source_types": plan.source_types,
-        "max_candidates": 10,
-    }
-    return [
-        ChatMessage(
-            role="system",
-            content=(
-                "You are a source discovery planner for a founder strategy workspace. "
-                "Generate candidate public sources for a human to review before ingestion. "
-                "Do not claim that you browsed the web. Prefer high-signal primary pages, "
-                "pricing pages, review directories, forums, market reports, and specific "
-                "search-result URLs when a concrete source is uncertain. Each candidate must "
-                "explain why it is worth reviewing and which research question it supports. "
-                f"{UNTRUSTED_RETRIEVED_CONTENT_RULE}"
-            ),
-        ),
-        ChatMessage(
-            role="user",
-            content=(
-                "Create a ranked source candidate list from this approved research plan. "
-                "Return only the structured JSON.\n\n"
-                f"{json.dumps(payload, ensure_ascii=True, separators=(',', ':'))}"
-            ),
-        ),
-    ]
-
-
-def _candidate_specs_from_draft(draft: SourceDiscoveryDraft) -> list[dict[str, object]]:
-    specs: list[dict[str, object]] = []
-    for source in draft.sources:
-        url = _clean_url(source.url)
-        if not url:
-            continue
-        specs.append(
-            {
-                "url": url,
-                "title": source.title[:500] if source.title else None,
-                "snippet": source.snippet,
-                "source_type": source.source_type,
-                "relevance_score": _clamp_score(source.relevance_score),
-                "reason_selected": source.reason_selected,
-                "associated_research_question": source.associated_research_question,
-            }
-        )
-    return _dedupe_specs(specs)
-
-
-def _candidate_specs_from_search(
-    batch: external_search_service.ExternalSearchBatch,
-) -> list[dict[str, object]]:
-    specs: list[dict[str, object]] = []
-    for result in batch.results:
-        url = _clean_url(result.url)
-        if not url:
-            continue
-        source_type = _infer_source_type(
-            result.url,
-            result.title,
-            result.snippet,
-            result.metadata.get("source_type_hint"),
-        )
-        specs.append(
-            {
-                "url": url,
-                "title": result.title[:500] if result.title else None,
-                "snippet": result.snippet,
-                "source_type": source_type,
-                "relevance_score": _clamp_score(result.score),
-                "reason_selected": (
-                    "External search result selected for human review before ingestion."
-                ),
-                "associated_research_question": result.query,
-                "search_provider": result.provider,
-                "search_query": result.query,
-                "search_result_rank": result.rank,
-                "retrieved_at": result.retrieved_at,
-                "risk_level": _risk_level(source_type),
-                "provenance_metadata": {
-                    "search_provider": result.provider,
-                    "search_query": result.query,
-                    "search_result_rank": result.rank,
-                    "retrieved_at": result.retrieved_at.isoformat(),
-                    "search_score": str(result.score),
-                    **result.metadata,
-                },
-            }
-        )
-    return _dedupe_specs(specs)
+_source_discovery_messages = source_discovery_feature.source_discovery_messages
 
 
 def _fallback_completion(
@@ -524,26 +468,14 @@ def _fallback_completion(
     fallback_name: str,
     error: BaseException | None = None,
 ) -> LLMCompletion:
-    content = draft.model_dump_json()
-    prompt_tokens = sum(len(message.content.split()) for message in messages)
-    completion_tokens = len(content.split())
-    return LLMCompletion(
-        content=content,
-        model_provider="stub" if settings.should_use_llm_stub else "local-fallback",
-        model_name=(
-            f"deterministic-dev-stub:{settings.litellm_model}"
-            if settings.should_use_llm_stub
-            else settings.litellm_model
-        ),
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=prompt_tokens + completion_tokens,
-        total_cost=Decimal("0"),
-        raw_response={
-            "fallback": f"source_discovery_{fallback_name}",
-            "error": str(error)[:500] if error is not None else None,
-        },
-        used_stub=True,
+    return fallback_completion(
+        settings,
+        messages,
+        draft,
+        fallback_name,
+        error,
+        fallback_prefix="source_discovery",
+        use_stub_provider=True,
     )
 
 
@@ -582,224 +514,17 @@ def _external_search_completion(
     )
 
 
-def _fallback_candidate_specs(sprint: ResearchSprint) -> list[dict[str, Any]]:
-    plan = sprint.plan
-    queries = _ordered_queries(
-        [
-            *plan.market_queries,
-            *plan.competitor_queries,
-            *plan.substitute_queries,
-            *plan.research_questions,
-        ]
-    )
-    if not queries:
-        queries = [plan.objective]
-
-    specs: list[dict[str, Any]] = []
-    for index, query in enumerate(queries[:8]):
-        score_base = max(Decimal("0.95") - Decimal(index) * Decimal("0.03"), Decimal("0.62"))
-        specs.extend(
-            [
-                _spec(
-                    query,
-                    "directory",
-                    f"https://www.g2.com/search?query={quote_plus(query)}",
-                    f"G2 search for {query}",
-                    score_base,
-                    "Directory pages can reveal named competitors, categories, and review "
-                    "patterns.",
-                ),
-                _spec(
-                    query,
-                    "forum",
-                    f"https://www.reddit.com/search/?q={quote_plus(query)}",
-                    f"Reddit discussions for {query}",
-                    score_base - Decimal("0.04"),
-                    "Forum threads can reveal customer pain, substitutes, and language users use.",
-                ),
-                _spec(
-                    query,
-                    "market_report",
-                    f"https://www.google.com/search?q={quote_plus(query + ' market report')}",
-                    f"Market report search for {query}",
-                    score_base - Decimal("0.08"),
-                    "Market landscape sources can help calibrate category maturity and trends.",
-                ),
-            ]
-        )
-
-    for query in plan.competitor_queries[:4]:
-        specs.append(
-            _spec(
-                query,
-                "pricing_page",
-                f"https://www.google.com/search?q={quote_plus(query + ' pricing')}",
-                f"Pricing page search for {query}",
-                Decimal("0.81"),
-                "Pricing pages help test willingness-to-pay and packaging assumptions.",
-            )
-        )
-    return _dedupe_specs(specs)
-
-
-def _spec(
-    query: str,
-    source_type: str,
-    url: str,
-    title: str,
-    score: Decimal,
-    reason: str,
-) -> dict[str, Any]:
-    clean_query = " ".join(query.split())
-    return {
-        "url": url,
-        "title": title[:500],
-        "snippet": f"Candidate public source to inspect for: {clean_query}",
-        "source_type": source_type,
-        "relevance_score": max(min(score, Decimal("1.00")), Decimal("0.00")),
-        "reason_selected": reason,
-        "associated_research_question": clean_query,
-    }
-
-
-def _ordered_queries(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for value in values:
-        cleaned = " ".join(str(value).split())
-        key = cleaned.casefold()
-        if cleaned and key not in seen:
-            ordered.append(cleaned)
-            seen.add(key)
-    return ordered
-
-
-def _search_queries_for_sprint(sprint: ResearchSprint) -> list[str]:
-    plan = sprint.plan
-    queries = _ordered_queries(
-        [
-            *plan.competitor_queries,
-            *plan.substitute_queries,
-            *plan.market_queries,
-            *plan.research_questions,
-        ]
-    )
-    return queries or [plan.objective]
-
-
-def _dedupe_specs(specs: list[dict[str, object]]) -> list[dict[str, object]]:
-    by_url: dict[str, dict[str, object]] = {}
-    for spec in specs:
-        key = _normalize_url(str(spec["url"]))
-        if key not in by_url:
-            by_url[key] = spec
-    return list(by_url.values())
-
-
-def _normalize_url(url: str) -> str:
-    return url.strip().rstrip("/").casefold()
-
-
-def _clean_url(url: str) -> str:
-    cleaned = " ".join(url.split())
-    if not cleaned:
-        return ""
-    if cleaned.startswith(("http://", "https://")):
-        return cleaned
-    return f"https://www.google.com/search?q={quote_plus(cleaned)}"
-
-
-def _clamp_score(score: Decimal) -> Decimal:
-    return max(min(score, Decimal("1.00")), Decimal("0.00"))
-
-
-def _infer_source_type(
-    url: str,
-    title: str | None,
-    snippet: str | None,
-    hint: object | None,
-) -> str:
-    allowed = {
-        "company_site",
-        "pricing_page",
-        "product_page",
-        "review",
-        "forum",
-        "blog",
-        "market_report",
-        "directory",
-        "docs",
-        "unknown",
-    }
-    if isinstance(hint, str) and hint in allowed:
-        return hint
-    combined = f"{url} {title or ''} {snippet or ''}".casefold()
-    if any(term in combined for term in ["pricing", "plans", "price"]):
-        return "pricing_page"
-    if any(term in combined for term in ["reddit", "forum", "community", "discussion"]):
-        return "forum"
-    if any(term in combined for term in ["review", "g2", "capterra", "trustpilot"]):
-        return "review"
-    if any(term in combined for term in ["market", "report", "trend", "industry"]):
-        return "market_report"
-    if any(term in combined for term in ["docs", "documentation", "changelog"]):
-        return "docs"
-    if any(term in combined for term in ["directory", "alternatives", "list"]):
-        return "directory"
-    if any(term in combined for term in ["product", "features"]):
-        return "product_page"
-    return "unknown"
-
-
-def _risk_level(source_type: str) -> str:
-    if source_type in {"forum", "review", "unknown"}:
-        return "medium"
-    return "low"
-
-
-def _snapshot_text(source: DiscoveredSource) -> str:
-    return "\n\n".join(
-        part
-        for part in [
-            source.title,
-            f"URL: {source.url}",
-            source.snippet,
-            f"Reason selected: {source.reason_selected}",
-            (
-                f"Associated research question: {source.associated_research_question}"
-                if source.associated_research_question
-                else None
-            ),
-        ]
-        if part
-    )
-
-
-def _source_evidence_metadata(
-    source: DiscoveredSource,
-    sprint: ResearchSprint,
-) -> dict[str, object]:
-    return {
-        "origin": "source_discovery",
-        "research_sprint_id": str(sprint.id),
-        "research_sprint_ids": [str(sprint.id)],
-        "research_plan_id": str(sprint.plan.id),
-        "discovered_source_id": str(source.id),
-        "discovered_source_ids": [str(source.id)],
-        "source_candidate_type": source.source_type,
-        "source_candidate_types": [source.source_type],
-        "source_relevance_score": str(source.relevance_score),
-        "reason_selected": source.reason_selected,
-        "associated_research_question": source.associated_research_question,
-        "search_provider": source.search_provider,
-        "search_query": source.search_query,
-        "search_result_rank": source.search_result_rank,
-        "retrieved_at": source.retrieved_at.isoformat() if source.retrieved_at else None,
-        "risk_level": source.risk_level,
-        "provenance": source.provenance_metadata or {},
-        "research_questions": (
-            [source.associated_research_question] if source.associated_research_question else []
-        ),
-        "assumptions_to_test": sprint.plan.assumptions_to_test,
-        "source_fetched_at": datetime.now(UTC).isoformat(),
-    }
+_candidate_specs_from_draft = source_discovery_feature.candidate_specs_from_draft
+_candidate_specs_from_search = source_discovery_feature.candidate_specs_from_search
+_fallback_candidate_specs = source_discovery_feature.fallback_candidate_specs
+_spec = source_discovery_feature.spec
+_ordered_queries = source_discovery_feature.ordered_queries
+_search_queries_for_sprint = source_discovery_feature.search_queries_for_sprint
+_dedupe_specs = source_discovery_feature.dedupe_specs
+_normalize_url = source_discovery_feature.normalize_url
+_clean_url = source_discovery_feature.clean_url
+_clamp_score = source_discovery_feature.clamp_score
+_infer_source_type = source_discovery_feature.infer_source_type
+_risk_level = source_discovery_feature.risk_level
+_snapshot_text = source_discovery_feature.snapshot_text
+_source_evidence_metadata = source_discovery_feature.source_evidence_metadata
