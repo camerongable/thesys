@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -14,6 +14,8 @@ from app.db.models import (
     Assumption,
     AuditEvent,
     MCPServerRegistration,
+    ResearchSprint,
+    SecurityEvent,
     ToolInvocation,
 )
 from app.features.governance_tools import registry as tool_registry
@@ -704,6 +706,92 @@ def test_research_plan_proposal_is_audited_and_approvable(
     )
     assert stored is not None
     assert stored.status == "approved"
+
+
+def test_research_sprint_tool_budget_denies_before_a_new_invocation(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = _create_project(client)
+    plan_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Bound the governed tool workflow."},
+    )
+    assert plan_response.status_code == 200
+    sprint_id = uuid.UUID(plan_response.json()["sprint"]["id"])
+    sprint = db_session.get(ResearchSprint, sprint_id)
+    assert sprint is not None
+    existing_tool_calls = int(
+        db_session.scalar(
+            select(func.count())
+            .select_from(ToolInvocation)
+            .where(ToolInvocation.research_sprint_id == sprint_id)
+        )
+        or 0
+    )
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_tool_calls": existing_tool_calls + 1,
+    }
+    db_session.commit()
+
+    auth = _dev_auth(db_session)
+    first = tool_service.execute_tool(
+        db_session,
+        auth,
+        get_settings(),
+        uuid.UUID(project_id),
+        "get_project_summary",
+        research_sprint_id=sprint_id,
+    )
+
+    assert first.invocation.research_sprint_id == sprint_id
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            auth,
+            get_settings(),
+            uuid.UUID(project_id),
+            "get_project_summary",
+            research_sprint_id=sprint_id,
+        )
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == tool_service.WORKFLOW_BUDGET_EXHAUSTED_DETAIL
+    with pytest.raises(HTTPException) as proposal_exc_info:
+        tool_service.create_proposal(
+            db_session,
+            auth,
+            uuid.UUID(project_id),
+            "propose_memory_update",
+            {},
+            research_sprint_id=sprint_id,
+        )
+
+    assert proposal_exc_info.value.status_code == 429
+    assert proposal_exc_info.value.detail == tool_service.WORKFLOW_BUDGET_EXHAUSTED_DETAIL
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(ToolInvocation)
+            .where(ToolInvocation.research_sprint_id == sprint_id)
+        )
+        == existing_tool_calls + 1
+    )
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_tool_budget_exceeded")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.risk_level == "high"
+    assert audit.event_metadata["max_tool_calls"] == existing_tool_calls + 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.severity == "high"
+    assert security_event.source == "workflow"
 
 
 def test_tool_proposal_rejection_resolves_approval_and_writes_audit_event(

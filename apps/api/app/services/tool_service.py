@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.auth import (
@@ -43,6 +43,7 @@ from app.features.policy.opa import (
     unavailable_opa_policy_denial,
 )
 from app.schemas.evidence import EvidenceRetrieveCreate
+from app.security.workflow_budget import WorkflowSecurityBudget
 from app.services import (
     evidence_service,
     governance_service,
@@ -59,6 +60,10 @@ PROJECT_READ_ROLES = tool_registry.PROJECT_READ_ROLES
 PROJECT_MUTATION_ROLES = tool_registry.PROJECT_MUTATION_ROLES
 list_tool_definitions = tool_registry.list_tool_definitions
 ToolGuardViolation = schema_guard.ToolGuardViolation
+WORKFLOW_BUDGET_EXHAUSTED_DETAIL = (
+    "The workflow was stopped because it exceeded its safe execution budget. "
+    "No external write was performed."
+)
 
 
 @dataclass(frozen=True)
@@ -101,6 +106,14 @@ def execute_tool(
     definition = _definition(tool_name)
     project = project_service.get_project(db, auth, project_id)
     _authorize_tool_invocation(db, auth, project_id, definition)
+    _enforce_workflow_tool_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
     if remote_mcp_server_id is not None:
         from app.services import mcp_registry_service
 
@@ -351,6 +364,14 @@ def create_proposal(
     project = project_service.get_project(db, auth, project_id)
     _authorize_tool_invocation(db, auth, project_id, definition)
     effective_settings = settings or get_settings()
+    _enforce_workflow_tool_budget(
+        db,
+        auth,
+        effective_settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
     _enforce_agent_write_kill_switch(
         db,
         auth,
@@ -656,6 +677,76 @@ def reject_tool_invocation(
     db.commit()
     db.refresh(invocation)
     return invocation
+
+
+def _enforce_workflow_tool_budget(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+) -> None:
+    if research_sprint_id is None:
+        return
+
+    sprint = db.scalar(
+        select(ResearchSprint)
+        .where(
+            ResearchSprint.id == research_sprint_id,
+            ResearchSprint.workspace_id == auth.workspace_id,
+            ResearchSprint.project_id == project_id,
+        )
+        .with_for_update()
+    )
+    if sprint is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Research sprint not found.",
+        )
+    if not sprint.workflow_security_budget:
+        sprint.workflow_security_budget = WorkflowSecurityBudget.from_settings(
+            settings
+        ).as_payload()
+        db.flush()
+    budget = WorkflowSecurityBudget.from_payload(sprint.workflow_security_budget)
+    observed_tool_calls = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ToolInvocation)
+            .where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.research_sprint_id == research_sprint_id,
+            )
+        )
+        or 0
+    )
+    if observed_tool_calls < budget.max_tool_calls:
+        return
+
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_tool_budget_exceeded",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=research_sprint_id,
+        risk_level="high",
+        summary="Workflow tool-call budget was exhausted before tool execution.",
+        metadata={
+            "max_tool_calls": budget.max_tool_calls,
+            "observed_tool_calls": observed_tool_calls,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
 
 
 def approve_pending_proposals_for_sprint(

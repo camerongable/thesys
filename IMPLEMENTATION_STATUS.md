@@ -1060,6 +1060,14 @@ current verdict, next action, evidence health, validation, and decision state.
   the sprint API, persists across retries/configuration changes, travels with
   the Temporal payload, and constrains its execution timeout by the configured
   workflow duration limit.
+- [x] Enforce the sprint-scoped tool-call budget at the shared governed tool
+  boundary. Direct local calls, reviewed remote MCP calls, and approval-gated
+  proposals lock and count durable tool invocations before any tool preparation
+  or external effect. Exhaustion stops the workflow with the prescribed safe
+  response, records a high-risk audit event, and produces the normalized
+  workflow security event and alert. The default ceiling is 32 calls so the
+  standard multi-stage agentic research workflow can complete while retaining a
+  strict finite limit.
 
 ## Next Sprint
 

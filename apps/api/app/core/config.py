@@ -188,7 +188,7 @@ class Settings(BaseSettings):
         validation_alias="SECURITY_WORKFLOW_MAX_MODEL_CALLS",
     )
     security_workflow_max_tool_calls: int = Field(
-        default=20,
+        default=32,
         ge=1,
         le=1_000,
         validation_alias="SECURITY_WORKFLOW_MAX_TOOL_CALLS",
