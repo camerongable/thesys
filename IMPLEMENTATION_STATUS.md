@@ -1296,6 +1296,11 @@ operational metrics, dashboard, and incident-response requirements.
   cases preserve the MCP, tenant-scope, and workflow-budget contracts for their
   next dedicated runners. Assistant-message impersonation and permanent-rule
   memory poisoning are quarantined before retrieved content can become evidence.
+- [x] Add a deterministic Promptfoo fast-suite contract over all direct guardrail
+  corpus cases. Its custom provider invokes the local Python guardrail target
+  through `uv` and asserts only category/block decisions, never returning prompt
+  text. The config, provider, assertion, and target are covered without requiring
+  Promptfoo installation; dependency pinning and CI execution remain next.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

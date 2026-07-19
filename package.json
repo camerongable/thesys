@@ -8,6 +8,7 @@
     "eval:ai": "python3 scripts/eval_ai_quality.py",
     "eval:extraction": "python3 scripts/eval_extraction_quality.py",
     "eval:quality": "python3 scripts/eval_quality_gate.py",
+    "security:redteam:fast": "promptfoo eval -c security/redteam/promptfooconfig.fast.yaml",
     "web:dev": "pnpm --filter thesys-web dev",
     "web:build": "pnpm --filter thesys-web build",
     "web:typecheck": "pnpm --filter thesys-web typecheck"

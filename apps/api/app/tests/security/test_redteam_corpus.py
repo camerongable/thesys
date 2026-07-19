@@ -32,6 +32,8 @@ REQUIRED_SUITES = {
 def _suite_documents() -> list[tuple[Path, dict[str, Any]]]:
     documents: list[tuple[Path, dict[str, Any]]] = []
     for path in sorted(REDTEAM_ROOT.glob("*.yaml")):
+        if path.name not in REQUIRED_SUITES:
+            continue
         loaded = yaml.safe_load(path.read_text())
         assert isinstance(loaded, dict), path
         documents.append((path, loaded))
