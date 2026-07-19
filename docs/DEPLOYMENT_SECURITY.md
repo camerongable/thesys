@@ -176,6 +176,9 @@ Security boundaries:
   presigning. Their fixed-window buckets use the same hosted Redis backend.
 - Research-sprint planning has an independent per-workspace quota before it can
   create an AI run or durable workflow, separate from model-call budgets.
+- Every sprint-scoped LiteLLM reservation is independently rate limited by user
+  and workspace before provider egress, in addition to its immutable workflow
+  model-call budget.
 
 ## Dependency And Security Audit Commands
 

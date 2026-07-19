@@ -653,6 +653,86 @@ def enforce_research_sprint_rate_limit(
         raise denial from exc
 
 
+def enforce_model_call_rate_limit(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+) -> None:
+    """Limit attributed model calls before the shared provider boundary."""
+    if not settings.security_rate_limit_enabled:
+        return
+
+    workflow_type = "model_call"
+    try:
+        buckets = (
+            (
+                "model_call_user",
+                str(auth.user_id),
+                settings.security_model_call_rate_limit_user_max_requests,
+                "Per-user model-call rate limit exceeded.",
+            ),
+            (
+                "model_call_workspace",
+                str(auth.workspace_id),
+                settings.security_model_call_rate_limit_workspace_max_requests,
+                "Per-workspace model-call rate limit exceeded.",
+            ),
+        )
+        if settings.security_rate_limit_backend == "redis":
+            client = _redis_client(settings)
+            for scope, identifier, maximum, detail in buckets:
+                _check_redis_bucket(
+                    client,
+                    key=_rate_limit_key(
+                        settings,
+                        scope=scope,
+                        identifier=identifier,
+                        workflow_type=workflow_type,
+                    ),
+                    window_seconds=settings.security_rate_limit_window_seconds,
+                    max_requests=maximum,
+                    detail=detail,
+                )
+        else:
+            now = time.monotonic()
+            window = float(settings.security_rate_limit_window_seconds)
+            with _lock:
+                for scope, identifier, maximum, detail in buckets:
+                    _check_rate_bucket(
+                        key=(scope, identifier, workflow_type),
+                        now=now,
+                        window=window,
+                        max_requests=maximum,
+                        detail=detail,
+                    )
+    except HTTPException as exc:
+        _record_policy_denial(
+            db,
+            auth,
+            project_id=project_id,
+            workflow_type=workflow_type,
+            status_code=exc.status_code,
+            detail=str(exc.detail),
+        )
+        raise
+    except RedisError as exc:
+        denial = HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Distributed rate-limit service is unavailable.",
+        )
+        _record_policy_denial(
+            db,
+            auth,
+            project_id=project_id,
+            workflow_type=workflow_type,
+            status_code=denial.status_code,
+            detail=str(denial.detail),
+        )
+        raise denial from exc
+
+
 def _enforce_memory_authenticated_request_limits(
     settings: Settings,
     auth: AuthContext,

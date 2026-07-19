@@ -603,6 +603,36 @@ def test_research_sprint_rate_limit_denies_before_planning_run(
     get_settings.cache_clear()
 
 
+def test_model_call_rate_limit_denies_before_provider_reservation(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    monkeypatch.setenv("SECURITY_MODEL_CALL_RATE_LIMIT_USER_MAX_REQUESTS", "1")
+    monkeypatch.setenv("SECURITY_MODEL_CALL_RATE_LIMIT_WORKSPACE_MAX_REQUESTS", "10")
+    get_settings.cache_clear()
+    security_policy_service.reset_policy_state()
+
+    security_policy_service.enforce_model_call_rate_limit(
+        db_session,
+        auth,
+        get_settings(),
+        project_id=project_id,
+    )
+    with pytest.raises(HTTPException, match="model-call rate limit") as exc_info:
+        security_policy_service.enforce_model_call_rate_limit(
+            db_session,
+            auth,
+            get_settings(),
+            project_id=project_id,
+        )
+
+    assert exc_info.value.status_code == 429
+    get_settings.cache_clear()
+
+
 def test_expensive_workflow_rate_limit_uses_hashed_redis_buckets(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

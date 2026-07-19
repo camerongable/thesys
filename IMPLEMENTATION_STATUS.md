@@ -1302,7 +1302,9 @@ current verdict, next action, evidence health, validation, and decision state.
   uploaded bytes per workspace, and signed-download authorizations per user are
   independently limited before scanning, storage, or object presigning.
   Research-sprint planning is independently limited per workspace before it
-  creates an AI run or durable workflow.
+  creates an AI run or durable workflow. Sprint-scoped model calls are also
+  independently limited per user and workspace at the shared provider
+  reservation point before egress.
 
 ## Next Sprint
 

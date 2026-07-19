@@ -61,6 +61,14 @@ def reserve_model_call() -> None:
     context = _workflow_budget_context.get()
     if context is None:
         return
+    from app.services import security_policy_service
+
+    security_policy_service.enforce_model_call_rate_limit(
+        context.db,
+        context.auth,
+        context.settings,
+        project_id=context.project_id,
+    )
     sprint, budget = _locked_sprint_and_budget(context)
     usage = dict(sprint.workflow_security_usage or {})
     observed_model_calls = _nonnegative_usage_count(usage.get("model_calls", 0))

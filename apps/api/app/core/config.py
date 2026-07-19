@@ -894,6 +894,16 @@ class Settings(BaseSettings):
         ge=1,
         validation_alias="SECURITY_RESEARCH_SPRINT_RATE_LIMIT_WORKSPACE_MAX_REQUESTS",
     )
+    security_model_call_rate_limit_user_max_requests: int = Field(
+        default=120,
+        ge=1,
+        validation_alias="SECURITY_MODEL_CALL_RATE_LIMIT_USER_MAX_REQUESTS",
+    )
+    security_model_call_rate_limit_workspace_max_requests: int = Field(
+        default=1_000,
+        ge=1,
+        validation_alias="SECURITY_MODEL_CALL_RATE_LIMIT_WORKSPACE_MAX_REQUESTS",
+    )
     security_max_concurrent_workflows: int = Field(
         default=8,
         ge=1,
