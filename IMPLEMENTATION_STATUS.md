@@ -1405,6 +1405,24 @@ deployment-hardening requirements.
   indirect, memory, retrieval, tool, MCP, PII, encoded, multimodal, output, or
   consumption adversarial case fails.
 
+## Sprint 61-68 Terminal Verification
+
+- [x] Backend terminal verification passed: full `apps/api/app/tests` coverage,
+  application Ruff, and the focused Sprint 68 workflow, release-report,
+  Kubernetes, container, red-team, Promptfoo, Garak, and registry contracts are
+  green locally.
+- [ ] Live Postgres verification remains required. Run the forced-RLS migration
+  and wrong-tenant policy suite with `RLS_TEST_DATABASE_URL` against a migrated
+  PostgreSQL instance; this workstation has no provisioned service URL.
+- [ ] The locked web typecheck/test and local Promptfoo CLI runs remain blocked
+  by repeated npm-registry tarball `ECONNRESET` failures. CI has the exact
+  frozen-lockfile gates; rerun locally only after registry access is stable.
+- [ ] Hosted release verification remains required: execute the tagged GitHub
+  release workflow with protected Garak target credentials and registry access,
+  then retain the signed-image, SBOM, Trivy, and security-report artifacts.
+- [ ] Repository administration remains required outside source control: enable
+  default-branch protection and required review for the documented CI checks.
+
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
 `IMPLEMENTATION_BRIEF.md` under "Post-Sprint 50 Audit and Future Upgrade
