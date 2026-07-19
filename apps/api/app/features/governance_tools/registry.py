@@ -6,8 +6,9 @@ from typing import Any, Literal
 from fastapi import HTTPException, status
 
 ToolAccessMode = Literal["read", "write", "proposal"]
-ToolRiskLevel = Literal["low", "medium", "high"]
+ToolRiskLevel = Literal["low", "medium", "high", "critical"]
 ApprovalPolicy = Literal["never_required", "required_for_write", "always_required"]
+ToolDataClassification = Literal["public", "internal", "confidential", "restricted"]
 ApprovalRequestType = Literal[
     "research_plan",
     "memory_update",
@@ -30,6 +31,33 @@ class ToolDefinition:
     risk_level: ToolRiskLevel
     approval_policy: ApprovalPolicy
     allowed_project_roles: list[str]
+    version: str = "1.0.0"
+    required_scopes: tuple[str, ...] = ()
+    allowed_data_classifications: tuple[ToolDataClassification, ...] = (
+        "public",
+        "internal",
+        "confidential",
+    )
+    allowed_network_destinations: tuple[str, ...] = ()
+    timeout_seconds: int = 15
+    max_output_bytes: int = 1_000_000
+    max_affected_records: int | None = None
+    reversible: bool = True
+    owner: str = "thesys-core"
+
+    def __post_init__(self) -> None:
+        if not self.required_scopes:
+            object.__setattr__(
+                self,
+                "required_scopes",
+                ("project:read",) if self.access_mode == "read" else ("project:write",),
+            )
+        if self.max_affected_records is None:
+            object.__setattr__(
+                self,
+                "max_affected_records",
+                100 if self.access_mode == "read" else 1,
+            )
 
 
 PROJECT_READ_ROLES = ["owner", "admin", "editor", "viewer"]
@@ -266,14 +294,61 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
 def list_tool_definitions() -> list[ToolDefinition]:
     """Return the stable tool registry exposed to UI, agents, and MCP clients."""
 
-    return list(TOOL_REGISTRY.values())
+    definitions = list(TOOL_REGISTRY.values())
+    for tool_definition in definitions:
+        validate_tool_definition(tool_definition)
+    return definitions
 
 
 def definition(tool_name: str) -> ToolDefinition:
     tool_definition = TOOL_REGISTRY.get(tool_name)
     if tool_definition is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool not found.")
+    try:
+        validate_tool_definition(tool_definition)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Tool manifest is unavailable.",
+        ) from exc
     return tool_definition
+
+
+def validate_tool_definition(tool_definition: ToolDefinition) -> None:
+    """Reject malformed local manifests before tools are listed or invoked."""
+    if (
+        not tool_definition.name
+        or not tool_definition.version
+        or not tool_definition.description
+        or not tool_definition.owner
+    ):
+        raise ValueError("Tool manifests require identity, version, description, and owner.")
+    if (
+        not isinstance(tool_definition.input_schema, dict)
+        or not isinstance(tool_definition.output_schema, dict)
+        or tool_definition.input_schema.get("type") != "object"
+        or tool_definition.output_schema.get("type") != "object"
+    ):
+        raise ValueError("Tool manifests require object input and output schemas.")
+    if not tool_definition.required_scopes:
+        raise ValueError("Tool manifests require at least one scope.")
+    if not tool_definition.allowed_data_classifications:
+        raise ValueError("Tool manifests require allowed data classifications.")
+    if (
+        tool_definition.timeout_seconds < 1
+        or tool_definition.timeout_seconds > 300
+        or tool_definition.max_output_bytes < 1
+        or tool_definition.max_output_bytes > 10_000_000
+        or tool_definition.max_affected_records is None
+        or tool_definition.max_affected_records < 1
+        or tool_definition.max_affected_records > 10_000
+    ):
+        raise ValueError("Tool manifest bounds are invalid.")
+    if (
+        tool_definition.access_mode == "write"
+        and tool_definition.approval_policy == "never_required"
+    ):
+        raise ValueError("Write tool manifests must define an approval policy.")
 
 
 def approval_request_type_for_tool(tool_name: str) -> ApprovalRequestType:

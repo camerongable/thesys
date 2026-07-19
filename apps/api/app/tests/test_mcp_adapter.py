@@ -24,6 +24,10 @@ def test_mcp_lists_governed_tool_schemas(client: TestClient) -> None:
     assert "list_project_memory" in tool_names
     assert "propose_memory_update" not in tool_names
     assert all(tool["access_mode"] == "read" for tool in body["tools"])
+    summary = next(tool for tool in body["tools"] if tool["name"] == "get_project_summary")
+    assert summary["version"] == "1.0.0"
+    assert summary["required_scopes"] == ["project:read"]
+    assert summary["max_output_bytes"] == 1_000_000
 
 
 def test_mcp_read_tool_uses_existing_governance_and_audit(
@@ -148,6 +152,8 @@ def test_mcp_jsonrpc_initialize_and_list_tools(client: TestClient) -> None:
     assert "inputSchema" in first_tool
     assert "annotations" in first_tool
     assert first_tool["annotations"]["adapterVersion"] == "thesys-mcp-adapter:v1"
+    assert first_tool["annotations"]["manifestVersion"] == "1.0.0"
+    assert first_tool["annotations"]["requiredScopes"] == ["project:read"]
 
 
 def test_mcp_jsonrpc_tool_calls_preserve_governance(

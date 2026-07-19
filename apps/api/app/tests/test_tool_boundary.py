@@ -1,4 +1,5 @@
 import uuid
+from dataclasses import replace
 
 import pytest
 from fastapi import HTTPException
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.db.models import ApprovalRequest, Assumption, AuditEvent, ToolInvocation
+from app.features.governance_tools import registry as tool_registry
 from app.features.policy.opa import OpaPolicyDecision, OpaPolicyUnavailableError
 from app.services import tool_service
 from app.services.evidence_service import ParsedSource
@@ -43,6 +45,100 @@ def test_tool_registry_exposes_mcp_style_contracts(client: TestClient) -> None:
     assert tools["search_project_evidence"]["approval_policy"] == "never_required"
     assert tools["propose_memory_update"]["approval_policy"] == "always_required"
     assert tools["propose_memory_update"]["risk_level"] == "medium"
+    manifest = tools["search_project_evidence"]
+    assert manifest["version"] == "1.0.0"
+    assert manifest["required_scopes"] == ["project:read"]
+    assert manifest["allowed_network_destinations"] == []
+    assert manifest["max_affected_records"] == 100
+    assert manifest["owner"] == "thesys-core"
+
+
+def test_invalid_local_tool_manifest_fails_closed_before_execution(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    definition = tool_registry.definition("get_project_summary")
+    monkeypatch.setitem(
+        tool_registry.TOOL_REGISTRY,
+        definition.name,
+        replace(definition, max_output_bytes=0),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            _dev_auth(db_session),
+            get_settings(),
+            project_id,
+            definition.name,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert db_session.scalar(select(ToolInvocation)) is None
+
+
+def test_manifest_record_limit_blocks_tool_before_invocation(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    definition = tool_registry.definition("list_project_memory")
+    monkeypatch.setitem(
+        tool_registry.TOOL_REGISTRY,
+        definition.name,
+        replace(definition, max_affected_records=3),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            _dev_auth(db_session),
+            get_settings(),
+            project_id,
+            definition.name,
+            {"limit": 4},
+        )
+
+    assert exc_info.value.status_code == 422
+    assert db_session.scalar(select(ToolInvocation)) is None
+    denial = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "tool_invocation_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert denial is not None
+    assert denial.event_metadata["reason"] == "manifest_record_limit_exceeded"
+
+
+def test_manifest_output_limit_marks_invocation_failed(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    definition = tool_registry.definition("get_project_summary")
+    monkeypatch.setitem(
+        tool_registry.TOOL_REGISTRY,
+        definition.name,
+        replace(definition, max_output_bytes=1),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            _dev_auth(db_session),
+            get_settings(),
+            project_id,
+            definition.name,
+        )
+
+    assert exc_info.value.status_code == 500
+    invocation = db_session.scalar(select(ToolInvocation))
+    assert invocation is not None
+    assert invocation.status == "failed"
 
 
 def test_read_tools_return_declared_output_schema_keys(

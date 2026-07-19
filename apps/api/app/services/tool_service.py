@@ -106,6 +106,7 @@ def execute_tool(
             research_sprint_id=research_sprint_id,
             requested_by=requested_by,
         )
+        _guard_tool_manifest_input(definition, guarded_input)
     except ToolGuardViolation as exc:
         _audit_tool_denial(db, auth, project_id, definition, exc.reason, detail=exc.detail)
         db.commit()
@@ -168,6 +169,7 @@ def execute_tool(
         raise
     try:
         _guard_tool_output(definition, output)
+        _guard_tool_manifest_output(definition, output)
     except ToolGuardViolation as exc:
         invocation.status = "failed"
         invocation.output_summary = "Tool output failed guard validation."
@@ -238,6 +240,7 @@ def create_proposal(
             research_sprint_id=research_sprint_id,
             requested_by=requested_by,
         )
+        _guard_tool_manifest_input(definition, guarded_proposal)
         guarded_input = _guard_tool_metadata(input_json or {})
     except ToolGuardViolation as exc:
         _audit_tool_denial(db, auth, project_id, definition, exc.reason, detail=exc.detail)
@@ -841,6 +844,8 @@ _guard_tool_input = schema_guard.guard_tool_input
 _guard_proposal_payload = schema_guard.guard_proposal_payload
 _guard_tool_metadata = schema_guard.guard_tool_metadata
 _guard_tool_output = schema_guard.guard_tool_output
+_guard_tool_manifest_input = schema_guard.guard_tool_manifest_input
+_guard_tool_manifest_output = schema_guard.guard_tool_manifest_output
 _guard_requested_by = schema_guard.guard_requested_by
 _guard_research_sprint_scope = schema_guard.guard_research_sprint_scope
 _validate_schema_payload = schema_guard.validate_schema_payload
@@ -914,9 +919,18 @@ def _authorize_opa_tool_invocation(
         },
         "tool": {
             "name": definition.name,
+            "version": definition.version,
             "access_mode": definition.access_mode,
             "risk_level": definition.risk_level,
             "approval_policy": definition.approval_policy,
+            "required_scopes": list(definition.required_scopes),
+            "allowed_data_classifications": list(definition.allowed_data_classifications),
+            "allowed_network_destinations": list(definition.allowed_network_destinations),
+            "timeout_seconds": definition.timeout_seconds,
+            "max_output_bytes": definition.max_output_bytes,
+            "max_affected_records": definition.max_affected_records,
+            "reversible": definition.reversible,
+            "owner": definition.owner,
         },
         "request": {
             "requested_by": requested_by,

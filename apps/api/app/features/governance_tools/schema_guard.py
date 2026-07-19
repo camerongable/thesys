@@ -1,5 +1,6 @@
 """Schema and scope guards for governed agent/tool inputs."""
 
+import json
 import uuid
 from typing import Any
 
@@ -71,6 +72,27 @@ def guard_tool_output(definition: Any, output: dict[str, Any]) -> None:
         output,
         label=f"{definition.name} output",
     )
+
+
+def guard_tool_manifest_input(definition: Any, tool_input: dict[str, Any]) -> None:
+    """Apply the local manifest's record limit after schema validation."""
+    for key in ("limit", "top_k"):
+        value = tool_input.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            if value > definition.max_affected_records:
+                raise ToolGuardViolation(
+                    "manifest_record_limit_exceeded",
+                    f"{definition.name} exceeds its approved record limit.",
+                )
+
+
+def guard_tool_manifest_output(definition: Any, output: dict[str, Any]) -> None:
+    payload_size = len(json.dumps(output, default=str, sort_keys=True).encode("utf-8"))
+    if payload_size > definition.max_output_bytes:
+        raise ToolGuardViolation(
+            "manifest_output_limit_exceeded",
+            f"{definition.name} output exceeds its approved size limit.",
+        )
 
 
 def guard_requested_by(requested_by: str) -> None:

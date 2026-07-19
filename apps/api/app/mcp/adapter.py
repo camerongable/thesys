@@ -56,6 +56,15 @@ def list_tools(*, include_proposals: bool = True) -> list[MCPToolRead]:
             access_mode=definition.access_mode,
             risk_level=definition.risk_level,
             approval_policy=definition.approval_policy,
+            version=definition.version,
+            required_scopes=list(definition.required_scopes),
+            allowed_data_classifications=list(definition.allowed_data_classifications),
+            allowed_network_destinations=list(definition.allowed_network_destinations),
+            timeout_seconds=definition.timeout_seconds,
+            max_output_bytes=definition.max_output_bytes,
+            max_affected_records=definition.max_affected_records,
+            reversible=definition.reversible,
+            owner=definition.owner,
         )
         for definition in definitions[:READ_TOOL_LIMIT]
     ]
@@ -260,7 +269,4 @@ def _approval_for_invocation(db: Session, invocation: ToolInvocation) -> Approva
 
 
 def _definition(tool_name: str):
-    for definition in tool_service.list_tool_definitions():
-        if definition.name == tool_name:
-            return definition
-    raise ValueError(f"Unsupported MCP tool: {tool_name}")
+    return tool_service._definition(tool_name)

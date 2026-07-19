@@ -837,10 +837,15 @@ current verdict, next action, evidence health, validation, and decision state.
   approval, merge, and conflict resolution before mutations, and every allowed
   or denied lifecycle action is attributable to the reviewing user in audit
   metadata.
-- [ ] Implement the remaining Sprint 66 capability controls: secure tool
-  manifests, approved MCP server registrations, scoped remote credentials, and
-  runtime kill switches; then validate the live Compose policy bundle with the
-  OPA parser/runtime.
+- [x] Make the local registry the secure tool-manifest authority. Every tool
+  now declares a version, required scopes, data classifications, egress
+  destinations, timeout, output/record limits, reversibility, and owner;
+  malformed manifests fail closed before discovery or invocation. Shared input
+  and output guards enforce manifest record and byte limits, OPA receives the
+  same manifest fields, and API/MCP discovery exposes the approved contract.
+- [ ] Implement the remaining Sprint 66 capability controls: approved MCP
+  server registrations, scoped remote credentials, and runtime kill switches;
+  then validate the live Compose policy bundle with the OPA parser/runtime.
 
 ## Sprint 66 Verification
 
@@ -852,14 +857,17 @@ current verdict, next action, evidence health, validation, and decision state.
   `git diff --check` passed.
 - [x] Memory lifecycle OPA checkpoint passed (`66 passed, 1 xfailed, 1
   warning`); changed-file lint, compile checks, and `git diff --check` passed.
+- [x] Secure-manifest, MCP, tool-boundary, and security-invariant checkpoint
+  passed (`105 passed, 1 xfailed, 1 warning`); application lint and
+  `git diff --check` passed.
 - [ ] The local workspace has no Docker CLI, so Compose graph validation and
   direct OPA/Rego parser validation remain part of the compose-backed
   enforcement checkpoint.
 
 ## Next Sprint
 
-Continue Sprint 66 by defining secure tool manifests and enforcing the
-locally-approved manifest before invocation.
+Continue Sprint 66 by implementing approved external MCP server registrations
+with hostname/TLS/pinned-identity controls and default-disabled tools.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-ToolRiskLevel = Literal["low", "medium", "high"]
+ToolRiskLevel = Literal["low", "medium", "high", "critical"]
 ToolAccessMode = Literal["read", "write", "proposal"]
 ApprovalPolicy = Literal["never_required", "required_for_write", "always_required"]
 ToolInvocationStatus = Literal["requested", "approved", "rejected", "executed", "failed"]
@@ -21,6 +21,15 @@ class AgentToolDefinitionRead(BaseModel):
     risk_level: ToolRiskLevel
     approval_policy: ApprovalPolicy
     allowed_project_roles: list[str]
+    version: str
+    required_scopes: list[str]
+    allowed_data_classifications: list[str]
+    allowed_network_destinations: list[str]
+    timeout_seconds: int
+    max_output_bytes: int
+    max_affected_records: int
+    reversible: bool
+    owner: str
 
 
 class ToolRegistryRead(BaseModel):

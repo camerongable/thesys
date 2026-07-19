@@ -10,8 +10,17 @@ class MCPToolRead(BaseModel):
     input_schema: dict[str, Any]
     output_schema: dict[str, Any]
     access_mode: Literal["read", "write", "proposal"]
-    risk_level: Literal["low", "medium", "high"]
+    risk_level: Literal["low", "medium", "high", "critical"]
     approval_policy: Literal["never_required", "required_for_write", "always_required"]
+    version: str
+    required_scopes: list[str]
+    allowed_data_classifications: list[str]
+    allowed_network_destinations: list[str]
+    timeout_seconds: int
+    max_output_bytes: int
+    max_affected_records: int
+    reversible: bool
+    owner: str
 
 
 class MCPToolListRead(BaseModel):
