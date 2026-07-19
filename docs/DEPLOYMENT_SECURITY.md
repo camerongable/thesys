@@ -179,6 +179,8 @@ Security boundaries:
 - Every sprint-scoped LiteLLM reservation is independently rate limited by user
   and workspace before provider egress, in addition to its immutable workflow
   model-call budget.
+- Non-streaming research-plan generation uses the same attributed reservation
+  scope before each provider call, including structured-output retry attempts.
 
 ## Dependency And Security Audit Commands
 

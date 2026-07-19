@@ -27,10 +27,39 @@ class WorkflowBudgetContext:
     research_sprint_id: uuid.UUID
 
 
+@dataclass(frozen=True)
+class ModelCallRateContext:
+    db: Session
+    auth: AuthContext
+    settings: Settings
+    project_id: uuid.UUID
+
+
 _workflow_budget_context: ContextVar[WorkflowBudgetContext | None] = ContextVar(
     "workflow_budget_context",
     default=None,
 )
+_model_call_rate_context: ContextVar[ModelCallRateContext | None] = ContextVar(
+    "model_call_rate_context",
+    default=None,
+)
+
+
+@contextmanager
+def model_call_rate_scope(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+) -> Iterator[None]:
+    token = _model_call_rate_context.set(
+        ModelCallRateContext(db=db, auth=auth, settings=settings, project_id=project_id)
+    )
+    try:
+        yield
+    finally:
+        _model_call_rate_context.reset(token)
 
 
 @contextmanager
@@ -42,6 +71,9 @@ def workflow_budget_scope(
     project_id: uuid.UUID,
     research_sprint_id: uuid.UUID,
 ) -> Iterator[None]:
+    rate_token = _model_call_rate_context.set(
+        ModelCallRateContext(db=db, auth=auth, settings=settings, project_id=project_id)
+    )
     token = _workflow_budget_context.set(
         WorkflowBudgetContext(
             db=db,
@@ -55,20 +87,23 @@ def workflow_budget_scope(
         yield
     finally:
         _workflow_budget_context.reset(token)
+        _model_call_rate_context.reset(rate_token)
 
 
 def reserve_model_call() -> None:
+    rate_context = _model_call_rate_context.get()
+    if rate_context is not None:
+        from app.services import security_policy_service
+
+        security_policy_service.enforce_model_call_rate_limit(
+            rate_context.db,
+            rate_context.auth,
+            rate_context.settings,
+            project_id=rate_context.project_id,
+        )
     context = _workflow_budget_context.get()
     if context is None:
         return
-    from app.services import security_policy_service
-
-    security_policy_service.enforce_model_call_rate_limit(
-        context.db,
-        context.auth,
-        context.settings,
-        project_id=context.project_id,
-    )
     sprint, budget = _locked_sprint_and_budget(context)
     usage = dict(sprint.workflow_security_usage or {})
     observed_model_calls = _nonnegative_usage_count(usage.get("model_calls", 0))

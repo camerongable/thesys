@@ -1304,7 +1304,8 @@ current verdict, next action, evidence health, validation, and decision state.
   Research-sprint planning is independently limited per workspace before it
   creates an AI run or durable workflow. Sprint-scoped model calls are also
   independently limited per user and workspace at the shared provider
-  reservation point before egress.
+  reservation point before egress; research-plan generation uses the same
+  reservation scope for every non-streaming provider attempt.
 
 ## Next Sprint
 

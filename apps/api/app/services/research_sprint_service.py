@@ -53,6 +53,7 @@ from app.services import (
     security_policy_service,
     temporal_research_service,
     tool_service,
+    workflow_budget_service,
 )
 
 
@@ -267,7 +268,13 @@ def start_research_sprint_plan(
     # The graph makes planning phases observable: context loading, model
     # generation, then durable draft persistence for human approval.
     try:
-        state = graph.compile().invoke({"objective": payload.objective})
+        with workflow_budget_service.model_call_rate_scope(
+            db,
+            auth,
+            settings,
+            project_id=project_id,
+        ):
+            state = graph.compile().invoke({"objective": payload.objective})
     except (StructuredOutputError, RuntimeError) as exc:
         _fail_generation(db, run, step_holder["step"], exc)
         raise ResearchSprintWorkflowError("Research sprint planning failed.") from exc

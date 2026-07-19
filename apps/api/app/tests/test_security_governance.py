@@ -22,7 +22,12 @@ from app.core.security import (
 )
 from app.db.models import AIRun, ApprovalRequest, AuditEvent, EvidenceSource, ToolInvocation
 from app.schemas.security import KillSwitchUpdate
-from app.services import kill_switch_service, security_policy_service, tool_service
+from app.services import (
+    kill_switch_service,
+    security_policy_service,
+    tool_service,
+    workflow_budget_service,
+)
 from app.services.identity_service import ensure_dev_identity
 
 
@@ -628,6 +633,32 @@ def test_model_call_rate_limit_denies_before_provider_reservation(
             get_settings(),
             project_id=project_id,
         )
+
+    assert exc_info.value.status_code == 429
+    get_settings.cache_clear()
+
+
+def test_model_call_rate_scope_reserves_before_non_sprint_provider_call(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    monkeypatch.setenv("SECURITY_MODEL_CALL_RATE_LIMIT_USER_MAX_REQUESTS", "1")
+    monkeypatch.setenv("SECURITY_MODEL_CALL_RATE_LIMIT_WORKSPACE_MAX_REQUESTS", "10")
+    get_settings.cache_clear()
+    security_policy_service.reset_policy_state()
+
+    with workflow_budget_service.model_call_rate_scope(
+        db_session,
+        auth,
+        get_settings(),
+        project_id=project_id,
+    ):
+        workflow_budget_service.reserve_model_call()
+        with pytest.raises(HTTPException, match="model-call rate limit") as exc_info:
+            workflow_budget_service.reserve_model_call()
 
     assert exc_info.value.status_code == 429
     get_settings.cache_clear()
