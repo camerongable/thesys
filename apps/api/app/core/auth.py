@@ -172,6 +172,12 @@ def get_current_auth_context(
             status_code=exc.status_code,
             has_bearer_token=bool(authorization and authorization.lower().startswith("bearer ")),
         )
+        from app.services import security_policy_service
+
+        security_policy_service.enforce_failed_authentication_rate_limit(
+            settings,
+            client_ip=request.client.host if request.client is not None else "unknown",
+        )
         raise
 
     bind_tenant_context(db, auth.principal)

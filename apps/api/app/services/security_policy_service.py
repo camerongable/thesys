@@ -379,6 +379,51 @@ def enforce_authenticated_request_rate_limit(
         raise
 
 
+def enforce_failed_authentication_rate_limit(
+    settings: Settings,
+    *,
+    client_ip: str,
+) -> None:
+    """Limit repeated rejected credentials without trusting their claimed identity."""
+    if not settings.security_rate_limit_enabled:
+        return
+
+    workflow_type = "failed_authentication_attempt"
+    detail = "Failed authentication attempt rate limit exceeded."
+    try:
+        if settings.security_rate_limit_backend == "redis":
+            client = _redis_client(settings)
+            _check_redis_bucket(
+                client,
+                key=_rate_limit_key(
+                    settings,
+                    scope="failed_auth_ip",
+                    identifier=client_ip,
+                    workflow_type=workflow_type,
+                ),
+                window_seconds=settings.security_rate_limit_window_seconds,
+                max_requests=settings.security_failed_auth_rate_limit_ip_max_requests,
+                detail=detail,
+            )
+            return
+
+        now = time.monotonic()
+        window = float(settings.security_rate_limit_window_seconds)
+        with _lock:
+            _check_rate_bucket(
+                key=("failed_auth_ip", client_ip, workflow_type),
+                now=now,
+                window=window,
+                max_requests=settings.security_failed_auth_rate_limit_ip_max_requests,
+                detail=detail,
+            )
+    except RedisError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Distributed rate-limit service is unavailable.",
+        ) from exc
+
+
 def _enforce_memory_authenticated_request_limits(
     settings: Settings,
     auth: AuthContext,

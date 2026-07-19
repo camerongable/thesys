@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core import auth
 from app.core.config import get_settings
 from app.db.models import AuthenticationEvent
+from app.services import security_policy_service
 
 
 def test_successful_authentication_records_attributable_login(
@@ -74,6 +75,56 @@ def test_missing_oidc_credentials_records_login_failure(
     assert event.reason_code == "credentials_missing"
     assert event.workspace_id is None
     assert event.user_id is None
+
+
+def test_failed_authentication_attempts_are_rate_limited_by_transport_ip(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_oidc(monkeypatch)
+    monkeypatch.setenv("SECURITY_FAILED_AUTH_RATE_LIMIT_IP_MAX_REQUESTS", "1")
+    get_settings.cache_clear()
+
+    first = client.get("/api/projects")
+    denied = client.get("/api/projects")
+
+    assert first.status_code == status.HTTP_401_UNAUTHORIZED
+    assert denied.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    events = list(db_session.scalars(select(AuthenticationEvent)))
+    assert len(events) == 2
+    assert all(event.event_type == "login_failure" for event in events)
+    assert all(event.reason_code == "credentials_missing" for event in events)
+
+
+def test_failed_authentication_rate_limit_uses_hashed_redis_bucket(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeRedis:
+        def __init__(self) -> None:
+            self.counts: dict[str, int] = {}
+
+        def eval(self, _script: str, _keys: int, key: str, _window_seconds: int) -> int:
+            self.counts[key] = self.counts.get(key, 0) + 1
+            return self.counts[key]
+
+    fake_redis = FakeRedis()
+    _configure_oidc(monkeypatch)
+    monkeypatch.setenv("SECURITY_RATE_LIMIT_BACKEND", "redis")
+    monkeypatch.setenv("SECURITY_FAILED_AUTH_RATE_LIMIT_IP_MAX_REQUESTS", "1")
+    monkeypatch.setattr(security_policy_service, "_redis_client", lambda _settings: fake_redis)
+    get_settings.cache_clear()
+
+    first = client.get("/api/projects")
+    denied = client.get("/api/projects")
+
+    assert first.status_code == status.HTTP_401_UNAUTHORIZED
+    assert denied.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert len(fake_redis.counts) == 1
+    key = next(iter(fake_redis.counts))
+    assert key.startswith("thesys:security-rate:v1:failed_auth_ip:")
+    assert "failed_authentication_attempt" not in key
 
 
 def test_session_revocation_requires_a_session_identifier(client: TestClient) -> None:

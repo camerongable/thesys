@@ -1296,7 +1296,9 @@ current verdict, next action, evidence health, validation, and decision state.
   against hashed Redis buckets for transport IP, user, and workspace; denials
   and Redis outages are audited and fail closed, while local and test runs use
   the same scoped limits in memory. These interactive-request quotas remain
-  separate from expensive-workflow limits.
+  separate from expensive-workflow limits. Rejected credentials are separately
+  throttled by transport IP after the failure is recorded, limiting brute-force
+  attempts without trusting a claimed identity.
 
 ## Next Sprint
 

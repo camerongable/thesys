@@ -168,6 +168,9 @@ Security boundaries:
   and workspace before route work begins. The configured values are intentionally
   separate from expensive-workflow quotas so interactive reads do not consume a
   model or ingestion budget.
+- Rejected credentials are separately limited by transport IP. This counter uses
+  the same hosted Redis requirement and local/test memory backend as the other
+  request limits, while preserving a credential-free authentication audit trail.
 
 ## Dependency And Security Audit Commands
 
