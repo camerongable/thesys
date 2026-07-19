@@ -4,13 +4,12 @@ from app.services import model_data_policy_service
 def test_restricted_content_uses_a_sanitized_provider_representation() -> None:
     decision = model_data_policy_service.prepare_model_payload(
         provider="litellm",
-        model="enterprise-model",
+        model="dev-gpt-4o-mini",
         messages=[
             {
                 "role": "user",
                 "content": (
-                    "Contact Jane Doe at jane.doe@example.com with "
-                    "api_key=sk-secretvalue123."
+                    "Contact Jane Doe at jane.doe@example.com with api_key=sk-secretvalue123."
                 ),
             }
         ],

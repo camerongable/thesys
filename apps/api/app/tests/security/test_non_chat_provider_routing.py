@@ -35,7 +35,7 @@ def test_litellm_embedding_sends_sanitized_text(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(embedding_service.httpx, "Client", FakeClient)
     settings = Settings(
         embedding_provider="litellm",
-        embedding_model="embedding-model",
+        embedding_model="dev-gpt-4o-mini",
         embedding_dimension=2,
         litellm_api_key="test-key",
         provider_egress_policy_enabled=False,

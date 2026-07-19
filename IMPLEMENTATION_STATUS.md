@@ -1285,8 +1285,8 @@ current verdict, next action, evidence health, validation, and decision state.
 
 ## Next Sprint
 
-Continue Sprint 67 with the remaining loop and anomaly detection rules,
-operational metrics, dashboard, and incident-response requirements.
+Continue Sprint 68 with the remaining CI, supply-chain, release-gate, and
+deployment-hardening requirements.
 
 ## Sprint 68 Progress
 
@@ -1301,6 +1301,11 @@ operational metrics, dashboard, and incident-response requirements.
   through `uv` and asserts only category/block decisions, never returning prompt
   text. The config, provider, assertion, and target are covered without requiring
   Promptfoo installation; dependency pinning and CI execution remain next.
+- [x] Replace the wildcard provider policy with a reviewed approved-model registry.
+  Every external provider call now requires an exact enabled
+  `(provider, model, purpose)` approval carrying data-classification and security-eval
+  metadata. The supported development targets and Tavily search are registered;
+  unreviewed model configuration fails closed before provider transit.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

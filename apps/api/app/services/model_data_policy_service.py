@@ -1,10 +1,11 @@
 """Deterministic provider policy for sanitized model payloads."""
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from app.security.contracts import DataClassification
+from app.security.model_registry import ApprovedModelRegistryError, resolve_approved_model
 from app.services.data_protection_service import data_protection_service
 
 
@@ -73,31 +74,6 @@ _CLASSIFICATION_RANK = {
     DataClassification.RESTRICTED: 3,
 }
 
-_LITELLM_POLICY = ModelDataPolicy(
-    provider="litellm",
-    model="*",
-    maximum_data_classification=DataClassification.CONFIDENTIAL,
-    allows_pii=False,
-    allows_provider_retention=False,
-    approved_purposes=(
-        "chat_completion",
-        "embedding",
-        "guided_reasoning",
-        "multimodal_extraction",
-        "reranking",
-        "structured_extraction",
-    ),
-)
-
-_TAVILY_POLICY = ModelDataPolicy(
-    provider="tavily",
-    model="search",
-    maximum_data_classification=DataClassification.INTERNAL,
-    allows_pii=False,
-    allows_provider_retention=False,
-    approved_purposes=("external_search",),
-)
-
 
 def prepare_model_payload(
     *,
@@ -106,7 +82,7 @@ def prepare_model_payload(
     messages: Sequence[dict[str, Any]],
 ) -> ModelPayloadDecision:
     """Return the representation permitted to cross a model-provider boundary."""
-    policy = resolve_policy(provider, model)
+    policy = resolve_policy(provider=provider, model=model, purpose="chat_completion")
     decisions = [
         prepare_provider_text(
             provider=provider,
@@ -155,7 +131,7 @@ def prepare_provider_text(
     purpose: str,
 ) -> ProviderTextDecision:
     """Sanitize one text payload for an approved non-local provider purpose."""
-    policy = resolve_policy(provider, model)
+    policy = resolve_policy(provider=provider, model=model, purpose=purpose)
     if purpose not in policy.approved_purposes:
         raise ModelDataPolicyError(f"Provider policy does not permit purpose: {purpose}.")
     original_classification = _maximum_classification([text])
@@ -211,12 +187,23 @@ def permit_binary_provider_payload(
     return decision
 
 
-def resolve_policy(provider: str, model: str) -> ModelDataPolicy:
-    if provider == "litellm":
-        return replace(_LITELLM_POLICY, model=model)
-    if provider == "tavily":
-        return _TAVILY_POLICY
-    raise ModelDataPolicyError(f"No data policy is configured for provider: {provider}.")
+def resolve_policy(*, provider: str, model: str, purpose: str) -> ModelDataPolicy:
+    try:
+        approved_model = resolve_approved_model(
+            provider=provider,
+            model_id=model,
+            purpose=purpose,
+        )
+    except ApprovedModelRegistryError as exc:
+        raise ModelDataPolicyError(str(exc)) from None
+    return ModelDataPolicy(
+        provider=approved_model.provider,
+        model=approved_model.model_id,
+        maximum_data_classification=approved_model.maximum_data_classification,
+        allows_pii=False,
+        allows_provider_retention=False,
+        approved_purposes=(approved_model.purpose,),
+    )
 
 
 def _maximum_classification(values: Iterable[str]) -> DataClassification:

@@ -9,7 +9,7 @@ from app.services import multimodal_extraction_service
 def _settings() -> Settings:
     return Settings(
         multimodal_extraction_provider="litellm",
-        multimodal_extraction_model="test-vision-model",
+        multimodal_extraction_model="dev-gpt-4o-mini",
         litellm_api_key="test-key",
         provider_egress_policy_enabled=False,
     )
@@ -26,7 +26,7 @@ def test_multimodal_extraction_sends_a_trusted_guardrail_boundary(monkeypatch) -
 
         def json(self) -> dict[str, Any]:
             return {
-                "model": "test-vision-model",
+                "model": "dev-gpt-4o-mini",
                 "choices": [
                     {
                         "message": {
@@ -112,7 +112,7 @@ def test_multimodal_extraction_blocks_unsafe_provider_output(monkeypatch) -> Non
 
         def json(self) -> dict[str, Any]:
             return {
-                "model": "test-vision-model",
+                "model": "dev-gpt-4o-mini",
                 "choices": [
                     {
                         "message": {
