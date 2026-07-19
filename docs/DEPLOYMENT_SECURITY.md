@@ -187,6 +187,14 @@ public production route. Configure `GARAK_TARGET_URI` and, when required,
 same model allowlist and egress policy as the target application and be scoped
 to the red-team environment only.
 
+All third-party Actions are commit-pinned and reviewed through weekly Dependabot
+pull requests for Actions, Python, and npm. The repository administrator must
+also enforce branch protection for the default branch: require pull-request
+reviews, require the Security workflow, dismiss stale approvals, and restrict
+direct pushes. Those GitHub-hosted repository settings cannot be enforced from
+this repository, so they remain a deployment prerequisite rather than an
+in-repository claim.
+
 ## Backup And Restore Boundaries
 
 Production-like deployments should back up:

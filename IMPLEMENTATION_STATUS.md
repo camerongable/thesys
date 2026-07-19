@@ -1338,6 +1338,10 @@ deployment-hardening requirements.
   API/web Trivy scans, and an `infra/k8s/base` configuration scan. Garak target secrets
   are documented for the protected CI environment; local Promptfoo execution remains
   blocked by repeatable npm registry `ECONNRESET` failures.
+- [x] Close the workflow supply-chain gap. Every third-party GitHub Action now uses an
+  immutable commit SHA, verified by a security contract test; Dependabot proposes weekly
+  reviewed updates for Actions, Python, and npm. Default-branch protection and required
+  review are documented as an external GitHub repository-administration prerequisite.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

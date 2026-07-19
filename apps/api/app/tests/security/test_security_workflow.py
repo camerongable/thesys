@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import yaml
@@ -36,9 +37,9 @@ def test_security_workflow_covers_required_pull_request_gates() -> None:
         "uv export --project apps/api --locked --no-dev",
         "semgrep==1.130.0",
         "pnpm security:redteam:fast",
-        "gitleaks/gitleaks-action@v2",
-        "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.8",
-        "anchore/sbom-action@v0",
+        "gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc",
+        "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2",
+        "anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610",
     ):
         assert command in content
 
@@ -54,18 +55,18 @@ def test_release_workflow_requires_signed_scanned_provenance_backed_images() -> 
 
     for contract in (
         'tags:\n      - "v*"',
-        "docker/build-push-action@v6",
+        "docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8",
         "provenance: mode=max",
         "sbom: true",
-        "sigstore/cosign-installer@v3",
+        "sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9",
         "cosign sign --yes",
         "cosign verify",
-        "aquasecurity/trivy-action@0.31.0",
+        "aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8",
         "format: json",
         "scripts/prepare_release_evidence.py",
         "scripts/generate_security_report.py",
         "if: always()",
-        "actions/upload-artifact@v4",
+        "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
     ):
         assert contract in workflow
 
@@ -80,8 +81,27 @@ def test_nightly_workflow_runs_full_adversarial_and_deployment_scans() -> None:
         "--probes promptinject,encoding",
         "docker build --file apps/api/Dockerfile",
         "docker build --file apps/web/Dockerfile",
-        "aquasecurity/trivy-action@0.36.0",
+        "aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8",
         "scan-type: config",
         "scan-ref: infra/k8s/base",
     ):
         assert contract in workflow
+
+
+def test_security_workflows_pin_actions_and_dependabot_updates_them() -> None:
+    for workflow_path in (
+        WORKFLOW_PATH,
+        REPO_ROOT / ".github" / "workflows" / "release-security.yml",
+    ):
+        references = re.findall(
+            r"^\s*(?:- )?uses:\s+([^\s#]+)", workflow_path.read_text(), re.M
+        )
+        for reference in references:
+            assert re.search(r"@[a-f0-9]{40}$", reference), reference
+
+    dependabot = yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text())
+    assert dependabot["version"] == 2
+    assert {
+        (entry["package-ecosystem"], entry["directory"])
+        for entry in dependabot["updates"]
+    } == {("github-actions", "/"), ("pip", "/apps/api"), ("npm", "/")}
