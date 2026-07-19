@@ -36,6 +36,7 @@ def secure_memory_metadata(
     source_ids = _source_ids(normalized.get("source_ids"), source_entity_type, source_entity_id)
     conflicts = _string_list(normalized.get("contradicts_memory_ids"))
     now = datetime.now(UTC).isoformat()
+    trusted_projection = bool(normalized.get("trusted_projection")) and origin == "derived"
     normalized.update(
         {
             "policy_version": SECURE_MEMORY_POLICY_VERSION,
@@ -47,9 +48,8 @@ def secure_memory_metadata(
             "contradicts_memory_ids": conflicts,
             "last_verified_at": normalized.get("last_verified_at") or now,
             "expires_at": _expiry_metadata(expires_at),
-            "requires_human_approval": write_policy == "approval_required",
-            "trusted_projection": bool(normalized.get("trusted_projection"))
-            or origin == "user",
+            "requires_human_approval": write_policy == "approval_required" or origin == "agent",
+            "trusted_projection": trusted_projection or origin == "user",
         }
     )
     return normalized
@@ -68,9 +68,10 @@ def requires_memory_proposal(
         return True
     if source_entity_type in _EVIDENCE_ENTITY_TYPES:
         return True
+    if metadata.get("origin") == "agent":
+        return True
     return bool(
-        metadata.get("origin") == "agent"
-        and metadata.get("requires_human_approval")
+        metadata.get("requires_human_approval")
         and not (metadata.get("approved_at") or metadata.get("trusted_projection"))
     )
 

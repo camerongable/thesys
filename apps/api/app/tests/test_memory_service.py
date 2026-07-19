@@ -146,6 +146,41 @@ def test_evidence_derived_agent_memory_requires_approval_before_recall(
     assert [candidate.id for candidate in selected] == [item.id]
 
 
+def test_agent_memory_cannot_bypass_approval_with_direct_policy_or_projection(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+
+    item = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="semantic",
+        write_policy="direct",
+        title="Agent-proposed conclusion",
+        summary="An agent conclusion requires review before durable recall.",
+        content={"claim": "requires review"},
+        provenance_metadata={
+            "origin": "agent",
+            "trusted_projection": True,
+            "approved_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    db_session.commit()
+
+    assert item.status == "proposed"
+    assert item.provenance_metadata["requires_human_approval"] is True
+    assert item.provenance_metadata["trusted_projection"] is False
+    assert memory_service.select_memory_for_workflow(
+        db_session,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+    ) == []
+
+
 def test_working_memory_has_bounded_ttl_and_expired_memory_is_inspectable(
     client: TestClient,
     db_session: Session,

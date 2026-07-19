@@ -558,6 +558,10 @@ current verdict, next action, evidence health, validation, and decision state.
   recall is fail-closed for missing security metadata and returns only active,
   approved, sufficiently trusted records with an Inspect-visible exclusion
   reason for every rejected item.
+- [x] Make approval mandatory for every agent-origin durable-memory write,
+  independent of a caller-selected direct write policy or forged approval and
+  trusted-projection fields. Agent proposals stay out of workflow recall until
+  the controlled approval path records review metadata.
 - [x] Preserve the active memory version when a proposed update for the same
   entity has a different content hash. The active and proposed versions receive
   reciprocal conflict links and a shared conflict group; Inspect exposes both
@@ -700,11 +704,14 @@ current verdict, next action, evidence health, validation, and decision state.
   1 warning`) across source-trust, real agentic-research quarantine, and source
   deletion-propagation regressions; changed-file compile checks and repository
   application lint passed.
+- [x] Agent-memory approval-bypass checkpoint passed (`63 passed, 1 warning`)
+  across memory-service and feature-boundary coverage; changed-file compile
+  checks and repository application lint passed.
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-audit the remaining memory-write acceptance paths and any residual
+enforce code-owned procedural-memory writes and audit any residual
 evidence-derived replay surfaces.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
