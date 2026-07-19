@@ -44,9 +44,10 @@ the implementation brief and status ledger.
 | Explain the project or give a demo | [Portfolio Owner Guide](PORTFOLIO_OWNER_GUIDE.md) |
 | Understand the product and local setup | [README](../README.md) |
 | Explain major packages and tools | [Dependencies And Tooling](DEPENDENCIES.md) |
-| Understand the AI design | [AI Architecture](AI_ARCHITECTURE.md), [Context Engineering](CONTEXT_ENGINEERING.md), [Retrieval And Citations](RETRIEVAL_AND_CITATIONS.md), [Memory System](MEMORY_SYSTEM.md) |
+| Understand the AI design and principles | [AI Architecture](AI_ARCHITECTURE.md), [Context Engineering](CONTEXT_ENGINEERING.md), [Retrieval And Citations](RETRIEVAL_AND_CITATIONS.md), [Memory System](MEMORY_SYSTEM.md) |
+| Understand durable workflows and distributed behavior | [Distributed Systems And Durable Execution](DISTRIBUTED_SYSTEMS.md), [Deployment And Security](DEPLOYMENT_SECURITY.md) |
 | Understand tools and integrations | [Governance And MCP](GOVERNANCE_AND_MCP.md), [MCP Integration](MCP_INTEGRATION.md), [Source Intelligence](SOURCE_INTELLIGENCE.md) |
-| Understand security controls | [Security Overview](security.md), [Security Architecture](security/SECURITY_ARCHITECTURE.md), [Threat Model](security/THREAT_MODEL.md), [Control Matrix](security/CONTROL_MATRIX.md), [Abuse Cases](security/ABUSE_CASES.md) |
+| Understand security controls or find a runbook | [Security Documentation Guide](security/README.md), [Security Overview](security.md), [Security Architecture](security/SECURITY_ARCHITECTURE.md), [Threat Model](security/THREAT_MODEL.md), [Control Matrix](security/CONTROL_MATRIX.md), [Abuse Cases](security/ABUSE_CASES.md) |
 | Understand deployments and verification | [Deployment And Security](DEPLOYMENT_SECURITY.md), [Evals And Observability](EVALS_AND_OBSERVABILITY.md), [Security And Evals](SECURITY_AND_EVALS.md) |
 | Understand exact delivered scope | [Implementation Brief](../IMPLEMENTATION_BRIEF.md), [Implementation Status](../IMPLEMENTATION_STATUS.md) |
 | Understand old refactor/package boundaries | [Backend Feature Package Map](BACKEND_FEATURE_PACKAGE_MAP.md) |

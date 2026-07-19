@@ -4,6 +4,11 @@ Thesys is a full-stack, stateful AI workflow application. The architecture is
 designed to keep model reasoning useful while keeping authority over data,
 tools, memory, and decisions in deterministic services.
 
+For the principles behind the subsystem map, read [AI
+Architecture](AI_ARCHITECTURE.md) and [Distributed Systems And Durable
+Execution](DISTRIBUTED_SYSTEMS.md). For security boundaries, use the [Security
+Documentation Guide](security/README.md).
+
 ```text
 Next.js workspace
   -> FastAPI routes and validated Principal

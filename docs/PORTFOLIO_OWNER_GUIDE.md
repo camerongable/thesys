@@ -209,10 +209,12 @@ tests, and UI consumer. Use the focused documents rather than reading the
 implementation brief sequentially:
 
 - [AI Architecture](AI_ARCHITECTURE.md)
+- [Distributed Systems And Durable Execution](DISTRIBUTED_SYSTEMS.md)
 - [Retrieval And Citations](RETRIEVAL_AND_CITATIONS.md)
 - [Memory System](MEMORY_SYSTEM.md)
 - [Governance And MCP](GOVERNANCE_AND_MCP.md)
 - [Security Architecture](security/SECURITY_ARCHITECTURE.md)
+- [Security Documentation Guide](security/README.md)
 - [Dependencies And Tooling](DEPENDENCIES.md)
 
 The goal is not to memorize every module. It is to explain the product flow,

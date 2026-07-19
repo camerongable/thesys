@@ -6,6 +6,7 @@ documentation and the authoritative security material; it is not the complete
 security architecture.
 
 For the full control set, start with [Security Overview](security.md),
+[Security Documentation Guide](security/README.md),
 [Security Architecture](security/SECURITY_ARCHITECTURE.md), and
 [Dependencies And Tooling](DEPENDENCIES.md).
 

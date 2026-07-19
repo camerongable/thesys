@@ -4,6 +4,9 @@ Thesys treats the AI layer as a security boundary, not just a model-calling
 utility. The current branch includes controls for local development, portfolio
 demo use, and the production shape that a hosted version would need.
 
+For the complete security documentation map, including runbooks and evidence
+boundaries, start with the [Security Documentation Guide](security/README.md).
+
 ## Security Contract
 
 The Sprint 61 security contract is maintained across:

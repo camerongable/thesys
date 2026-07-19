@@ -560,11 +560,13 @@ Developer docs:
 - **Start here:** [Portfolio owner guide](docs/PORTFOLIO_OWNER_GUIDE.md) and
   [repository navigation](docs/REPOSITORY_NAVIGATION.md).
 - **Product and architecture:** [AI architecture](docs/AI_ARCHITECTURE.md),
+  [distributed systems and durable execution](docs/DISTRIBUTED_SYSTEMS.md),
   [context engineering](docs/CONTEXT_ENGINEERING.md),
   [retrieval and citations](docs/RETRIEVAL_AND_CITATIONS.md),
   [memory system](docs/MEMORY_SYSTEM.md), and
   [source intelligence](docs/SOURCE_INTELLIGENCE.md).
 - **Security and operations:** [security overview](docs/security.md),
+  [security documentation guide](docs/security/README.md),
   [security architecture](docs/security/SECURITY_ARCHITECTURE.md),
   [threat model](docs/security/THREAT_MODEL.md),
   [control matrix](docs/security/CONTROL_MATRIX.md),

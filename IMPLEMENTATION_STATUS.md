@@ -1436,6 +1436,31 @@ deployment-hardening requirements.
 - [ ] Repository administration remains required outside source control: enable
   default-branch protection and required review for the documented CI checks.
 
+## Sprint 70 Engineering Principles and Security Documentation Consolidation
+
+Status: complete for repository documentation. Sprint 70 makes the governing
+security, AI, and distributed-system concepts explainable at the same level as
+the implementation and runbooks. It does not add runtime controls or convert
+hosted deployment prerequisites into verified claims.
+
+- [x] Expanded `docs/AI_ARCHITECTURE.md` with source-linked AI principles,
+  authority boundaries, and prohibited model responsibilities.
+- [x] Added `docs/DISTRIBUTED_SYSTEMS.md` explaining request correlation,
+  Temporal coordination, approval signals, retry/timeout behavior, tenant
+  propagation, locks, budgets, reconciliation, and non-guarantees.
+- [x] Added `docs/security/README.md` as the index for architecture, threat
+  model, control matrix, data governance, abuse cases, incident response, and
+  scenario-specific runbooks.
+- [x] Linked the concept guides from the README, repository navigation, and
+  portfolio owner learning path.
+- [x] Revalidated all maintained Markdown links and referenced repository paths
+  after the consolidation (`43` documents, no broken local references).
+
+Residual limit: these documents describe current source-controlled behavior and
+the evidence needed for hosted claims. They cannot prove a future deployment's
+cloud IAM, network policy, branch protection, provider configuration, or
+operational response without environment-specific evidence.
+
 ## Sprint 69 Documentation, Ownership, and Dependency Literacy
 
 Status: complete for repository documentation. Sprint 69 turns the

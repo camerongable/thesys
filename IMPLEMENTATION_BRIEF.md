@@ -16763,3 +16763,44 @@ security/CI tools introduced in Sprints 61-68.
   repository paths in the maintained documentation set.
 - `IMPLEMENTATION_STATUS.md` records the Sprint 69 evidence and residual
   documentation limits.
+
+---
+
+# V1 Sprint 70: Engineering Principles and Security Documentation Consolidation
+
+## Goal
+
+Make the architecture understandable as an engineered system, not a collection
+of generated modules. Sprint 70 consolidates the concepts that underpin the
+security, AI, and distributed execution work into source-linked owner
+documentation. It changes documentation only; it does not represent new hosted
+controls or additional runtime guarantees.
+
+## Scope
+
+1. Expand AI architecture documentation to define model boundaries, grounded
+   generation, context, structured output, memory, governed tools, provider
+   handling, observability, deterministic fallback, and the authority model.
+2. Add a durable-execution guide covering request correlation, Temporal
+   orchestration, approval signals, timeout/retry policy, tenant propagation,
+   database coordination, rate-limit topology, budgets, reconciliation,
+   observability, and explicit non-guarantees.
+3. Add a security documentation index that maps high-level design, threat
+   model, controls, data governance, adversarial cases, runbooks, and CI/release
+   evidence to the question each document answers.
+4. Refresh repository navigation, README, and owner learning paths so those
+   materials are discoverable without reading the implementation brief.
+
+## Acceptance Criteria
+
+- An owner can explain which component owns model reasoning, authorization,
+  durable state, orchestration, concurrency coordination, and external side
+  effects without inferring behavior from source code.
+- The documentation distinguishes implemented contracts from hosted operational
+  prerequisites and avoids claims of exactly-once processing, multi-region
+  availability, or production verification that the repository cannot prove.
+- Every existing security runbook and control document is reachable from one
+  dedicated security index.
+- Navigation, owner guidance, and README link the AI, distributed-system, and
+  security concept documents.
+- Documentation validation reports no broken local links or referenced paths.
