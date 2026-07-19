@@ -1,6 +1,7 @@
 import uuid
 
 import pytest
+from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.db.models import MCPServerRegistration
@@ -61,6 +62,7 @@ def _registration() -> MCPServerRegistration:
 
 def test_review_registration_verifies_tls_version_and_full_manifest(monkeypatch) -> None:
     registration = _registration()
+    registration.oauth_issuer = "https://issuer.example.test"
     client = _Client(
         [
             _Response(
@@ -100,7 +102,11 @@ def test_review_registration_verifies_tls_version_and_full_manifest(monkeypatch)
     )
     monkeypatch.setattr(remote_mcp_review_service.httpx, "Client", lambda **_kwargs: client)
 
-    review = remote_mcp_review_service.review_registration(Settings(), registration)
+    review = remote_mcp_review_service.review_registration(
+        Settings(),
+        registration,
+        authorization=SecretStr("server-scoped-token"),
+    )
 
     assert review.server_name == "remote"
     assert review.server_version == "1.2.3"
@@ -109,6 +115,7 @@ def test_review_registration_verifies_tls_version_and_full_manifest(monkeypatch)
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
         "Mcp-Session-Id": "session-1",
+        "Authorization": "Bearer server-scoped-token",
     }
 
 

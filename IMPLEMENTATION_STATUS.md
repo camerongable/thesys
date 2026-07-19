@@ -881,15 +881,20 @@ current verdict, next action, evidence health, validation, and decision state.
   verifies the pinned TLS certificate fingerprint, approved server version,
   and complete compatible `tools/list` manifest before setting a registration
   enabled; any unavailable, identity, version, or schema drift leaves it
-  disabled and records an attributable high-risk audit event. OAuth-backed and
-  SSE registrations remain disabled until their scoped credential and transport
-  implementations exist.
+  disabled and records an attributable high-risk audit event. OAuth
+  client-credentials and SSE registrations remain disabled until their token
+  exchange and transport implementations exist.
 - [x] Add encrypted, per-server MCP credential isolation. Owner-only endpoints
   store either short-lived user-delegated access/refresh tokens or a
   client-credentials secret under workspace envelope encryption bound to the
   exact registration; issuer and audience must match the reviewed server,
   metadata never returns secret material, and audited revocation deletes the
   credential and disables the server.
+- [x] Use the registration-scoped, user-delegated access token during live
+  remote-MCP enablement. The review client sends it only to that server for its
+  TLS-pinned `initialize` and `tools/list` preflight; no token reaches another
+  registration, audit event, or API response. Client-credentials exchange and
+  token refresh remain disabled until a validated token client is added.
 - [ ] Implement the remaining Sprint 66 capability controls: the outbound
   remote-MCP invocation client with token exchange/refresh and cryptographic
   issuer/audience validation, then validate the live Compose policy bundle with
@@ -947,6 +952,10 @@ current verdict, next action, evidence health, validation, and decision state.
   kill-switch, envelope-encryption, and security-invariant coverage; focused
   lint, compilation, Alembic single-head/offline SQL rendering, and `git diff
   --check` passed.
+- [x] Scoped-token review checkpoint passed (`60 passed, 1 xfailed, 1 warning`)
+  across MCP credential, registration, remote-review, adapter, kill-switch,
+  envelope-encryption, and security-invariant coverage; focused lint,
+  compilation, and `git diff --check` passed.
 - [ ] The local workspace has no Docker CLI, so Compose graph validation and
   direct OPA/Rego parser validation remain part of the compose-backed
   enforcement checkpoint.

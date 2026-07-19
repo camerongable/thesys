@@ -139,7 +139,7 @@ def test_workspace_owner_can_enable_a_live_reviewed_mcp_server(
         monkeypatch.setattr(
             mcp_registry_service.remote_mcp_review_service,
             "review_registration",
-            lambda _settings, _registration: remote_mcp_review_service.RemoteMcpReview(
+            lambda _settings, _registration, **_kwargs: remote_mcp_review_service.RemoteMcpReview(
                 server_name="reviewed-mcp",
                 server_version="2026.07.18",
                 certificate_fingerprint="f" * 64,

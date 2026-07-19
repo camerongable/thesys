@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.db.models import MCPServerRegistration
@@ -36,13 +37,12 @@ class RemoteMcpReview:
 def review_registration(
     settings: Settings,
     registration: MCPServerRegistration,
+    *,
+    authorization: SecretStr | None = None,
 ) -> RemoteMcpReview:
     """Verify the pinned identity and reviewed tool contract of a remote server."""
     if registration.transport != "streamable_http":
         raise RemoteMcpReviewError("unsupported_transport")
-    if registration.oauth_issuer is not None:
-        raise RemoteMcpReviewError("scoped_credentials_unavailable")
-
     certificate_fingerprint = _certificate_fingerprint(
         registration.base_url,
         timeout_seconds=settings.mcp_remote_review_timeout_seconds,
@@ -66,6 +66,7 @@ def review_registration(
                     "capabilities": {},
                     "clientInfo": REVIEW_CLIENT_INFO,
                 },
+                authorization=authorization,
             )
             server_info = initialize_result.get("serverInfo")
             if not isinstance(server_info, dict):
@@ -84,6 +85,7 @@ def review_registration(
                 method="tools/list",
                 params={},
                 session_id=session_id,
+                authorization=authorization,
             )
     except RemoteMcpReviewError:
         raise
@@ -125,6 +127,7 @@ def _rpc_call(
     method: str,
     params: dict[str, object],
     session_id: str | None = None,
+    authorization: SecretStr | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     headers = {
         "Accept": "application/json, text/event-stream",
@@ -132,6 +135,8 @@ def _rpc_call(
     }
     if session_id:
         headers["Mcp-Session-Id"] = session_id
+    if authorization is not None:
+        headers["Authorization"] = f"Bearer {authorization.get_secret_value()}"
     response = client.post(
         base_url,
         headers=headers,

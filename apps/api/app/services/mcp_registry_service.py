@@ -123,7 +123,31 @@ def enable_server(
         operation="enablement",
     )
     try:
-        review = remote_mcp_review_service.review_registration(settings, registration)
+        authorization = None
+        if registration.oauth_issuer is not None:
+            from app.services import mcp_credential_service
+
+            try:
+                material = mcp_credential_service.resolve_credential_material(
+                    db,
+                    auth,
+                    settings,
+                    registration,
+                )
+            except HTTPException as exc:
+                raise remote_mcp_review_service.RemoteMcpReviewError(
+                    "scoped_credentials_unavailable"
+                ) from exc
+            authorization = material.access_token
+            if authorization is None:
+                raise remote_mcp_review_service.RemoteMcpReviewError(
+                    "scoped_credentials_unavailable"
+                )
+        review = remote_mcp_review_service.review_registration(
+            settings,
+            registration,
+            authorization=authorization,
+        )
     except remote_mcp_review_service.RemoteMcpReviewError as exc:
         registration.enabled = False
         governance_service.record_audit_event(
