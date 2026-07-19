@@ -15,6 +15,7 @@ from app.services import (
     multimodal_extraction_service,
     retrieval_service,
     secure_file_parser_service,
+    security_metrics_service,
 )
 
 
@@ -141,6 +142,36 @@ def test_note_ingestion_chunks_embeds_and_retrieves(
         "embedded",
         "retrievable",
     ]
+
+
+def test_retrieval_records_distinct_returned_source_count(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    observed: list[int] = []
+    monkeypatch.setattr(security_metrics_service, "record_retrieval_source_count", observed.append)
+    project_response = client.post(
+        "/api/projects",
+        json={"name": "Retrieval metric project"},
+    )
+    project_id = project_response.json()["id"]
+    note_response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={
+            "title": "Source count evidence",
+            "text": "Independent coaches need trusted weekly check-in recommendations.",
+        },
+    )
+    assert note_response.status_code == 201
+
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/retrieve",
+        json={"query": "trusted coach recommendations", "mode": "keyword", "top_k": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"]
+    assert observed == [1]
 
 
 def test_workflow_traces_hide_evidence_after_source_quarantine(

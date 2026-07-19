@@ -1155,6 +1155,11 @@ current verdict, next action, evidence health, validation, and decision state.
   tenant identifiers or content. Normalized security events drive prompt,
   jailbreak, guardrail, tool, scope-denial, budget, and loop signals; the shared
   LiteLLM boundary adds provider-error, token, and reported-cost telemetry.
+- [x] Observe workflow duration and retrieval breadth without sensitive labels.
+  Terminal AI-run transitions emit one `ai_workflow_duration_seconds`
+  observation, and the shared retrieval pipeline emits
+  `ai_retrieval_source_count` from the distinct sources in its returned result
+  set, including cache hits.
 - [x] Add the redacted, admin-only Security Overview data API. Project security
   administrators can aggregate high/critical events, blocked attacks, denied
   tools, pending high-risk approvals, PII redactions, quarantines, anomalous

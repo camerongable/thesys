@@ -42,6 +42,7 @@ from app.services import (
     embedding_service,
     project_service,
     retrieval_reranker_service,
+    security_metrics_service,
 )
 from app.services.common import workflow as workflow_utils
 
@@ -244,6 +245,7 @@ def retrieve_evidence_pipeline(
                 "cache": ai_cache_service.cache_event_diagnostics(cache_lookup.event),
             }
         )
+        _record_retrieval_source_count(assembled)
         return RetrievalSearchResult(diagnostics=diagnostics, results=assembled)
 
     plan = _plan_query(payload.query)
@@ -318,6 +320,7 @@ def retrieve_evidence_pipeline(
         },
         project_id=project_id,
     )
+    _record_retrieval_source_count(assembled)
     return RetrievalSearchResult(diagnostics=pipeline_diagnostics, results=assembled)
 
 
@@ -651,6 +654,12 @@ _text_similarity = retrieval_context_selection_feature.text_similarity
 _result_domain = retrieval_context_selection_feature.result_domain
 _result_competitor_id = retrieval_context_selection_feature.result_competitor_id
 _estimate_tokens = retrieval_context_selection_feature.estimate_tokens
+
+
+def _record_retrieval_source_count(results: list[EvidenceRetrievalResultRead]) -> None:
+    security_metrics_service.record_retrieval_source_count(
+        len({result.source_id for result in results})
+    )
 
 
 def _base_conditions(

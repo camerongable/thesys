@@ -1,8 +1,15 @@
 """Low-cardinality Prometheus metrics for security operations."""
 
 from decimal import Decimal
+from math import isfinite
 
-from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Counter,
+    Histogram,
+    generate_latest,
+)
 
 _REGISTRY = CollectorRegistry(auto_describe=True)
 
@@ -59,6 +66,18 @@ COST_USD_TOTAL = Counter(
 TOKEN_TOTAL = Counter(
     "ai_token_total",
     "Reported provider token usage.",
+    registry=_REGISTRY,
+)
+WORKFLOW_DURATION_SECONDS = Histogram(
+    "ai_workflow_duration_seconds",
+    "Elapsed wall-clock time for completed AI workflow runs.",
+    buckets=(0.1, 1, 5, 30, 60, 300, 900, 1800, 3600, float("inf")),
+    registry=_REGISTRY,
+)
+RETRIEVAL_SOURCE_COUNT = Histogram(
+    "ai_retrieval_source_count",
+    "Distinct evidence sources returned by a retrieval operation.",
+    buckets=(0, 1, 2, 3, 5, 10, 20, 50, float("inf")),
     registry=_REGISTRY,
 )
 PROVIDER_ERROR_TOTAL = Counter(
@@ -121,6 +140,22 @@ def record_model_usage(*, total_tokens: int | None, total_cost: Decimal | None) 
         TOKEN_TOTAL.inc(total_tokens)
     if total_cost is not None and total_cost.is_finite() and total_cost >= 0:
         COST_USD_TOTAL.inc(float(total_cost))
+
+
+def record_workflow_duration(duration_seconds: float) -> None:
+    """Observe one terminal AI-run duration without workflow identity labels."""
+    if isinstance(duration_seconds, bool) or not isinstance(duration_seconds, (int, float)):
+        return
+    if not isfinite(duration_seconds) or duration_seconds < 0:
+        return
+    WORKFLOW_DURATION_SECONDS.observe(duration_seconds)
+
+
+def record_retrieval_source_count(source_count: int) -> None:
+    """Observe distinct returned sources without recording their identities."""
+    if isinstance(source_count, bool) or not isinstance(source_count, int) or source_count < 0:
+        return
+    RETRIEVAL_SOURCE_COUNT.observe(source_count)
 
 
 def record_provider_error() -> None:

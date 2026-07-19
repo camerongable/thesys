@@ -1,9 +1,12 @@
 import re
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
 
-from app.services import security_metrics_service
+from app.db.models import AIRun
+from app.services import ai_run_service, security_metrics_service
 
 
 def _metric_value(payload: str, name: str) -> float:
@@ -68,3 +71,60 @@ def test_prometheus_metrics_endpoint_exposes_low_cardinality_security_counters(
     assert _metric_value(payload, "ai_provider_error_total") == (
         _metric_value(before_text, "ai_provider_error_total") + 1
     )
+
+
+def test_security_metrics_observe_duration_and_retrieval_source_count() -> None:
+    before, _ = security_metrics_service.render_metrics()
+    before_text = before.decode("utf-8")
+
+    security_metrics_service.record_workflow_duration(2.5)
+    security_metrics_service.record_retrieval_source_count(3)
+    security_metrics_service.record_workflow_duration(float("inf"))
+    security_metrics_service.record_retrieval_source_count(-1)
+
+    payload, _ = security_metrics_service.render_metrics()
+    payload_text = payload.decode("utf-8")
+    assert _metric_value(payload_text, "ai_workflow_duration_seconds_count") == (
+        _metric_value(before_text, "ai_workflow_duration_seconds_count") + 1
+    )
+    assert _metric_value(payload_text, "ai_workflow_duration_seconds_sum") == (
+        _metric_value(before_text, "ai_workflow_duration_seconds_sum") + 2.5
+    )
+    assert _metric_value(payload_text, "ai_retrieval_source_count_count") == (
+        _metric_value(before_text, "ai_retrieval_source_count_count") + 1
+    )
+    assert _metric_value(payload_text, "ai_retrieval_source_count_sum") == (
+        _metric_value(before_text, "ai_retrieval_source_count_sum") + 3
+    )
+
+
+def test_terminal_ai_run_records_duration_once(monkeypatch) -> None:
+    observed: list[float] = []
+    monkeypatch.setattr(security_metrics_service, "record_workflow_duration", observed.append)
+    run = AIRun(
+        status="running",
+        started_at=datetime.now(UTC) - timedelta(seconds=4),
+    )
+    db = Mock()
+
+    ai_run_service.complete_run(
+        db,
+        run,
+        output_summary="Completed.",
+        total_tokens=3,
+        total_cost=Decimal("0.01"),
+        model_provider="deterministic",
+        model_name="test",
+    )
+    ai_run_service.complete_run(
+        db,
+        run,
+        output_summary="Completed again.",
+        total_tokens=3,
+        total_cost=Decimal("0.01"),
+        model_provider="deterministic",
+        model_name="test",
+    )
+
+    assert len(observed) == 1
+    assert observed[0] >= 4
