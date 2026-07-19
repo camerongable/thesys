@@ -339,19 +339,27 @@ def run_agentic_research(
         return {"memo": memo, "context_pack": memo_context_pack}
 
     def critic(state: AgenticResearchState) -> AgenticResearchState:
-        audited, critique = _step(
+        with workflow_budget_service.workflow_budget_scope(
             db,
-            run,
-            "critic",
-            {
-                "claim_count": len(state["memo"].claims),
-                "selected_evidence_count": len(state["selected_evidence"]),
-            },
-            lambda: _critic_review(state["memo"], state["selected_evidence"], state["gaps"]),
-            settings=settings,
-            trace=trace,
-            span_name="critique",
-        )
+            auth,
+            settings,
+            project_id=project_id,
+            research_sprint_id=sprint.id,
+        ):
+            workflow_budget_service.reserve_critique_loop()
+            audited, critique = _step(
+                db,
+                run,
+                "critic",
+                {
+                    "claim_count": len(state["memo"].claims),
+                    "selected_evidence_count": len(state["selected_evidence"]),
+                },
+                lambda: _critic_review(state["memo"], state["selected_evidence"], state["gaps"]),
+                settings=settings,
+                trace=trace,
+                span_name="critique",
+            )
         return {"memo": audited, "critic": critique}
 
     def final_memo_writer(state: AgenticResearchState) -> AgenticResearchState:

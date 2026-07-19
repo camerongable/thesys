@@ -262,6 +262,43 @@ def test_agentic_research_reserves_model_budget_before_provider_call(
     assert security_event.source == "workflow"
 
 
+def test_agentic_research_stops_before_critique_when_budget_exhausted(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint_with_evidence(client, monkeypatch)
+    sprint = db_session.get(ResearchSprint, uuid.UUID(sprint_id))
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_critique_loops": 0,
+    }
+    db_session.commit()
+
+    response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/agentic-rag/run"
+    )
+
+    assert response.status_code == 429
+    db_session.refresh(sprint)
+    assert "critique_loops" not in sprint.workflow_security_usage
+    assert db_session.scalar(select(ArtifactVersion)) is None
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_critique_loop_budget_exceeded")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["max_critique_loops"] == 0
+    assert audit.event_metadata["observed_critique_loops"] == 0
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
+
+
 def test_agentic_research_quarantines_a_single_source_recommendation_reversal(
     client: TestClient,
     db_session: Session,

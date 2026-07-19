@@ -1107,6 +1107,11 @@ current verdict, next action, evidence health, validation, and decision state.
   Exhaustion prevents the next repair call and emits the configured and observed
   totals through the high-risk workflow audit, normalized security event, and
   alert.
+- [x] Enforce agentic-research critique-loop limits before the governed critic
+  stage. Each critique reserves durable sprint usage before citation review;
+  exhaustion stops the graph before the memo-writing stage and records the
+  configured and observed totals in the high-risk workflow audit, normalized
+  security event, and alert.
 
 ## Next Sprint
 
