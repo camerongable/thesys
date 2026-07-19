@@ -15,6 +15,7 @@ from app.db.models import (
     AuditEvent,
     MCPServerRegistration,
     ResearchSprint,
+    SecurityAlert,
     SecurityEvent,
     ToolInvocation,
 )
@@ -175,6 +176,83 @@ def test_agent_write_kill_switch_blocks_proposals_without_blocking_reads_or_user
     )
     assert denial is not None
     assert denial.event_metadata["workflow_type"] == "agent_write_propose_memory_update"
+
+
+def test_agent_high_risk_tool_requests_emit_specific_security_alerts(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session)
+    requested_via_execution = tool_service.execute_tool(
+        db_session,
+        auth,
+        get_settings(),
+        project_id,
+        "propose_decision",
+        {"summary": "Propose a high-risk decision.", "decision": {}},
+        requested_by="agent",
+    ).invocation
+    requested_via_proposal = tool_service.create_proposal(
+        db_session,
+        auth,
+        project_id,
+        "propose_decision",
+        {"summary": "Propose another high-risk decision.", "decision": {}},
+        requested_by="agent",
+    )
+    user_requested = tool_service.create_proposal(
+        db_session,
+        auth,
+        project_id,
+        "propose_decision",
+        {"summary": "User requested a high-risk decision.", "decision": {}},
+        requested_by="user",
+    )
+
+    audit_events = list(
+        db_session.scalars(
+            select(AuditEvent).where(
+                AuditEvent.entity_id.in_(
+                    (requested_via_execution.id, requested_via_proposal.id, user_requested.id)
+                )
+            )
+        )
+    )
+    unexpected_events = [
+        event for event in audit_events if event.event_type == "unexpected_high_risk_tool_request"
+    ]
+    assert {event.entity_id for event in unexpected_events} == {
+        requested_via_execution.id,
+        requested_via_proposal.id,
+    }
+    assert all(event.risk_level == "high" for event in unexpected_events)
+    assert all(event.actor_type == "agent" for event in unexpected_events)
+    assert any(
+        event.entity_id == user_requested.id and event.event_type == "tool_invocation_requested"
+        for event in audit_events
+    )
+
+    security_events = list(
+        db_session.scalars(
+            select(SecurityEvent).where(
+                SecurityEvent.audit_event_id.in_([event.id for event in unexpected_events])
+            )
+        )
+    )
+    assert {event.tool_invocation_id for event in security_events} == {
+        requested_via_execution.id,
+        requested_via_proposal.id,
+    }
+    assert all(event.source == "tool" and event.severity == "high" for event in security_events)
+    assert {
+        alert.security_event_id
+        for alert in db_session.scalars(
+            select(SecurityAlert).where(
+                SecurityAlert.security_event_id.in_([event.id for event in security_events])
+            )
+        )
+    } == {event.id for event in security_events}
 
 
 def test_manifest_output_limit_marks_invocation_failed(
@@ -499,7 +577,7 @@ def test_approved_remote_write_uses_persisted_idempotency_and_audits_execution(
         )
     )
     assert {
-        "tool_invocation_requested",
+        "unexpected_high_risk_tool_request",
         "tool_invocation_approved",
         "tool_invocation_executed",
     } <= event_types

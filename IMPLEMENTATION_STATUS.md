@@ -1088,6 +1088,11 @@ current verdict, next action, evidence health, validation, and decision state.
   sprint's immutable budget against its durable start time, marks an overdue
   sprint failed once, and emits the correlated high-risk audit, workflow event,
   and alert with only configured/observed duration and Temporal identifiers.
+- [x] Detect unexpected agent or system high-risk tool requests at every
+  governed request constructor. Such requests now use a specific high-risk
+  immutable audit type instead of the generic request label, producing exactly
+  one correlated tool security event and alert while explicit user requests
+  retain the normal approval workflow.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,

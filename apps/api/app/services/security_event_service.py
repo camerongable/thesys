@@ -572,7 +572,7 @@ def _source_for_audit_event(event_type: str) -> SecurityEventSource:
         return "guardrail"
     if event_type.startswith("memory_"):
         return "memory"
-    if event_type.startswith(("tool_", "high_risk_action_")):
+    if event_type.startswith(("tool_", "high_risk_action_", "unexpected_high_risk_tool_")):
         return "tool"
     if event_type.startswith(("temporal_", "workflow_")):
         return "workflow"

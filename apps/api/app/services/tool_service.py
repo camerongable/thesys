@@ -265,7 +265,7 @@ def execute_tool(
     governance_service.record_audit_event(
         db,
         auth,
-        event_type="tool_invocation_requested",
+        event_type=_tool_request_event_type(definition, requested_by),
         actor_type=requested_by,
         project_id=project_id,
         entity_type="tool_invocation",
@@ -382,7 +382,7 @@ def _request_remote_write(
     governance_service.record_audit_event(
         db,
         auth,
-        event_type="tool_invocation_requested",
+        event_type=_tool_request_event_type(definition, requested_by),
         actor_type=requested_by,
         project_id=project_id,
         entity_type="tool_invocation",
@@ -531,7 +531,7 @@ def create_proposal(
     governance_service.record_audit_event(
         db,
         auth,
-        event_type="tool_invocation_requested",
+        event_type=_tool_request_event_type(definition, requested_by),
         actor_type=requested_by,
         project_id=project_id,
         entity_type="tool_invocation",
@@ -2080,6 +2080,15 @@ _tool_invocation_status_metadata = tool_audit.invocation_status_metadata
 _tool_denial_metadata = tool_audit.denial_metadata
 _tool_approval_summary = tool_audit.approval_summary
 _tool_approval_proposed_change = tool_audit.approval_proposed_change
+
+
+def _tool_request_event_type(
+    definition: ToolDefinition,
+    requested_by: RequestedBy,
+) -> str:
+    if definition.risk_level == "high" and requested_by in {"agent", "system"}:
+        return "unexpected_high_risk_tool_request"
+    return "tool_invocation_requested"
 
 
 def _get_invocation(
