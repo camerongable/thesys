@@ -177,6 +177,15 @@ def execute_tool(
         research_sprint_id=research_sprint_id,
         requested_by=requested_by,
     )
+    _enforce_no_progress_retrieval_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        definition=definition,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
     _enforce_repeated_tool_invocation_limit(
         db,
         auth,
@@ -1205,6 +1214,70 @@ def _retrieval_query_digest(input_json: dict[str, Any]) -> str:
         sort_keys=True,
     )
     return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
+
+
+def _enforce_no_progress_retrieval_limit(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+) -> None:
+    if definition.name != "search_project_evidence" or research_sprint_id is None:
+        return
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    assert budget_context is not None
+    sprint, budget = budget_context
+    recent_outputs = db.scalars(
+        select(ToolInvocation.output_json)
+        .where(
+            ToolInvocation.workspace_id == auth.workspace_id,
+            ToolInvocation.project_id == project_id,
+            ToolInvocation.research_sprint_id == research_sprint_id,
+            ToolInvocation.tool_name == definition.name,
+        )
+        .order_by(ToolInvocation.created_at.desc(), ToolInvocation.id.desc())
+        .limit(budget.max_consecutive_empty_retrievals)
+    )
+    observed_empty_retrievals = 0
+    for output in recent_outputs:
+        if _retrieved_chunk_count(output) > 0:
+            break
+        observed_empty_retrievals += 1
+    if observed_empty_retrievals < budget.max_consecutive_empty_retrievals:
+        return
+
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_no_progress_detected",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=research_sprint_id,
+        risk_level="high",
+        summary="Workflow stopped after consecutive retrievals produced no evidence.",
+        metadata={
+            "progress_signal": "retrieval_results",
+            "max_consecutive_empty_retrievals": budget.max_consecutive_empty_retrievals,
+            "observed_empty_retrievals": observed_empty_retrievals,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
 
 
 def _limit_retrieved_chunk_output(

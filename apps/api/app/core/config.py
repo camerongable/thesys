@@ -247,6 +247,12 @@ class Settings(BaseSettings):
         le=100,
         validation_alias="SECURITY_WORKFLOW_MAX_REPEATED_RETRIEVAL_QUERIES",
     )
+    security_workflow_max_consecutive_empty_retrievals: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        validation_alias="SECURITY_WORKFLOW_MAX_CONSECUTIVE_EMPTY_RETRIEVALS",
+    )
     ai_workflow_max_tokens: int = Field(
         default=100_000,
         ge=1_000,

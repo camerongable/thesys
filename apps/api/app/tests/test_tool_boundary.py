@@ -1132,6 +1132,86 @@ def test_repeated_retrieval_query_stops_before_retrieval_execution(
     assert security_event.source == "workflow"
 
 
+def test_empty_retrievals_stop_a_no_progress_workflow(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id = _create_project(client)
+    plan_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Stop retrieval loops without evidence progress."},
+    )
+    assert plan_response.status_code == 200
+    sprint_id = uuid.UUID(plan_response.json()["sprint"]["id"])
+    sprint = db_session.get(ResearchSprint, sprint_id)
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_consecutive_empty_retrievals": 1,
+    }
+    db_session.commit()
+
+    executed_queries: list[str] = []
+
+    def _empty_retrieval_stub(*args, **kwargs) -> dict[str, object]:
+        executed_queries.append(args[5]["query"])
+        return {"results": []}
+
+    monkeypatch.setattr(tool_service, "_run_tool", _empty_retrieval_stub)
+    auth = _dev_auth(db_session)
+    tool_service.execute_tool(
+        db_session,
+        auth,
+        get_settings(),
+        uuid.UUID(project_id),
+        "search_project_evidence",
+        {"query": "pricing evidence"},
+        research_sprint_id=sprint_id,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            auth,
+            get_settings(),
+            uuid.UUID(project_id),
+            "search_project_evidence",
+            {"query": "customer interview evidence"},
+            research_sprint_id=sprint_id,
+        )
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == tool_service.WORKFLOW_BUDGET_EXHAUSTED_DETAIL
+    assert executed_queries == ["pricing evidence"]
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(ToolInvocation)
+            .where(
+                ToolInvocation.research_sprint_id == sprint_id,
+                ToolInvocation.tool_name == "search_project_evidence",
+            )
+        )
+        == 1
+    )
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_no_progress_detected")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.risk_level == "high"
+    assert audit.event_metadata["progress_signal"] == "retrieval_results"
+    assert audit.event_metadata["max_consecutive_empty_retrievals"] == 1
+    assert audit.event_metadata["observed_empty_retrievals"] == 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
+
+
 def test_research_sprint_memory_proposal_budget_stops_both_proposal_paths(
     client: TestClient,
     db_session: Session,
