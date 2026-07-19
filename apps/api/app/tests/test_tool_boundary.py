@@ -376,7 +376,7 @@ def test_remote_mcp_proposal_preview_uses_governed_approval_lifecycle(
     assert audit is not None
 
 
-def test_remote_mcp_writes_remain_denied_before_persistence(
+def test_remote_mcp_writes_create_pending_approval_without_remote_execution(
     client: TestClient,
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
@@ -398,20 +398,170 @@ def test_remote_mcp_writes_remain_denied_before_persistence(
         auth,
         allowed_tools=[write_definition.name],
     )
+    calls = 0
 
-    with pytest.raises(HTTPException) as exc_info:
-        tool_service.execute_tool(
-            db_session,
-            auth,
-            get_settings(),
-            project_id,
-            write_definition.name,
-            {"summary": "No direct remote write."},
-            remote_mcp_server_id=registration.id,
+    def unexpected_remote_call(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("Remote writes must not execute before approval.")
+
+    monkeypatch.setattr(
+        mcp_registry_service,
+        "invoke_approved_write_tool",
+        unexpected_remote_call,
+    )
+
+    result = tool_service.execute_tool(
+        db_session,
+        auth,
+        get_settings(),
+        project_id,
+        write_definition.name,
+        {"summary": "No direct remote write."},
+        remote_mcp_server_id=registration.id,
+    )
+
+    assert result.invocation.status == "requested"
+    assert result.invocation.executed_at is None
+    assert calls == 0
+
+
+def test_approved_remote_write_uses_persisted_idempotency_and_audits_execution(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session)
+    definition = _remote_write_definition(monkeypatch)
+    registration = _remote_mcp_registration(
+        db_session,
+        auth,
+        allowed_tools=[definition.name],
+    )
+    calls: list[dict[str, object]] = []
+
+    def invoke_approved_write(*_args, **kwargs):
+        calls.append(kwargs)
+        return {"result": {"status": "applied"}}
+
+    monkeypatch.setattr(
+        mcp_registry_service,
+        "invoke_approved_write_tool",
+        invoke_approved_write,
+    )
+    request = tool_service.execute_tool(
+        db_session,
+        auth,
+        get_settings(),
+        project_id,
+        definition.name,
+        {"summary": "Apply the approved remote memory update."},
+        remote_mcp_server_id=registration.id,
+    )
+    approval = db_session.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.entity_id == request.invocation.id,
+            ApprovalRequest.status == "pending",
         )
+    )
 
-    assert exc_info.value.status_code == 409
-    assert db_session.scalar(select(ToolInvocation)) is None
+    assert request.invocation.status == "requested"
+    assert request.invocation.idempotency_key is not None
+    assert request.output["preview"]["max_affected_records"] == 1
+    assert calls == []
+    assert approval is not None
+    assert approval.proposed_change["proposal"]["remote_mcp_server_id"] == str(registration.id)
+    assert approval.proposed_change["proposal"]["arguments"] == {
+        "summary": "Apply the approved remote memory update."
+    }
+
+    response = client.post(
+        f"/api/projects/{project_id}/tool-invocations/{request.invocation.id}/approve"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["invocation"]["status"] == "executed"
+    assert len(calls) == 1
+    assert calls[0]["registration_id"] == registration.id
+    assert calls[0]["arguments"] == {"summary": "Apply the approved remote memory update."}
+    assert calls[0]["idempotency_key"] == request.invocation.idempotency_key
+    db_session.refresh(request.invocation)
+    db_session.refresh(approval)
+    assert request.invocation.status == "executed"
+    assert request.invocation.output_json == {"result": {"status": "applied"}}
+    assert approval.status == "approved"
+    event_types = set(
+        db_session.scalars(
+            select(AuditEvent.event_type).where(AuditEvent.entity_id == request.invocation.id)
+        )
+    )
+    assert {
+        "tool_invocation_requested",
+        "tool_invocation_approved",
+        "tool_invocation_executed",
+    } <= event_types
+
+
+def test_failed_approved_remote_write_cannot_be_approved_or_dispatched_again(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session)
+    definition = _remote_write_definition(monkeypatch)
+    registration = _remote_mcp_registration(
+        db_session,
+        auth,
+        allowed_tools=[definition.name],
+    )
+    calls = 0
+
+    def fail_approved_write(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise HTTPException(status_code=502, detail="Remote MCP write did not complete.")
+
+    monkeypatch.setattr(
+        mcp_registry_service,
+        "invoke_approved_write_tool",
+        fail_approved_write,
+    )
+    request = tool_service.execute_tool(
+        db_session,
+        auth,
+        get_settings(),
+        project_id,
+        definition.name,
+        {"summary": "Do not duplicate an uncertain remote write."},
+        remote_mcp_server_id=registration.id,
+    )
+    approval = db_session.scalar(
+        select(ApprovalRequest).where(ApprovalRequest.entity_id == request.invocation.id)
+    )
+    assert approval is not None
+
+    failed_response = client.post(f"/api/projects/{project_id}/approvals/{approval.id}/approve")
+    replay_response = client.post(
+        f"/api/projects/{project_id}/tool-invocations/{request.invocation.id}/approve"
+    )
+
+    assert failed_response.status_code == 502
+    assert replay_response.status_code == 409
+    assert calls == 1
+    db_session.refresh(request.invocation)
+    db_session.refresh(approval)
+    assert request.invocation.status == "failed"
+    assert request.invocation.output_summary == "Approved remote write did not complete."
+    assert approval.status == "approved"
+    failure_audit = db_session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.event_type == "tool_invocation_failed",
+            AuditEvent.entity_id == request.invocation.id,
+        )
+    )
+    assert failure_audit is not None
 
 
 def test_remote_mcp_failure_disables_server_and_marks_tool_invocation_failed(
@@ -906,6 +1056,21 @@ def _remote_mcp_registration(
     db_session.add(registration)
     db_session.commit()
     return registration
+
+
+def _remote_write_definition(monkeypatch: pytest.MonkeyPatch):
+    definition = tool_registry.definition("propose_memory_update")
+    write_definition = replace(
+        definition,
+        name="write_remote_memory",
+        title="Write remote memory",
+        access_mode="write",
+        approval_policy="required_for_write",
+        risk_level="high",
+        output_schema={"type": "object", "properties": {"result": {"type": "object"}}},
+    )
+    monkeypatch.setitem(tool_registry.TOOL_REGISTRY, write_definition.name, write_definition)
+    return write_definition
 
 
 def _approved_research_sprint_with_evidence(

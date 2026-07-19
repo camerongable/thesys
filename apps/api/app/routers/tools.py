@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.core.auth import AuthContextDep
+from app.core.auth import AuthContextDep, SettingsDep
 from app.db.models import ToolInvocation
 from app.db.session import get_db
 from app.schemas.tools import (
@@ -77,9 +77,7 @@ def list_project_tool_invocations(
         research_sprint_id=research_sprint_id,
         limit=limit,
     )
-    return ToolInvocationListRead(
-        invocations=[serialize_invocation(item) for item in invocations]
-    )
+    return ToolInvocationListRead(invocations=[serialize_invocation(item) for item in invocations])
 
 
 @router.post(
@@ -91,8 +89,9 @@ def approve_project_tool_invocation(
     invocation_id: uuid.UUID,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> ToolInvocationActionRead:
-    invocation = tool_service.approve_tool_invocation(db, auth, project_id, invocation_id)
+    invocation = tool_service.approve_tool_invocation(db, auth, settings, project_id, invocation_id)
     return ToolInvocationActionRead(invocation=serialize_invocation(invocation))
 
 

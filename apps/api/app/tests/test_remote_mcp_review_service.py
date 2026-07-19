@@ -225,6 +225,7 @@ def test_invoke_registration_revalidates_session_and_returns_schema_checked_outp
         tool_name="search_project_evidence",
         arguments={"query": "reviewed query"},
         authorization=SecretStr("server-scoped-token"),
+        idempotency_key="reviewed-idempotency-key",
     )
 
     assert invocation.tool_name == "search_project_evidence"
@@ -242,6 +243,7 @@ def test_invoke_registration_revalidates_session_and_returns_schema_checked_outp
         "params": {
             "name": "search_project_evidence",
             "arguments": {"query": "reviewed query"},
+            "_meta": {"thesys/idempotencyKey": "reviewed-idempotency-key"},
         },
     }
 

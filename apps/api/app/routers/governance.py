@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import AuthContext, AuthContextDep
+from app.core.auth import AuthContext, AuthContextDep, SettingsDep
 from app.db.models import ApprovalRequest, AuditEvent
 from app.db.session import get_db
 from app.schemas.governance import (
@@ -56,10 +56,17 @@ def approve_project_approval(
     approval_id: uuid.UUID,
     db: DbDep,
     auth: AuthContextDep,
+    settings: SettingsDep,
 ) -> ApprovalRequestActionRead:
     approval = _get_project_approval(db, auth, project_id, approval_id)
     if approval.entity_type == "tool_invocation" and approval.entity_id is not None:
-        tool_service.approve_tool_invocation(db, auth, project_id, approval.entity_id)
+        tool_service.approve_tool_invocation(
+            db,
+            auth,
+            settings,
+            project_id,
+            approval.entity_id,
+        )
         db.refresh(approval)
     elif approval.entity_type == "validation_interpretation":
         approval = validation_service.apply_validation_interpretation_approval(

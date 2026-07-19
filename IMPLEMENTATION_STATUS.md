@@ -944,9 +944,16 @@ current verdict, next action, evidence health, validation, and decision state.
   schema review, scoped-credential, output-redaction, and audit boundary as
   remote reads; their returned preview is stored as a pending human approval.
   Direct remote write manifests remain denied before persistence or egress.
-- [ ] Implement the remaining Sprint 66 capability controls: execute approved
-  remote write tools safely with idempotency and before/after audit, implement
-  SSE transport, then validate the live Compose policy bundle with the OPA
+- [x] Execute approved remote MCP writes through a separate, terminal lifecycle.
+  A write first stores a redacted consequence preview, reviewed server ID, and
+  per-invocation idempotency key with a pending approval; it cannot reach the
+  server until a qualified user approves. Approval rechecks policy and kill
+  switches, commits the approval before exactly one reviewed remote dispatch,
+  sends the key in MCP metadata, validates/redacts output, and records
+  before/after audits. Ambiguous failures become terminal and cannot be
+  approved or automatically dispatched again.
+- [ ] Implement the remaining Sprint 66 capability controls: implement SSE
+  transport, then validate the live Compose policy bundle with the OPA
   parser/runtime.
 
 ## Sprint 66 Verification
@@ -1009,14 +1016,17 @@ current verdict, next action, evidence health, validation, and decision state.
   1 warning`) across remote token, MCP credential, and security-invariant
   coverage; changed-file lint/format, Alembic single-head/offline SQL rendering,
   and `git diff --check` passed.
+- [x] Approved remote-write checkpoint passed (`72 passed, 4 warnings`) across
+  tool-boundary, MCP-adapter, security-governance, remote-review, and
+  registration coverage; changed-file lint/format, Alembic single-head/offline
+  SQL rendering, and `git diff --check` passed.
 - [ ] The local workspace has no Docker CLI, so Compose graph validation and
   direct OPA/Rego parser validation remain part of the compose-backed
   enforcement checkpoint.
 
 ## Next Sprint
 
-Continue Sprint 66 by implementing reviewed remote proposal/write execution
-with the required approval lifecycle.
+Continue Sprint 66 by implementing the reviewed SSE remote-MCP transport.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

@@ -197,6 +197,83 @@ def prepare_tool_invocation(
     tool_name: str,
 ) -> MCPServerRegistration:
     """Resolve an enabled, non-writing remote capability before invocation persistence."""
+    return _prepare_invocation_registration(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        registration_id=registration_id,
+        tool_name=tool_name,
+        allowed_access_modes={"read", "proposal"},
+    )
+
+
+def prepare_remote_write_request(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    registration_id: uuid.UUID,
+    tool_name: str,
+) -> MCPServerRegistration:
+    """Validate an approved remote write target without opening a remote session."""
+    return _prepare_invocation_registration(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        registration_id=registration_id,
+        tool_name=tool_name,
+        allowed_access_modes={"write"},
+    )
+
+
+def invoke_approved_write_tool(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    invocation_id: uuid.UUID,
+    registration_id: uuid.UUID,
+    tool_name: str,
+    arguments: dict[str, object],
+    idempotency_key: str,
+) -> dict[str, object]:
+    """Execute one persisted, human-approved remote write exactly once per invocation."""
+    registration = _prepare_invocation_registration(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        registration_id=registration_id,
+        tool_name=tool_name,
+        allowed_access_modes={"write"},
+    )
+    return _invoke_registration_tool(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        invocation_id=invocation_id,
+        registration=registration,
+        tool_name=tool_name,
+        arguments=arguments,
+        idempotency_key=idempotency_key,
+    )
+
+
+def _prepare_invocation_registration(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    registration_id: uuid.UUID,
+    tool_name: str,
+    allowed_access_modes: set[str],
+) -> MCPServerRegistration:
     security_policy_service.enforce_external_mcp_allowed(
         db,
         auth,
@@ -216,7 +293,7 @@ def prepare_tool_invocation(
     if (
         not registration.enabled
         or tool_name not in registration.allowed_tools
-        or definition.access_mode not in {"read", "proposal"}
+        or definition.access_mode not in allowed_access_modes
     ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -245,6 +322,30 @@ def invoke_tool(
         registration_id=registration_id,
         tool_name=tool_name,
     )
+    return _invoke_registration_tool(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        invocation_id=invocation_id,
+        registration=registration,
+        tool_name=tool_name,
+        arguments=arguments,
+    )
+
+
+def _invoke_registration_tool(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    invocation_id: uuid.UUID,
+    registration: MCPServerRegistration,
+    tool_name: str,
+    arguments: dict[str, object],
+    idempotency_key: str | None = None,
+) -> dict[str, object]:
     try:
         authorization = _resolve_invocation_authorization(db, auth, settings, registration)
         remote_invocation = remote_mcp_review_service.invoke_registration(
@@ -253,6 +354,7 @@ def invoke_tool(
             tool_name=tool_name,
             arguments=arguments,
             authorization=authorization,
+            idempotency_key=idempotency_key,
         )
     except remote_mcp_review_service.RemoteMcpReviewError as exc:
         registration.enabled = False
@@ -293,6 +395,7 @@ def invoke_tool(
             "server_name": remote_invocation.review.server_name,
             "server_version": remote_invocation.review.server_version,
             "certificate_fingerprint": remote_invocation.review.certificate_fingerprint,
+            "idempotent": idempotency_key is not None,
         },
     )
     return remote_invocation.output

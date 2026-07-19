@@ -75,6 +75,7 @@ def invoke_registration(
     tool_name: str,
     arguments: dict[str, Any],
     authorization: SecretStr | None = None,
+    idempotency_key: str | None = None,
 ) -> RemoteMcpInvocation:
     """Call one approved remote tool after a fresh review on the same MCP session."""
     if not registration.enabled:
@@ -98,12 +99,15 @@ def invoke_registration(
                 client,
                 authorization=authorization,
             )
+            call_params: dict[str, object] = {"name": tool_name, "arguments": arguments}
+            if idempotency_key is not None:
+                call_params["_meta"] = {"thesys/idempotencyKey": idempotency_key}
             call_result, _ = _rpc_call(
                 client,
                 registration.base_url,
                 request_id=3,
                 method="tools/call",
-                params={"name": tool_name, "arguments": arguments},
+                params=call_params,
                 session_id=session_id,
                 authorization=authorization,
             )

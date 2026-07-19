@@ -104,14 +104,24 @@ def execute_tool(
     if remote_mcp_server_id is not None:
         from app.services import mcp_registry_service
 
-        mcp_registry_service.prepare_tool_invocation(
-            db,
-            auth,
-            settings,
-            project_id=project_id,
-            registration_id=remote_mcp_server_id,
-            tool_name=definition.name,
-        )
+        if definition.access_mode == "write":
+            mcp_registry_service.prepare_remote_write_request(
+                db,
+                auth,
+                settings,
+                project_id=project_id,
+                registration_id=remote_mcp_server_id,
+                tool_name=definition.name,
+            )
+        else:
+            mcp_registry_service.prepare_tool_invocation(
+                db,
+                auth,
+                settings,
+                project_id=project_id,
+                registration_id=remote_mcp_server_id,
+                tool_name=definition.name,
+            )
     _enforce_agent_write_kill_switch(
         db,
         auth,
@@ -140,12 +150,28 @@ def execute_tool(
         definition,
         requested_by=requested_by,
         research_sprint_id=research_sprint_id,
+        allow_required_approval=(
+            remote_mcp_server_id is not None and definition.access_mode == "write"
+        ),
     )
     clean_input = redact_payload(guarded_input, redact_emails=True)
+    if remote_mcp_server_id is not None and definition.access_mode == "write":
+        return _request_remote_write(
+            db,
+            auth,
+            project_id,
+            definition,
+            clean_input,
+            research_sprint_id=research_sprint_id,
+            requested_by=requested_by,
+            remote_mcp_server_id=remote_mcp_server_id,
+            policy_decision=policy_decision,
+        )
     invocation = ToolInvocation(
         workspace_id=auth.workspace_id,
         project_id=project_id,
         research_sprint_id=research_sprint_id,
+        remote_mcp_server_id=remote_mcp_server_id,
         tool_name=definition.name,
         access_mode=definition.access_mode,
         risk_level=definition.risk_level,
@@ -236,6 +262,74 @@ def execute_tool(
     db.commit()
     db.refresh(invocation)
     return ToolExecutionResult(invocation=invocation, output=output)
+
+
+def _request_remote_write(
+    db: Session,
+    auth: AuthContext,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    clean_input: dict[str, Any],
+    *,
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+    remote_mcp_server_id: uuid.UUID,
+    policy_decision: OpaPolicyDecision | None,
+) -> ToolExecutionResult:
+    preview = {
+        "summary": f"{definition.title} will run against the reviewed remote MCP server.",
+        "max_affected_records": definition.max_affected_records,
+        "reversible": definition.reversible,
+    }
+    invocation = ToolInvocation(
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+        remote_mcp_server_id=remote_mcp_server_id,
+        idempotency_key=uuid.uuid4().hex,
+        tool_name=definition.name,
+        access_mode=definition.access_mode,
+        risk_level=definition.risk_level,
+        input_json=clean_input,
+        output_json={"preview": preview},
+        output_summary=preview["summary"],
+        status="requested",
+        requested_by=requested_by,
+    )
+    db.add(invocation)
+    db.flush()
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="tool_invocation_requested",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="tool_invocation",
+        entity_id=invocation.id,
+        risk_level=definition.risk_level,
+        summary=f"{definition.title} requested.",
+        metadata=_tool_invocation_requested_metadata(
+            definition,
+            include_approval_policy=True,
+            policy_decision=_opa_decision_metadata(policy_decision),
+        ),
+    )
+    _create_tool_approval_request(
+        db,
+        auth,
+        project_id,
+        definition,
+        invocation,
+        requested_by=requested_by,
+        proposal={
+            "preview": preview,
+            "arguments": clean_input,
+            "remote_mcp_server_id": str(remote_mcp_server_id),
+        },
+    )
+    db.commit()
+    db.refresh(invocation)
+    return ToolExecutionResult(invocation=invocation, output={"preview": preview})
 
 
 def create_proposal(
@@ -338,6 +432,7 @@ def create_proposal(
 def approve_tool_invocation(
     db: Session,
     auth: AuthContext,
+    settings: Settings,
     project_id: uuid.UUID,
     invocation_id: uuid.UUID,
 ) -> ToolInvocation:
@@ -357,6 +452,13 @@ def approve_tool_invocation(
         require_permission(auth, "approve_high_risk_tools")
     else:
         require_permission(auth, "approve_memory_updates")
+    if invocation.idempotency_key is not None and invocation.access_mode == "write":
+        if invocation.remote_mcp_server_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The remote MCP write target is no longer available.",
+            )
+        return _approve_and_execute_remote_write(db, auth, settings, invocation)
     invocation.status = "approved"
     invocation.approved_by_user_id = auth.user_id
     invocation.executed_at = invocation.executed_at or datetime.now(UTC)
@@ -379,6 +481,128 @@ def approve_tool_invocation(
         risk_level=invocation.risk_level,
         summary=f"Approved tool proposal {invocation.tool_name}.",
         metadata=_tool_invocation_status_metadata(invocation.tool_name, "approved"),
+    )
+    db.commit()
+    db.refresh(invocation)
+    return invocation
+
+
+def _approve_and_execute_remote_write(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    invocation: ToolInvocation,
+) -> ToolInvocation:
+    if invocation.status != "requested" or invocation.idempotency_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only pending remote write requests can be approved.",
+        )
+    definition = _definition(invocation.tool_name)
+    project = project_service.get_project(db, auth, invocation.project_id)
+    _enforce_agent_write_kill_switch(
+        db,
+        auth,
+        settings,
+        project_id=invocation.project_id,
+        definition=definition,
+        requested_by=invocation.requested_by,
+    )
+    _authorize_opa_tool_invocation(
+        db,
+        auth,
+        settings,
+        project,
+        definition,
+        requested_by=invocation.requested_by,
+        research_sprint_id=invocation.research_sprint_id,
+        allow_required_approval=True,
+    )
+    from app.services import mcp_registry_service
+
+    mcp_registry_service.prepare_remote_write_request(
+        db,
+        auth,
+        settings,
+        project_id=invocation.project_id,
+        registration_id=invocation.remote_mcp_server_id,
+        tool_name=invocation.tool_name,
+    )
+    invocation.status = "approved"
+    invocation.approved_by_user_id = auth.user_id
+    governance_service.resolve_pending_approvals_for_entity(
+        db,
+        auth,
+        project_id=invocation.project_id,
+        entity_type="tool_invocation",
+        entity_id=invocation.id,
+        status_value="approved",
+    )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="tool_invocation_approved",
+        actor_type="user",
+        project_id=invocation.project_id,
+        entity_type="tool_invocation",
+        entity_id=invocation.id,
+        risk_level=invocation.risk_level,
+        summary=f"Approved remote write {invocation.tool_name} for execution.",
+        metadata=_tool_invocation_status_metadata(invocation.tool_name, "approved"),
+    )
+    db.commit()
+
+    try:
+        output = mcp_registry_service.invoke_approved_write_tool(
+            db,
+            auth,
+            settings,
+            project_id=invocation.project_id,
+            invocation_id=invocation.id,
+            registration_id=invocation.remote_mcp_server_id,
+            tool_name=invocation.tool_name,
+            arguments=invocation.input_json,
+            idempotency_key=invocation.idempotency_key,
+        )
+        _guard_tool_output(definition, output)
+        _guard_tool_manifest_output(definition, output)
+    except Exception:
+        invocation.status = "failed"
+        invocation.output_summary = "Approved remote write did not complete."
+        invocation.executed_at = datetime.now(UTC)
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="tool_invocation_failed",
+            actor_type="user",
+            project_id=invocation.project_id,
+            entity_type="tool_invocation",
+            entity_id=invocation.id,
+            risk_level=invocation.risk_level,
+            summary=f"Approved remote write {invocation.tool_name} failed.",
+            metadata=_tool_invocation_status_metadata(invocation.tool_name, "failed"),
+        )
+        db.commit()
+        raise
+
+    invocation.status = "executed"
+    invocation.output_json = redact_payload(output, redact_emails=True)
+    invocation.output_summary = redact_text(
+        _summarize_output(definition.name, output),
+        redact_emails=True,
+    )
+    invocation.executed_at = datetime.now(UTC)
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="tool_invocation_executed",
+        actor_type="user",
+        project_id=invocation.project_id,
+        entity_type="tool_invocation",
+        entity_id=invocation.id,
+        risk_level=invocation.risk_level,
+        summary=f"Executed approved remote write {invocation.tool_name}.",
+        metadata=_tool_invocation_executed_metadata(definition),
     )
     db.commit()
     db.refresh(invocation)
@@ -968,6 +1192,7 @@ def _authorize_opa_tool_invocation(
     *,
     requested_by: RequestedBy,
     research_sprint_id: uuid.UUID | None,
+    allow_required_approval: bool = False,
 ) -> OpaPolicyDecision | None:
     """Evaluate tool policy after deterministic scope and schema guards pass."""
     if not opa_policy_enforced(settings):
@@ -1034,7 +1259,11 @@ def _authorize_opa_tool_invocation(
         )
         db.commit()
         raise
-    if approved_decision.requires_approval and definition.access_mode != "proposal":
+    if (
+        approved_decision.requires_approval
+        and definition.access_mode != "proposal"
+        and not allow_required_approval
+    ):
         detail = "Policy requires approval before this tool can execute."
         _audit_tool_denial(
             db,
@@ -1138,11 +1367,13 @@ def _get_invocation(
     invocation_id: uuid.UUID,
 ) -> ToolInvocation:
     invocation = db.scalar(
-        select(ToolInvocation).where(
+        select(ToolInvocation)
+        .where(
             ToolInvocation.id == invocation_id,
             ToolInvocation.workspace_id == auth.workspace_id,
             ToolInvocation.project_id == project_id,
         )
+        .with_for_update()
     )
     if invocation is None:
         record_cross_tenant_access_attempt(

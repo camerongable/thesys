@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, Uuid
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -31,6 +31,11 @@ class ToolInvocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "requested_by in ('agent','user','system')",
             name="ck_tool_invocations_requested_by",
         ),
+        UniqueConstraint(
+            "remote_mcp_server_id",
+            "idempotency_key",
+            name="uq_tool_invocations_remote_mcp_idempotency",
+        ),
     )
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
@@ -50,6 +55,12 @@ class ToolInvocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("research_sprints.id", ondelete="CASCADE"),
         index=True,
     )
+    remote_mcp_server_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("mcp_server_registrations.id", ondelete="SET NULL"),
+        index=True,
+    )
+    idempotency_key: Mapped[str | None] = mapped_column(String(64))
     tool_name: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     access_mode: Mapped[str] = mapped_column(String(20), nullable=False)
     risk_level: Mapped[str] = mapped_column(String(20), nullable=False)

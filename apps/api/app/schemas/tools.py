@@ -42,6 +42,7 @@ class ToolInvocationRead(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID
     research_sprint_id: uuid.UUID | None
+    remote_mcp_server_id: uuid.UUID | None
     tool_name: str
     access_mode: ToolAccessMode
     risk_level: ToolRiskLevel
