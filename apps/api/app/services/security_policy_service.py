@@ -175,6 +175,28 @@ def _enforce_runtime_kill_switches(
         )
 
 
+def enforce_source_fetching_allowed(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID | None,
+    workflow_type: str,
+) -> None:
+    if not kill_switch_service.is_enabled(db, auth, settings, "disable_source_fetching"):
+        return
+    detail = "Source fetching is temporarily unavailable."
+    _record_policy_denial(
+        db,
+        auth,
+        project_id=project_id,
+        workflow_type=workflow_type,
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=detail,
+    )
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
 def _is_model_provider_url(settings: Settings, url: str) -> bool:
     return url.rstrip("/") == settings.litellm_base_url.rstrip("/")
 

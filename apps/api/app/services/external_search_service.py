@@ -1,6 +1,7 @@
 """External search provider boundary for source discovery."""
 
 import hashlib
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -8,10 +9,12 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from sqlalchemy.orm import Session
 
+from app.core.auth import AuthContext
 from app.core.config import Settings
 from app.security.secrets import SecretName, SecretProviderError, resolve_secret
-from app.services import model_data_policy_service
+from app.services import model_data_policy_service, security_policy_service
 from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
@@ -49,7 +52,14 @@ class ExternalSearchBatch:
     results: list[ExternalSearchResult]
 
 
-def search_many(settings: Settings, queries: list[str]) -> ExternalSearchBatch:
+def search_many(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    queries: list[str],
+    *,
+    project_id: uuid.UUID | None = None,
+) -> ExternalSearchBatch:
     """Run bounded external search with deterministic fallback for local demos."""
     cleaned_queries = _clean_queries(queries)[: settings.external_search_max_queries_per_sprint]
     if not settings.external_search_enabled:
@@ -63,6 +73,13 @@ def search_many(settings: Settings, queries: list[str]) -> ExternalSearchBatch:
             fallback_reason=None,
             results=[],
         )
+    security_policy_service.enforce_source_fetching_allowed(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="external_search",
+    )
 
     provider = settings.external_search_provider
     raw_results: list[ExternalSearchResult] = []

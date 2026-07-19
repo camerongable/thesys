@@ -31,6 +31,7 @@ from app.services import (
     external_search_service,
     langsmith_observability_service,
     project_service,
+    security_policy_service,
 )
 
 
@@ -71,6 +72,14 @@ def discover_sources(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Approve the research plan before discovering sources.",
+        )
+    if settings.external_search_enabled:
+        security_policy_service.enforce_source_fetching_allowed(
+            db,
+            auth,
+            settings,
+            project_id=project_id,
+            workflow_type="source_discovery",
         )
 
     run = ai_run_service.start_run(
@@ -114,8 +123,11 @@ def discover_sources(
     try:
         if settings.external_search_enabled:
             search_batch = external_search_service.search_many(
+                db,
+                auth,
                 settings,
                 _search_queries_for_sprint(sprint),
+                project_id=project_id,
             )
             draft = SourceDiscoveryDraft(sources=[])
             completion = _external_search_completion(settings, messages, search_batch)

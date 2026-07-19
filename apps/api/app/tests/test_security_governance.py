@@ -543,6 +543,38 @@ def test_model_provider_kill_switch_returns_safe_api_denial_before_run_creation(
     assert audit.event_metadata["workflow_type"] == "guide_chat"
 
 
+def test_source_fetching_kill_switch_denies_url_ingestion_before_source_creation(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = _create_project(client)
+    monkeypatch.setattr(
+        "app.services.evidence_service._fetch_url",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("URL fetch must not run.")),
+    )
+    update_response = client.patch(
+        "/api/security/kill-switches",
+        json={"disable_source_fetching": True},
+    )
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/url",
+        json={"url": "https://example.test/research"},
+    )
+
+    assert update_response.status_code == 200
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Source fetching is temporarily unavailable."}
+    assert db_session.scalar(select(EvidenceSource)) is None
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "security_policy_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["workflow_type"] == "evidence_url_ingestion"
+
+
 def test_tool_denial_is_audited_and_persisted_proposals_are_redacted(
     client: TestClient,
     db_session: Session,

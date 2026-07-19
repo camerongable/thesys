@@ -52,6 +52,7 @@ from app.services import (
     secure_file_parser_service,
     secure_image_service,
     secure_ingestion_state_service,
+    security_policy_service,
     source_provenance_service,
 )
 from app.services.common import workflow as workflow_utils
@@ -191,6 +192,13 @@ def add_url_source(
     existing = _find_ready_url_source(db, auth, project_id, canonical_url)
     if existing is not None:
         return get_source(db, auth, project_id, existing.id)
+    security_policy_service.enforce_source_fetching_allowed(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="evidence_url_ingestion",
+    )
 
     source = EvidenceSource(
         workspace_id=auth.workspace_id,
@@ -277,6 +285,13 @@ def add_discovered_url_source(
             _merge_source_chunk_metadata(db, existing, sanitized_metadata)
             db.commit()
         return get_source(db, auth, project_id, existing.id)
+    security_policy_service.enforce_source_fetching_allowed(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        workflow_type="discovered_source_ingestion",
+    )
 
     source = EvidenceSource(
         workspace_id=auth.workspace_id,

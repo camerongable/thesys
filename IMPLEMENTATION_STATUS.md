@@ -858,11 +858,16 @@ current verdict, next action, evidence health, validation, and decision state.
   The control recognizes the configured LiteLLM target plus any non-loopback
   provider endpoint, emits the existing attributed policy-denial audit event,
   and returns a generic 403 without creating an AI run.
+- [x] Enforce the source-fetching kill switch before URL and discovered-source
+  ingestion can create source state, before source discovery can create an AI
+  run, and within the external-search adapter itself. Each denial returns a
+  generic 403 and records the attributable policy-denial event; existing ready
+  sources remain readable without a network request.
 - [ ] Implement the remaining Sprint 66 capability controls: remote credential
   isolation, registration enablement plus live schema/version-drift validation,
-  enforcement of the remaining write, source-fetch, and external-MCP runtime
-  kill switches, and then validate the live Compose policy bundle with the OPA
-  parser/runtime.
+  enforcement of the remaining agent-write, memory-write, and external-MCP
+  runtime kill switches, and then validate the live Compose policy bundle with
+  the OPA parser/runtime.
 
 ## Sprint 66 Verification
 
@@ -891,14 +896,18 @@ current verdict, next action, evidence health, validation, and decision state.
   warnings`) across security governance, control-plane, tool, MCP-registration,
   and security-invariant coverage; focused lint, compilation, and `git diff
   --check` passed.
+- [x] Source-fetch kill-switch checkpoint passed (`106 passed, 1 xfailed, 4
+  warnings`) across evidence, discovery, competitor, agentic-research, security
+  governance, provider-routing, tool, control-plane, and security-invariant
+  coverage; focused lint, compilation, and `git diff --check` passed.
 - [ ] The local workspace has no Docker CLI, so Compose graph validation and
   direct OPA/Rego parser validation remain part of the compose-backed
   enforcement checkpoint.
 
 ## Next Sprint
 
-Continue Sprint 66 by enforcing the source-fetch kill switch before URL
-ingestion and external search requests.
+Continue Sprint 66 by enforcing the all-agent-writes and memory-writes kill
+switches at their shared mutation boundaries.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

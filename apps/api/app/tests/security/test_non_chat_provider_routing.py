@@ -1,9 +1,11 @@
 from typing import Any
 
 import pytest
+from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.services import embedding_service, external_search_service, multimodal_extraction_service
+from app.services.identity_service import ensure_dev_identity
 
 
 def test_litellm_embedding_sends_sanitized_text(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -51,7 +53,10 @@ def test_litellm_embedding_sends_sanitized_text(monkeypatch: pytest.MonkeyPatch)
     assert "[REDACTED_SECRET]" in outbound
 
 
-def test_tavily_search_sends_sanitized_queries(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tavily_search_sends_sanitized_queries(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
     outbound_queries: list[str] = []
 
     class FakeResponse:
@@ -83,7 +88,15 @@ def test_tavily_search_sends_sanitized_queries(monkeypatch: pytest.MonkeyPatch) 
         provider_egress_policy_enabled=False,
     )
 
+    auth = ensure_dev_identity(
+        db_session,
+        email=settings.dev_auth_default_email,
+        display_name=settings.dev_auth_default_name,
+        role="owner",
+    )
     external_search_service.search_many(
+        db_session,
+        auth,
         settings,
         ["Find competitors for Jane Doe jane.doe@example.com api_key=sk-secretvalue123"],
     )
