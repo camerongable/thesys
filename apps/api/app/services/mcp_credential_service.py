@@ -254,33 +254,55 @@ def resolve_validated_access_token(
     settings: Settings,
     registration: MCPServerRegistration,
 ) -> SecretStr:
-    """Return only a valid, registration-scoped user-delegated access token."""
+    """Return only a valid access token bound to the reviewed registration."""
     material = resolve_credential_material(db, auth, settings, registration)
-    if (
-        material.credential_type != "oauth_user_delegated"
-        or material.access_token is None
-        or registration.oauth_issuer is None
-        or material.issuer != registration.oauth_issuer.rstrip("/")
-        or material.audience != _registration_audience(registration)
-    ):
+    if not _material_matches_registration(material, registration):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Remote MCP credentials are unavailable.",
         )
     try:
-        remote_mcp_token_service.validate_access_token(
-            settings,
-            access_token=material.access_token,
-            issuer=material.issuer,
-            audience=material.audience,
-            required_scopes=material.scopes,
+        if material.credential_type == "oauth_user_delegated" and material.access_token is not None:
+            remote_mcp_token_service.validate_access_token(
+                settings,
+                access_token=material.access_token,
+                issuer=material.issuer,
+                audience=material.audience,
+                required_scopes=material.scopes,
+            )
+            return material.access_token
+        if (
+            material.credential_type == "oauth_client_credentials"
+            and material.client_id is not None
+            and material.client_secret is not None
+        ):
+            return remote_mcp_token_service.request_client_credentials_access_token(
+                settings,
+                issuer=material.issuer,
+                audience=material.audience,
+                scopes=material.scopes,
+                client_id=material.client_id,
+                client_secret=material.client_secret,
+            )
+        raise remote_mcp_token_service.RemoteMcpTokenValidationError(
+            "scoped_credentials_unavailable"
         )
     except remote_mcp_token_service.RemoteMcpTokenValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Remote MCP credentials are unavailable.",
         ) from exc
-    return material.access_token
+
+
+def _material_matches_registration(
+    material: MCPServerCredentialMaterial,
+    registration: MCPServerRegistration,
+) -> bool:
+    return (
+        registration.oauth_issuer is not None
+        and material.issuer == registration.oauth_issuer.rstrip("/")
+        and material.audience == _registration_audience(registration)
+    )
 
 
 def _validate_credential_binding(

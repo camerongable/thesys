@@ -882,8 +882,9 @@ current verdict, next action, evidence health, validation, and decision state.
   and complete compatible `tools/list` manifest before setting a registration
   enabled; any unavailable, identity, version, or schema drift leaves it
   disabled and records an attributable high-risk audit event. OAuth
-  client-credentials and SSE registrations remain disabled until their token
-  exchange and transport implementations exist.
+  client-credentials registrations remain disabled until their secure token
+  exchange is configured; SSE registrations remain disabled until their
+  transport implementation exists.
 - [x] Add encrypted, per-server MCP credential isolation. Owner-only endpoints
   store either short-lived user-delegated access/refresh tokens or a
   client-credentials secret under workspace envelope encryption bound to the
@@ -893,8 +894,8 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Use the registration-scoped, user-delegated access token during live
   remote-MCP enablement. The review client sends it only to that server for its
   TLS-pinned `initialize` and `tools/list` preflight; no token reaches another
-  registration, audit event, or API response. Client-credentials exchange and
-  token refresh remain disabled until a validated token client is added.
+  registration, audit event, or API response. Token refresh remains disabled
+  until its validated OAuth lifecycle is added.
 - [x] Add the protocol-level outbound remote-MCP invocation client. It refuses
   disabled registrations and unapproved tool names, validates the approved
   input schema before egress, then uses one TLS-pinned MCP session for fresh
@@ -918,10 +919,15 @@ current verdict, next action, evidence health, validation, and decision state.
   Enablement and runtime use only this validated registration-scoped token;
   opaque, symmetric, overlong, malformed, mismatched, and untrusted-JWKS tokens
   fail closed without leaking token material.
+- [x] Add a client-credentials token exchange for reviewed remote MCP servers.
+  OAuth discovery and the token endpoint must remain on the reviewed issuer
+  host; the exchange uses HTTP Basic authentication, accepts only a bounded
+  bearer response, persists no access token, and cryptographically validates
+  the resulting registration-scoped JWT before use.
 - [ ] Implement the remaining Sprint 66 capability controls: add
-  client-credentials token exchange and user-delegated refresh, execute
-  approved remote proposal and write tools safely, then validate the live
-  Compose policy bundle with the OPA parser/runtime.
+  user-delegated refresh, execute approved remote proposal and write tools
+  safely, implement SSE transport, then validate the live Compose policy bundle
+  with the OPA parser/runtime.
 
 ## Sprint 66 Verification
 

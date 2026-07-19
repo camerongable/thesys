@@ -36,6 +36,10 @@ class _Client:
         self.requests.append((url, kwargs))
         return self._responses.pop(0)
 
+    def post(self, url: str, **kwargs: object) -> _Response:
+        self.requests.append((url, kwargs))
+        return self._responses.pop(0)
+
 
 def test_validates_signed_remote_access_token_against_issuer_audience_and_scopes(
     monkeypatch,
@@ -229,6 +233,110 @@ def test_rejects_remote_access_tokens_with_wrong_issuer_or_excessive_lifetime(
             issuer=issuer,
             audience="https://mcp.example.test",
             required_scopes=("mcp.tools.read",),
+        )
+
+    assert exc_info.value.reason_code == expected_reason
+
+
+def test_client_credentials_exchange_uses_reviewed_token_endpoint_and_validates_output(
+    monkeypatch,
+) -> None:
+    issuer = "https://issuer.example.test"
+    client = _Client(
+        [
+            _Response(
+                {
+                    "issuer": issuer,
+                    "jwks_uri": f"{issuer}/.well-known/jwks.json",
+                    "token_endpoint": f"{issuer}/oauth/token",
+                }
+            ),
+            _Response(
+                {
+                    "access_token": "issued-short-lived-token",
+                    "token_type": "Bearer",
+                    "expires_in": 300,
+                }
+            ),
+        ]
+    )
+    validated: dict[str, object] = {}
+    monkeypatch.setattr(remote_mcp_token_service.httpx, "Client", lambda **_kwargs: client)
+    monkeypatch.setattr(
+        remote_mcp_token_service,
+        "validate_access_token",
+        lambda _settings, **kwargs: validated.update(kwargs),
+    )
+
+    access_token = remote_mcp_token_service.request_client_credentials_access_token(
+        Settings(),
+        issuer=issuer,
+        audience="https://mcp.example.test",
+        scopes=("mcp.tools.read",),
+        client_id="reviewed-client",
+        client_secret=SecretStr("server-secret"),
+    )
+
+    assert access_token.get_secret_value() == "issued-short-lived-token"
+    assert client.requests[1][0] == f"{issuer}/oauth/token"
+    assert client.requests[1][1]["data"] == {
+        "grant_type": "client_credentials",
+        "audience": "https://mcp.example.test",
+        "scope": "mcp.tools.read",
+    }
+    assert client.requests[1][1]["headers"]["Authorization"].startswith("Basic ")
+    assert "server-secret" not in str(client.requests[1][1])
+    assert validated["require_subject"] is False
+
+
+@pytest.mark.parametrize(
+    ("token_endpoint", "token_response", "expected_reason"),
+    [
+        (
+            "https://other.example.test/oauth/token",
+            None,
+            "token_token_endpoint_url_invalid",
+        ),
+        (
+            "https://issuer.example.test/oauth/token",
+            {
+                "access_token": "issued-token",
+                "token_type": "Bearer",
+                "expires_in": 7200,
+            },
+            "client_credentials_response_invalid",
+        ),
+    ],
+)
+def test_client_credentials_exchange_rejects_untrusted_endpoint_or_invalid_response(
+    monkeypatch,
+    token_endpoint: str,
+    token_response: dict[str, object] | None,
+    expected_reason: str,
+) -> None:
+    issuer = "https://issuer.example.test"
+    responses = [
+        _Response(
+            {
+                "issuer": issuer,
+                "jwks_uri": f"{issuer}/.well-known/jwks.json",
+                "token_endpoint": token_endpoint,
+            }
+        )
+    ]
+    if token_response is not None:
+        responses.append(_Response(token_response))
+    client = _Client(responses)
+    monkeypatch.setattr(remote_mcp_token_service.httpx, "Client", lambda **_kwargs: client)
+
+    with pytest.raises(remote_mcp_token_service.RemoteMcpTokenValidationError) as exc_info:
+        remote_mcp_token_service.request_client_credentials_access_token(
+            Settings(),
+            issuer=issuer,
+            audience="https://mcp.example.test",
+            scopes=("mcp.tools.read",),
+            client_id="reviewed-client",
+            client_secret=SecretStr("server-secret"),
         )
 
     assert exc_info.value.reason_code == expected_reason

@@ -175,6 +175,22 @@ def test_client_credentials_are_isolated_to_the_reviewed_server(
     assert material.client_secret is not None
     assert material.client_secret.get_secret_value() == client_secret
     assert material.access_token is None
+    validated_token = "issued-server-token"
+    monkeypatch.setattr(
+        mcp_credential_service.remote_mcp_token_service,
+        "request_client_credentials_access_token",
+        lambda *_args, **_kwargs: mcp_credential_service.SecretStr(validated_token),
+    )
+
+    assert (
+        mcp_credential_service.resolve_validated_access_token(
+            db_session,
+            auth,
+            settings,
+            registration,
+        ).get_secret_value()
+        == validated_token
+    )
 
 
 def test_mcp_credential_rejects_an_unreviewed_issuer_or_audience(
