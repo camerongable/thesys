@@ -1074,6 +1074,12 @@ current verdict, next action, evidence health, validation, and decision state.
   to the remaining allowance, and safely stops once it is exhausted. The denial
   emits a high-risk audit record plus the normalized workflow security event and
   alert, including the configured and observed chunk totals.
+- [x] Enforce the sprint-scoped memory-proposal budget at both governed proposal
+  entry points. Direct/MCP proposal calls and agent-created proposal helpers now
+  count every durable `propose_memory_update` attempt before creating an
+  approval request, including proposals later approved or rejected. Exhaustion
+  safely stops the workflow and records a high-risk audit, normalized workflow
+  security event, and alert with configured and observed proposal totals.
 
 ## Next Sprint
 

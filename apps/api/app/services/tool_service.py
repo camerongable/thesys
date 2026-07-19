@@ -165,6 +165,15 @@ def execute_tool(
         research_sprint_id=research_sprint_id,
         requested_by=requested_by,
     )
+    _enforce_workflow_memory_proposal_budget(
+        db,
+        auth,
+        settings=settings,
+        project_id=project_id,
+        definition=definition,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
     policy_decision = _authorize_opa_tool_invocation(
         db,
         auth,
@@ -404,6 +413,15 @@ def create_proposal(
         _audit_tool_denial(db, auth, project_id, definition, exc.reason, detail=exc.detail)
         db.commit()
         raise HTTPException(status_code=422, detail=exc.detail) from exc
+    _enforce_workflow_memory_proposal_budget(
+        db,
+        auth,
+        settings=effective_settings,
+        project_id=project_id,
+        definition=definition,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
     policy_decision = _authorize_opa_tool_invocation(
         db,
         auth,
@@ -777,6 +795,66 @@ def _workflow_security_budget(
         ).as_payload()
         db.flush()
     return sprint, WorkflowSecurityBudget.from_payload(sprint.workflow_security_budget)
+
+
+def _enforce_workflow_memory_proposal_budget(
+    db: Session,
+    auth: AuthContext,
+    *,
+    settings: Settings,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+) -> None:
+    if definition.name != "propose_memory_update":
+        return
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    if budget_context is None:
+        return
+    sprint, budget = budget_context
+    observed_memory_proposals = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ToolInvocation)
+            .where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.research_sprint_id == research_sprint_id,
+                ToolInvocation.tool_name == definition.name,
+            )
+        )
+        or 0
+    )
+    if observed_memory_proposals < budget.max_memory_proposals:
+        return
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_memory_proposal_budget_exceeded",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=research_sprint_id,
+        risk_level="high",
+        summary="Workflow memory-proposal budget was exhausted before proposal creation.",
+        metadata={
+            "max_memory_proposals": budget.max_memory_proposals,
+            "observed_memory_proposals": observed_memory_proposals,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
 
 
 def _cap_workflow_retrieval_input(

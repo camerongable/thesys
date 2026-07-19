@@ -865,6 +865,81 @@ def test_research_sprint_retrieved_chunk_budget_caps_and_stops_retrieval(
     assert security_event.source == "workflow"
 
 
+def test_research_sprint_memory_proposal_budget_stops_both_proposal_paths(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = _create_project(client)
+    plan_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Bound durable memory proposals for this workflow."},
+    )
+    assert plan_response.status_code == 200
+    sprint_id = uuid.UUID(plan_response.json()["sprint"]["id"])
+    sprint = db_session.get(ResearchSprint, sprint_id)
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_memory_proposals": 1,
+    }
+    db_session.commit()
+
+    auth = _dev_auth(db_session)
+    first = tool_service.execute_tool(
+        db_session,
+        auth,
+        get_settings(),
+        uuid.UUID(project_id),
+        "propose_memory_update",
+        {
+            "summary": "Remember that pricing evidence needs validation.",
+            "research_sprint_id": str(sprint_id),
+        },
+        research_sprint_id=sprint_id,
+    )
+
+    assert first.invocation.status == "requested"
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.create_proposal(
+            db_session,
+            auth,
+            uuid.UUID(project_id),
+            "propose_memory_update",
+            {
+                "summary": "Remember that validation requires owner approval.",
+                "research_sprint_id": str(sprint_id),
+            },
+            research_sprint_id=sprint_id,
+        )
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == tool_service.WORKFLOW_BUDGET_EXHAUSTED_DETAIL
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(ToolInvocation)
+            .where(
+                ToolInvocation.research_sprint_id == sprint_id,
+                ToolInvocation.tool_name == "propose_memory_update",
+            )
+        )
+        == 1
+    )
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_memory_proposal_budget_exceeded")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["max_memory_proposals"] == 1
+    assert audit.event_metadata["observed_memory_proposals"] == 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
+
+
 def test_tool_proposal_rejection_resolves_approval_and_writes_audit_event(
     client: TestClient,
     db_session: Session,
