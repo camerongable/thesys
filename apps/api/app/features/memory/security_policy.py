@@ -96,6 +96,26 @@ def requires_memory_proposal(
     )
 
 
+def untrusted_memory_source_reasons(
+    metadata: dict[str, Any],
+    *,
+    source_entity_type: str | None,
+) -> tuple[str, ...]:
+    """Return fixed categories describing why a memory write needs containment."""
+    reasons: set[str] = set()
+    if source_entity_type in _EVIDENCE_ENTITY_TYPES:
+        reasons.add("evidence_sourced")
+    if metadata.get("security_status") != "approved":
+        reasons.add("security_status_not_approved")
+    if _bounded_score(metadata.get("trust_score"), default=0.0) < MINIMUM_RECALL_TRUST_SCORE:
+        reasons.add("trust_below_threshold")
+    if metadata.get("origin") == "agent":
+        reasons.add("agent_generated")
+    if metadata.get("origin") == "derived" and not metadata.get("trusted_projection"):
+        reasons.add("untrusted_derived_projection")
+    return tuple(sorted(reasons))
+
+
 def procedural_memory_write_allowed(
     metadata: dict[str, Any],
     *,

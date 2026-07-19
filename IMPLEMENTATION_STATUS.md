@@ -1132,6 +1132,11 @@ current verdict, next action, evidence health, validation, and decision state.
   and streaming boundaries. Secret-bearing output and retained provider response
   bodies are redacted before caller use; attributed workflows emit a high-severity
   event and alert with only bounded entity categories.
+- [x] Detect memory writes sourced from untrusted content at the shared durable
+  memory-write boundary. Evidence-backed, agent-generated, low-trust, quarantined,
+  and untrusted-derived writes retain only fixed reason categories, are contained
+  as reviewable proposals, and emit a correlated medium-severity memory event with
+  no source IDs or memory text.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,

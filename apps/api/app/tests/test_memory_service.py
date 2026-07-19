@@ -563,6 +563,22 @@ def test_evidence_derived_agent_memory_requires_approval_before_recall(
 
     assert item.status == "proposed"
     assert item.provenance_metadata["source_ids"] == [str(source_id)]
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(
+            SecurityEvent.event_type == "memory_write_sourced_from_untrusted_content"
+        )
+    )
+    assert security_event is not None
+    assert security_event.severity == "medium"
+    assert security_event.source == "memory"
+    assert security_event.containment_status == "proposed_for_review"
+    assert security_event.attributes == {
+        "memory_type": "semantic",
+        "source_reasons": ["agent_generated", "evidence_sourced"],
+        "containment_action": "proposal_required",
+    }
+    assert str(source_id) not in str(security_event.attributes)
+    assert "coach demand" not in security_event.summary
     assert memory_service.select_memory_for_workflow(
         db_session,
         auth,

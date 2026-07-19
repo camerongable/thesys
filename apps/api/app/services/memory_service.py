@@ -403,6 +403,10 @@ def upsert_memory_item(
         data_classification=data_classification,
         trusted_derived_projection=_trusted_projection is _TRUSTED_DERIVED_PROJECTION,
     )
+    untrusted_source_reasons = memory_security_policy.untrusted_memory_source_reasons(
+        safe_provenance,
+        source_entity_type=source_entity_type,
+    )
     if memory_type == "working":
         if not memory_security_policy.working_memory_write_allowed(write_policy):
             raise HTTPException(
@@ -547,6 +551,17 @@ def upsert_memory_item(
         affected_records=1,
         policy_decision=policy_decision,
     )
+    if untrusted_source_reasons:
+        _record_untrusted_memory_write(
+            db,
+            auth,
+            project_id=project_id,
+            memory_type=memory_type,
+            source_reasons=untrusted_source_reasons,
+            containment_action=(
+                "proposal_required" if existing.status == "proposed" else "write_not_activated"
+            ),
+        )
     if conflicting_active is not None:
         _link_memory_proposal_conflict(
             db=db,
@@ -556,6 +571,33 @@ def upsert_memory_item(
             proposal=existing,
         )
     return existing
+
+
+def _record_untrusted_memory_write(
+    db: Session,
+    auth: AuthContext,
+    *,
+    project_id: uuid.UUID,
+    memory_type: MemoryType,
+    source_reasons: tuple[str, ...],
+    containment_action: str,
+) -> None:
+    security_event_service.record_security_event(
+        db,
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        user_id=auth.user_id,
+        event_type="memory_write_sourced_from_untrusted_content",
+        severity="medium",
+        source="memory",
+        summary="Memory content from an untrusted source requires human review.",
+        attributes={
+            "memory_type": memory_type,
+            "source_reasons": list(source_reasons),
+            "containment_action": containment_action,
+        },
+        containment_status="proposed_for_review",
+    )
 
 
 def _authorize_opa_memory_write(
