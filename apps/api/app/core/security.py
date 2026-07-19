@@ -182,6 +182,10 @@ def _extension(filename: str) -> str:
 
 def _detect_upload_content_type(body: bytes) -> str:
     """Identify upload content from bytes rather than client-controlled metadata."""
+    built_in_type = _detect_builtin_upload_content_type(body)
+    if built_in_type is not None:
+        return built_in_type
+
     if magic is not None:
         try:
             detected = magic.from_buffer(body, mime=True)
@@ -205,6 +209,25 @@ def _detect_upload_content_type(body: bytes) -> str:
         return _normalize_detected_content_type(result.stdout.decode("utf-8", errors="replace"))
 
     raise SecurityValidationError("Upload MIME detection is unavailable.")
+
+
+def _detect_builtin_upload_content_type(body: bytes) -> str | None:
+    """Recognize supported formats without relying on host-installed MIME tooling."""
+    if body.startswith(b"%PDF"):
+        return "application/pdf"
+    if body.startswith(b"\x89PNG\r\n"):
+        return "image/png"
+    if body.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if body.startswith(b"RIFF") and body[8:12] == b"WEBP":
+        return "image/webp"
+    if b"\x00" in body:
+        return None
+    try:
+        body.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return "text/plain"
 
 
 def _normalize_detected_content_type(detected: object) -> str:

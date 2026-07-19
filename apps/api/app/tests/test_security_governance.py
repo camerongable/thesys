@@ -155,7 +155,37 @@ def test_file_upload_requires_content_detection_to_match_extension(
     assert "Detected MIME type application/pdf" in audit.event_metadata["reason"]
 
 
-def test_upload_validation_denies_when_mime_detector_is_unavailable(
+@pytest.mark.parametrize(
+    ("filename", "content_type", "body", "expected_content_type"),
+    [
+        ("notes.txt", "text/plain", b"ordinary evidence notes", "text/plain"),
+        ("report.pdf", "application/pdf", b"%PDF-1.7\n", "application/pdf"),
+        ("image.png", "image/png", b"\x89PNG\r\n\x1a\n", "image/png"),
+        ("photo.jpg", "image/jpeg", b"\xff\xd8\xff\xe0", "image/jpeg"),
+        ("image.webp", "image/webp", b"RIFF\x00\x00\x00\x00WEBP", "image/webp"),
+    ],
+)
+def test_upload_validation_uses_builtin_content_detection_when_system_tools_are_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
+    content_type: str,
+    body: bytes,
+    expected_content_type: str,
+) -> None:
+    monkeypatch.setattr(security_module, "magic", None)
+    monkeypatch.setattr(security_module.shutil, "which", lambda _command: None)
+
+    result = validate_upload(
+        filename=filename,
+        content_type=content_type,
+        body=body,
+        settings=get_settings(),
+    )
+
+    assert result.detected_content_type == expected_content_type
+
+
+def test_upload_validation_denies_unknown_binary_when_mime_detector_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(security_module, "magic", None)
@@ -165,7 +195,7 @@ def test_upload_validation_denies_when_mime_detector_is_unavailable(
         validate_upload(
             filename="notes.txt",
             content_type="text/plain",
-            body=b"ordinary evidence notes",
+            body=b"\x00unknown-binary-content",
             settings=get_settings(),
         )
 
