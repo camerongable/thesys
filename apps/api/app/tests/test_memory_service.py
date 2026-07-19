@@ -247,6 +247,88 @@ def test_semantic_memory_requires_provenance_and_bounded_confidence(
     assert item.confidence_score == Decimal("0.7")
 
 
+def test_memory_recall_respects_principal_data_classification(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    owner_auth = _dev_auth(db_session, "owner")
+    viewer_auth = replace(
+        owner_auth,
+        principal=replace(owner_auth.principal, role="viewer"),
+    )
+    subject_id = uuid.uuid4()
+    memory = memory_service.upsert_memory_item(
+        db_session,
+        owner_auth,
+        project_id,
+        memory_type="semantic",
+        write_policy="direct",
+        entity_type="assumption",
+        entity_id=subject_id,
+        title="Confidential research conclusion",
+        summary="Coaches need triage before weekly check-ins.",
+        content={"claim": "coaches need triage"},
+        source_entity_type="artifact_version",
+        source_entity_id=uuid.uuid4(),
+        confidence_score=Decimal("0.7"),
+    )
+    db_session.commit()
+
+    assert memory.provenance_metadata["data_classification"] == "confidential"
+    assert memory_service.select_memory_for_workflow(
+        db_session,
+        owner_auth,
+        project_id,
+        workflow_type="guide_chat",
+    ) == [memory]
+    assert memory_service.list_memory(db_session, viewer_auth, project_id) == []
+    assert memory_service.select_memory_for_workflow(
+        db_session,
+        viewer_auth,
+        project_id,
+        workflow_type="guide_chat",
+    ) == []
+    selection = memory_service.select_memory_for_context(
+        db_session,
+        viewer_auth,
+        project_id,
+        workflow_type="guide_chat",
+    )
+    assert selection.selected == []
+    assert selection.excluded == [
+        {
+            "id": memory.id,
+            "memory_type": "semantic",
+            "status": "active",
+            "title": "Restricted memory",
+            "reason": "memory_data_classification_not_allowed",
+        }
+    ]
+    with pytest.raises(HTTPException) as exc_info:
+        memory_service.upsert_memory_item(
+            db_session,
+            viewer_auth,
+            project_id,
+            memory_type="semantic",
+            write_policy="approval_required",
+            entity_type="assumption",
+            entity_id=subject_id,
+            title="Conflicting viewer conclusion",
+            summary="A lower-clearance caller cannot alter a hidden conclusion.",
+            content={"claim": "different conclusion"},
+            source_entity_type="artifact_version",
+            source_entity_id=uuid.uuid4(),
+            confidence_score=Decimal("0.7"),
+            status_value="proposed",
+        )
+    assert exc_info.value.status_code == 404
+    assert memory.provenance_metadata["contradicts_memory_ids"] == []
+    with pytest.raises(HTTPException) as exc_info:
+        memory_service.get_memory_item(db_session, viewer_auth, project_id, memory.id)
+    assert exc_info.value.status_code == 404
+
+
 def test_procedural_memory_requires_versioned_code_or_config_source(
     client: TestClient,
     db_session: Session,

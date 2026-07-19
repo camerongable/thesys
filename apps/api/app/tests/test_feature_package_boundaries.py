@@ -1187,6 +1187,7 @@ def test_memory_security_policy_normalizes_secure_recall_metadata() -> None:
 
     assert metadata["policy_version"] == "secure-memory:v1"
     assert metadata["source_ids"] == ["source-1"]
+    assert metadata["data_classification"] == "confidential"
     assert metadata["requires_human_approval"] is True
     assert memory_security_policy.requires_memory_proposal(
         metadata,
@@ -1216,6 +1217,24 @@ def test_memory_security_policy_normalizes_secure_recall_metadata() -> None:
         source_entity_type="artifact_version",
         source_entity_id="artifact-1",
         confidence_score=1.1,
+    )
+    assert memory_security_policy.secure_memory_metadata(
+        {},
+        content={},
+        summary="",
+        source_entity_type=None,
+        source_entity_id=None,
+        write_policy="direct",
+        data_classification="invalid",
+    )["data_classification"] == "restricted"
+    legacy_memory = SimpleNamespace(provenance_metadata={})
+    assert memory_security_policy.memory_visible_to_clearance(
+        legacy_memory,
+        allowed_data_classifications={"confidential"},
+    )
+    assert not memory_security_policy.memory_visible_to_clearance(
+        legacy_memory,
+        allowed_data_classifications={"internal"},
     )
 
 

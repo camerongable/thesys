@@ -5,6 +5,7 @@ Items can be semantic, episodic, procedural, preference, working, or project
 memory, and each workflow selects only the memory types it is allowed to use.
 """
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -22,8 +23,11 @@ from app.features.memory import inspection as memory_inspection
 from app.features.memory import review as memory_review
 from app.features.memory import security_policy as memory_security_policy
 from app.features.memory import selection_policy as memory_selection_policy
+from app.features.retrieval.security_policy import RetrievalSecurityPolicy
 from app.schemas.memory import MemoryType, MemoryWritePolicy
+from app.security.contracts import DataClassification
 from app.services import governance_service, project_service
+from app.services.data_protection_service import data_protection_service
 
 ACTIVE_MEMORY_STATUSES = {"active"}
 WORKING_MEMORY_TTL = timedelta(hours=8)
@@ -43,6 +47,20 @@ WORKFLOW_STALE_HISTORY_ALLOWED = {
     "agentic_research",
     "validation_result_interpretation",
     "decision_recommendation",
+}
+_CLASSIFICATION_RANK = {
+    DataClassification.PUBLIC: 0,
+    DataClassification.INTERNAL: 1,
+    DataClassification.CONFIDENTIAL: 2,
+    DataClassification.RESTRICTED: 3,
+}
+_MEMORY_TYPE_BASE_CLASSIFICATION = {
+    "working": DataClassification.INTERNAL,
+    "preference": DataClassification.INTERNAL,
+    "episodic": DataClassification.CONFIDENTIAL,
+    "semantic": DataClassification.CONFIDENTIAL,
+    "project": DataClassification.CONFIDENTIAL,
+    "procedural": DataClassification.CONFIDENTIAL,
 }
 
 MemorySelection = memory_selection_policy.MemorySelection
@@ -68,6 +86,7 @@ def list_memory(
     """List typed project memory with stale/expired records hidden by default."""
     project_service.get_project(db, auth, project_id)
     session_scope = _working_memory_session_scope(auth)
+    allowed_data_classifications = _allowed_memory_data_classifications(auth)
     stmt = select(ProjectMemoryItem).where(
         ProjectMemoryItem.workspace_id == auth.workspace_id,
         ProjectMemoryItem.project_id == project_id,
@@ -93,6 +112,10 @@ def list_memory(
                 item,
                 session_scope=session_scope,
             )
+            and memory_security_policy.memory_visible_to_clearance(
+                item,
+                allowed_data_classifications=allowed_data_classifications,
+            )
         ]
     return [
         item
@@ -101,6 +124,7 @@ def list_memory(
             item,
             now=datetime.now(UTC),
             working_memory_session_scope=session_scope,
+            allowed_data_classifications=allowed_data_classifications,
         )
         is None
     ]
@@ -121,6 +145,7 @@ def select_memory_for_workflow(
     )
     project_service.get_project(db, auth, project_id)
     session_scope = _working_memory_session_scope(auth)
+    allowed_data_classifications = _allowed_memory_data_classifications(auth)
     items = list(
         db.scalars(
             select(ProjectMemoryItem)
@@ -145,6 +170,7 @@ def select_memory_for_workflow(
             item,
             now=datetime.now(UTC),
             working_memory_session_scope=session_scope,
+            allowed_data_classifications=allowed_data_classifications,
         )
         is None
     ]
@@ -167,6 +193,7 @@ def select_memory_for_context(
     now = datetime.now(UTC)
     project_service.get_project(db, auth, project_id)
     session_scope = _working_memory_session_scope(auth)
+    allowed_data_classifications = _allowed_memory_data_classifications(auth)
     all_items = list(
         db.scalars(
             select(ProjectMemoryItem)
@@ -196,6 +223,7 @@ def select_memory_for_context(
             include_stale_history=include_stale_history,
             now=now,
             working_memory_session_scope=session_scope,
+            allowed_data_classifications=allowed_data_classifications,
         )
         if reason is not None:
             excluded.append(_excluded(item, reason))
@@ -270,6 +298,9 @@ def get_memory_item(
     if item is None or not memory_security_policy.working_memory_visible_to_session(
         item,
         session_scope=_working_memory_session_scope(auth),
+    ) or not memory_security_policy.memory_visible_to_clearance(
+        item,
+        allowed_data_classifications=_allowed_memory_data_classifications(auth),
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory item not found.")
     return item
@@ -297,6 +328,7 @@ def upsert_memory_item(
     """Create or update a typed memory item under the project's governance model."""
     project_service.get_project(db, auth, project_id)
     expires_at = _effective_memory_expiry(memory_type, expires_at)
+    data_classification = _memory_data_classification(memory_type, title, summary, content)
     safe_title = redact_text(title, redact_emails=True)
     safe_summary = redact_text(summary, redact_emails=True)
     safe_content = redact_payload(content, redact_emails=True)
@@ -308,6 +340,7 @@ def upsert_memory_item(
         source_entity_id=source_entity_id,
         write_policy=write_policy,
         expires_at=expires_at,
+        data_classification=data_classification,
     )
     if memory_type == "working":
         session_scope = _working_memory_session_scope(auth)
@@ -370,6 +403,11 @@ def upsert_memory_item(
                 ProjectMemoryItem.memory_type == memory_type,
             )
         )
+    if existing is not None and not memory_security_policy.memory_visible_to_clearance(
+        existing,
+        allowed_data_classifications=_allowed_memory_data_classifications(auth),
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory item not found.")
     if existing is not None and status_value == "proposed" and existing.status == "active":
         if (existing.provenance_metadata or {}).get("content_hash") == safe_provenance[
             "content_hash"
@@ -762,6 +800,15 @@ def detect_memory_conflicts(
             )
         )
     )
+    allowed_data_classifications = _allowed_memory_data_classifications(auth)
+    items = [
+        item
+        for item in items
+        if memory_security_policy.memory_visible_to_clearance(
+            item,
+            allowed_data_classifications=allowed_data_classifications,
+        )
+    ]
     groups: dict[str, list[ProjectMemoryItem]] = {}
     for item in items:
         groups.setdefault(_conflict_key(item), []).append(item)
@@ -931,6 +978,30 @@ def _working_memory_session_scope(auth: AuthContext) -> str | None:
     return memory_security_policy.working_memory_session_scope(session_identifier)
 
 
+def _allowed_memory_data_classifications(auth: AuthContext) -> set[str]:
+    return set(
+        RetrievalSecurityPolicy.for_auth(
+            auth,
+            minimum_source_trust_score=0.0,
+        ).allowed_classifications
+    )
+
+
+def _memory_data_classification(
+    memory_type: MemoryType,
+    title: str,
+    summary: str,
+    content: dict[str, Any],
+) -> str:
+    classifications = [
+        _MEMORY_TYPE_BASE_CLASSIFICATION[memory_type],
+        data_protection_service.classify_text(title),
+        data_protection_service.classify_text(summary),
+        data_protection_service.classify_text(json.dumps(content, default=str, sort_keys=True)),
+    ]
+    return max(classifications, key=_CLASSIFICATION_RANK.__getitem__).value
+
+
 def _conflicting_active_memory_items(
     db: Session,
     auth: AuthContext,
@@ -945,7 +1016,7 @@ def _conflicting_active_memory_items(
     parsed_ids = [uuid.UUID(value) for value in conflicting_ids if _is_uuid(value)]
     if not parsed_ids:
         return []
-    return list(
+    items = list(
         db.scalars(
             select(ProjectMemoryItem).where(
                 ProjectMemoryItem.workspace_id == auth.workspace_id,
@@ -955,6 +1026,14 @@ def _conflicting_active_memory_items(
             )
         )
     )
+    return [
+        item
+        for item in items
+        if memory_security_policy.memory_visible_to_clearance(
+            item,
+            allowed_data_classifications=_allowed_memory_data_classifications(auth),
+        )
+    ]
 
 
 def _proposal_conflicts(
@@ -971,8 +1050,14 @@ def _proposal_conflicts(
             )
         )
     )
+    allowed_data_classifications = _allowed_memory_data_classifications(auth)
     conflicts: list[dict[str, Any]] = []
     for proposal in proposals:
+        if not memory_security_policy.memory_visible_to_clearance(
+            proposal,
+            allowed_data_classifications=allowed_data_classifications,
+        ):
+            continue
         metadata = proposal.provenance_metadata or {}
         conflict_group_id = metadata.get("conflict_group_id")
         conflicting_ids = _metadata_id_list(metadata.get("contradicts_memory_ids"))
@@ -992,6 +1077,14 @@ def _proposal_conflicts(
                 )
             )
         }
+        if any(
+            not memory_security_policy.memory_visible_to_clearance(
+                item,
+                allowed_data_classifications=allowed_data_classifications,
+            )
+            for item in conflicting_items.values()
+        ):
+            continue
         conflicts.append(
             {
                 "conflict_group_id": conflict_group_id,

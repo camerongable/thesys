@@ -593,6 +593,11 @@ current verdict, next action, evidence health, validation, and decision state.
   source provenance and confidence in the inclusive zero-to-one range; compacted
   semantic proposals retain their source-memory reference and conservatively
   use the lowest source confidence, treating missing confidence as zero.
+- [x] Enforce memory data-classification boundaries. Memory writes now persist a
+  conservative classification, elevated when PII or secrets are detected; list,
+  workflow selection, Inspect, direct lookup, compaction, conflicts, and
+  updates reuse role clearances from `RetrievalSecurityPolicy`, with denied
+  records non-enumerating and redacted in Inspect exclusions.
 - [x] Detect anomalous embedding clusters before evidence chunks are persisted.
   A distinct source whose candidate vectors nearly match two approved,
   different-content project sources receives an inspectable source-trust signal
@@ -743,6 +748,9 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Semantic-memory integrity checkpoint passed (`77 passed, 1 warning`)
   across memory-service, context-compiler, and feature-boundary coverage;
   changed-file compile checks and repository application lint passed.
+- [x] Memory-classification checkpoint passed (`82 passed, 1 warning`) across
+  memory-service, context-compiler, feature-boundary, and retrieval-policy
+  coverage; changed-file compile checks and repository application lint passed.
 
 ## Next Sprint
 

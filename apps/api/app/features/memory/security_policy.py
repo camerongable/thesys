@@ -7,6 +7,8 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from app.security.contracts import DataClassification
+
 SECURE_MEMORY_POLICY_VERSION = "secure-memory:v1"
 MINIMUM_RECALL_TRUST_SCORE = 0.5
 WORKING_MEMORY_SESSION_SCOPE_KEY = "working_memory_session_scope"
@@ -25,6 +27,7 @@ def secure_memory_metadata(
     source_entity_id: object | None,
     write_policy: str,
     expires_at: datetime | None = None,
+    data_classification: str = DataClassification.CONFIDENTIAL.value,
 ) -> dict[str, Any]:
     """Normalize the durable metadata required for secure memory recall."""
     normalized = dict(metadata or {})
@@ -48,6 +51,7 @@ def secure_memory_metadata(
             "content_hash": _content_hash(content, summary),
             "source_ids": source_ids,
             "contradicts_memory_ids": conflicts,
+            "data_classification": _normalized_data_classification(data_classification),
             "last_verified_at": normalized.get("last_verified_at") or now,
             "expires_at": _expiry_metadata(expires_at),
             "requires_human_approval": write_policy == "approval_required" or origin == "agent",
@@ -163,11 +167,26 @@ def working_memory_visible_to_session(item: Any, *, session_scope: str | None) -
     )
 
 
+def memory_visible_to_clearance(
+    item: Any,
+    *,
+    allowed_data_classifications: set[str] | None,
+) -> bool:
+    if allowed_data_classifications is None:
+        return True
+    metadata = item.provenance_metadata or {}
+    return (
+        metadata.get("data_classification", DataClassification.CONFIDENTIAL.value)
+        in allowed_data_classifications
+    )
+
+
 def memory_recall_exclusion_reason(
     item: Any,
     *,
     now: datetime,
     working_memory_session_scope: str | None = None,
+    allowed_data_classifications: set[str] | None = None,
 ) -> str | None:
     """Return an explainable denial reason for a durable-memory recall candidate."""
     if item.status != "active":
@@ -177,6 +196,11 @@ def memory_recall_exclusion_reason(
         session_scope=working_memory_session_scope,
     ):
         return "working_memory_session_mismatch"
+    if not memory_visible_to_clearance(
+        item,
+        allowed_data_classifications=allowed_data_classifications,
+    ):
+        return "memory_data_classification_not_allowed"
     if item.expires_at is not None and _as_utc(item.expires_at) <= _as_utc(now):
         return "expired"
     metadata = item.provenance_metadata or {}
@@ -225,6 +249,13 @@ def _bounded_score(value: object, *, default: float) -> float:
         return min(1.0, max(0.0, float(value)))
     except (TypeError, ValueError):
         return default
+
+
+def _normalized_data_classification(value: object) -> str:
+    try:
+        return DataClassification(str(value)).value
+    except ValueError:
+        return DataClassification.RESTRICTED.value
 
 
 def _as_utc(value: datetime) -> datetime:

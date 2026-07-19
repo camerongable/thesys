@@ -29,7 +29,13 @@ def memory_exclusion_reason(
     include_stale_history: bool,
     now: datetime,
     working_memory_session_scope: str | None = None,
+    allowed_data_classifications: set[str] | None = None,
 ) -> str | None:
+    if not security_policy.memory_visible_to_clearance(
+        item,
+        allowed_data_classifications=allowed_data_classifications,
+    ):
+        return "memory_data_classification_not_allowed"
     if item.memory_type not in allowed_types:
         return "memory_type_not_allowed_for_workflow"
     if item.status == "proposed":
@@ -38,6 +44,7 @@ def memory_exclusion_reason(
         item,
         now=now,
         working_memory_session_scope=working_memory_session_scope,
+        allowed_data_classifications=allowed_data_classifications,
     )
     if recall_reason is not None:
         return recall_reason
@@ -49,7 +56,9 @@ def excluded(item: ProjectMemoryItem, reason: str) -> dict[str, Any]:
         "id": item.id,
         "memory_type": item.memory_type,
         "status": item.status,
-        "title": item.title,
+        "title": "Restricted memory"
+        if reason == "memory_data_classification_not_allowed"
+        else item.title,
         "reason": reason,
     }
 
