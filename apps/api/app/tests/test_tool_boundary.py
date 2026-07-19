@@ -688,6 +688,64 @@ def test_remote_mcp_failure_disables_server_and_marks_tool_invocation_failed(
     assert audit.event_metadata["reason_code"] == "tool_schema_drift"
 
 
+def test_mcp_fingerprint_drift_disables_server_and_opens_security_alert(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session)
+    registration = _remote_mcp_registration(db_session, auth)
+
+    def _drifted_remote(*_args, **_kwargs):
+        raise remote_mcp_review_service.RemoteMcpReviewError("server_identity_mismatch")
+
+    monkeypatch.setattr(
+        mcp_registry_service.remote_mcp_review_service,
+        "invoke_registration",
+        _drifted_remote,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            auth,
+            get_settings(),
+            project_id,
+            "get_project_summary",
+            remote_mcp_server_id=registration.id,
+        )
+
+    assert exc_info.value.status_code == 502
+    db_session.refresh(registration)
+    assert registration.enabled is False
+    invocation = db_session.scalar(select(ToolInvocation))
+    assert invocation is not None
+    assert invocation.status == "failed"
+    audit = db_session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.event_type == "mcp_server_fingerprint_changed",
+            AuditEvent.entity_id == invocation.id,
+        )
+    )
+    assert audit is not None
+    assert audit.risk_level == "high"
+    assert audit.event_metadata["reason_code"] == "server_identity_mismatch"
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "mcp"
+    assert security_event.severity == "high"
+    assert security_event.tool_invocation_id == invocation.id
+    assert (
+        db_session.scalar(
+            select(SecurityAlert).where(SecurityAlert.security_event_id == security_event.id)
+        )
+        is not None
+    )
+
+
 def test_read_tools_return_declared_output_schema_keys(
     client: TestClient,
     db_session: Session,

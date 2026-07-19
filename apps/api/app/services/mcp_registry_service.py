@@ -358,16 +358,25 @@ def _invoke_registration_tool(
         )
     except remote_mcp_review_service.RemoteMcpReviewError as exc:
         registration.enabled = False
+        fingerprint_changed = exc.reason_code == "server_identity_mismatch"
         governance_service.record_audit_event(
             db,
             auth,
-            event_type="mcp_server_tool_invocation_failed",
+            event_type=(
+                "mcp_server_fingerprint_changed"
+                if fingerprint_changed
+                else "mcp_server_tool_invocation_failed"
+            ),
             actor_type="user",
             project_id=project_id,
             entity_type="tool_invocation",
             entity_id=invocation_id,
             risk_level="high",
-            summary="Remote MCP tool invocation failed and the server was disabled.",
+            summary=(
+                "Remote MCP server fingerprint changed and the server was disabled."
+                if fingerprint_changed
+                else "Remote MCP tool invocation failed and the server was disabled."
+            ),
             metadata={
                 "server_registration_id": str(registration.id),
                 "tool_name": tool_name,
