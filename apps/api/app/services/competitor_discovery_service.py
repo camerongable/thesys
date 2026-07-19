@@ -47,6 +47,7 @@ from app.services import (
     langsmith_observability_service,
     project_service,
     source_discovery_service,
+    workflow_budget_service,
 )
 
 
@@ -133,7 +134,14 @@ def discover_competitors(
     try:
         # Discovery stops at candidates; conversion into project memory happens
         # only after a user approves an individual candidate.
-        draft, completion = _generate_competitor_draft(settings, sprint, sources, messages)
+        with workflow_budget_service.workflow_budget_scope(
+            db,
+            auth,
+            settings,
+            project_id=project_id,
+            research_sprint_id=sprint.id,
+        ):
+            draft, completion = _generate_competitor_draft(settings, sprint, sources, messages)
         specs = _candidate_specs_from_draft(draft, {str(source.id) for source in sources})
         generated_count = len(specs)
         existing = {

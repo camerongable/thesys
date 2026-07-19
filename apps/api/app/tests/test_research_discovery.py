@@ -848,3 +848,98 @@ def test_competitor_discovery_uses_structured_output_in_live_mode(
     assert run.model_provider == "litellm"
     assert run.model_name == "test-live-model"
     assert run.total_tokens == 32
+
+
+def test_competitor_discovery_reserves_model_budget_before_provider_call(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint(client)
+    sprint = db_session.get(ResearchSprint, uuid.UUID(sprint_id))
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_model_calls": 1,
+    }
+    db_session.commit()
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_API_KEY", "test-model-key")
+    monkeypatch.setenv("PROVIDER_EGRESS_POLICY_ENABLED", "false")
+    get_settings.cache_clear()
+    provider_calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "model": "test-model",
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"candidates":[{"name":"Model Budget Competitor",'
+                                '"url":"https://example.com/model-budget-competitor",'
+                                '"category":"direct_competitor",'
+                                '"target_user":"Fitness coaches",'
+                                '"positioning":"Provider-backed candidate.",'
+                                '"pricing_signal":"Pricing requires verification.",'
+                                '"core_features":["research"],'
+                                '"why_it_matters":"Tests provider reservation.",'
+                                '"threat_level":"medium",'
+                                '"relevance_score":0.9,"source_ids":[]}]}'
+                            )
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+            }
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, _url: str, **kwargs: object) -> FakeResponse:
+            provider_calls.append(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr(litellm_client.httpx, "Client", FakeClient)
+
+    first_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates/discover"
+    )
+
+    assert first_response.status_code == 200
+    assert len(provider_calls) == 1
+    db_session.refresh(sprint)
+    assert sprint.workflow_security_usage == {"model_calls": 1}
+
+    second_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates/discover"
+    )
+
+    assert second_response.status_code == 429
+    assert len(provider_calls) == 1
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_model_call_budget_exceeded")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["max_model_calls"] == 1
+    assert audit.event_metadata["observed_model_calls"] == 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
