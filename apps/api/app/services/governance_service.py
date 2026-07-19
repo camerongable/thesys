@@ -19,6 +19,10 @@ RiskLevel = Literal["low", "medium", "high"]
 _NORMALIZED_SECURITY_AUDIT_EVENT_TYPES = {
     "security_policy_denied",
     "evidence_source_content_access_denied",
+    "memory_write_denied",
+    "signed_url_denied",
+    "tool_invocation_approved",
+    "tool_invocation_denied",
 }
 ApprovalRequestType = Literal[
     "research_plan",

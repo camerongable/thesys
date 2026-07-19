@@ -1,4 +1,5 @@
 import hashlib
+import re
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -19,8 +20,19 @@ from app.db.models import (
     SecurityAlert,
     SecurityEvent,
 )
-from app.services import governance_service, security_event_service, workflow_budget_service
+from app.services import (
+    governance_service,
+    security_event_service,
+    security_metrics_service,
+    workflow_budget_service,
+)
 from app.services.identity_service import ensure_dev_identity
+
+
+def _metric_value(payload: str, name: str) -> float:
+    match = re.search(rf"^{re.escape(name)} ([0-9.e+-]+)$", payload, flags=re.MULTILINE)
+    assert match is not None, f"Metric {name} was not exposed."
+    return float(match.group(1))
 
 
 def test_high_risk_audit_event_creates_redacted_normalized_security_event(
@@ -174,6 +186,51 @@ def test_audit_events_use_a_hashed_authenticated_session_correlation(
     assert event.session_id == expected_session_id
     assert raw_identifier not in str(audit.__dict__)
     assert raw_identifier not in str(event.__dict__)
+
+
+@pytest.mark.parametrize(
+    ("event_type", "source", "metric_name"),
+    [
+        ("tool_invocation_approved", "tool", "ai_tool_approval_total"),
+        ("tool_invocation_denied", "tool", "ai_tool_denied_total"),
+        ("memory_write_denied", "memory", None),
+        ("signed_url_denied", "api", None),
+    ],
+)
+def test_medium_operational_audits_are_normalized_for_security_monitoring(
+    db_session: Session,
+    event_type: str,
+    source: str,
+    metric_name: str | None,
+) -> None:
+    auth = ensure_dev_identity(
+        db_session,
+        email="operational-monitoring@thesys.local",
+        display_name="Operational Monitoring",
+    )
+    before_metrics, _ = security_metrics_service.render_metrics()
+
+    audit = governance_service.record_audit_event(
+        db_session,
+        auth,
+        event_type=event_type,
+        actor_type="user",
+        risk_level="medium",
+        summary="Recorded a governed operational outcome.",
+    )
+    db_session.commit()
+
+    event = db_session.scalar(select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id))
+
+    assert event is not None
+    assert event.event_type == event_type
+    assert event.severity == "medium"
+    assert event.source == source
+    if metric_name is not None:
+        after_metrics, _ = security_metrics_service.render_metrics()
+        assert _metric_value(after_metrics.decode(), metric_name) == (
+            _metric_value(before_metrics.decode(), metric_name) + 1
+        )
 
 
 def test_repeated_blocked_guardrail_attacks_create_one_critical_escalation_alert(

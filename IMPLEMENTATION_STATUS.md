@@ -1073,6 +1073,12 @@ current verdict, next action, evidence health, validation, and decision state.
   emit one high-severity `authorization_denial_spike` event and alert with only
   bounded count/window evidence. The detector also includes governed tool,
   memory, source-content, and signed-URL denials when they are normalized.
+- [x] Normalize medium-severity governed operational outcomes. Tool approvals
+  and denials, memory-write denials, and signed-URL denials now enter the
+  security-event stream even when their audit record is not high risk. This
+  makes the authorization anomaly detector see those denials and ensures the
+  real `ai_tool_approval_total` and `ai_tool_denied_total` metrics are driven
+  by audit-producing application paths.
 - [x] Detect scoped model-provider failure spikes at the shared LiteLLM boundary.
   HTTP and transport failures preserve only provider, bounded failure category,
   and optional status code while inheriting workspace, project, user, and
