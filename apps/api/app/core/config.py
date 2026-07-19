@@ -533,7 +533,7 @@ class Settings(BaseSettings):
         validation_alias="PDF_EXTRACTION_TIMEOUT_SECONDS",
     )
     pdf_extraction_memory_mb: int = Field(
-        default=256,
+        default=1024,
         ge=64,
         le=4096,
         validation_alias="PDF_EXTRACTION_MEMORY_MB",
