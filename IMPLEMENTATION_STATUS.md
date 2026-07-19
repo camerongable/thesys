@@ -1111,6 +1111,10 @@ current verdict, next action, evidence health, validation, and decision state.
   an authorized local project now remains non-enumerating while recording a
   credential-free scope denial plus a redacted high-risk auth event and alert;
   only the actor's local project is correlated.
+- [x] Detect unusually broad evidence retrieval. The shared cached and fresh
+  retrieval paths now alert when a configurable distinct-source threshold is
+  reached, retaining only returned chunk count, distinct source count, and the
+  requested result limit rather than the query or source identifiers.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,

@@ -193,6 +193,12 @@ class Settings(BaseSettings):
         le=100,
         validation_alias="SECURITY_CROSS_PROJECT_ENUMERATION_THRESHOLD",
     )
+    security_unusually_broad_retrieval_source_threshold: int = Field(
+        default=16,
+        ge=2,
+        le=25,
+        validation_alias="SECURITY_UNUSUALLY_BROAD_RETRIEVAL_SOURCE_THRESHOLD",
+    )
     security_provider_failure_spike_threshold: int = Field(
         default=3,
         ge=2,

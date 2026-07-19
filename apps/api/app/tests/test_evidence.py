@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import AIRun, AIStep, EvidenceChunk, EvidenceSource
+from app.db.models import AIRun, AIStep, EvidenceChunk, EvidenceSource, SecurityAlert, SecurityEvent
 from app.schemas.evidence import EvidenceRetrievalResultRead, RetrievalQueryPlanRead
 from app.services import (
     evidence_service,
@@ -172,6 +172,76 @@ def test_retrieval_records_distinct_returned_source_count(
     assert response.status_code == 200
     assert response.json()["results"]
     assert observed == [1]
+
+
+def test_unusually_broad_retrieval_creates_a_redacted_high_severity_alert(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SECURITY_UNUSUALLY_BROAD_RETRIEVAL_SOURCE_THRESHOLD", "3")
+    get_settings.cache_clear()
+    project_id = client.post("/api/projects", json={"name": "Broad retrieval"}).json()["id"]
+    source_ids: list[str] = []
+    source_texts = [
+        "Founder interviews describe onboarding friction and shared retrieval signal "
+        "market research.",
+        "Pricing surveys compare annual contracts and shared retrieval signal market research.",
+        "Support tickets identify retention gaps and shared retrieval signal market research.",
+    ]
+    for index, text in enumerate(source_texts):
+        response = client.post(
+            f"/api/projects/{project_id}/evidence/note",
+            json={
+                "title": f"Broad source {index + 1}",
+                "text": text,
+            },
+        )
+        assert response.status_code == 201
+        source_ids.append(response.json()["id"])
+
+    query = "shared retrieval signal market research"
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/retrieve",
+        json={"query": query, "mode": "keyword", "top_k": 3},
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["results"]) == 3
+    cached_response = client.post(
+        f"/api/projects/{project_id}/evidence/retrieve",
+        json={"query": query, "mode": "keyword", "top_k": 3},
+    )
+    assert cached_response.status_code == 200
+    assert len(cached_response.json()["results"]) == 3
+    events = list(
+        db_session.scalars(
+            select(SecurityEvent).where(SecurityEvent.event_type == "unusually_broad_retrieval")
+        )
+    )
+    assert len(events) == 2
+    event = events[0]
+    assert event.project_id == uuid.UUID(project_id)
+    assert event.severity == "high"
+    assert event.source == "retrieval"
+    assert event.attributes == {
+        "returned_chunk_count": 3,
+        "distinct_source_count": 3,
+        "requested_top_k": 3,
+    }
+    assert query not in str(event.__dict__)
+    assert all(source_id not in str(event.__dict__) for source_id in source_ids)
+    alerts = list(
+        db_session.scalars(
+            select(SecurityAlert)
+            .join(SecurityEvent, SecurityAlert.security_event_id == SecurityEvent.id)
+            .where(SecurityEvent.event_type == "unusually_broad_retrieval")
+        )
+    )
+    assert len(alerts) == 2
+    assert all(alert.project_id == uuid.UUID(project_id) for alert in alerts)
+    assert all(alert.severity == "high" for alert in alerts)
+    get_settings.cache_clear()
 
 
 def test_workflow_traces_hide_evidence_after_source_quarantine(

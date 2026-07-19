@@ -42,6 +42,7 @@ from app.services import (
     embedding_service,
     project_service,
     retrieval_reranker_service,
+    security_event_service,
     security_metrics_service,
 )
 from app.services.common import workflow as workflow_utils
@@ -246,6 +247,14 @@ def retrieve_evidence_pipeline(
             }
         )
         _record_retrieval_source_count(assembled)
+        _record_unusually_broad_retrieval(
+            db,
+            auth,
+            settings,
+            project_id=project_id,
+            requested_top_k=payload.top_k,
+            results=assembled,
+        )
         return RetrievalSearchResult(diagnostics=diagnostics, results=assembled)
 
     plan = _plan_query(payload.query)
@@ -321,6 +330,14 @@ def retrieve_evidence_pipeline(
         project_id=project_id,
     )
     _record_retrieval_source_count(assembled)
+    _record_unusually_broad_retrieval(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        requested_top_k=payload.top_k,
+        results=assembled,
+    )
     return RetrievalSearchResult(diagnostics=pipeline_diagnostics, results=assembled)
 
 
@@ -659,6 +676,36 @@ _estimate_tokens = retrieval_context_selection_feature.estimate_tokens
 def _record_retrieval_source_count(results: list[EvidenceRetrievalResultRead]) -> None:
     security_metrics_service.record_retrieval_source_count(
         len({result.source_id for result in results})
+    )
+
+
+def _record_unusually_broad_retrieval(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    requested_top_k: int,
+    results: list[EvidenceRetrievalResultRead],
+) -> None:
+    distinct_source_count = len({result.source_id for result in results})
+    if distinct_source_count < settings.security_unusually_broad_retrieval_source_threshold:
+        return
+    security_event_service.record_security_event(
+        db,
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        user_id=auth.user_id,
+        event_type="unusually_broad_retrieval",
+        severity="high",
+        source="retrieval",
+        summary="Evidence retrieval returned an unusually broad set of sources.",
+        attributes={
+            "returned_chunk_count": len(results),
+            "distinct_source_count": distinct_source_count,
+            "requested_top_k": requested_top_k,
+        },
+        containment_status="alert_open",
     )
 
 
