@@ -211,6 +211,26 @@ def test_scoped_s3_write_download_and_delete_enforce_security(
     assert sum(name == "get_public_access_block" for name, _ in fake.calls) == 1
 
 
+def test_bucket_security_is_verified_on_a_fresh_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeS3Client()
+    monkeypatch.setattr(object_storage_service, "_s3_client", lambda _settings: fake)
+    monkeypatch.setattr(object_storage_service, "monotonic", lambda: 10.0)
+
+    object_storage_service.put_evidence_object(
+        _secure_s3_settings(),
+        workspace_id=uuid.uuid4(),
+        project_id=uuid.uuid4(),
+        source_id=uuid.uuid4(),
+        filename="source.pdf",
+        body=b"%PDF fixture",
+        content_type="application/pdf",
+    )
+
+    assert _call(fake, "get_public_access_block") == {"Bucket": "private-bucket"}
+
+
 @pytest.mark.parametrize(
     ("failure", "message"),
     [

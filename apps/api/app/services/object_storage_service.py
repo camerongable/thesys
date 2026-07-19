@@ -263,7 +263,11 @@ def _verify_bucket_security(settings: Settings, client) -> None:
     )
     now = monotonic()
     with _bucket_security_lock:
-        if now - _bucket_security_cache.get(cache_key, 0.0) < _BUCKET_SECURITY_CACHE_SECONDS:
+        last_verified = _bucket_security_cache.get(cache_key)
+        if (
+            last_verified is not None
+            and now - last_verified < _BUCKET_SECURITY_CACHE_SECONDS
+        ):
             return
 
     try:
