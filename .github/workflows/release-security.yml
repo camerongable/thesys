@@ -1,0 +1,174 @@
+name: Release Security
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/thesys
+  UV_LOCKED: "1"
+  PROMPTFOO_DISABLE_UPDATE: "true"
+
+jobs:
+  release-security:
+    name: Signed release artifact gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.14"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: corepack enable
+      - name: Install locked release dependencies
+        run: |
+          uv sync --project apps/api --locked --all-extras
+          pnpm install --frozen-lockfile
+      - name: Security regression gates
+        id: application-security
+        continue-on-error: true
+        run: |
+          uv run --project apps/api pytest app/tests/security
+          pnpm --filter thesys-web test
+          pnpm --filter thesys-web typecheck
+          pnpm security:redteam:fast
+      - name: Dependency vulnerability gate
+        id: dependency-scan
+        continue-on-error: true
+        run: |
+          uv export --project apps/api --locked --no-dev --output-file /tmp/api-requirements.txt
+          uvx --from pip-audit==2.9.0 pip-audit --strict -r /tmp/api-requirements.txt
+          pnpm audit --audit-level=high
+      - name: Log in to GitHub Container Registry
+        if: steps.application-security.outcome == 'success' && steps.dependency-scan.outcome == 'success'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and push API image
+        id: api-image
+        if: steps.application-security.outcome == 'success' && steps.dependency-scan.outcome == 'success'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-api:${{ github.ref_name }}
+          provenance: mode=max
+          sbom: true
+      - name: Build and push web image
+        id: web-image
+        if: steps.application-security.outcome == 'success' && steps.dependency-scan.outcome == 'success'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-web:${{ github.ref_name }}
+          provenance: mode=max
+          sbom: true
+      - name: Generate API SBOM
+        if: steps.api-image.outcome == 'success'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_PREFIX }}-api@${{ steps.api-image.outputs.digest }}
+          format: cyclonedx-json
+          output-file: artifacts/api.sbom.cdx.json
+          artifact-name: api-sbom
+      - name: Generate web SBOM
+        if: steps.web-image.outcome == 'success'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_PREFIX }}-web@${{ steps.web-image.outputs.digest }}
+          format: cyclonedx-json
+          output-file: artifacts/web.sbom.cdx.json
+          artifact-name: web-sbom
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign image digests
+        id: sign-images
+        if: steps.api-image.outcome == 'success' && steps.web-image.outcome == 'success'
+        run: |
+          cosign sign --yes "${IMAGE_PREFIX}-api@${{ steps.api-image.outputs.digest }}"
+          cosign sign --yes "${IMAGE_PREFIX}-web@${{ steps.web-image.outputs.digest }}"
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE_PREFIX}-api@${{ steps.api-image.outputs.digest }}"
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE_PREFIX}-web@${{ steps.web-image.outputs.digest }}"
+          echo "api=${IMAGE_PREFIX}-api@${{ steps.api-image.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          echo "web=${IMAGE_PREFIX}-web@${{ steps.web-image.outputs.digest }}" >> "$GITHUB_OUTPUT"
+      - name: Scan API image
+        id: api-trivy
+        if: steps.api-image.outcome == 'success'
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          image-ref: ${{ env.IMAGE_PREFIX }}-api@${{ steps.api-image.outputs.digest }}
+          format: json
+          output: artifacts/api.trivy.json
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Scan web image
+        id: web-trivy
+        if: steps.web-image.outcome == 'success'
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          image-ref: ${{ env.IMAGE_PREFIX }}-web@${{ steps.web-image.outputs.digest }}
+          format: json
+          output: artifacts/web.trivy.json
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Generate fail-closed release report
+        if: always()
+        run: |
+          uv run --project apps/api python scripts/prepare_release_evidence.py \
+            --output artifacts/release-evidence.json \
+            --sbom-path artifacts/api.sbom.cdx.json \
+            --image-sbom "api=artifacts/api.sbom.cdx.json" \
+            --image-sbom "web=artifacts/web.sbom.cdx.json" \
+            --required-image api --required-image web \
+            --image-signature "api=${{ steps.sign-images.outputs.api }}" \
+            --image-signature "web=${{ steps.sign-images.outputs.web }}" \
+            --trivy-report artifacts/api.trivy.json \
+            --trivy-report artifacts/web.trivy.json \
+            --check "tenant_isolation=${{ steps.application-security.outcome == 'success' }}" \
+            --check "pii_leakage=${{ steps.application-security.outcome == 'success' }}" \
+            --check "prompt_injection=${{ steps.application-security.outcome == 'success' }}" \
+            --check "tool_policy=${{ steps.application-security.outcome == 'success' }}" \
+            --check "memory_poisoning=${{ steps.application-security.outcome == 'success' }}" \
+            --check "redteam=${{ steps.application-security.outcome == 'success' }}" \
+            --check "dependency_scan=${{ steps.dependency-scan.outcome == 'success' }}" \
+            --check "container_scan=${{ steps.api-trivy.outcome == 'success' && steps.web-trivy.outcome == 'success' }}"
+          uv run --project apps/api python scripts/generate_security_report.py \
+            --evidence artifacts/release-evidence.json \
+            --output-dir artifacts/security-report
+      - name: Upload release security evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-security-${{ github.ref_name }}
+          path: artifacts/
+          if-no-files-found: error

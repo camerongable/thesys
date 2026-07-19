@@ -47,3 +47,24 @@ def test_promptfoo_fast_command_uses_an_exact_cli_version() -> None:
     package_json = (REPO_ROOT / "package.json").read_text()
 
     assert "pnpm dlx promptfoo@0.121.15 eval" in package_json
+
+
+def test_release_workflow_requires_signed_scanned_provenance_backed_images() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release-security.yml").read_text()
+
+    for contract in (
+        'tags:\n      - "v*"',
+        "docker/build-push-action@v6",
+        "provenance: mode=max",
+        "sbom: true",
+        "sigstore/cosign-installer@v3",
+        "cosign sign --yes",
+        "cosign verify",
+        "aquasecurity/trivy-action@0.31.0",
+        "format: json",
+        "scripts/prepare_release_evidence.py",
+        "scripts/generate_security_report.py",
+        "if: always()",
+        "actions/upload-artifact@v4",
+    ):
+        assert contract in workflow

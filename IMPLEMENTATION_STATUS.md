@@ -1327,6 +1327,11 @@ deployment-hardening requirements.
   production environment and both default runtime images run as UID/GID 10001. Compose
   explicitly selects separate development stages so host-source mounts do not shadow the
   production virtual environment or runtime image.
+- [x] Add the fail-closed signed release-artifact gate. Version tags build and publish
+  API and web images with provenance/SBOM attestations, generate per-image CycloneDX
+  SBOMs, sign and keylessly verify immutable digests, run Trivy high/critical scans, and
+  upload normalized evidence plus the human-readable security report. Missing named
+  SBOMs, signatures, scan success, or upstream security gates block the release report.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -66,15 +67,17 @@ def _load_evidence(path: Path) -> dict[str, Any]:
 def _build_report(evidence: dict[str, Any]) -> dict[str, Any]:
     checks = _check_results(evidence)
     registry = _registry_inventory()
-    sbom_path = _optional_path(evidence.get("sbom_path"))
-    signature = _optional_text(evidence.get("image_signature"))
+    sbom_paths, missing_sboms = _sbom_inventory(evidence)
+    signatures, unsigned_images = _signature_inventory(evidence)
     dependency_vulnerabilities = _list_value(evidence.get("dependency_vulnerabilities"))
     container_vulnerabilities = _list_value(evidence.get("container_vulnerabilities"))
     blockers = _blockers(
         checks=checks,
         registry=registry,
-        sbom_path=sbom_path,
-        image_signature=signature,
+        sbom_paths=sbom_paths,
+        missing_sboms=missing_sboms,
+        signatures=signatures,
+        unsigned_images=unsigned_images,
         dependency_vulnerabilities=dependency_vulnerabilities,
         container_vulnerabilities=container_vulnerabilities,
     )
@@ -101,8 +104,8 @@ def _build_report(evidence: dict[str, Any]) -> dict[str, Any]:
         "memory_poisoning_result": _result(checks["memory_poisoning"]),
         "model_versions": registry["models"],
         "prompt_versions": registry["prompts"],
-        "sbom_digest": _file_digest(sbom_path),
-        "image_signature": signature,
+        "sbom_digests": {name: _file_digest(path) for name, path in sbom_paths.items()},
+        "image_signatures": signatures,
         "release_gates": checks,
         "release_decision": "release" if not blockers else "blocked",
         "blockers": blockers,
@@ -167,8 +170,10 @@ def _blockers(
     *,
     checks: dict[str, bool],
     registry: dict[str, Any],
-    sbom_path: Path | None,
-    image_signature: str | None,
+    sbom_paths: dict[str, Path],
+    missing_sboms: list[str],
+    signatures: dict[str, str],
+    unsigned_images: list[str],
     dependency_vulnerabilities: list[dict[str, Any]],
     container_vulnerabilities: list[dict[str, Any]],
 ) -> list[str]:
@@ -177,9 +182,9 @@ def _blockers(
         blockers.append("model_registry")
     if not registry["prompts_valid"]:
         blockers.append("prompt_registry")
-    if sbom_path is None:
+    if not sbom_paths or missing_sboms:
         blockers.append("sbom_missing")
-    if image_signature is None:
+    if not signatures or unsigned_images:
         blockers.append("image_unsigned")
     if _high_critical_findings(dependency_vulnerabilities + container_vulnerabilities):
         blockers.append("high_or_critical_vulnerability")
@@ -203,6 +208,54 @@ def _optional_path(value: Any) -> Path | None:
 
 def _optional_text(value: Any) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _sbom_inventory(evidence: dict[str, Any]) -> tuple[dict[str, Path], list[str]]:
+    raw_paths = evidence.get("sbom_paths")
+    paths = (
+        {name: path for name, value in raw_paths.items() if isinstance(name, str) and (path := _optional_path(value))}
+        if isinstance(raw_paths, dict)
+        else {}
+    )
+    legacy_path = _optional_path(evidence.get("sbom_path"))
+    if not paths and legacy_path:
+        paths = {"release": legacy_path}
+    required_images = _required_images(evidence, paths)
+    return paths, sorted(image for image in required_images if image not in paths)
+
+
+def _signature_inventory(evidence: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
+    raw_signatures = evidence.get("image_signatures")
+    signatures = (
+        {
+            name: normalized_signature
+            for name, raw_signature in raw_signatures.items()
+            if isinstance(name, str)
+            and name.strip()
+            and (normalized_signature := _optional_text(raw_signature))
+            and _is_image_digest(normalized_signature)
+        }
+        if isinstance(raw_signatures, dict)
+        else {}
+    )
+    legacy_signature = _optional_text(evidence.get("image_signature"))
+    if not signatures and legacy_signature and _is_image_digest(legacy_signature):
+        signatures = {"release": legacy_signature}
+    required_images = _required_images(evidence, signatures)
+    return signatures, sorted(image for image in required_images if image not in signatures)
+
+
+def _required_images(evidence: dict[str, Any], fallback: dict[str, Any]) -> list[str]:
+    raw_required = evidence.get("required_images")
+    return (
+        [image for image in raw_required if isinstance(image, str) and image.strip()]
+        if isinstance(raw_required, list)
+        else list(fallback)
+    )
+
+
+def _is_image_digest(value: str) -> bool:
+    return bool(re.search(r"@sha256:[a-f0-9]{64}$", value))
 
 
 def _list_value(value: Any) -> list[dict[str, Any]]:
@@ -241,8 +294,8 @@ def _render_markdown(report: dict[str, Any]) -> str:
         f"- Generated: `{report['generated_at']}`",
         f"- Commit: `{report['git_commit']}`",
         f"- Release decision: `{report['release_decision']}`",
-        f"- SBOM digest: `{report['sbom_digest'] or 'missing'}`",
-        f"- Image signature: `{report['image_signature'] or 'missing'}`",
+        f"- SBOM digests: `{len(report['sbom_digests'])}`",
+        f"- Image signatures: `{len(report['image_signatures'])}`",
         "",
         "## Release Gates",
         "",
@@ -250,6 +303,11 @@ def _render_markdown(report: dict[str, Any]) -> str:
     lines.extend(
         f"- `{name}`: `{'pass' if passed else 'fail'}`"
         for name, passed in report["release_gates"].items()
+    )
+    lines.extend(["", "## SBOM Digests", ""])
+    lines.extend(
+        f"- `{image}`: `{digest}`"
+        for image, digest in sorted(report["sbom_digests"].items())
     )
     lines.extend(
         [
@@ -267,6 +325,11 @@ def _render_markdown(report: dict[str, Any]) -> str:
         ]
     )
     lines.extend(f"- `{blocker}`" for blocker in report["blockers"] or ["none"])
+    lines.extend(["", "## Image Signatures", ""])
+    lines.extend(
+        f"- `{image}`: `{signature}`"
+        for image, signature in sorted(report["image_signatures"].items())
+    )
     return "\n".join(lines) + "\n"
 
 
