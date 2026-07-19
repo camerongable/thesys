@@ -20,8 +20,9 @@ Browser
   -> Audit, metrics, alerts, incident response
 ```
 
-Sprints 61-68 progressively replace distributed best-effort controls with the
-central gates in this target flow.
+Sprints 61-68 establish the central gates in this target flow; new execution
+paths must join those gates rather than reintroduce distributed best-effort
+controls.
 
 ## Trust boundaries
 
@@ -126,7 +127,7 @@ inherit the wrong contract.
 
 ## Security telemetry
 
-Every governed action should carry actor, workspace, project, workflow/run,
-control decision, risk level, and outcome. Sprint 67 centralizes security event
-types, budgets, anomaly rules, alerting, and incident runbooks. Sprint 68 makes
-the critical controls release gates.
+Every governed action carries actor, workspace, project, workflow/run, control
+decision, risk level, and outcome. Sprint 67 centralizes security event types,
+budgets, anomaly rules, alerting, and incident runbooks. Sprint 68 makes the
+critical controls release gates.

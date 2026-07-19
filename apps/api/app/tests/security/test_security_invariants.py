@@ -90,6 +90,29 @@ def test_security_contract_documents_cover_required_boundaries_and_pr_questions(
     assert all(question in pull_request_template for question in required_questions)
 
 
+def test_security_control_documents_reflect_completed_sprint_controls() -> None:
+    matrix = (REPO_ROOT / "docs" / "security" / "CONTROL_MATRIX.md").read_text()
+    threat_model = (REPO_ROOT / "docs" / "security" / "THREAT_MODEL.md").read_text()
+    completed_controls = {
+        "Direct prompt injection and jailbreak",
+        "Indirect prompt injection",
+        "RAG corpus poisoning",
+        "Durable memory poisoning",
+        "Tool misuse or excessive agency",
+        "MCP confused deputy or server compromise",
+        "Restricted-data provider exfiltration",
+        "Secrets in logs, traces, prompts, or memory",
+        "SSRF, unsafe redirect, or parser exploit",
+        "Resource and cost exhaustion",
+        "Compromised dependency or container",
+    }
+
+    for threat in completed_controls:
+        assert f"| {threat} " in matrix
+    assert "| Planned |" not in matrix
+    assert "| Planned |" not in threat_model
+
+
 def test_incident_runbooks_and_tabletop_cover_the_sprint_67_response_contract() -> None:
     security_dir = REPO_ROOT / "docs" / "security"
     runbooks = {

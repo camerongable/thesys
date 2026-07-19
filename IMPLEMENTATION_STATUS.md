@@ -65,6 +65,10 @@ current verdict, next action, evidence health, validation, and decision state.
   security architecture, and abuse-case documents under `docs/security/`.
 - [x] Add automated checks for the security registry, required documents and
   trust boundaries, tenant paths, governed tools, memory writes, and audit paths.
+- [x] Reconcile the threat model, control matrix, and security architecture with
+  completed Sprints 62-68. Implemented controls are no longer described as
+  planned; only deployment-owned prerequisites and explicit residual risks remain
+  partial.
 - [x] Promote production-auth, ingestion-classification, centralized-guardrail,
   and complete durable-workflow-budget invariants from their initial expected
   gaps into enforced checks as their owning Sprints 62, 63, 64, and 67 land.
