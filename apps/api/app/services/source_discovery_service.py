@@ -288,6 +288,17 @@ def ingest_source_candidate(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only candidate, approved, or failed sources can be ingested.",
         )
+    with workflow_budget_service.workflow_budget_scope(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=sprint_id,
+    ):
+        workflow_budget_service.enforce_repeated_source_fetch_failure_limit(
+            source_id=source.id,
+            observed_failed_fetches=_failed_fetch_attempt_count(source),
+        )
     source.status = "approved"
     source.ingestion_error = None
     db.commit()
@@ -306,6 +317,9 @@ def ingest_source_candidate(
         source = _get_source(db, auth, project_id, sprint_id, source_id)
         source.status = "failed"
         source.ingestion_error = str(exc)[:2000]
+        metadata = dict(source.provenance_metadata or {})
+        metadata["failed_fetch_attempt_count"] = _failed_fetch_attempt_count(source) + 1
+        source.provenance_metadata = metadata
         db.commit()
         db.refresh(source)
         return source
@@ -318,6 +332,13 @@ def ingest_source_candidate(
     db.commit()
     db.refresh(source)
     return source
+
+
+def _failed_fetch_attempt_count(source: DiscoveredSource) -> int:
+    value = (source.provenance_metadata or {}).get("failed_fetch_attempt_count", 0)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
 
 
 def reject_source_candidate(

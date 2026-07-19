@@ -206,6 +206,41 @@ def reserve_critique_loop() -> None:
     context.db.commit()
 
 
+def enforce_repeated_source_fetch_failure_limit(
+    *,
+    source_id: uuid.UUID,
+    observed_failed_fetches: int,
+) -> None:
+    context = _workflow_budget_context.get()
+    if context is None:
+        return
+    observed_failed_fetches = _nonnegative_usage_count(observed_failed_fetches)
+    sprint, budget = _locked_sprint_and_budget(context)
+    if observed_failed_fetches < budget.max_failed_source_fetches:
+        return
+    governance_service.record_audit_event(
+        context.db,
+        context.auth,
+        event_type="workflow_repeated_source_fetch_failure_detected",
+        actor_type="agent",
+        project_id=context.project_id,
+        entity_type="discovered_source",
+        entity_id=source_id,
+        risk_level="high",
+        summary="Workflow stopped before retrying a repeatedly failed source fetch.",
+        metadata={
+            "max_failed_source_fetches": budget.max_failed_source_fetches,
+            "observed_failed_fetches": observed_failed_fetches,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    context.db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
+
+
 def _locked_sprint_and_budget(
     context: WorkflowBudgetContext,
 ) -> tuple[ResearchSprint, WorkflowSecurityBudget]:

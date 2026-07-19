@@ -1057,8 +1057,8 @@ current verdict, next action, evidence health, validation, and decision state.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,
   critique-loop, repeated-identical-tool, alternating-tool-cycle,
-  repeated-retrieval-query, and no-progress-retrieval limits before durable
-  execution.
+  repeated-retrieval-query, no-progress-retrieval, and failed-source-fetch
+  limits before durable execution.
   The snapshot is visible through the sprint API, persists across
   retries/configuration changes, travels with the Temporal payload, and
   constrains its execution timeout by the configured workflow duration limit.
@@ -1139,6 +1139,12 @@ current verdict, next action, evidence health, validation, and decision state.
   sequence. Once the immutable ceiling is reached, a distinct query is safely
   stopped before invocation persistence and emits a high-risk audit, normalized
   workflow security event, and alert with configured/observed counts.
+- [x] Detect repeated failed discovered-source fetches before another ingestion
+  attempt. Each source candidate records only its durable failed-attempt count;
+  the source-ingestion boundary locks the sprint budget and stops the next
+  retry at the immutable ceiling before network fetch, then emits a high-risk
+  audit, normalized workflow security event, and alert with configured/observed
+  counts.
 
 ## Next Sprint
 

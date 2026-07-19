@@ -28,6 +28,7 @@ class WorkflowSecurityBudget:
     max_alternating_tool_cycles: int
     max_repeated_retrieval_queries: int
     max_consecutive_empty_retrievals: int
+    max_failed_source_fetches: int
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "WorkflowSecurityBudget":
@@ -52,6 +53,7 @@ class WorkflowSecurityBudget:
             max_consecutive_empty_retrievals=(
                 settings.security_workflow_max_consecutive_empty_retrievals
             ),
+            max_failed_source_fetches=settings.security_workflow_max_failed_source_fetches,
         )
 
     @classmethod
@@ -87,6 +89,7 @@ class WorkflowSecurityBudget:
                     payload,
                     "max_consecutive_empty_retrievals",
                 ),
+                max_failed_source_fetches=_positive_int(payload, "max_failed_source_fetches"),
             )
         except (TypeError, ValueError, KeyError) as exc:
             raise ValueError("Workflow security budget is invalid.") from exc
@@ -107,6 +110,7 @@ class WorkflowSecurityBudget:
             "max_alternating_tool_cycles": self.max_alternating_tool_cycles,
             "max_repeated_retrieval_queries": self.max_repeated_retrieval_queries,
             "max_consecutive_empty_retrievals": self.max_consecutive_empty_retrievals,
+            "max_failed_source_fetches": self.max_failed_source_fetches,
         }
 
 

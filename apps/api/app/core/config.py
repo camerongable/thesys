@@ -253,6 +253,12 @@ class Settings(BaseSettings):
         le=100,
         validation_alias="SECURITY_WORKFLOW_MAX_CONSECUTIVE_EMPTY_RETRIEVALS",
     )
+    security_workflow_max_failed_source_fetches: int = Field(
+        default=3,
+        ge=1,
+        le=100,
+        validation_alias="SECURITY_WORKFLOW_MAX_FAILED_SOURCE_FETCHES",
+    )
     ai_workflow_max_tokens: int = Field(
         default=100_000,
         ge=1_000,

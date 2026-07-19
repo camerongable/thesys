@@ -30,7 +30,7 @@ from app.schemas.research import (
     SourceDiscoveryCandidateDraft,
     SourceDiscoveryDraft,
 )
-from app.services import external_search_service
+from app.services import external_search_service, source_discovery_service
 from app.services.evidence_service import EvidenceIngestionError, ParsedSource
 from app.services.identity_service import ensure_dev_identity
 
@@ -987,6 +987,67 @@ def test_blocked_source_fetch_ingests_discovery_snapshot(
     )
     assert retry_response.status_code == 200
     assert retry_response.json()["source"]["status"] == "ingested"
+
+
+def test_repeated_failed_source_fetch_stops_before_another_ingestion_attempt(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint(client)
+    discover_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+    )
+    assert discover_response.status_code == 200
+    source_id = uuid.UUID(discover_response.json()["sources"][0]["id"])
+    sprint = db_session.get(ResearchSprint, uuid.UUID(sprint_id))
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_failed_source_fetches": 1,
+    }
+    db_session.commit()
+
+    fetch_attempts: list[uuid.UUID] = []
+
+    def _failed_ingestion(*args, **kwargs):
+        fetch_attempts.append(source_id)
+        raise EvidenceIngestionError("source fetch failed")
+
+    monkeypatch.setattr(
+        source_discovery_service.evidence_service,
+        "add_discovered_url_source",
+        _failed_ingestion,
+    )
+    first_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/{source_id}/approve"
+    )
+
+    assert first_response.status_code == 200
+    assert first_response.json()["source"]["status"] == "failed"
+    stored_source = db_session.get(DiscoveredSource, source_id)
+    assert stored_source is not None
+    assert stored_source.provenance_metadata["failed_fetch_attempt_count"] == 1
+    second_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/{source_id}/approve"
+    )
+
+    assert second_response.status_code == 429
+    assert fetch_attempts == [source_id]
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_repeated_source_fetch_failure_detected")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.risk_level == "high"
+    assert audit.event_metadata["max_failed_source_fetches"] == 1
+    assert audit.event_metadata["observed_failed_fetches"] == 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
 
 
 def test_competitor_discovery_uses_structured_output_in_live_mode(
