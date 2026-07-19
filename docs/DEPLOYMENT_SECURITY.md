@@ -174,6 +174,8 @@ Security boundaries:
 - Evidence transfers apply separate per-user upload and signed-download limits,
   plus a per-workspace byte quota before malware scanning, storage, or object
   presigning. Their fixed-window buckets use the same hosted Redis backend.
+- Research-sprint planning has an independent per-workspace quota before it can
+  create an AI run or durable workflow, separate from model-call budgets.
 
 ## Dependency And Security Audit Commands
 

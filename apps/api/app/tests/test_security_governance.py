@@ -570,6 +570,39 @@ def test_signed_url_rate_limit_denies_before_object_authorization(
     get_settings.cache_clear()
 
 
+def test_research_sprint_rate_limit_denies_before_planning_run(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = _create_project(client)
+    monkeypatch.setenv("SECURITY_RESEARCH_SPRINT_RATE_LIMIT_WORKSPACE_MAX_REQUESTS", "1")
+    get_settings.cache_clear()
+    security_policy_service.reset_policy_state()
+
+    first = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Plan the first research sprint."},
+    )
+    denied = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Plan a second research sprint."},
+    )
+
+    assert first.status_code == 200
+    assert denied.status_code == 429
+    assert db_session.scalar(select(AIRun).where(AIRun.workflow_type == "research_sprint_planning"))
+    assert (
+        db_session.scalar(
+            select(AuditEvent)
+            .where(AuditEvent.event_type == "security_policy_denied")
+            .order_by(AuditEvent.created_at.desc())
+        )
+        is not None
+    )
+    get_settings.cache_clear()
+
+
 def test_expensive_workflow_rate_limit_uses_hashed_redis_buckets(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

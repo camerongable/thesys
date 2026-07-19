@@ -1301,6 +1301,8 @@ current verdict, next action, evidence health, validation, and decision state.
   attempts without trusting a claimed identity. Evidence upload requests,
   uploaded bytes per workspace, and signed-download authorizations per user are
   independently limited before scanning, storage, or object presigning.
+  Research-sprint planning is independently limited per workspace before it
+  creates an AI run or durable workflow.
 
 ## Next Sprint
 

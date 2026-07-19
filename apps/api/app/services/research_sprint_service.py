@@ -50,6 +50,7 @@ from app.services import (
     governance_service,
     langsmith_observability_service,
     project_service,
+    security_policy_service,
     temporal_research_service,
     tool_service,
 )
@@ -114,6 +115,12 @@ def start_research_sprint_plan(
 
     require_permission(auth, "run_research")
     project = project_service.get_project(db, auth, project_id)
+    security_policy_service.enforce_research_sprint_rate_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+    )
     input_summary = payload.objective or _default_objective(project)
     run = ai_run_service.start_run(
         db,
