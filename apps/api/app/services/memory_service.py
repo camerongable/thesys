@@ -375,6 +375,16 @@ def upsert_memory_item(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Semantic memory requires source provenance and confidence from zero to one.",
         )
+    if memory_type == "preference" and not memory_security_policy.preference_memory_write_allowed(
+        safe_provenance,
+        source_entity_type=source_entity_type,
+        source_entity_id=source_entity_id,
+        confirmed_user_id=str(auth.user_id),
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Preference memory requires explicit confirmation from the authenticated user.",
+        )
     if memory_type == "procedural" and not memory_security_policy.procedural_memory_write_allowed(
         safe_provenance,
         source_entity_type=source_entity_type,
@@ -477,11 +487,16 @@ def propose_preference_memory(
         title=title,
         summary=summary,
         content=content or {"preference": summary},
-        source_entity_type=source,
+        source_entity_type="user_preference",
+        source_entity_id=auth.user_id,
         provenance_metadata={
             "source": source,
+            "origin": "user",
             "proposal_kind": "preference_capture",
             "requires_human_approval": True,
+            "explicit_user_confirmation": True,
+            "confirmed_by_user_id": str(auth.user_id),
+            "confirmed_at": datetime.now(UTC).isoformat(),
         },
         status_value="proposed",
     )

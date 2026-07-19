@@ -148,6 +148,25 @@ def semantic_memory_write_allowed(
     )
 
 
+def preference_memory_write_allowed(
+    metadata: dict[str, Any],
+    *,
+    source_entity_type: str | None,
+    source_entity_id: object | None,
+    confirmed_user_id: str,
+) -> bool:
+    """Require a durable preference to record its explicit confirming user."""
+    return bool(
+        metadata.get("origin") == "user"
+        and source_entity_type == "user_preference"
+        and source_entity_id is not None
+        and metadata.get("explicit_user_confirmation") is True
+        and metadata.get("confirmed_by_user_id") == confirmed_user_id
+        and isinstance(metadata.get("confirmed_at"), str)
+        and metadata["confirmed_at"].strip()
+    )
+
+
 def working_memory_session_scope(session_identifier: str | None) -> str | None:
     """Return a non-reversible session scope suitable for memory provenance."""
     if not isinstance(session_identifier, str) or not session_identifier.strip():

@@ -1218,6 +1218,23 @@ def test_memory_security_policy_normalizes_secure_recall_metadata() -> None:
         source_entity_id="artifact-1",
         confidence_score=1.1,
     )
+    assert memory_security_policy.preference_memory_write_allowed(
+        {
+            "origin": "user",
+            "explicit_user_confirmation": True,
+            "confirmed_by_user_id": "user-1",
+            "confirmed_at": "2026-07-18T12:00:00+00:00",
+        },
+        source_entity_type="user_preference",
+        source_entity_id="user-1",
+        confirmed_user_id="user-1",
+    )
+    assert not memory_security_policy.preference_memory_write_allowed(
+        {"origin": "agent"},
+        source_entity_type="guide_chat",
+        source_entity_id="chat-1",
+        confirmed_user_id="user-1",
+    )
     assert memory_security_policy.secure_memory_metadata(
         {},
         content={},

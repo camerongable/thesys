@@ -598,6 +598,10 @@ current verdict, next action, evidence health, validation, and decision state.
   workflow selection, Inspect, direct lookup, compaction, conflicts, and
   updates reuse role clearances from `RetrievalSecurityPolicy`, with denied
   records non-enumerating and redacted in Inspect exclusions.
+- [x] Enforce explicit preference confirmation. Durable preference memory now
+  requires the authenticated user's confirmation, identity, and timestamp;
+  the preference endpoint records attributable confirmation provenance and unconfirmed
+  agent-inferred preferences are rejected instead of becoming proposals.
 - [x] Detect anomalous embedding clusters before evidence chunks are persisted.
   A distinct source whose candidate vectors nearly match two approved,
   different-content project sources receives an inspectable source-trust signal
@@ -751,6 +755,10 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Memory-classification checkpoint passed (`82 passed, 1 warning`) across
   memory-service, context-compiler, feature-boundary, and retrieval-policy
   coverage; changed-file compile checks and repository application lint passed.
+- [x] Preference-confirmation checkpoint passed (`89 passed, 1 warning`) across
+  memory-service, context-compiler, feature-boundary, route-contract, and
+  cache coverage; changed-file compile checks and repository application lint
+  passed.
 
 ## Next Sprint
 

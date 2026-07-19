@@ -329,6 +329,47 @@ def test_memory_recall_respects_principal_data_classification(
     assert exc_info.value.status_code == 404
 
 
+def test_preference_memory_requires_explicit_user_confirmation(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+
+    with pytest.raises(HTTPException) as exc_info:
+        memory_service.upsert_memory_item(
+            db_session,
+            auth,
+            project_id,
+            memory_type="preference",
+            write_policy="approval_required",
+            title="Inferred preference",
+            summary="This preference was only inferred from one interaction.",
+            content={"preference": "inferred"},
+            source_entity_type="guide_chat",
+            source_entity_id=uuid.uuid4(),
+            provenance_metadata={"origin": "agent"},
+            status_value="proposed",
+        )
+    assert exc_info.value.status_code == 422
+
+    preference = memory_service.propose_preference_memory(
+        db_session,
+        auth,
+        project_id,
+        title="Research style",
+        summary="Prefer paid-pilot evidence when assessing demand.",
+        content={"preference": "paid-pilot evidence"},
+    )
+
+    assert preference.status == "proposed"
+    assert preference.source_entity_type == "user_preference"
+    assert preference.source_entity_id == auth.user_id
+    assert preference.provenance_metadata["explicit_user_confirmation"] is True
+    assert preference.provenance_metadata["confirmed_by_user_id"] == str(auth.user_id)
+    assert preference.provenance_metadata["confirmed_at"]
+
+
 def test_procedural_memory_requires_versioned_code_or_config_source(
     client: TestClient,
     db_session: Session,
@@ -751,6 +792,14 @@ def test_project_memory_tool_uses_governed_read_boundary(
         title="Validation preference",
         summary="Prefer lightweight concierge tests before surveys.",
         content={"preference": "concierge tests"},
+        source_entity_type="user_preference",
+        source_entity_id=owner_auth.user_id,
+        provenance_metadata={
+            "origin": "user",
+            "explicit_user_confirmation": True,
+            "confirmed_by_user_id": str(owner_auth.user_id),
+            "confirmed_at": datetime.now(UTC).isoformat(),
+        },
     )
     db_session.commit()
 
@@ -832,6 +881,14 @@ def test_memory_context_selection_explains_exclusions_and_conflicts(
         title="Validation preference",
         summary="Prefer concierge tests.",
         content={"preference": "concierge"},
+        source_entity_type="user_preference",
+        source_entity_id=auth.user_id,
+        provenance_metadata={
+            "origin": "user",
+            "explicit_user_confirmation": True,
+            "confirmed_by_user_id": str(auth.user_id),
+            "confirmed_at": datetime.now(UTC).isoformat(),
+        },
         status_value="proposed",
     )
     first_conflict = memory_service.upsert_memory_item(
