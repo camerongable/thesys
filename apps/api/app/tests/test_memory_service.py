@@ -1661,6 +1661,8 @@ def test_memory_proposals_and_inspect_endpoint(
     )
     assert review_event is not None
     assert review_event.risk_level == "medium"
+    request_id = review_event.event_metadata["request_id"]
+    assert str(uuid.UUID(request_id)) == request_id
     assert review_event.event_metadata == {
         "memory_item_id": str(rejected.id),
         "memory_type": "semantic",
@@ -1668,6 +1670,7 @@ def test_memory_proposals_and_inspect_endpoint(
         "proposal_kind": "memory_compaction",
         "source_entity_type": "project_memory_item",
         "source_entity_id": str(source.id),
+        "request_id": request_id,
     }
 
     inspect_after_reject_response = client.get(

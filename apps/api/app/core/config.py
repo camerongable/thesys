@@ -22,6 +22,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("APP_ENV", "ENVIRONMENT"),
     )
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+    otel_service_name: str = Field(
+        default="thesys-api",
+        validation_alias="OTEL_SERVICE_NAME",
+    )
+    otel_exporter_otlp_endpoint: str | None = Field(
+        default=None,
+        validation_alias="OTEL_EXPORTER_OTLP_ENDPOINT",
+    )
     secret_provider: Literal["environment", "vault", "cloud"] = Field(
         default="environment",
         validation_alias="SECRET_PROVIDER",

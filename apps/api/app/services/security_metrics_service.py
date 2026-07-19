@@ -11,6 +11,8 @@ from prometheus_client import (
     generate_latest,
 )
 
+from app.core import telemetry
+
 _REGISTRY = CollectorRegistry(auto_describe=True)
 
 PROMPT_INJECTION_TOTAL = Counter(
@@ -110,6 +112,7 @@ _LOOP_EVENTS = {
 
 def record_security_event(event_type: str, source: str) -> None:
     """Increment non-sensitive counters from one normalized security event."""
+    telemetry.record_security_event(event_type, source)
     if event_type in _PROMPT_INJECTION_EVENTS:
         PROMPT_INJECTION_TOTAL.inc()
     if event_type in _JAILBREAK_EVENTS:

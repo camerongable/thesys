@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.errors import public_error_detail
 from app.core.logging import configure_logging
 from app.core.request_correlation import RequestCorrelationMiddleware
+from app.core.telemetry import configure_telemetry
 from app.routers.ai import router as ai_router
 from app.routers.artifacts import router as artifacts_router
 from app.routers.assumptions import router as assumptions_router
@@ -50,6 +51,7 @@ async def _structured_output_error_handler(_: Request, exc: Exception) -> JSONRe
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
+    configure_telemetry(settings)
 
     app = FastAPI(
         title=settings.app_name,

@@ -1270,6 +1270,13 @@ current verdict, next action, evidence health, validation, and decision state.
   tenant identifiers or content. Normalized security events drive prompt,
   jailbreak, guardrail, tool, scope-denial, budget, and loop signals; the shared
   LiteLLM boundary adds provider-error, token, and reported-cost telemetry.
+- [x] Add application-level OpenTelemetry tracing without creating a second
+  metrics surface. The shared request-correlation middleware now continues or
+  creates a W3C `traceparent`, emits only method, route template, status, and
+  request-ID span attributes, and returns the trace context for client
+  correlation. OTLP export is enabled only by the trusted deployment endpoint;
+  normalized security events contribute bounded type/source span events, never
+  tenant identifiers, raw URLs, prompts, or event content.
 - [x] Observe workflow duration and retrieval breadth without sensitive labels.
   Terminal AI-run transitions emit one `ai_workflow_duration_seconds`
   observation, and the shared retrieval pipeline emits
@@ -1407,8 +1414,10 @@ deployment-hardening requirements.
 
 ## Sprint 61-68 Terminal Verification
 
-- [x] Backend terminal verification passed: full `apps/api/app/tests` coverage,
-  application Ruff, and the focused Sprint 68 workflow, release-report,
+- [x] Backend terminal verification passed: application Ruff and full
+  `apps/api/app/tests` coverage (`649 passed, 1 skipped`), including W3C
+  OpenTelemetry propagation and request-correlation audit contracts, plus the
+  focused Sprint 68 workflow, release-report,
   Kubernetes, container, red-team, Promptfoo, Garak, and registry contracts are
   green locally.
 - [ ] Live Postgres verification remains required. Run the forced-RLS migration
