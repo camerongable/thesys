@@ -1052,6 +1052,86 @@ def test_research_sprint_retrieved_chunk_budget_caps_and_stops_retrieval(
     assert security_event.source == "workflow"
 
 
+def test_repeated_retrieval_query_stops_before_retrieval_execution(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id = _create_project(client)
+    plan_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Detect repeated sprint retrieval queries."},
+    )
+    assert plan_response.status_code == 200
+    sprint_id = uuid.UUID(plan_response.json()["sprint"]["id"])
+    sprint = db_session.get(ResearchSprint, sprint_id)
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_repeated_retrieval_queries": 1,
+    }
+    db_session.commit()
+
+    executed_queries: list[str] = []
+
+    def _retrieval_stub(*args, **kwargs) -> dict[str, object]:
+        executed_queries.append(args[5]["query"])
+        return {"results": [{"chunk": "pricing evidence"}]}
+
+    monkeypatch.setattr(tool_service, "_run_tool", _retrieval_stub)
+    auth = _dev_auth(db_session)
+    tool_service.execute_tool(
+        db_session,
+        auth,
+        get_settings(),
+        uuid.UUID(project_id),
+        "search_project_evidence",
+        {"query": "Pricing   trends", "top_k": 1},
+        research_sprint_id=sprint_id,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            auth,
+            get_settings(),
+            uuid.UUID(project_id),
+            "search_project_evidence",
+            {"query": " pricing trends ", "top_k": 2},
+            research_sprint_id=sprint_id,
+        )
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == tool_service.WORKFLOW_BUDGET_EXHAUSTED_DETAIL
+    assert executed_queries == ["Pricing   trends"]
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(ToolInvocation)
+            .where(
+                ToolInvocation.research_sprint_id == sprint_id,
+                ToolInvocation.tool_name == "search_project_evidence",
+            )
+        )
+        == 1
+    )
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_repeated_retrieval_query_detected")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.risk_level == "high"
+    assert audit.event_metadata["max_repeated_retrieval_queries"] == 1
+    assert audit.event_metadata["observed_repeated_queries"] == 1
+    assert len(audit.event_metadata["query_sha256"]) == 64
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
+
+
 def test_research_sprint_memory_proposal_budget_stops_both_proposal_paths(
     client: TestClient,
     db_session: Session,

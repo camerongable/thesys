@@ -241,6 +241,12 @@ class Settings(BaseSettings):
         le=100,
         validation_alias="SECURITY_WORKFLOW_MAX_ALTERNATING_TOOL_CYCLES",
     )
+    security_workflow_max_repeated_retrieval_queries: int = Field(
+        default=3,
+        ge=1,
+        le=100,
+        validation_alias="SECURITY_WORKFLOW_MAX_REPEATED_RETRIEVAL_QUERIES",
+    )
     ai_workflow_max_tokens: int = Field(
         default=100_000,
         ge=1_000,

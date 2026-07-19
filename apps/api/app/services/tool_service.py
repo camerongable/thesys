@@ -145,6 +145,7 @@ def execute_tool(
         research_sprint_id=research_sprint_id,
         requested_by=requested_by,
     )
+    clean_input = redact_payload(guarded_input, redact_emails=True)
     _enforce_workflow_memory_proposal_budget(
         db,
         auth,
@@ -166,7 +167,16 @@ def execute_tool(
             remote_mcp_server_id is not None and definition.access_mode == "write"
         ),
     )
-    clean_input = redact_payload(guarded_input, redact_emails=True)
+    _enforce_repeated_retrieval_query_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        definition=definition,
+        input_json=clean_input,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
     _enforce_repeated_tool_invocation_limit(
         db,
         auth,
@@ -1118,6 +1128,83 @@ def _cap_workflow_retrieval_input(
     remaining_chunks = budget.max_retrieved_chunks - observed_retrieved_chunks
     requested_top_k = int(tool_input.get("top_k", 8))
     return {**tool_input, "top_k": min(requested_top_k, remaining_chunks)}, remaining_chunks
+
+
+def _enforce_repeated_retrieval_query_limit(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    input_json: dict[str, Any],
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+) -> None:
+    if definition.name != "search_project_evidence" or research_sprint_id is None:
+        return
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    assert budget_context is not None
+    sprint, budget = budget_context
+    query_digest = _retrieval_query_digest(input_json)
+    observed_repeated_queries = sum(
+        _retrieval_query_digest(stored_input) == query_digest
+        for stored_input in db.scalars(
+            select(ToolInvocation.input_json).where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.research_sprint_id == research_sprint_id,
+                ToolInvocation.tool_name == definition.name,
+            )
+        )
+    )
+    if observed_repeated_queries < budget.max_repeated_retrieval_queries:
+        return
+
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_repeated_retrieval_query_detected",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=research_sprint_id,
+        risk_level="high",
+        summary="Workflow stopped before repeating an equivalent retrieval query.",
+        metadata={
+            "query_sha256": query_digest,
+            "max_repeated_retrieval_queries": budget.max_repeated_retrieval_queries,
+            "observed_repeated_queries": observed_repeated_queries,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
+
+
+def _retrieval_query_digest(input_json: dict[str, Any]) -> str:
+    payload = EvidenceRetrieveCreate.model_validate(input_json).model_dump(mode="json")
+    payload.pop("top_k", None)
+    payload["query"] = " ".join(payload["query"].casefold().split())
+    source_types = payload.get("source_types")
+    if isinstance(source_types, list):
+        payload["source_types"] = sorted(source_types)
+    canonical_payload = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
 
 
 def _limit_retrieved_chunk_output(

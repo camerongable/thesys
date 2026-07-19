@@ -1056,8 +1056,8 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,
-  critique-loop, repeated-identical-tool, and alternating-tool-cycle limits
-  before durable execution.
+  critique-loop, repeated-identical-tool, alternating-tool-cycle, and
+  repeated-retrieval-query limits before durable execution.
   The snapshot is visible through the sprint API, persists across
   retries/configuration changes, travels with the Temporal payload, and
   constrains its execution timeout by the configured workflow duration limit.
@@ -1125,6 +1125,13 @@ current verdict, next action, evidence health, validation, and decision state.
   lock the durable cycle limit, compare only recent tool names, and stop the
   next completed cycle with a high-risk audit, normalized workflow security
   event, and alert containing the cycle names and configured/observed counts.
+- [x] Detect repeated equivalent sprint-scoped retrieval queries before the
+  retrieval service runs. Validated query semantics are normalized across case,
+  whitespace, source-type ordering, and `top_k` pagination, then compared by
+  SHA-256 fingerprint under the locked durable limit. Exhaustion safely stops
+  before another retrieval invocation or result persistence and emits a
+  high-risk audit, normalized workflow security event, and alert with only the
+  digest and configured/observed counts.
 
 ## Next Sprint
 
