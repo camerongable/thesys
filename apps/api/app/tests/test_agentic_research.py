@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai import litellm_client
 from app.core.config import get_settings
 from app.db.models import (
     AIRun,
@@ -12,6 +13,7 @@ from app.db.models import (
     ArtifactVersion,
     Assumption,
     AssumptionEvidenceLink,
+    AuditEvent,
     Claim,
     ClaimEvidenceLink,
     EvidenceChunk,
@@ -19,6 +21,7 @@ from app.db.models import (
     ProjectMemoryItem,
     ResearchSprint,
     Risk,
+    SecurityEvent,
     ToolInvocation,
 )
 from app.services.evidence_service import ParsedSource
@@ -149,16 +152,114 @@ def test_agentic_research_runs_multi_step_rag_and_writes_reviewable_memo(
     assert first_retrieval["reranker"]["provider"] == "deterministic"
     assert any(item["context"]["selected_count"] >= 1 for item in retrieval_diagnostics)
     assert any(
-        item["quality_report"]["citation_coverage_proxy"] == 1
-        for item in retrieval_diagnostics
+        item["quality_report"]["citation_coverage_proxy"] == 1 for item in retrieval_diagnostics
     )
     assert body["version"]["langsmith_trace_id"]
     assert body["version"]["langsmith_trace_url"]
-    assert body["version"]["structured_content"]["langsmith_trace_id"] == (
-        body["version"]["langsmith_trace_id"]
+    assert (
+        body["version"]["structured_content"]["langsmith_trace_id"]
+        == (body["version"]["langsmith_trace_id"])
     )
     assert body["claims"]
     assert body["citations"]
+
+
+def test_agentic_research_reserves_model_budget_before_provider_call(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint_with_evidence(client, monkeypatch)
+    sprint = db_session.get(ResearchSprint, uuid.UUID(sprint_id))
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_model_calls": 1,
+        "max_tool_calls": 1_000,
+        "max_external_queries": 1_000,
+        "max_retrieved_chunks": 1_000,
+        "max_tokens": 1_000_000,
+        "max_cost_usd": 1_000,
+        "max_duration_seconds": 10_000,
+        "max_memory_proposals": 1_000,
+        "max_structured_output_repairs": 10,
+        "max_critique_loops": 10,
+    }
+    db_session.commit()
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_API_KEY", "test-model-key")
+    monkeypatch.setenv("PROVIDER_EGRESS_POLICY_ENABLED", "false")
+    get_settings.cache_clear()
+    provider_calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "model": "test-model",
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"executive_verdict":"Continue validating the evidence.",'
+                                '"best_wedge":"A narrow coach workflow.",'
+                                '"decision_recommendation":"Run targeted interviews."}'
+                            )
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+            }
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, _url: str, **kwargs: object) -> FakeResponse:
+            provider_calls.append(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr(litellm_client.httpx, "Client", FakeClient)
+
+    first_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/agentic-rag/run"
+    )
+
+    assert first_response.status_code == 200
+    assert len(provider_calls) == 1
+    db_session.refresh(sprint)
+    assert sprint.workflow_security_usage["model_calls"] == 1
+
+    second_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/agentic-rag/run"
+    )
+
+    assert second_response.status_code == 429
+    assert len(provider_calls) == 1
+    db_session.expire_all()
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_model_call_budget_exceeded")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["max_model_calls"] == 1
+    assert audit.event_metadata["observed_model_calls"] == 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
 
 
 def test_agentic_research_quarantines_a_single_source_recommendation_reversal(
@@ -186,12 +287,9 @@ def test_agentic_research_quarantines_a_single_source_recommendation_reversal(
     assert source is not None
     assert source.ingestion_status == "quarantined"
     assert source.source_metadata["source_trust"]["recommendation_shift_count"] == 1
+    assert "recommendation_shift_single_source" in source.source_metadata["source_trust"]["signals"]
     assert (
-        "recommendation_shift_single_source" in source.source_metadata["source_trust"]["signals"]
-    )
-    assert (
-        db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == source.id))
-        is None
+        db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == source.id)) is None
     )
     decision_proposal = db_session.scalar(
         select(ToolInvocation).where(ToolInvocation.tool_name == "propose_decision")

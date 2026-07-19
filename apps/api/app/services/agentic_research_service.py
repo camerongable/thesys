@@ -69,6 +69,7 @@ from app.services import (
     retrieval_service,
     source_provenance_service,
     tool_service,
+    workflow_budget_service,
 )
 
 
@@ -327,6 +328,7 @@ def run_agentic_research(
             settings,
             run,
             project_id,
+            sprint.id,
             state["project_context"],
             state["subquestions"],
             state["selected_evidence"],
@@ -1384,6 +1386,7 @@ def _generate_memo(
     settings: Settings,
     run: AIRun,
     project_id: uuid.UUID,
+    research_sprint_id: uuid.UUID,
     project_context: dict[str, Any],
     subquestions: list[str],
     selected_evidence: list[EvidenceRetrievalResultRead],
@@ -1436,14 +1439,21 @@ def _generate_memo(
             )
         else:
             try:
-                result = generate_structured_output(
+                with workflow_budget_service.workflow_budget_scope(
+                    db,
+                    auth,
                     settings,
-                    AgenticResearchMemoDraft,
-                    messages,
-                    model=settings.litellm_model,
-                    temperature=0.0,
-                    max_tokens=MEMO_MAX_TOKENS,
-                )
+                    project_id=project_id,
+                    research_sprint_id=research_sprint_id,
+                ):
+                    result = generate_structured_output(
+                        settings,
+                        AgenticResearchMemoDraft,
+                        messages,
+                        model=settings.litellm_model,
+                        temperature=0.0,
+                        max_tokens=MEMO_MAX_TOKENS,
+                    )
                 memo = AgenticResearchMemoDraft.model_validate(result.parsed)
                 completion = result.completion
             except (StructuredOutputError, RuntimeError) as exc:
@@ -2295,9 +2305,7 @@ def _suppress_conflicting_claim(
     unsupported_claims = list(
         dict.fromkeys([*memo.unsupported_claims, claim_conflict.proposed_claim])
     )
-    return memo.model_copy(
-        update={"claims": claims, "unsupported_claims": unsupported_claims[:12]}
-    )
+    return memo.model_copy(update={"claims": claims, "unsupported_claims": unsupported_claims[:12]})
 
 
 def _replace_recommendation_shift_proposals(proposal_payloads, recommendation_shift):
