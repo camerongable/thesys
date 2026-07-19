@@ -1314,6 +1314,10 @@ deployment-hardening requirements.
   Python/JavaScript installs, API and web checks, the Promptfoo fast suite, Bandit,
   Semgrep, pip-audit, pnpm audit, Gitleaks, OSV scanning, and CycloneDX SBOM
   generation; nightly runs the deterministic red-team, budget, and PII regressions.
+- [x] Add fail-closed `security-report.json` and `security-report.md` generation.
+  Release evidence is correlated with red-team inventory, approved model/prompt
+  registries, SBOM digest, image signature, scan findings, and the tenant, PII,
+  prompt-injection, tool, and memory gates; missing or failing evidence blocks release.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
