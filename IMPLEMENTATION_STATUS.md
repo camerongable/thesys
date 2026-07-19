@@ -1052,9 +1052,10 @@ current verdict, next action, evidence health, validation, and decision state.
   type with the worker's narrowly scoped delete grant.
 - [x] Propagate a trusted API request correlation identifier. The API now emits
   an `X-Request-ID` UUID for every response, accepts only canonical UUID input,
-  and adds that ID at the shared audit boundary. Normalized security events
-  inherit the same value, linking the request, immutable audit record, event,
-  and alert without recording arbitrary client-provided metadata.
+  and adds that ID at the shared audit boundary. Both audit-projected and
+  direct runtime normalized security events inherit the same value, linking the
+  request, immutable audit record, event, and alert without recording arbitrary
+  client-provided metadata.
 - [x] Propagate session correlation without retaining bearer-linked identifiers.
   The common audit boundary derives a stable domain-separated SHA-256 value from
   the authenticated OIDC `sid` or JWT `jti`, and normalized security events

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import AuthContext, require_workspace_security_admin
 from app.core.config import Settings, get_settings
 from app.core.redaction import redact_payload, redact_text
+from app.core.request_context import current_request_id
 from app.db.models import AuditEvent, SecurityAlert, SecurityEvent
 from app.services import project_service, security_metrics_service
 
@@ -107,7 +108,7 @@ def record_security_event(
         tool_invocation_id=tool_invocation_id,
         approval_request_id=approval_request_id,
         session_id=_bounded(session_id, 255),
-        request_id=_bounded(request_id, 255),
+        request_id=_bounded(request_id or current_request_id(), 255),
         langsmith_trace_id=_bounded(langsmith_trace_id, 100),
         temporal_workflow_id=_bounded(temporal_workflow_id, 255),
         event_type=_bounded(event_type, 120) or "security_event",

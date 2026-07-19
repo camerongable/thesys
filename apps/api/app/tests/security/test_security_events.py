@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
 from app.core.config import get_settings
+from app.core.request_context import reset_request_id, set_request_id
 from app.db.models import (
     ApprovalRequest,
     AuditEvent,
@@ -186,6 +187,34 @@ def test_audit_events_use_a_hashed_authenticated_session_correlation(
     assert event.session_id == expected_session_id
     assert raw_identifier not in str(audit.__dict__)
     assert raw_identifier not in str(event.__dict__)
+
+
+def test_direct_security_events_inherit_the_current_request_correlation(
+    db_session: Session,
+) -> None:
+    auth = ensure_dev_identity(
+        db_session,
+        email="direct-security-event@thesys.local",
+        display_name="Direct Security Event",
+    )
+    request_id = str(uuid.uuid4())
+    token = set_request_id(request_id)
+    try:
+        event = security_event_service.record_security_event(
+            db_session,
+            workspace_id=auth.workspace_id,
+            project_id=None,
+            user_id=auth.user_id,
+            event_type="direct_runtime_security_event",
+            severity="medium",
+            source="api",
+            summary="Direct runtime security event retained its request correlation.",
+        )
+        db_session.commit()
+    finally:
+        reset_request_id(token)
+
+    assert event.request_id == request_id
 
 
 @pytest.mark.parametrize(
