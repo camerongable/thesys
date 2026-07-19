@@ -86,13 +86,13 @@ should not be placed on the homepage or the primary project workflow.
 Core verification:
 
 ```bash
-cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py app/tests/test_feature_package_boundaries.py -q
+uv run --project apps/api pytest apps/api/app/tests/test_context_compiler.py apps/api/app/tests/test_feature_package_boundaries.py -q
 ```
 
 Broader closeout:
 
 ```bash
-cd apps/api && .venv/bin/pytest app/tests/test_context_compiler.py app/tests/test_memory_service.py app/tests/test_contract_shapes.py app/tests/test_feature_package_boundaries.py -q
+uv run --project apps/api pytest apps/api/app/tests/test_context_compiler.py apps/api/app/tests/test_memory_service.py apps/api/app/tests/test_contract_shapes.py apps/api/app/tests/test_feature_package_boundaries.py -q
 ```
 
 Quality-gate coverage:

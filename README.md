@@ -557,25 +557,27 @@ Useful codepaths for AI reviewers:
 
 Developer docs:
 
-- [Repository navigation](docs/REPOSITORY_NAVIGATION.md)
-- [Security contract](docs/security/THREAT_MODEL.md)
-- [Data classification](docs/security/DATA_CLASSIFICATION.md)
-- [Security control matrix](docs/security/CONTROL_MATRIX.md)
-- [Security architecture](docs/security/SECURITY_ARCHITECTURE.md)
-- [Security abuse cases](docs/security/ABUSE_CASES.md)
-- [AI architecture](docs/AI_ARCHITECTURE.md)
-- [Context engineering](docs/CONTEXT_ENGINEERING.md)
-- [Memory system](docs/MEMORY_SYSTEM.md)
-- [MCP integration](docs/MCP_INTEGRATION.md)
-- [Retrieval and citations](docs/RETRIEVAL_AND_CITATIONS.md)
-- [Ask Thesys streaming](docs/ASK_THESYS_STREAMING.md)
-- [Evals and observability](docs/EVALS_AND_OBSERVABILITY.md)
-- [Source intelligence](docs/SOURCE_INTELLIGENCE.md)
-- [Deployment and security](docs/DEPLOYMENT_SECURITY.md)
-- [Retrieval pipeline](docs/RETRIEVAL_PIPELINE.md)
-- [Governance and MCP](docs/GOVERNANCE_AND_MCP.md)
-- [Memory model](docs/MEMORY_MODEL.md)
-- [Security and evals](docs/SECURITY_AND_EVALS.md)
+- **Start here:** [Portfolio owner guide](docs/PORTFOLIO_OWNER_GUIDE.md) and
+  [repository navigation](docs/REPOSITORY_NAVIGATION.md).
+- **Product and architecture:** [AI architecture](docs/AI_ARCHITECTURE.md),
+  [context engineering](docs/CONTEXT_ENGINEERING.md),
+  [retrieval and citations](docs/RETRIEVAL_AND_CITATIONS.md),
+  [memory system](docs/MEMORY_SYSTEM.md), and
+  [source intelligence](docs/SOURCE_INTELLIGENCE.md).
+- **Security and operations:** [security overview](docs/security.md),
+  [security architecture](docs/security/SECURITY_ARCHITECTURE.md),
+  [threat model](docs/security/THREAT_MODEL.md),
+  [control matrix](docs/security/CONTROL_MATRIX.md),
+  [abuse cases](docs/security/ABUSE_CASES.md),
+  [deployment and security](docs/DEPLOYMENT_SECURITY.md), and
+  [security and evals](docs/SECURITY_AND_EVALS.md).
+- **Dependencies and integrations:** [dependencies and tooling](docs/DEPENDENCIES.md),
+  [governance and MCP](docs/GOVERNANCE_AND_MCP.md),
+  [MCP integration](docs/MCP_INTEGRATION.md), and
+  [retrieval pipeline](docs/RETRIEVAL_PIPELINE.md).
+- **Verification and delivery:** [evals and observability](docs/EVALS_AND_OBSERVABILITY.md),
+  [implementation brief](IMPLEMENTATION_BRIEF.md), and
+  [implementation status](IMPLEMENTATION_STATUS.md).
 
 ---
 
@@ -958,6 +960,12 @@ production-grade work. Sprints 51-60 are the explicit gap-closure track, and the
 current branch has implemented Sprints 51-60. Sprint 60 closes the carried-gap
 ledger by documenting implemented work, exact verification blockers, future
 owners, and V1 out-of-scope decisions for every `G41-*` through `G50-*` item.
+Sprints 61-68 add the production-style security and verification foundations:
+identity/RLS, safe ingestion and PII handling, AI guardrails, retrieval/memory
+trust boundaries, governed MCP/tools, durable workflow budgets, security
+telemetry, red-team coverage, and CI/release controls. Sprint 69 keeps the
+documentation current and owner-facing; it does not change the portfolio
+project's non-hosted status.
 
 Implemented or demonstrated:
 

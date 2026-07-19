@@ -1436,6 +1436,34 @@ deployment-hardening requirements.
 - [ ] Repository administration remains required outside source control: enable
   default-branch protection and required review for the documented CI checks.
 
+## Sprint 69 Documentation, Ownership, and Dependency Literacy
+
+Status: complete for repository documentation. Sprint 69 turns the
+implementation and security material landed through Sprint 68 into a current,
+navigable owner-facing documentation set. It is explicitly separate from the
+remaining hosted release and repository-administration prerequisites.
+
+- [x] Published `docs/PORTFOLIO_OWNER_GUIDE.md` with product framing, five core
+  runtime flows, demo narrative, tradeoffs, and local/CI/hosted boundaries.
+- [x] Published `docs/DEPENDENCIES.md` covering direct application dependencies
+  and operational tools, their rationale, entry points, execution environment,
+  alternatives/limits where helpful, and verification expectations.
+- [x] Audited and corrected stale repository paths, code references, operational
+  claims, and local Markdown links across the maintained documentation set. The
+  legacy overview pages now declare their scope and point to current sources of
+  truth rather than presenting sprint-era snapshots as full specifications.
+- [x] Made the documentation map discoverable from the README and repository
+  navigation guide, including product, architecture, security, operations,
+  ownership, dependencies, and delivery evidence.
+- [x] Added `scripts/check_documentation_links.py` and the PR `Documentation
+  integrity` job. It validates 41 Markdown documents for local links and
+  documented repository code paths; its workflow contract test passed (`8
+  passed, 1 warning`) and focused Ruff passed.
+
+Residual limit: this checker validates local Markdown links and explicitly
+formatted repository paths. It does not validate external URLs, generated
+OpenAPI content, provider availability, or deployment configuration.
+
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
 `IMPLEMENTATION_BRIEF.md` under "Post-Sprint 50 Audit and Future Upgrade

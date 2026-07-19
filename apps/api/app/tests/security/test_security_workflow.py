@@ -44,6 +44,14 @@ def test_security_workflow_covers_required_pull_request_gates() -> None:
         assert command in content
 
 
+def test_security_workflow_checks_documentation_integrity() -> None:
+    workflow = yaml.safe_load(WORKFLOW_PATH.read_text())
+    job = workflow["jobs"]["documentation"]
+
+    assert job["timeout-minutes"] == 5
+    assert job["steps"][-1]["run"] == "python3 scripts/check_documentation_links.py"
+
+
 def test_model_and_prompt_changes_run_named_security_evaluations() -> None:
     workflow = yaml.safe_load(WORKFLOW_PATH.read_text())
     job = workflow["jobs"]["model-prompt-security-evals"]

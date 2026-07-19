@@ -81,7 +81,7 @@ Citation outcomes include `supported`, `weakly_supported`, `unsupported`,
 ## Verification
 
 ```bash
-cd apps/api && .venv/bin/pytest app/tests/test_evidence.py app/tests/test_citation_verifier.py app/tests/test_retrieval_quality_eval.py app/tests/test_feature_package_boundaries.py -q
+uv run --project apps/api pytest apps/api/app/tests/test_evidence.py apps/api/app/tests/test_citation_verifier.py apps/api/app/tests/test_retrieval_quality_eval.py apps/api/app/tests/test_feature_package_boundaries.py -q
 python3 scripts/eval_retrieval_quality.py
 ```
 

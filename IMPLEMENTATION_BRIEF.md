@@ -16674,3 +16674,92 @@ The desired interview explanation is:
 
 > I designed Thesys so models can reason and propose, but deterministic services own identity, tenant isolation, policies, approvals, state transitions, memory writes, tool execution, resource budgets, and auditability. I continuously test those boundaries with prompt-injection, RAG-poisoning, memory-poisoning, cross-tenant, PII-leakage, excessive-agency, and supply-chain attacks.
 ````
+
+---
+
+# V1 Sprint 69: Documentation, Ownership, and Dependency Literacy
+
+## Goal
+
+Make the implementation understandable and explainable by its owner without
+requiring a line-by-line reconstruction of the codebase. Sprint 69 is a
+documentation-maintenance and portfolio-readiness sprint; it does not add new
+product behavior or claim hosted production verification.
+
+## Scope
+
+1. Audit repository documentation for stale paths, obsolete operational claims,
+   broken internal references, and missing navigation.
+2. Create a concise owner guide that explains the product, core runtime flows,
+   local versus CI versus hosted behavior, design tradeoffs, demo path, and
+   honest limits.
+3. Create a direct-dependency and operational-tool guide. It must explain why
+   each first-party Python and web dependency category exists, what risk or
+   capability it addresses, where it is used, and whether it is runtime,
+   development, CI, or deployment-only. Do not duplicate lockfile-level
+   transitive dependency inventories.
+4. Refresh the README and repository-navigation documentation so the owner can
+   discover product, architecture, security, ownership, operations, and
+   dependency references from one documented entry point.
+5. Refresh focused architecture, security, and deployment documents where they
+   link to moved code or make claims superseded by Sprints 61-68.
+6. Define a lightweight documentation-maintenance rule: behavior, runtime
+   ownership, dependency rationale, and verification documentation change with
+   the corresponding implementation rather than as an afterthought.
+
+## Deliverables
+
+```text
+docs/PORTFOLIO_OWNER_GUIDE.md
+docs/DEPENDENCIES.md
+updated README.md
+updated docs/REPOSITORY_NAVIGATION.md
+updated architecture/security/deployment documentation where needed
+updated IMPLEMENTATION_STATUS.md
+```
+
+## Owner Guide Requirements
+
+The guide must provide:
+
+- a two-minute product explanation and a six-minute demo narrative;
+- end-to-end diagrams for research, evidence ingestion, grounded guidance,
+  approval-backed memory changes, and unsafe-input containment;
+- a runtime ownership map covering the web app, API, deterministic services,
+  PostgreSQL, Temporal, model/provider boundaries, and observability;
+- a local/CI/hosted execution matrix;
+- concise portfolio discussion points and tradeoffs;
+- a clear separation between implemented-and-locally-verified controls and
+  deployment-owned prerequisites.
+
+## Dependency Guide Requirements
+
+For direct dependencies and operational tools, document:
+
+- category and purpose;
+- the primary code/configuration entry point;
+- why this choice fits Thesys;
+- notable alternatives or limits when that context helps an owner explain it;
+- execution environment and verification command where relevant.
+
+Cover at minimum the application framework, persistence and migrations,
+identity/encryption, AI orchestration and providers, retrieval/document
+processing, observability, rate limiting, web framework/UI utilities, and the
+security/CI tools introduced in Sprints 61-68.
+
+## Acceptance Criteria
+
+- Every README and documentation internal code-path reference touched by the
+  audit resolves to a current repository path.
+- The README provides a discoverable documentation map linking product,
+  architecture, owner guide, security, operations, and dependencies.
+- An owner can explain the five required runtime flows without reading the
+  implementation brief or status ledger.
+- Dependency and operational-tool rationale covers all direct manifests and
+  Sprint 61-68 security/CI tooling without presenting transitive lockfile
+  contents as first-class architecture.
+- Local, CI, and hosted-only controls are explicitly distinguished.
+- Documentation validation reports no broken local Markdown links or referenced
+  repository paths in the maintained documentation set.
+- `IMPLEMENTATION_STATUS.md` records the Sprint 69 evidence and residual
+  documentation limits.

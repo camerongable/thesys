@@ -1,5 +1,10 @@
 # Evals
 
+This document describes product-facing evaluation endpoints and their historical
+milestones. The current developer/CI evaluation map is
+[Evals And Observability](EVALS_AND_OBSERVABILITY.md); security and adversarial
+verification is summarized in [Security And Evals](SECURITY_AND_EVALS.md).
+
 Evaluation is part of the MVP. AI workflow executions are persisted in
 `ai_runs` and `ai_steps`, and Sprint 8 adds the first local MVP readiness check.
 Sprint 10 keeps this eval as a developer/demo check but replaces the primary
@@ -26,9 +31,10 @@ The MVP eval currently checks:
 - decision traceability
 - workflow observability
 
-This is intentionally lightweight. Later eval work should add fixture datasets,
-retrieval relevance labels, groundedness scoring, prompt regression tests, and
-cost/latency thresholds.
+This remains intentionally lightweight for a seeded demo. The repository now
+also includes fixture datasets, retrieval/citation checks, prompt/model approval
+tests, Promptfoo adversarial cases, and cost/latency reporting; see the linked
+evaluation documentation for their current commands and limits.
 
 ## V1 Research Eval
 

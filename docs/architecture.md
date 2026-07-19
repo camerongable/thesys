@@ -1,44 +1,46 @@
 # Architecture
 
-Sprint 0 establishes the service boundaries from `IMPLEMENTATION_BRIEF.md`:
+Thesys is a full-stack, stateful AI workflow application. The architecture is
+designed to keep model reasoning useful while keeping authority over data,
+tools, memory, and decisions in deterministic services.
 
-- Next.js web app in `apps/web`
-- FastAPI API gateway in `apps/api`
-- PostgreSQL with `pgvector`
-- Redis for future async workflow support
-- MinIO for local S3-compatible object storage
-- LiteLLM proxy for model routing
-- AI run/step tables for workflow observability, token usage, and cost tracking
+```text
+Next.js workspace
+  -> FastAPI routes and validated Principal
+    -> product services and governed tools
+      -> retrieval/context/model gateway
+      -> PostgreSQL/pgvector, object storage, Temporal, external providers
+    -> approvals, audit chain, security events, metrics, traces
+```
 
-The MVP product architecture should keep structured project state in Postgres
-and use markdown artifacts only as display/export views over structured records.
+## Runtime Responsibilities
 
-Sprint 2 adds a local deterministic LLM stub path. The API uses it by default
-when provider keys are absent, while preserving the same structured-output and
-AI-run logging path used by real LiteLLM calls.
+- **Web:** presents a guided project lifecycle and uses a typed API client; it
+  does not decide authorization or persist strategic state directly.
+- **API:** validates requests, resolves identity and project scope, invokes
+  services, and serializes public response contracts.
+- **Services:** own research, ingestion, retrieval, memory, validation,
+  decision, tool, and security workflows.
+- **PostgreSQL/pgvector:** stores project state, evidence, approvals, AI-run
+  metadata, audit records, and embeddings. Hosted deployments enforce tenant
+  isolation with forced row-level security.
+- **Temporal:** makes research workflows durable across retries and approval
+  waits. LangGraph owns agent reasoning inside a workflow; Temporal owns durable
+  lifecycle and recovery.
+- **External providers:** models, embeddings, search, storage, and telemetry
+  are configuration-gated and pass through application policy boundaries.
 
-Sprint 4 adds the first RAG foundation:
+## Architectural Principles
 
-- Evidence sources are ingested through URL, note, and file endpoints.
-- Uploaded files are stored through the object storage boundary. Docker uses
-  MinIO/S3 mode; tests and local non-Docker runs can use local filesystem mode.
-- Evidence object keys include workspace, project, and source scope. Hosted S3
-  mode verifies private bucket controls, encryption, retention, and TLS policy;
-  downloads require resource authorization before short-lived presigning.
-- Parsed text is normalized, summarized, classified, chunked, embedded, and
-  stored in Postgres/pgvector.
-- Retrieval is project/workspace-scoped and supports semantic, keyword, and
-  hybrid scoring. In Postgres, semantic and hybrid retrieval rank chunks through
-  SQL-level pgvector nearest-neighbor search before context is returned. The
-  deterministic Python scorer remains the fallback for SQLite tests and offline
-  demos.
-- Evidence ingestion and retrieval create `ai_runs` and `ai_steps` traces so
-  generated artifacts in later sprints can expose the retrieval context they
-  used.
+1. Project strategy is durable structured state, not a chat transcript.
+2. Retrieved or uploaded content is evidence, not trusted instruction.
+3. Models can propose; deterministic application code authorizes, validates,
+   persists, budgets, and audits consequential effects.
+4. Important mutations are reviewable through approval records.
+5. Local deterministic behavior makes tests and demos repeatable without paid
+   provider credentials; hosted integrations remain explicit configuration.
 
-Sprint 10 adds a computed project overview layer. `ProjectOverviewService`
-derives founder-facing guidance from existing records instead of adding new
-persistence: project lifecycle stage, recommendation, next best action, idea
-readiness, strategic snapshot, evidence health, and recent strategic updates.
-This keeps the overview aligned with the project graph while leaving workflow
-execution, RAG, and artifact generation unchanged.
+For flow diagrams and portfolio explanation, see
+[Portfolio Owner Guide](PORTFOLIO_OWNER_GUIDE.md). For AI-specific design, see
+[AI Architecture](AI_ARCHITECTURE.md). For security trust boundaries, see
+[Security Architecture](security/SECURITY_ARCHITECTURE.md).
