@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
@@ -7,7 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext
-from app.db.models import AuditEvent, SecurityAlert, SecurityEvent
+from app.db.models import (
+    ApprovalRequest,
+    AuditEvent,
+    MCPServerRegistration,
+    ResearchSprint,
+    SecurityAlert,
+    SecurityEvent,
+)
 from app.services import governance_service, security_event_service
 from app.services.identity_service import ensure_dev_identity
 
@@ -171,6 +179,122 @@ def test_repeated_blocked_guardrail_attacks_create_one_critical_escalation_alert
     assert len(escalation_alerts) == 1
     assert escalation_alerts[0].severity == "critical"
     assert escalation_alerts[0].status == "open"
+
+
+def test_project_security_overview_aggregates_redacted_operational_state(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project = client.post("/api/projects", json={"name": "Security overview"}).json()
+    project_id = uuid.UUID(project["id"])
+    auth = ensure_dev_identity(
+        db_session,
+        email="dev@thesys.local",
+        display_name="Dev User",
+    )
+    plan_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Keep the security overview current."},
+    )
+    assert plan_response.status_code == 200
+    sprint = db_session.get(ResearchSprint, uuid.UUID(plan_response.json()["sprint"]["id"]))
+    assert sprint is not None
+    sprint.status = "running"
+    db_session.add(
+        ApprovalRequest(
+            workspace_id=auth.workspace_id,
+            project_id=project_id,
+            request_type="memory_update",
+            status="pending",
+            requested_by="agent",
+            risk_level="high",
+            summary="Review a high-risk memory update.",
+            proposed_change={},
+        )
+    )
+    db_session.add(
+        MCPServerRegistration(
+            workspace_id=auth.workspace_id,
+            name="Reviewed security server",
+            base_url="https://mcp.example.test/v1",
+            transport="streamable_http",
+            server_fingerprint="a" * 64,
+            approved_version="1.2.3",
+            allowed_tools=[],
+            tool_schema_snapshot={},
+            oauth_issuer=None,
+            enabled=True,
+            reviewed_at=datetime.now(UTC),
+            reviewed_by=auth.user_id,
+        )
+    )
+    for event_type, source in (
+        ("prompt_injection_detected", "guardrail"),
+        ("tool_invocation_denied", "tool"),
+        ("pii_redaction_applied", "api"),
+        ("memory_source_quarantined", "memory"),
+        ("retrieval_anomaly_detected", "retrieval"),
+        ("workflow_token_budget_exceeded", "workflow"),
+    ):
+        security_event_service.record_security_event(
+            db_session,
+            workspace_id=auth.workspace_id,
+            project_id=project_id,
+            user_id=auth.user_id,
+            event_type=event_type,
+            severity="high",
+            source=source,
+            summary="Sensitive details must not appear in the security overview.",
+        )
+    db_session.commit()
+
+    switch_response = client.patch(
+        "/api/security/kill-switches",
+        json={"disable_external_egress": True},
+    )
+    assert switch_response.status_code == 200
+    response = client.get(f"/api/projects/{project_id}/security-overview")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["project_id"] == str(project_id)
+    assert body["high_or_critical_event_count"] == 6
+    assert body["blocked_prompt_attack_count"] == 1
+    assert body["denied_tool_count"] == 1
+    assert body["pending_high_risk_approval_count"] == 1
+    assert body["pii_redaction_count"] == 1
+    assert body["memory_quarantine_count"] == 1
+    assert body["anomalous_retrieval_count"] == 1
+    assert body["budget_alert_count"] == 1
+    assert body["active_workflow_count"] == 1
+    assert body["active_kill_switches"] == [
+        {
+            "name": "disable_external_egress",
+            "enabled": True,
+            "workspace_enabled": True,
+            "environment_enabled": False,
+        }
+    ]
+    assert body["mcp_servers"] == [
+        {
+            "name": "Reviewed security server",
+            "enabled": True,
+            "approved_version": "1.2.3",
+            "reviewed_at": body["mcp_servers"][0]["reviewed_at"],
+        }
+    ]
+    assert "Sensitive details" not in response.text
+
+
+def test_project_security_overview_requires_workspace_security_admin(client: TestClient) -> None:
+    project_id = client.post("/api/projects", json={"name": "Security overview role"}).json()["id"]
+
+    response = client.get(
+        f"/api/projects/{project_id}/security-overview",
+        headers={"X-Dev-User-Role": "viewer"},
+    )
+
+    assert response.status_code == 403
 
 
 def test_security_event_query_requires_workspace_security_admin(

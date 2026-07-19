@@ -21,7 +21,13 @@ from app.schemas.governance import (
     SecurityEventListRead,
     SecurityEventRead,
 )
-from app.services import governance_service, tool_service, validation_service
+from app.schemas.security import SecurityOverviewRead
+from app.services import (
+    governance_service,
+    security_dashboard_service,
+    tool_service,
+    validation_service,
+)
 
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["governance"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -144,6 +150,21 @@ def list_project_security_alerts(
 
     alerts = security_event_service.list_project_security_alerts(db, auth, project_id, limit=limit)
     return SecurityAlertListRead(alerts=[serialize_security_alert(alert) for alert in alerts])
+
+
+@router.get("/security-overview", response_model=SecurityOverviewRead)
+def get_project_security_overview(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> SecurityOverviewRead:
+    return security_dashboard_service.read_project_security_overview(
+        db,
+        auth,
+        settings,
+        project_id,
+    )
 
 
 @router.post("/security-alerts/{alert_id}/acknowledge", response_model=SecurityAlertActionRead)

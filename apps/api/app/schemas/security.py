@@ -40,3 +40,26 @@ class WorkspaceKillSwitchStateRead(BaseModel):
     switches: list[KillSwitchStatusRead]
     updated_at: datetime | None = None
     updated_by: uuid.UUID | None = None
+
+
+class MCPServerSecurityStatusRead(BaseModel):
+    name: str
+    enabled: bool
+    approved_version: str
+    reviewed_at: datetime
+
+
+class SecurityOverviewRead(BaseModel):
+    project_id: uuid.UUID
+    generated_at: datetime
+    high_or_critical_event_count: int
+    blocked_prompt_attack_count: int
+    denied_tool_count: int
+    pending_high_risk_approval_count: int
+    pii_redaction_count: int
+    memory_quarantine_count: int
+    anomalous_retrieval_count: int
+    budget_alert_count: int
+    active_workflow_count: int
+    active_kill_switches: list[KillSwitchStatusRead]
+    mcp_servers: list[MCPServerSecurityStatusRead]
