@@ -606,6 +606,9 @@ current verdict, next action, evidence health, validation, and decision state.
   requires the authenticated user's confirmation, identity, and timestamp;
   the preference endpoint records attributable confirmation provenance and unconfirmed
   agent-inferred preferences are rejected instead of becoming proposals.
+- [x] Gate low-trust memory at write time. A durable write below the same minimum
+  trust threshold used by recall is proposal-only, so an unverified item cannot
+  become active project memory merely by claiming an approved security status.
 - [x] Detect anomalous embedding clusters before evidence chunks are persisted.
   A distinct source whose candidate vectors nearly match two approved,
   different-content project sources receives an inspectable source-trust signal
@@ -766,6 +769,9 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Working-memory write-policy checkpoint passed (`79 passed, 1 warning`)
   across memory-service, context-compiler, and feature-boundary coverage;
   changed-file compile checks and repository application lint passed.
+- [x] Low-trust memory checkpoint passed (`80 passed, 1 warning`) across
+  memory-service, context-compiler, and feature-boundary coverage; changed-file
+  compile checks and repository application lint passed.
 
 ## Next Sprint
 

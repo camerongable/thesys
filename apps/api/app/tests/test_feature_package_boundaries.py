@@ -1194,6 +1194,18 @@ def test_memory_security_policy_normalizes_secure_recall_metadata() -> None:
         source_entity_type="evidence_source",
         status_value="active",
     )
+    assert memory_security_policy.requires_memory_proposal(
+        memory_security_policy.secure_memory_metadata(
+            {"trust_score": 0.2},
+            content={"summary": "unverified"},
+            summary="Unverified",
+            source_entity_type=None,
+            source_entity_id=None,
+            write_policy="direct",
+        ),
+        source_entity_type=None,
+        status_value="active",
+    )
 
     assert memory_security_policy.normalized_episodic_event_timestamp(
         {"event_at": "2026-07-18T12:00:00Z"}

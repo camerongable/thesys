@@ -191,6 +191,36 @@ def test_agent_memory_cannot_bypass_approval_with_direct_policy_or_projection(
     ) == []
 
 
+def test_low_trust_memory_requires_review_before_durable_recall(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+
+    item = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="project",
+        write_policy="direct",
+        title="Unverified research summary",
+        summary="This project note has not reached the minimum trust threshold.",
+        content={"summary": "unverified"},
+        provenance_metadata={"trust_score": 0.2},
+    )
+    db_session.commit()
+
+    assert item.status == "proposed"
+    assert item.provenance_metadata["trust_score"] == 0.2
+    assert memory_service.select_memory_for_workflow(
+        db_session,
+        auth,
+        project_id,
+        workflow_type="guide_chat",
+    ) == []
+
+
 def test_semantic_memory_requires_provenance_and_bounded_confidence(
     client: TestClient,
     db_session: Session,
@@ -703,7 +733,7 @@ def test_conflicting_memory_proposal_preserves_active_version_until_approval(
     assert approved.provenance_metadata["conflict_resolved_by_user_id"] == str(auth.user_id)
 
 
-def test_low_trust_memory_is_excluded_from_recall_with_reason(
+def test_low_trust_memory_requires_review_before_recall(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -733,9 +763,9 @@ def test_low_trust_memory_is_excluded_from_recall_with_reason(
         {
             "id": item.id,
             "memory_type": "project",
-            "status": "active",
+            "status": "proposed",
             "title": "Weak source",
-            "reason": "memory_trust_below_threshold",
+            "reason": "pending_human_review",
         }
     ]
 

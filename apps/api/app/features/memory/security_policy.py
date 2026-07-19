@@ -72,6 +72,8 @@ def requires_memory_proposal(
         return False
     if metadata.get("security_status") != "approved":
         return True
+    if _bounded_score(metadata.get("trust_score"), default=0.0) < MINIMUM_RECALL_TRUST_SCORE:
+        return True
     if source_entity_type in _EVIDENCE_ENTITY_TYPES:
         return True
     if metadata.get("origin") == "agent":
