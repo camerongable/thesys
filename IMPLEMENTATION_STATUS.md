@@ -1098,6 +1098,11 @@ current verdict, next action, evidence health, validation, and decision state.
   registration and fails the invocation; identity mismatch now emits its own
   high-risk immutable audit, MCP security event, and alert correlated to the
   failed tool invocation.
+- [x] Detect reviewed MCP tool-schema drift at both review and invocation
+  boundaries. A changed approved catalog or schema keeps the registration
+  disabled and now produces a distinct high-risk MCP audit, security event, and
+  alert; unrelated remote protocol and availability failures remain separately
+  classified.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,

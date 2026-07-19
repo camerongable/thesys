@@ -680,12 +680,26 @@ def test_remote_mcp_failure_disables_server_and_marks_tool_invocation_failed(
     assert invocation.status == "failed"
     audit = db_session.scalar(
         select(AuditEvent).where(
-            AuditEvent.event_type == "mcp_server_tool_invocation_failed",
+            AuditEvent.event_type == "mcp_server_tool_schema_changed",
             AuditEvent.entity_id == invocation.id,
         )
     )
     assert audit is not None
+    assert audit.risk_level == "high"
     assert audit.event_metadata["reason_code"] == "tool_schema_drift"
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "mcp"
+    assert security_event.severity == "high"
+    assert security_event.tool_invocation_id == invocation.id
+    assert (
+        db_session.scalar(
+            select(SecurityAlert).where(SecurityAlert.security_event_id == security_event.id)
+        )
+        is not None
+    )
 
 
 def test_mcp_fingerprint_drift_disables_server_and_opens_security_alert(

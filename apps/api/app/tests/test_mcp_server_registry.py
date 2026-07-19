@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import AuditEvent, MCPServerRegistration
+from app.db.models import AuditEvent, MCPServerRegistration, SecurityAlert, SecurityEvent
 from app.services import mcp_credential_service, mcp_registry_service, remote_mcp_review_service
 
 
@@ -213,12 +213,24 @@ def test_schema_drift_disables_remote_mcp_server_during_enablement(
     assert registration.enabled is False
     audit = db_session.scalar(
         select(AuditEvent).where(
-            AuditEvent.event_type == "mcp_server_review_failed",
+            AuditEvent.event_type == "mcp_server_tool_schema_changed",
             AuditEvent.entity_id == registration.id,
         )
     )
     assert audit is not None
     assert audit.event_metadata["reason_code"] == "tool_schema_drift"
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "mcp"
+    assert security_event.severity == "high"
+    assert (
+        db_session.scalar(
+            select(SecurityAlert).where(SecurityAlert.security_event_id == security_event.id)
+        )
+        is not None
+    )
 
 
 def test_enable_oauth_server_uses_only_validated_scoped_access_token(

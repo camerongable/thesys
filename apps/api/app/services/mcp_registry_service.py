@@ -146,15 +146,22 @@ def enable_server(
         )
     except remote_mcp_review_service.RemoteMcpReviewError as exc:
         registration.enabled = False
+        schema_changed = exc.reason_code == "tool_schema_drift"
         governance_service.record_audit_event(
             db,
             auth,
-            event_type="mcp_server_review_failed",
+            event_type=(
+                "mcp_server_tool_schema_changed" if schema_changed else "mcp_server_review_failed"
+            ),
             actor_type="user",
             entity_type="mcp_server_registration",
             entity_id=registration.id,
             risk_level="high",
-            summary="Remote MCP server review failed and the server remains disabled.",
+            summary=(
+                "Remote MCP tool schema changed and the server remains disabled."
+                if schema_changed
+                else "Remote MCP server review failed and the server remains disabled."
+            ),
             metadata={"reason_code": exc.reason_code},
         )
         db.commit()
@@ -359,13 +366,18 @@ def _invoke_registration_tool(
     except remote_mcp_review_service.RemoteMcpReviewError as exc:
         registration.enabled = False
         fingerprint_changed = exc.reason_code == "server_identity_mismatch"
+        schema_changed = exc.reason_code == "tool_schema_drift"
         governance_service.record_audit_event(
             db,
             auth,
             event_type=(
                 "mcp_server_fingerprint_changed"
                 if fingerprint_changed
-                else "mcp_server_tool_invocation_failed"
+                else (
+                    "mcp_server_tool_schema_changed"
+                    if schema_changed
+                    else "mcp_server_tool_invocation_failed"
+                )
             ),
             actor_type="user",
             project_id=project_id,
@@ -375,7 +387,11 @@ def _invoke_registration_tool(
             summary=(
                 "Remote MCP server fingerprint changed and the server was disabled."
                 if fingerprint_changed
-                else "Remote MCP tool invocation failed and the server was disabled."
+                else (
+                    "Remote MCP tool schema changed and the server was disabled."
+                    if schema_changed
+                    else "Remote MCP tool invocation failed and the server was disabled."
+                )
             ),
             metadata={
                 "server_registration_id": str(registration.id),
