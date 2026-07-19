@@ -1119,6 +1119,10 @@ current verdict, next action, evidence health, validation, and decision state.
   A configurable number of distinct source-download authorizations by one actor
   in one project raises one high-risk audit/security event and alert within the
   detection window, retaining only the bounded count and window.
+- [x] Detect PII in provider-bound research-workflow prompts before LiteLLM egress.
+  The model policy preserves only entity categories and a bounded message count;
+  the shared provider boundary records a correlated medium-severity workflow
+  event without retaining prompt text or redacted values.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,

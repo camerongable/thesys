@@ -10,6 +10,7 @@ from app.core.config import Settings
 
 def test_litellm_client_sends_sanitized_payload(monkeypatch) -> None:
     captured: dict[str, Any] = {}
+    recorded_pii: list[dict[str, object]] = []
 
     class FakeResponse:
         headers: dict[str, str] = {}
@@ -39,6 +40,11 @@ def test_litellm_client_sends_sanitized_payload(monkeypatch) -> None:
             return FakeResponse()
 
     monkeypatch.setattr(litellm_client.httpx, "Client", FakeClient)
+    monkeypatch.setattr(
+        litellm_client,
+        "record_provider_prompt_pii",
+        lambda **kwargs: recorded_pii.append(kwargs),
+    )
     client = LiteLLMClient(
         Settings(
             llm_stub_mode="never",
@@ -64,6 +70,12 @@ def test_litellm_client_sends_sanitized_payload(monkeypatch) -> None:
     assert "jane.doe@example.com" not in outbound
     assert "sk-secretvalue123" not in outbound
     assert "[REDACTED_SECRET]" in outbound
+    assert recorded_pii == [
+        {
+            "pii_entity_types": ("API_KEY", "EMAIL", "PERSON"),
+            "redacted_message_count": 1,
+        }
+    ]
 
 
 def test_litellm_client_reports_bounded_http_failure_metadata(monkeypatch) -> None:

@@ -166,6 +166,47 @@ def record_provider_failure(*, failure_kind: str, status_code: int | None = None
     context.db.commit()
 
 
+def record_provider_prompt_pii(
+    *,
+    pii_entity_types: tuple[str, ...],
+    redacted_message_count: int,
+) -> None:
+    """Record provider-bound prompt redaction for an attributed workflow only."""
+    context = _workflow_budget_context.get()
+    if context is None or redacted_message_count < 1:
+        return
+    sprint, _ = _locked_sprint_and_budget(context)
+    from app.services import security_event_service
+
+    entity_types = sorted(
+        {
+            entity_type[:80]
+            for entity_type in pii_entity_types
+            if isinstance(entity_type, str) and entity_type
+        }
+    )[:20]
+    if not entity_types:
+        return
+    security_event_service.record_security_event(
+        context.db,
+        workspace_id=context.auth.workspace_id,
+        project_id=context.project_id,
+        user_id=context.auth.user_id,
+        temporal_workflow_id=sprint.temporal_workflow_id,
+        event_type="pii_redaction_in_provider_prompt",
+        severity="medium",
+        source="workflow",
+        summary="Redacted sensitive entities before a model provider request.",
+        attributes={
+            "provider": "litellm",
+            "pii_entity_types": entity_types,
+            "redacted_message_count": min(redacted_message_count, 100),
+        },
+        settings=context.settings,
+    )
+    context.db.commit()
+
+
 def reserve_structured_output_repair() -> None:
     context = _workflow_budget_context.get()
     if context is None:

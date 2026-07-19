@@ -20,6 +20,7 @@ from app.services.security_policy_service import (
 from app.services.workflow_budget_service import (
     record_model_usage,
     record_provider_failure,
+    record_provider_prompt_pii,
     reserve_model_call,
 )
 
@@ -77,6 +78,10 @@ class LiteLLMClient:
             gateway,
             model=str(payload["model"]),
             messages=messages,
+        )
+        record_provider_prompt_pii(
+            pii_entity_types=decision.pii_entity_types,
+            redacted_message_count=decision.redacted_message_count,
         )
         payload["messages"] = decision.messages
         if response_format_json:
@@ -164,6 +169,10 @@ class LiteLLMClient:
             gateway,
             model=str(payload["model"]),
             messages=messages,
+        )
+        record_provider_prompt_pii(
+            pii_entity_types=decision.pii_entity_types,
+            redacted_message_count=decision.redacted_message_count,
         )
         payload["messages"] = decision.messages
         if response_format_json:

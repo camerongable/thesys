@@ -317,6 +317,58 @@ def test_repeated_provider_failures_create_one_provider_spike_alert(
     get_settings.cache_clear()
 
 
+def test_provider_bound_prompt_pii_is_recorded_without_prompt_content(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project = client.post("/api/projects", json={"name": "Provider PII monitoring"}).json()
+    project_id = uuid.UUID(project["id"])
+    plan_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Exercise provider prompt PII monitoring."},
+    )
+    assert plan_response.status_code == 200
+    sprint = db_session.get(ResearchSprint, uuid.UUID(plan_response.json()["sprint"]["id"]))
+    assert sprint is not None
+    sprint.temporal_workflow_id = "provider-pii-workflow"
+    db_session.commit()
+    auth = ensure_dev_identity(
+        db_session,
+        email="dev@thesys.local",
+        display_name="Dev User",
+    )
+
+    with workflow_budget_service.workflow_budget_scope(
+        db_session,
+        auth,
+        get_settings(),
+        project_id=project_id,
+        research_sprint_id=sprint.id,
+    ):
+        workflow_budget_service.record_provider_prompt_pii(
+            pii_entity_types=("API_KEY", "EMAIL"),
+            redacted_message_count=1,
+        )
+
+    event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.event_type == "pii_redaction_in_provider_prompt")
+    )
+
+    assert event is not None
+    assert event.workspace_id == auth.workspace_id
+    assert event.project_id == project_id
+    assert event.temporal_workflow_id == "provider-pii-workflow"
+    assert event.severity == "medium"
+    assert event.source == "workflow"
+    assert event.attributes == {
+        "provider": "litellm",
+        "pii_entity_types": ["API_KEY", "EMAIL"],
+        "redacted_message_count": 1,
+    }
+    assert "sk-secretvalue123" not in event.summary
+    assert "sk-secretvalue123" not in str(event.attributes)
+
+
 def test_repeated_memory_contradictions_create_one_spike_alert(
     client: TestClient,
     db_session: Session,

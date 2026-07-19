@@ -23,6 +23,8 @@ class ModelPayloadDecision:
     policy: ModelDataPolicy
     original_data_classification: DataClassification
     outbound_data_classification: DataClassification
+    pii_entity_types: tuple[str, ...]
+    redacted_message_count: int
     messages: list[dict[str, Any]]
 
 
@@ -31,6 +33,7 @@ class ProviderTextDecision:
     policy: ModelDataPolicy
     original_data_classification: DataClassification
     outbound_data_classification: DataClassification
+    pii_entity_types: tuple[str, ...]
     text: str
 
 
@@ -125,14 +128,21 @@ def prepare_model_payload(
     outbound_classification = _maximum_classification(
         str(message["content"]) for message in sanitized_messages
     )
-    if _CLASSIFICATION_RANK[outbound_classification] > _CLASSIFICATION_RANK[
-        policy.maximum_data_classification
-    ]:
+    if (
+        _CLASSIFICATION_RANK[outbound_classification]
+        > _CLASSIFICATION_RANK[policy.maximum_data_classification]
+    ):
         raise ModelDataPolicyError("Provider policy does not permit this payload classification.")
     return ModelPayloadDecision(
         policy=policy,
         original_data_classification=original_classification,
         outbound_data_classification=outbound_classification,
+        pii_entity_types=tuple(
+            sorted(
+                {entity_type for decision in decisions for entity_type in decision.pii_entity_types}
+            )
+        ),
+        redacted_message_count=sum(bool(decision.pii_entity_types) for decision in decisions),
         messages=sanitized_messages,
     )
 
@@ -149,17 +159,19 @@ def prepare_provider_text(
     if purpose not in policy.approved_purposes:
         raise ModelDataPolicyError(f"Provider policy does not permit purpose: {purpose}.")
     original_classification = _maximum_classification([text])
-    sanitized = data_protection_service.redact_for_model(text)
-    outbound_classification = _maximum_classification([sanitized])
-    if _CLASSIFICATION_RANK[outbound_classification] > _CLASSIFICATION_RANK[
-        policy.maximum_data_classification
-    ]:
+    sanitized = data_protection_service.create_searchable_copy(text)
+    outbound_classification = _maximum_classification([sanitized.text])
+    if (
+        _CLASSIFICATION_RANK[outbound_classification]
+        > _CLASSIFICATION_RANK[policy.maximum_data_classification]
+    ):
         raise ModelDataPolicyError("Provider policy does not permit this payload classification.")
     return ProviderTextDecision(
         policy=policy,
         original_data_classification=original_classification,
         outbound_data_classification=outbound_classification,
-        text=sanitized,
+        pii_entity_types=sanitized.pii_entity_types,
+        text=sanitized.text,
     )
 
 
