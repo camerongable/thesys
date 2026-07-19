@@ -863,11 +863,15 @@ current verdict, next action, evidence health, validation, and decision state.
   run, and within the external-search adapter itself. Each denial returns a
   generic 403 and records the attributable policy-denial event; existing ready
   sources remain readable without a network request.
+- [x] Enforce the memory-write kill switch at the central durable-memory
+  boundary, covering content upserts and all lifecycle mutations before they
+  persist. Each denial returns a generic 403 and emits an attributable
+  policy-denial event; conflict inspection remains read-only while disabled.
 - [ ] Implement the remaining Sprint 66 capability controls: remote credential
   isolation, registration enablement plus live schema/version-drift validation,
-  enforcement of the remaining agent-write, memory-write, and external-MCP
-  runtime kill switches, and then validate the live Compose policy bundle with
-  the OPA parser/runtime.
+  enforcement of the remaining agent-write and external-MCP runtime kill
+  switches, and then validate the live Compose policy bundle with the OPA
+  parser/runtime.
 
 ## Sprint 66 Verification
 
@@ -900,14 +904,18 @@ current verdict, next action, evidence health, validation, and decision state.
   warnings`) across evidence, discovery, competitor, agentic-research, security
   governance, provider-routing, tool, control-plane, and security-invariant
   coverage; focused lint, compilation, and `git diff --check` passed.
+- [x] Memory-write kill-switch checkpoint passed (`108 passed, 1 xfailed, 4
+  warnings`) across memory-service, security-governance, tool-boundary,
+  agentic-research, context-compiler, control-plane, and security-invariant
+  coverage; focused lint, compilation, and `git diff --check` passed.
 - [ ] The local workspace has no Docker CLI, so Compose graph validation and
   direct OPA/Rego parser validation remain part of the compose-backed
   enforcement checkpoint.
 
 ## Next Sprint
 
-Continue Sprint 66 by enforcing the all-agent-writes and memory-writes kill
-switches at their shared mutation boundaries.
+Continue Sprint 66 by enforcing the all-agent-writes kill switch at the shared
+governed mutation boundary.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

@@ -74,6 +74,75 @@ def test_memory_types_are_filtered_and_stale_memory_is_excluded(
     assert stale.id not in {item.id for item in selected}
 
 
+def test_memory_write_kill_switch_blocks_content_and_lifecycle_mutations(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+    active = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="semantic",
+        write_policy="approval_required",
+        title="Existing memory",
+        summary="Coaches need shorter weekly review cycles.",
+        content={"text": "Coaches need shorter weekly review cycles."},
+        entity_type="assumption",
+        entity_id=uuid.uuid4(),
+        source_entity_type="artifact_version",
+        source_entity_id=uuid.uuid4(),
+        confidence_score=Decimal("0.6"),
+    )
+    db_session.commit()
+    update_response = client.patch(
+        "/api/security/kill-switches",
+        json={"disable_memory_writes": True},
+    )
+
+    with pytest.raises(HTTPException, match="Memory updates are temporarily unavailable"):
+        memory_service.upsert_memory_item(
+            db_session,
+            auth,
+            project_id,
+            memory_type="semantic",
+            write_policy="approval_required",
+            title="Blocked memory",
+            summary="This content must not persist.",
+            content={"text": "This content must not persist."},
+            entity_type="assumption",
+            entity_id=uuid.uuid4(),
+            source_entity_type="artifact_version",
+            source_entity_id=uuid.uuid4(),
+            confidence_score=Decimal("0.6"),
+        )
+    archive_response = client.post(f"/api/projects/{project_id}/memory/{active.id}/archive")
+
+    assert update_response.status_code == 200
+    assert archive_response.status_code == 403
+    assert archive_response.json() == {"detail": "Memory updates are temporarily unavailable."}
+    assert (
+        db_session.scalar(
+            select(ProjectMemoryItem).where(ProjectMemoryItem.title == "Blocked memory")
+        )
+        is None
+    )
+    db_session.refresh(active)
+    assert active.status == "active"
+    denials = list(
+        db_session.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.event_type == "security_policy_denied")
+            .order_by(AuditEvent.created_at.asc())
+        )
+    )
+    assert [event.event_metadata["workflow_type"] for event in denials[-2:]] == [
+        "memory_content_write",
+        "memory_archive",
+    ]
+
+
 def test_project_memory_redacts_secret_values_before_persistence(
     client: TestClient,
     db_session: Session,

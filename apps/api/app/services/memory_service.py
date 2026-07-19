@@ -35,7 +35,12 @@ from app.features.policy.opa import (
 from app.features.retrieval.security_policy import RetrievalSecurityPolicy
 from app.schemas.memory import MemoryType, MemoryWritePolicy
 from app.security.contracts import DataClassification
-from app.services import governance_service, project_service
+from app.services import (
+    governance_service,
+    kill_switch_service,
+    project_service,
+    security_policy_service,
+)
 from app.services.data_protection_service import data_protection_service
 
 WORKING_MEMORY_TTL = timedelta(hours=8)
@@ -373,6 +378,14 @@ def upsert_memory_item(
 ) -> ProjectMemoryItem:
     """Create or update a typed memory item under the project's governance model."""
     project_service.get_project(db, auth, project_id)
+    effective_settings = settings or get_settings()
+    security_policy_service.enforce_memory_writes_allowed(
+        db,
+        auth,
+        effective_settings,
+        project_id=project_id,
+        operation="content_write",
+    )
     expires_at = _effective_memory_expiry(memory_type, expires_at)
     data_classification = _memory_data_classification(memory_type, title, summary, content)
     safe_title = redact_text(title, redact_emails=True)
@@ -450,7 +463,7 @@ def upsert_memory_item(
     policy_decision = _authorize_opa_memory_write(
         db,
         auth,
-        settings or get_settings(),
+        effective_settings,
         project_id,
         memory_type=memory_type,
         write_policy=write_policy,
@@ -896,6 +909,13 @@ def approve_memory_proposal(
     """Promote proposed memory to active memory after human review."""
     require_permission(auth, "approve_memory_updates")
     item = get_memory_item(db, auth, project_id, memory_id)
+    security_policy_service.enforce_memory_writes_allowed(
+        db,
+        auth,
+        settings or get_settings(),
+        project_id=project_id,
+        operation="approve",
+    )
     if item.status != "proposed":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -979,6 +999,13 @@ def reject_memory_proposal(
     """Archive proposed memory after human rejection while preserving auditability."""
     require_permission(auth, "approve_memory_updates")
     item = get_memory_item(db, auth, project_id, memory_id)
+    security_policy_service.enforce_memory_writes_allowed(
+        db,
+        auth,
+        settings or get_settings(),
+        project_id=project_id,
+        operation="reject",
+    )
     if item.status != "proposed":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1128,6 +1155,13 @@ def mark_stale(
 ) -> ProjectMemoryItem:
     require_permission(auth, "approve_memory_updates")
     item = get_memory_item(db, auth, project_id, memory_id)
+    security_policy_service.enforce_memory_writes_allowed(
+        db,
+        auth,
+        settings or get_settings(),
+        project_id=project_id,
+        operation="mark_stale",
+    )
     policy_decision = _authorize_opa_memory_lifecycle(
         db,
         auth,
@@ -1162,6 +1196,13 @@ def archive_memory(
 ) -> ProjectMemoryItem:
     require_permission(auth, "approve_memory_updates")
     item = get_memory_item(db, auth, project_id, memory_id)
+    security_policy_service.enforce_memory_writes_allowed(
+        db,
+        auth,
+        settings or get_settings(),
+        project_id=project_id,
+        operation="archive",
+    )
     policy_decision = _authorize_opa_memory_lifecycle(
         db,
         auth,
@@ -1197,6 +1238,13 @@ def merge_duplicates(
 ) -> ProjectMemoryItem:
     require_permission(auth, "approve_memory_updates")
     keeper = get_memory_item(db, auth, project_id, keeper_id)
+    security_policy_service.enforce_memory_writes_allowed(
+        db,
+        auth,
+        settings or get_settings(),
+        project_id=project_id,
+        operation="merge_duplicates",
+    )
     duplicates = [
         get_memory_item(db, auth, project_id, duplicate_id)
         for duplicate_id in duplicate_ids
@@ -1236,9 +1284,17 @@ def detect_memory_conflicts(
     *,
     mark: bool = True,
     commit: bool = False,
+    settings: Settings | None = None,
 ) -> list[dict[str, Any]]:
     """Detect active memory records that conflict on the same durable subject."""
     project_service.get_project(db, auth, project_id)
+    if mark and kill_switch_service.is_enabled(
+        db,
+        auth,
+        settings or get_settings(),
+        "disable_memory_writes",
+    ):
+        mark = False
     items = list(
         db.scalars(
             select(ProjectMemoryItem).where(
@@ -1309,6 +1365,13 @@ def resolve_memory_conflict(
     """Resolve a memory conflict through explicit human-approved state changes."""
     require_permission(auth, "approve_memory_updates")
     keeper = get_memory_item(db, auth, project_id, keeper_id)
+    security_policy_service.enforce_memory_writes_allowed(
+        db,
+        auth,
+        settings or get_settings(),
+        project_id=project_id,
+        operation="resolve_conflict",
+    )
     affected_records = len({keeper_id, *supersede_ids, *archive_ids})
     policy_decision = _authorize_opa_memory_lifecycle(
         db,
@@ -1319,7 +1382,14 @@ def resolve_memory_conflict(
         affected_records=affected_records,
         settings=settings,
     )
-    detect_memory_conflicts(db, auth, project_id, mark=True, commit=False)
+    detect_memory_conflicts(
+        db,
+        auth,
+        project_id,
+        mark=True,
+        commit=False,
+        settings=settings,
+    )
     _ensure_conflict_member(keeper, conflict_group_id)
     resolution_metadata = {
         "conflict_group_id": conflict_group_id,
