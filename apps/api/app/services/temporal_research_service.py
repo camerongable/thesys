@@ -14,6 +14,7 @@ from temporalio.exceptions import WorkflowAlreadyStartedError
 from app.core.auth import AuthContext, require_permission
 from app.core.config import Settings
 from app.db.models import ResearchSprint
+from app.security.workflow_budget import WorkflowSecurityBudget
 from app.services import governance_service, project_service
 from app.temporal.workflows import ResearchSprintWorkflow
 
@@ -39,7 +40,11 @@ def start_research_sprint_workflow(
             status_code=status.HTTP_409_CONFLICT,
             detail="Completed, cancelled, or rejected research sprints cannot be started.",
         )
+    budget_was_missing = not sprint.workflow_security_budget
+    _ensure_workflow_security_budget(sprint, settings)
     if sprint.temporal_workflow_id and sprint.status != "failed":
+        if budget_was_missing:
+            db.commit()
         return sprint
 
     workflow_id = sprint.temporal_workflow_id or _workflow_id(sprint.id)
@@ -254,7 +259,7 @@ def _workflow_id(sprint_id: uuid.UUID) -> str:
     return f"research-sprint-{sprint_id}"
 
 
-def _workflow_payload(auth: AuthContext, sprint: ResearchSprint) -> dict[str, str]:
+def _workflow_payload(auth: AuthContext, sprint: ResearchSprint) -> dict[str, Any]:
     return {
         "workspace_id": str(auth.workspace_id),
         "project_id": str(sprint.project_id),
@@ -262,10 +267,11 @@ def _workflow_payload(auth: AuthContext, sprint: ResearchSprint) -> dict[str, st
         "research_plan_id": str(sprint.research_plan_id),
         "user_id": str(auth.user_id),
         "temporal_workflow_id": sprint.temporal_workflow_id or _workflow_id(sprint.id),
+        "workflow_security_budget": sprint.workflow_security_budget,
     }
 
 
-async def _start_temporal_workflow(settings: Settings, payload: dict[str, str]) -> str | None:
+async def _start_temporal_workflow(settings: Settings, payload: dict[str, Any]) -> str | None:
     client = await _temporal_client(settings)
     workflow_id = payload.get("temporal_workflow_id") or _workflow_id(
         uuid.UUID(payload["research_sprint_id"])
@@ -276,7 +282,7 @@ async def _start_temporal_workflow(settings: Settings, payload: dict[str, str]) 
             payload,
             id=workflow_id,
             task_queue=settings.temporal_task_queue,
-            execution_timeout=timedelta(seconds=settings.temporal_workflow_timeout_seconds),
+            execution_timeout=_workflow_execution_timeout(settings, payload),
         )
     except WorkflowAlreadyStartedError:
         handle = client.get_workflow_handle(workflow_id)
@@ -284,6 +290,23 @@ async def _start_temporal_workflow(settings: Settings, payload: dict[str, str]) 
         getattr(handle, "first_execution_run_id", None)
         or getattr(handle, "result_run_id", None)
         or getattr(handle, "run_id", None)
+    )
+
+
+def _ensure_workflow_security_budget(sprint: ResearchSprint, settings: Settings) -> None:
+    if sprint.workflow_security_budget:
+        WorkflowSecurityBudget.from_payload(sprint.workflow_security_budget)
+        return
+    sprint.workflow_security_budget = WorkflowSecurityBudget.from_settings(settings).as_payload()
+
+
+def _workflow_execution_timeout(settings: Settings, payload: dict[str, Any]) -> timedelta:
+    budget_payload = payload.get("workflow_security_budget")
+    if not isinstance(budget_payload, dict):
+        raise TemporalResearchWorkflowError("Workflow security budget is missing.")
+    budget = WorkflowSecurityBudget.from_payload(budget_payload)
+    return timedelta(
+        seconds=min(settings.temporal_workflow_timeout_seconds, budget.max_duration_seconds)
     )
 
 

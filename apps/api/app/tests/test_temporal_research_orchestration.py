@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -6,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import ResearchSprint
+from app.services import temporal_research_service
 
 
 def _enable_temporal(monkeypatch) -> None:
@@ -74,6 +76,45 @@ def test_temporal_enabled_plan_start_stores_workflow_metadata(
     status_body = status_response.json()
     assert status_body["temporal_enabled"] is True
     assert status_body["action_required"] == "Approve research plan"
+
+
+def test_temporal_workflow_snapshots_budget_and_caps_execution_timeout(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    _enable_temporal(monkeypatch)
+    monkeypatch.setenv("TEMPORAL_WORKFLOW_TIMEOUT_SECONDS", "600")
+    monkeypatch.setenv("SECURITY_WORKFLOW_MAX_DURATION_SECONDS", "120")
+    monkeypatch.setenv("SECURITY_WORKFLOW_MAX_MODEL_CALLS", "7")
+    get_settings.cache_clear()
+    captured_payloads: list[dict] = []
+
+    async def capture_start(settings, payload):
+        captured_payloads.append(payload)
+        return "temporal-run-budget"
+
+    monkeypatch.setattr(
+        "app.services.temporal_research_service._start_temporal_workflow",
+        capture_start,
+    )
+
+    _project_id, sprint = _create_planned_sprint(client)
+    budget = sprint["workflow_security_budget"]
+
+    assert budget["max_model_calls"] == 7
+    assert budget["max_duration_seconds"] == 120
+    assert {"max_tokens", "max_cost_usd", "max_tool_calls", "max_retrieved_chunks"} <= budget.keys()
+    assert captured_payloads[0]["workflow_security_budget"] == budget
+    assert temporal_research_service._workflow_execution_timeout(
+        get_settings(),
+        captured_payloads[0],
+    ) == timedelta(seconds=120)
+
+    persisted = db_session.get(ResearchSprint, uuid.UUID(sprint["id"]))
+    assert persisted is not None
+    assert persisted.workflow_security_budget == budget
+    get_settings.cache_clear()
 
 
 def test_research_plan_approval_signals_temporal_workflow(

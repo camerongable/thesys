@@ -1053,11 +1053,18 @@ current verdict, next action, evidence health, validation, and decision state.
   actor within a configured window produce one critical, attributable escalation
   event and alert. Workspace owners and admins can query the redacted alert
   queue per project.
+- [x] Establish a durable, immutable workflow security-budget contract.
+  Each research sprint snapshots all required model, tool, external-query,
+  retrieval, token, cost, duration, memory-proposal, structured-repair, and
+  critique-loop limits before durable execution. The snapshot is visible through
+  the sprint API, persists across retries/configuration changes, travels with
+  the Temporal payload, and constrains its execution timeout by the configured
+  workflow duration limit.
 
 ## Next Sprint
 
-Continue Sprint 67 by adding resource-budget enforcement, loop detection, and
-the remaining detection rules to the normalized security-event stream.
+Continue Sprint 67 by metering and enforcing the remaining workflow budget
+dimensions, then add loop detection and the remaining detection rules.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

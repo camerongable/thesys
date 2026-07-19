@@ -181,6 +181,54 @@ class Settings(BaseSettings):
         le=100,
         validation_alias="SECURITY_REPEATED_GUARDRAIL_THRESHOLD",
     )
+    security_workflow_max_model_calls: int = Field(
+        default=12,
+        ge=1,
+        le=1_000,
+        validation_alias="SECURITY_WORKFLOW_MAX_MODEL_CALLS",
+    )
+    security_workflow_max_tool_calls: int = Field(
+        default=20,
+        ge=1,
+        le=1_000,
+        validation_alias="SECURITY_WORKFLOW_MAX_TOOL_CALLS",
+    )
+    security_workflow_max_external_queries: int = Field(
+        default=20,
+        ge=1,
+        le=1_000,
+        validation_alias="SECURITY_WORKFLOW_MAX_EXTERNAL_QUERIES",
+    )
+    security_workflow_max_retrieved_chunks: int = Field(
+        default=100,
+        ge=1,
+        le=10_000,
+        validation_alias="SECURITY_WORKFLOW_MAX_RETRIEVED_CHUNKS",
+    )
+    security_workflow_max_duration_seconds: int = Field(
+        default=1800,
+        ge=60,
+        le=86_400,
+        validation_alias="SECURITY_WORKFLOW_MAX_DURATION_SECONDS",
+    )
+    security_workflow_max_memory_proposals: int = Field(
+        default=10,
+        ge=1,
+        le=1_000,
+        validation_alias="SECURITY_WORKFLOW_MAX_MEMORY_PROPOSALS",
+    )
+    security_workflow_max_structured_output_repairs: int = Field(
+        default=3,
+        ge=0,
+        le=100,
+        validation_alias="SECURITY_WORKFLOW_MAX_STRUCTURED_OUTPUT_REPAIRS",
+    )
+    security_workflow_max_critique_loops: int = Field(
+        default=3,
+        ge=0,
+        le=100,
+        validation_alias="SECURITY_WORKFLOW_MAX_CRITIQUE_LOOPS",
+    )
     ai_workflow_max_tokens: int = Field(
         default=100_000,
         ge=1_000,

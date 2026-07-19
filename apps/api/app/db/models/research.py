@@ -129,6 +129,11 @@ class ResearchSprint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     current_step: Mapped[str | None] = mapped_column(String(120), index=True)
     failed_step: Mapped[str | None] = mapped_column(String(120))
     failure_message: Mapped[str | None] = mapped_column(Text)
+    workflow_security_budget: Mapped[dict[str, object]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"),
+        nullable=False,
+        default=dict,
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     langsmith_trace_id: Mapped[str | None] = mapped_column(String(100), index=True)

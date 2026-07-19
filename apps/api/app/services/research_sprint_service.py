@@ -44,6 +44,7 @@ from app.schemas.research import (
     ResearchPlanUpdate,
     ResearchSprintPlanCreate,
 )
+from app.security.workflow_budget import WorkflowSecurityBudget
 from app.services import (
     ai_run_service,
     governance_service,
@@ -202,6 +203,7 @@ def start_research_sprint_plan(
             research_plan_id=research_plan.id,
             ai_run_id=run.id,
             status="planned",
+            workflow_security_budget=WorkflowSecurityBudget.from_settings(settings).as_payload(),
             created_by=auth.user_id,
         )
         db.add(sprint)
