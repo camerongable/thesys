@@ -439,6 +439,137 @@ def test_authenticated_api_rate_limit_fails_closed_when_redis_is_unavailable(
     get_settings.cache_clear()
 
 
+def test_file_upload_rate_limits_user_requests_and_workspace_bytes(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = _create_project(client)
+    monkeypatch.setenv("SECURITY_UPLOAD_RATE_LIMIT_USER_MAX_REQUESTS", "1")
+    monkeypatch.setenv("SECURITY_UPLOAD_RATE_LIMIT_WORKSPACE_MAX_BYTES", "100")
+    get_settings.cache_clear()
+    security_policy_service.reset_policy_state()
+
+    first = client.post(
+        f"/api/projects/{project_id}/evidence/file",
+        files={"file": ("note.txt", b"hello", "text/plain")},
+    )
+    denied = client.post(
+        f"/api/projects/{project_id}/evidence/file",
+        files={"file": ("note-2.txt", b"hello", "text/plain")},
+    )
+
+    assert first.status_code == 201
+    assert denied.status_code == 429
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "security_policy_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["detail"] == "Per-user upload rate limit exceeded."
+    get_settings.cache_clear()
+
+
+def test_file_upload_rate_limits_workspace_bytes(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = _create_project(client)
+    monkeypatch.setenv("SECURITY_UPLOAD_RATE_LIMIT_USER_MAX_REQUESTS", "10")
+    monkeypatch.setenv("SECURITY_UPLOAD_RATE_LIMIT_WORKSPACE_MAX_BYTES", "5")
+    get_settings.cache_clear()
+    security_policy_service.reset_policy_state()
+
+    first = client.post(
+        f"/api/projects/{project_id}/evidence/file",
+        files={"file": ("note.txt", b"hello", "text/plain")},
+    )
+    denied = client.post(
+        f"/api/projects/{project_id}/evidence/file",
+        files={"file": ("note-2.txt", b"hello", "text/plain")},
+    )
+
+    assert first.status_code == 201
+    assert denied.status_code == 429
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "security_policy_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["detail"] == "Per-workspace uploaded-byte rate limit exceeded."
+    get_settings.cache_clear()
+
+
+def test_file_upload_rate_limit_uses_hashed_redis_byte_bucket(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeRedis:
+        def __init__(self) -> None:
+            self.counts: dict[str, int] = {}
+
+        def eval(self, _script: str, _keys: int, key: str, *args: int) -> int:
+            amount = args[0] if len(args) == 2 else 1
+            self.counts[key] = self.counts.get(key, 0) + amount
+            return self.counts[key]
+
+    project_id = _create_project(client)
+    fake_redis = FakeRedis()
+    monkeypatch.setenv("SECURITY_RATE_LIMIT_BACKEND", "redis")
+    monkeypatch.setenv("SECURITY_UPLOAD_RATE_LIMIT_USER_MAX_REQUESTS", "10")
+    monkeypatch.setenv("SECURITY_UPLOAD_RATE_LIMIT_WORKSPACE_MAX_BYTES", "5")
+    monkeypatch.setattr(security_policy_service, "_redis_client", lambda _settings: fake_redis)
+    get_settings.cache_clear()
+    security_policy_service.reset_policy_state()
+
+    first = client.post(
+        f"/api/projects/{project_id}/evidence/file",
+        files={"file": ("note.txt", b"hello", "text/plain")},
+    )
+    denied = client.post(
+        f"/api/projects/{project_id}/evidence/file",
+        files={"file": ("note-2.txt", b"hello", "text/plain")},
+    )
+
+    assert first.status_code == 201
+    assert denied.status_code == 429
+    assert any(":upload_bytes_workspace:" in key for key in fake_redis.counts)
+    assert all("evidence_file_upload" not in key for key in fake_redis.counts)
+    get_settings.cache_clear()
+
+
+def test_signed_url_rate_limit_denies_before_object_authorization(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = _create_project(client)
+    source = client.post(
+        f"/api/projects/{project_id}/evidence/file",
+        files={"file": ("note.txt", b"downloadable evidence", "text/plain")},
+    ).json()
+    monkeypatch.setenv("SECURITY_SIGNED_URL_RATE_LIMIT_USER_MAX_REQUESTS", "1")
+    get_settings.cache_clear()
+    security_policy_service.reset_policy_state()
+
+    first = client.get(f"/api/projects/{project_id}/evidence/{source['id']}/download")
+    denied = client.get(f"/api/projects/{project_id}/evidence/{source['id']}/download")
+
+    assert first.status_code == 200
+    assert denied.status_code == 429
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "security_policy_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["workflow_type"] == "evidence_signed_url"
+    get_settings.cache_clear()
+
+
 def test_expensive_workflow_rate_limit_uses_hashed_redis_buckets(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

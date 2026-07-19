@@ -1298,7 +1298,9 @@ current verdict, next action, evidence health, validation, and decision state.
   the same scoped limits in memory. These interactive-request quotas remain
   separate from expensive-workflow limits. Rejected credentials are separately
   throttled by transport IP after the failure is recorded, limiting brute-force
-  attempts without trusting a claimed identity.
+  attempts without trusting a claimed identity. Evidence upload requests,
+  uploaded bytes per workspace, and signed-download authorizations per user are
+  independently limited before scanning, storage, or object presigning.
 
 ## Next Sprint
 

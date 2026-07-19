@@ -36,6 +36,7 @@ class WorkflowBudgetEstimate:
 
 
 _rate_events: dict[tuple[str, str, str], deque[float]] = defaultdict(deque)
+_byte_rate_events: dict[tuple[str, str, str], deque[tuple[float, int]]] = defaultdict(deque)
 _concurrency_counts: dict[tuple[str, str], int] = defaultdict(int)
 _redis_clients: dict[str, Redis] = {}
 _lock = RLock()
@@ -44,6 +45,14 @@ _REDIS_FIXED_WINDOW_SCRIPT = """
 local count = redis.call('INCR', KEYS[1])
 if count == 1 then
   redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+"""
+
+_REDIS_FIXED_WINDOW_INCREMENT_BY_SCRIPT = """
+local count = redis.call('INCRBY', KEYS[1], ARGV[1])
+if count == tonumber(ARGV[1]) then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
 end
 return count
 """
@@ -318,6 +327,7 @@ def reset_policy_state() -> None:
     """Clear in-memory limiter state for tests and local development resets."""
     with _lock:
         _rate_events.clear()
+        _byte_rate_events.clear()
         _concurrency_counts.clear()
         clients = list(_redis_clients.values())
         _redis_clients.clear()
@@ -422,6 +432,156 @@ def enforce_failed_authentication_rate_limit(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Distributed rate-limit service is unavailable.",
         ) from exc
+
+
+def enforce_file_upload_rate_limit(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    size_bytes: int,
+) -> None:
+    """Limit upload attempts and cumulative byte intake before scanning or storage."""
+    if not settings.security_rate_limit_enabled:
+        return
+
+    workflow_type = "evidence_file_upload"
+    try:
+        if settings.security_rate_limit_backend == "redis":
+            client = _redis_client(settings)
+            _check_redis_bucket(
+                client,
+                key=_rate_limit_key(
+                    settings,
+                    scope="upload_user",
+                    identifier=str(auth.user_id),
+                    workflow_type=workflow_type,
+                ),
+                window_seconds=settings.security_rate_limit_window_seconds,
+                max_requests=settings.security_upload_rate_limit_user_max_requests,
+                detail="Per-user upload rate limit exceeded.",
+            )
+            _check_redis_amount_bucket(
+                client,
+                key=_rate_limit_key(
+                    settings,
+                    scope="upload_bytes_workspace",
+                    identifier=str(auth.workspace_id),
+                    workflow_type=workflow_type,
+                ),
+                amount=size_bytes,
+                window_seconds=settings.security_rate_limit_window_seconds,
+                maximum=settings.security_upload_rate_limit_workspace_max_bytes,
+                detail="Per-workspace uploaded-byte rate limit exceeded.",
+            )
+        else:
+            now = time.monotonic()
+            window = float(settings.security_rate_limit_window_seconds)
+            with _lock:
+                _check_rate_bucket(
+                    key=("upload_user", str(auth.user_id), workflow_type),
+                    now=now,
+                    window=window,
+                    max_requests=settings.security_upload_rate_limit_user_max_requests,
+                    detail="Per-user upload rate limit exceeded.",
+                )
+                _check_byte_rate_bucket(
+                    key=("upload_bytes_workspace", str(auth.workspace_id), workflow_type),
+                    now=now,
+                    window=window,
+                    amount=size_bytes,
+                    maximum=settings.security_upload_rate_limit_workspace_max_bytes,
+                    detail="Per-workspace uploaded-byte rate limit exceeded.",
+                )
+    except HTTPException as exc:
+        _record_policy_denial(
+            db,
+            auth,
+            project_id=project_id,
+            workflow_type=workflow_type,
+            status_code=exc.status_code,
+            detail=str(exc.detail),
+        )
+        raise
+    except RedisError as exc:
+        denial = HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Distributed rate-limit service is unavailable.",
+        )
+        _record_policy_denial(
+            db,
+            auth,
+            project_id=project_id,
+            workflow_type=workflow_type,
+            status_code=denial.status_code,
+            detail=str(denial.detail),
+        )
+        raise denial from exc
+
+
+def enforce_signed_url_rate_limit(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+) -> None:
+    """Limit signed download authorization before object-store presigning."""
+    if not settings.security_rate_limit_enabled:
+        return
+
+    workflow_type = "evidence_signed_url"
+    try:
+        if settings.security_rate_limit_backend == "redis":
+            client = _redis_client(settings)
+            _check_redis_bucket(
+                client,
+                key=_rate_limit_key(
+                    settings,
+                    scope="signed_url_user",
+                    identifier=str(auth.user_id),
+                    workflow_type=workflow_type,
+                ),
+                window_seconds=settings.security_rate_limit_window_seconds,
+                max_requests=settings.security_signed_url_rate_limit_user_max_requests,
+                detail="Per-user signed URL rate limit exceeded.",
+            )
+        else:
+            now = time.monotonic()
+            window = float(settings.security_rate_limit_window_seconds)
+            with _lock:
+                _check_rate_bucket(
+                    key=("signed_url_user", str(auth.user_id), workflow_type),
+                    now=now,
+                    window=window,
+                    max_requests=settings.security_signed_url_rate_limit_user_max_requests,
+                    detail="Per-user signed URL rate limit exceeded.",
+                )
+    except HTTPException as exc:
+        _record_policy_denial(
+            db,
+            auth,
+            project_id=project_id,
+            workflow_type=workflow_type,
+            status_code=exc.status_code,
+            detail=str(exc.detail),
+        )
+        raise
+    except RedisError as exc:
+        denial = HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Distributed rate-limit service is unavailable.",
+        )
+        _record_policy_denial(
+            db,
+            auth,
+            project_id=project_id,
+            workflow_type=workflow_type,
+            status_code=denial.status_code,
+            detail=str(denial.detail),
+        )
+        raise denial from exc
 
 
 def _enforce_memory_authenticated_request_limits(
@@ -571,6 +731,28 @@ def _check_redis_bucket(
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail)
 
 
+def _check_redis_amount_bucket(
+    client: Redis,
+    *,
+    key: str,
+    amount: int,
+    window_seconds: int,
+    maximum: int,
+    detail: str,
+) -> None:
+    count = int(
+        client.eval(
+            _REDIS_FIXED_WINDOW_INCREMENT_BY_SCRIPT,
+            1,
+            key,
+            amount,
+            window_seconds,
+        )
+    )
+    if count > maximum:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail)
+
+
 def _rate_limit_key(
     settings: Settings,
     *,
@@ -598,6 +780,23 @@ def _check_rate_bucket(
     if len(events) >= max_requests:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail)
     events.append(now)
+
+
+def _check_byte_rate_bucket(
+    *,
+    key: tuple[str, str, str],
+    now: float,
+    window: float,
+    amount: int,
+    maximum: int,
+    detail: str,
+) -> None:
+    events = _byte_rate_events[key]
+    while events and now - events[0][0] > window:
+        events.popleft()
+    if sum(size for _, size in events) + amount > maximum:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail)
+    events.append((now, amount))
 
 
 def _acquire_concurrency(settings: Settings, auth: AuthContext, workflow_type: str) -> None:

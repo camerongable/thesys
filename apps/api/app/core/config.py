@@ -874,6 +874,21 @@ class Settings(BaseSettings):
         ge=1,
         validation_alias="SECURITY_FAILED_AUTH_RATE_LIMIT_IP_MAX_REQUESTS",
     )
+    security_upload_rate_limit_user_max_requests: int = Field(
+        default=60,
+        ge=1,
+        validation_alias="SECURITY_UPLOAD_RATE_LIMIT_USER_MAX_REQUESTS",
+    )
+    security_upload_rate_limit_workspace_max_bytes: int = Field(
+        default=1_073_741_824,
+        ge=1,
+        validation_alias="SECURITY_UPLOAD_RATE_LIMIT_WORKSPACE_MAX_BYTES",
+    )
+    security_signed_url_rate_limit_user_max_requests: int = Field(
+        default=120,
+        ge=1,
+        validation_alias="SECURITY_SIGNED_URL_RATE_LIMIT_USER_MAX_REQUESTS",
+    )
     security_max_concurrent_workflows: int = Field(
         default=8,
         ge=1,

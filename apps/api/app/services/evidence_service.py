@@ -443,6 +443,13 @@ def add_file_source(
     project_service.get_project(db, auth, project_id)
     require_permission(auth, "write_project")
     body = upload.file.read()
+    security_policy_service.enforce_file_upload_rate_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        size_bytes=len(body),
+    )
     try:
         upload_validation = validate_upload(
             filename=upload.filename,
@@ -758,6 +765,12 @@ def prepare_source_download(
         settings,
         project_id=project_id,
         source_id=source.id,
+    )
+    security_policy_service.enforce_signed_url_rate_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
     )
     try:
         download = object_storage_service.prepare_evidence_download(

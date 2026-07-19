@@ -171,6 +171,9 @@ Security boundaries:
 - Rejected credentials are separately limited by transport IP. This counter uses
   the same hosted Redis requirement and local/test memory backend as the other
   request limits, while preserving a credential-free authentication audit trail.
+- Evidence transfers apply separate per-user upload and signed-download limits,
+  plus a per-workspace byte quota before malware scanning, storage, or object
+  presigning. Their fixed-window buckets use the same hosted Redis backend.
 
 ## Dependency And Security Audit Commands
 
