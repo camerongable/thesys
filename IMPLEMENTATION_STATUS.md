@@ -1322,6 +1322,11 @@ deployment-hardening requirements.
   Separate API/worker identities, non-root/read-only/RuntimeDefault pods, dropped
   capabilities, bounded writable storage, resource limits, PDBs, default-deny
   networking, and digest-only image admission are all static-tested before cluster use.
+- [x] Harden application container builds around immutable runtime inputs. API and web
+  bases now use pinned official image digests; the API build installs only the locked
+  production environment and both default runtime images run as UID/GID 10001. Compose
+  explicitly selects separate development stages so host-source mounts do not shadow the
+  production virtual environment or runtime image.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
