@@ -125,6 +125,7 @@ def test_evidence_derived_agent_memory_requires_approval_before_recall(
         source_entity_type="evidence_source",
         source_entity_id=source_id,
         provenance_metadata={"origin": "agent", "trust_score": 0.8},
+        confidence_score=Decimal("0.8"),
         expires_at=expiry,
     )
     db_session.commit()
@@ -168,6 +169,9 @@ def test_agent_memory_cannot_bypass_approval_with_direct_policy_or_projection(
         title="Agent-proposed conclusion",
         summary="An agent conclusion requires review before durable recall.",
         content={"claim": "requires review"},
+        source_entity_type="guide_chat",
+        source_entity_id=uuid.uuid4(),
+        confidence_score=Decimal("0.6"),
         provenance_metadata={
             "origin": "agent",
             "trusted_projection": True,
@@ -185,6 +189,62 @@ def test_agent_memory_cannot_bypass_approval_with_direct_policy_or_projection(
         project_id,
         workflow_type="guide_chat",
     ) == []
+
+
+def test_semantic_memory_requires_provenance_and_bounded_confidence(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session, "owner")
+
+    with pytest.raises(HTTPException) as missing_source:
+        memory_service.upsert_memory_item(
+            db_session,
+            auth,
+            project_id,
+            memory_type="semantic",
+            write_policy="direct",
+            title="Unattributed conclusion",
+            summary="A semantic conclusion cannot lack provenance.",
+            content={"claim": "unattributed"},
+            confidence_score=Decimal("0.7"),
+        )
+    assert missing_source.value.status_code == 422
+
+    with pytest.raises(HTTPException) as invalid_confidence:
+        memory_service.upsert_memory_item(
+            db_session,
+            auth,
+            project_id,
+            memory_type="semantic",
+            write_policy="direct",
+            title="Overconfident conclusion",
+            summary="A semantic conclusion must have bounded confidence.",
+            content={"claim": "overconfident"},
+            source_entity_type="artifact_version",
+            source_entity_id=uuid.uuid4(),
+            confidence_score=Decimal("1.1"),
+        )
+    assert invalid_confidence.value.status_code == 422
+
+    item = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="semantic",
+        write_policy="direct",
+        title="Sourced conclusion",
+        summary="A semantic conclusion includes its provenance and confidence.",
+        content={"claim": "sourced"},
+        source_entity_type="artifact_version",
+        source_entity_id=uuid.uuid4(),
+        confidence_score=Decimal("0.7"),
+    )
+    db_session.commit()
+
+    assert item.status == "active"
+    assert item.confidence_score == Decimal("0.7")
 
 
 def test_procedural_memory_requires_versioned_code_or_config_source(
@@ -263,6 +323,9 @@ def test_working_memory_has_bounded_ttl_and_expired_memory_is_inspectable(
         title="Expired finding",
         summary="An outdated willingness-to-pay finding.",
         content={"claim": "outdated finding"},
+        source_entity_type="artifact_version",
+        source_entity_id=uuid.uuid4(),
+        confidence_score=Decimal("0.5"),
         expires_at=now - timedelta(seconds=1),
     )
     db_session.commit()
@@ -425,6 +488,9 @@ def test_conflicting_memory_proposal_preserves_active_version_until_approval(
         title="Current buyer belief",
         summary="Independent coaches will pay for check-in triage.",
         content={"claim": "coaches will pay"},
+        source_entity_type="artifact_version",
+        source_entity_id=uuid.uuid4(),
+        confidence_score=Decimal("0.7"),
     )
     db_session.commit()
 
@@ -439,6 +505,9 @@ def test_conflicting_memory_proposal_preserves_active_version_until_approval(
         title="Repeated buyer belief",
         summary="Independent coaches will pay for check-in triage.",
         content={"claim": "coaches will pay"},
+        source_entity_type="artifact_version",
+        source_entity_id=uuid.uuid4(),
+        confidence_score=Decimal("0.7"),
         provenance_metadata={"origin": "agent", "trust_score": 0.8},
         status_value="proposed",
     )
@@ -456,6 +525,9 @@ def test_conflicting_memory_proposal_preserves_active_version_until_approval(
         title="Conflicting buyer belief",
         summary="Independent coaches will not pay for check-in triage.",
         content={"claim": "coaches will not pay"},
+        source_entity_type="artifact_version",
+        source_entity_id=uuid.uuid4(),
+        confidence_score=Decimal("0.7"),
         provenance_metadata={"origin": "agent", "trust_score": 0.8},
         status_value="proposed",
     )
@@ -635,6 +707,9 @@ def test_memory_api_can_mark_items_stale(
         title="Assumption",
         summary="The target user has urgent pain.",
         content={"text": "The target user has urgent pain."},
+        source_entity_type="artifact_version",
+        source_entity_id=uuid.uuid4(),
+        confidence_score=Decimal("0.7"),
     )
     db_session.commit()
 
@@ -662,6 +737,9 @@ def test_memory_context_selection_explains_exclusions_and_conflicts(
         title="Target pain",
         summary="Coaches need triage before weekly check-ins.",
         content={"text": "Coaches need triage before weekly check-ins."},
+        source_entity_type="artifact_version",
+        source_entity_id=uuid.uuid4(),
+        confidence_score=Decimal("0.7"),
     )
     memory_service.upsert_memory_item(
         db_session,
@@ -742,6 +820,7 @@ def test_memory_proposals_and_inspect_endpoint(
         content={"finding": "triage before calls"},
         source_entity_type="artifact_version",
         source_entity_id=uuid.uuid4(),
+        confidence_score=Decimal("0.7"),
     )
     db_session.commit()
 
@@ -792,6 +871,9 @@ def test_memory_proposals_and_inspect_endpoint(
         "workflow_type": "guide_chat",
     }
     assert compacted["provenance_metadata"]["source_memory_ids"] == [str(source.id)]
+    assert compacted["source_entity_type"] == "project_memory_item"
+    assert compacted["source_entity_id"] == str(source.id)
+    assert Decimal(compacted["confidence_score"]) == Decimal("0.7")
     assert compacted["provenance_metadata"]["source_entity_refs"] == [
         {
             "memory_id": str(source.id),
@@ -826,8 +908,8 @@ def test_memory_proposals_and_inspect_endpoint(
         "memory_type": "semantic",
         "status": "rejected",
         "proposal_kind": "memory_compaction",
-        "source_entity_type": "memory_compaction",
-        "source_entity_id": None,
+        "source_entity_type": "project_memory_item",
+        "source_entity_id": str(source.id),
     }
 
     inspect_after_reject_response = client.get(

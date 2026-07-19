@@ -1207,6 +1207,16 @@ def test_memory_security_policy_normalizes_secure_recall_metadata() -> None:
         source_entity_type="research_sprint",
         source_entity_id="sprint-1",
     )
+    assert memory_security_policy.semantic_memory_write_allowed(
+        source_entity_type="artifact_version",
+        source_entity_id="artifact-1",
+        confidence_score="0.7",
+    )
+    assert not memory_security_policy.semantic_memory_write_allowed(
+        source_entity_type="artifact_version",
+        source_entity_id="artifact-1",
+        confidence_score=1.1,
+    )
 
 
 def test_context_evidence_item_helpers_are_feature_owned_and_service_compatible() -> None:

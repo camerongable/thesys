@@ -333,6 +333,15 @@ def upsert_memory_item(
         safe_provenance["event_at"] = memory_security_policy.normalized_episodic_event_timestamp(
             safe_provenance
         )
+    if memory_type == "semantic" and not memory_security_policy.semantic_memory_write_allowed(
+        source_entity_type=source_entity_type,
+        source_entity_id=source_entity_id,
+        confidence_score=confidence_score,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Semantic memory requires source provenance and confidence from zero to one.",
+        )
     if memory_type == "procedural" and not memory_security_policy.procedural_memory_write_allowed(
         safe_provenance,
         source_entity_type=source_entity_type,
@@ -481,8 +490,13 @@ def propose_compacted_memory(
         title=compacted.title,
         summary=compacted.summary,
         content=compacted.content,
-        source_entity_type="memory_compaction",
+        source_entity_type="project_memory_item",
+        source_entity_id=source_items[0].id,
         provenance_metadata=compacted.provenance_metadata,
+        confidence_score=min(
+            (item.confidence_score or Decimal("0") for item in source_items),
+            default=Decimal("0"),
+        ),
         status_value="proposed",
     )
     db.commit()

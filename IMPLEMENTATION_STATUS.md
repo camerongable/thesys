@@ -589,6 +589,10 @@ current verdict, next action, evidence health, validation, and decision state.
   source provenance and a timezone-aware event timestamp; the timestamp is
   normalized to UTC and each episodic item receives a capped 30-day expiry so
   workflow events cannot become unbounded project memory.
+- [x] Enforce semantic-memory conclusion integrity. Writes require attributable
+  source provenance and confidence in the inclusive zero-to-one range; compacted
+  semantic proposals retain their source-memory reference and conservatively
+  use the lowest source confidence, treating missing confidence as zero.
 - [x] Detect anomalous embedding clusters before evidence chunks are persisted.
   A distinct source whose candidate vectors nearly match two approved,
   different-content project sources receives an inspectable source-trust signal
@@ -736,6 +740,9 @@ current verdict, next action, evidence health, validation, and decision state.
   across memory-service, context-compiler, and feature-boundary coverage;
   focused policy coverage, changed-file compile checks, and repository
   application lint passed.
+- [x] Semantic-memory integrity checkpoint passed (`77 passed, 1 warning`)
+  across memory-service, context-compiler, and feature-boundary coverage;
+  changed-file compile checks and repository application lint passed.
 
 ## Next Sprint
 

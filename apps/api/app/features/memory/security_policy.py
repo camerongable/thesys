@@ -125,6 +125,25 @@ def episodic_memory_write_allowed(
     )
 
 
+def semantic_memory_write_allowed(
+    *,
+    source_entity_type: str | None,
+    source_entity_id: object | None,
+    confidence_score: object | None,
+) -> bool:
+    """Require attributable, bounded confidence for durable semantic conclusions."""
+    try:
+        confidence = float(confidence_score)
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        isinstance(source_entity_type, str)
+        and source_entity_type.strip()
+        and source_entity_id is not None
+        and 0.0 <= confidence <= 1.0
+    )
+
+
 def working_memory_session_scope(session_identifier: str | None) -> str | None:
     """Return a non-reversible session scope suitable for memory provenance."""
     if not isinstance(session_identifier, str) or not session_identifier.strip():
