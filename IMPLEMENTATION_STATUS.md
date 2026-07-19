@@ -1428,9 +1428,11 @@ deployment-hardening requirements.
 - [x] The pinned `pnpm@10.12.1` frozen install, web test suite (`24 passed`),
   web typecheck, and local Promptfoo fast (`3 passed`) and full (`9 passed`)
   suites passed after npm registry access recovered.
-- [ ] Hosted release verification remains required: execute the tagged GitHub
-  release workflow with protected Garak target credentials and registry access,
-  then retain the signed-image, SBOM, Trivy, and security-report artifacts.
+- [ ] Hosted verification remains required. Push a version tag to run `Release
+  Security` with GitHub Container Registry access, then retain the signed-image,
+  SBOM, Trivy, and security-report artifacts. Separately dispatch `Security`
+  with protected `GARAK_TARGET_URI` and `GARAK_TARGET_AUTHORIZATION` secrets to
+  run the nightly Garak target scan and retain its evidence.
 - [ ] Repository administration remains required outside source control: enable
   default-branch protection and required review for the documented CI checks.
 
