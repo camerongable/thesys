@@ -10,6 +10,7 @@ from typing import Any
 SECURE_MEMORY_POLICY_VERSION = "secure-memory:v1"
 MINIMUM_RECALL_TRUST_SCORE = 0.5
 _EVIDENCE_ENTITY_TYPES = {"evidence_source", "evidence_chunk", "retrieved_evidence"}
+_PROCEDURAL_SOURCE_TYPES = {"code", "config"}
 _ORIGINS = {"user", "agent", "derived", "system"}
 _SECURITY_STATUSES = {"approved", "quarantined", "blocked"}
 
@@ -73,6 +74,24 @@ def requires_memory_proposal(
     return bool(
         metadata.get("requires_human_approval")
         and not (metadata.get("approved_at") or metadata.get("trusted_projection"))
+    )
+
+
+def procedural_memory_write_allowed(
+    metadata: dict[str, Any],
+    *,
+    source_entity_type: str | None,
+    source_entity_id: object | None,
+    write_policy: str,
+) -> bool:
+    """Only permit versioned code/config procedures in durable memory."""
+    return (
+        metadata.get("origin") == "system"
+        and source_entity_type in _PROCEDURAL_SOURCE_TYPES
+        and source_entity_id is not None
+        and write_policy == "derived_read_only"
+        and isinstance(metadata.get("procedure_version"), str)
+        and bool(metadata["procedure_version"].strip())
     )
 
 

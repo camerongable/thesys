@@ -284,6 +284,16 @@ def upsert_memory_item(
         write_policy=write_policy,
         expires_at=expires_at,
     )
+    if memory_type == "procedural" and not memory_security_policy.procedural_memory_write_allowed(
+        safe_provenance,
+        source_entity_type=source_entity_type,
+        source_entity_id=source_entity_id,
+        write_policy=write_policy,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Procedural memory must be code-owned and versioned.",
+        )
     if memory_security_policy.requires_memory_proposal(
         safe_provenance,
         source_entity_type=source_entity_type,

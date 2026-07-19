@@ -562,6 +562,10 @@ current verdict, next action, evidence health, validation, and decision state.
   independent of a caller-selected direct write policy or forged approval and
   trusted-projection fields. Agent proposals stay out of workflow recall until
   the controlled approval path records review metadata.
+- [x] Reserve procedural memory for versioned system code/config only. The
+  durable-memory boundary rejects retrieved or agent instructions before
+  persistence; an active procedure must carry system origin, a code/config
+  source reference, a non-empty procedure version, and a read-only policy.
 - [x] Preserve the active memory version when a proposed update for the same
   entity has a different content hash. The active and proposed versions receive
   reciprocal conflict links and a shared conflict group; Inspect exposes both
@@ -707,12 +711,15 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Agent-memory approval-bypass checkpoint passed (`63 passed, 1 warning`)
   across memory-service and feature-boundary coverage; changed-file compile
   checks and repository application lint passed.
+- [x] Code-owned procedural-memory checkpoint passed (`64 passed, 1 warning`)
+  across memory-service and feature-boundary coverage; changed-file compile
+  checks and repository application lint passed.
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-enforce code-owned procedural-memory writes and audit any residual
-evidence-derived replay surfaces.
+audit remaining evidence-derived replay surfaces, then move to the next
+unimplemented Sprint 65 acceptance boundary.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
