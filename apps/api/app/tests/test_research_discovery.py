@@ -521,6 +521,90 @@ def test_source_discovery_stops_after_provider_usage_exceeds_workflow_budget(
     assert security_event.source == "workflow"
 
 
+def test_source_discovery_caps_structured_output_repairs_before_provider_call(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint(client)
+    sprint = db_session.get(ResearchSprint, uuid.UUID(sprint_id))
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_structured_output_repairs": 1,
+    }
+    db_session.commit()
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LLM_STRUCTURED_OUTPUT_REPAIR_ATTEMPTS", "2")
+    monkeypatch.setenv("LITELLM_API_KEY", "test-model-key")
+    monkeypatch.setenv("PROVIDER_EGRESS_POLICY_ENABLED", "false")
+    get_settings.cache_clear()
+    provider_calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "model": "test-model",
+                "choices": [{"message": {"content": "[]"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+            }
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, _url: str, **kwargs: object) -> FakeResponse:
+            provider_calls.append(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr(litellm_client.httpx, "Client", FakeClient)
+
+    response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+    )
+
+    assert response.status_code == 429
+    assert len(provider_calls) == 2
+    db_session.refresh(sprint)
+    assert sprint.workflow_security_usage == {
+        "model_calls": 2,
+        "tokens": 40,
+        "cost_usd": "0",
+        "structured_output_repairs": 1,
+    }
+    assert not list(
+        db_session.scalars(
+            select(DiscoveredSource).where(
+                DiscoveredSource.research_sprint_id == uuid.UUID(sprint_id)
+            )
+        )
+    )
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_structured_output_repair_budget_exceeded")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["max_structured_output_repairs"] == 1
+    assert audit.event_metadata["observed_structured_output_repairs"] == 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
+
+
 def test_prompt_injection_search_snippet_stays_review_only(
     client: TestClient,
     db_session: Session,

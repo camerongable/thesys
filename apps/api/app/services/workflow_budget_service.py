@@ -136,6 +136,42 @@ def record_model_usage(
     context.db.commit()
 
 
+def reserve_structured_output_repair() -> None:
+    context = _workflow_budget_context.get()
+    if context is None:
+        return
+    sprint, budget = _locked_sprint_and_budget(context)
+    usage = dict(sprint.workflow_security_usage or {})
+    observed_repairs = _nonnegative_usage_count(usage.get("structured_output_repairs", 0))
+    if observed_repairs >= budget.max_structured_output_repairs:
+        governance_service.record_audit_event(
+            context.db,
+            context.auth,
+            event_type="workflow_structured_output_repair_budget_exceeded",
+            actor_type="agent",
+            project_id=context.project_id,
+            entity_type="research_sprint",
+            entity_id=context.research_sprint_id,
+            risk_level="high",
+            summary=(
+                "Workflow structured-output repair budget was exhausted before provider execution."
+            ),
+            metadata={
+                "max_structured_output_repairs": budget.max_structured_output_repairs,
+                "observed_structured_output_repairs": observed_repairs,
+                "temporal_workflow_id": sprint.temporal_workflow_id,
+            },
+        )
+        context.db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+        )
+    usage["structured_output_repairs"] = observed_repairs + 1
+    sprint.workflow_security_usage = usage
+    context.db.commit()
+
+
 def _locked_sprint_and_budget(
     context: WorkflowBudgetContext,
 ) -> tuple[ResearchSprint, WorkflowSecurityBudget]:

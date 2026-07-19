@@ -17,6 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.ai.litellm_client import ChatMessage, LiteLLMClient, LLMCompletion
 from app.core.config import Settings
+from app.services.workflow_budget_service import reserve_structured_output_repair
 
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
 
@@ -68,6 +69,7 @@ def generate_structured_output(
     except ValidationError as exc:
         last_error = exc
         for repair_attempt in range(settings.llm_structured_output_repair_attempts):
+            reserve_structured_output_repair()
             completion = client.complete(
                 _repair_messages(
                     output_schema,

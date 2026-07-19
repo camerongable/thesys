@@ -1101,6 +1101,12 @@ current verdict, next action, evidence health, validation, and decision state.
   records the configured and observed total in the high-risk workflow audit,
   normalized security event, and alert, and safely stops downstream workflow
   writes. Streamed requests also account for reported response cost when scoped.
+- [x] Enforce structured-output repair limits at the shared retry loop. Every
+  repair reservation locks and increments the sprint before another provider
+  request, so a malformed response cannot create an unbounded correction loop.
+  Exhaustion prevents the next repair call and emits the configured and observed
+  totals through the high-risk workflow audit, normalized security event, and
+  alert.
 
 ## Next Sprint
 
