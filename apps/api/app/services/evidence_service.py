@@ -2,7 +2,7 @@
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from time import perf_counter
 from typing import Any
@@ -24,6 +24,7 @@ from app.core.security import (
 )
 from app.db.models import (
     AssumptionEvidenceLink,
+    AuditEvent,
     Claim,
     ClaimEvidenceLink,
     CompetitorCandidate,
@@ -75,6 +76,8 @@ _summarize = evidence_extraction.summarize_text
 _text_upload_metadata = evidence_extraction.text_upload_metadata
 _tokens = evidence_extraction.tokens
 _truncate = evidence_extraction.truncate_text
+
+_AUTHORIZED_DOWNLOAD_AUDIT_EVENT_TYPES = ("signed_url_created", "object_download_authorized")
 
 
 class EvidenceIngestionError(RuntimeError):
@@ -749,6 +752,13 @@ def prepare_source_download(
     content_type = str(
         (source.source_metadata or {}).get("content_type") or "application/octet-stream"
     )
+    _record_mass_export_attempt_if_needed(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        source_id=source.id,
+    )
     try:
         download = object_storage_service.prepare_evidence_download(
             settings,
@@ -798,6 +808,64 @@ def prepare_source_download(
     )
     db.commit()
     return download
+
+
+def _record_mass_export_attempt_if_needed(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    source_id: uuid.UUID,
+) -> None:
+    window_start = datetime.now(UTC) - timedelta(
+        seconds=settings.security_alert_detection_window_seconds
+    )
+    source_ids = set(
+        db.scalars(
+            select(AuditEvent.entity_id).where(
+                AuditEvent.workspace_id == auth.workspace_id,
+                AuditEvent.project_id == project_id,
+                AuditEvent.user_id == auth.user_id,
+                AuditEvent.entity_type == "evidence_source",
+                AuditEvent.event_type.in_(_AUTHORIZED_DOWNLOAD_AUDIT_EVENT_TYPES),
+                AuditEvent.created_at >= window_start,
+            )
+        )
+    )
+    source_ids.discard(None)
+    source_ids.add(source_id)
+    distinct_source_count = len(source_ids)
+    if distinct_source_count < settings.security_mass_export_distinct_source_threshold:
+        return
+    if (
+        db.scalar(
+            select(AuditEvent.id)
+            .where(
+                AuditEvent.workspace_id == auth.workspace_id,
+                AuditEvent.project_id == project_id,
+                AuditEvent.user_id == auth.user_id,
+                AuditEvent.event_type == "mass_export_attempt",
+                AuditEvent.created_at >= window_start,
+            )
+            .limit(1)
+        )
+        is not None
+    ):
+        return
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="mass_export_attempt",
+        actor_type="user",
+        project_id=project_id,
+        risk_level="high",
+        summary="Evidence downloads exceeded the configured export threshold.",
+        metadata={
+            "distinct_source_count": distinct_source_count,
+            "window_seconds": settings.security_alert_detection_window_seconds,
+        },
+    )
 
 
 def reembed_evidence(

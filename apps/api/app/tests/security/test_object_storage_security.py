@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.db.models import AuditEvent
+from app.db.models import AuditEvent, SecurityAlert, SecurityEvent
 from app.services import object_storage_service
 
 
@@ -379,6 +379,56 @@ def test_evidence_storage_route_authorizes_signs_and_audits(
     serialized_metadata = json.dumps([event.event_metadata for event in events])
     assert "signature=short-lived" not in serialized_metadata
     assert "workspaces/" not in serialized_metadata
+
+
+def test_distinct_evidence_downloads_detect_one_mass_export_attempt(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SECURITY_MASS_EXPORT_DISTINCT_SOURCE_THRESHOLD", "3")
+    get_settings.cache_clear()
+    project_id = client.post("/api/projects", json={"name": "Export detection"}).json()["id"]
+    source_ids: list[str] = []
+    for index in range(4):
+        upload = client.post(
+            f"/api/projects/{project_id}/evidence/file",
+            files={
+                "file": (
+                    f"export-{index + 1}.txt",
+                    f"Private export evidence {index + 1}.".encode(),
+                    "text/plain",
+                )
+            },
+        )
+        assert upload.status_code == 201
+        source_ids.append(upload.json()["id"])
+
+    for source_id in source_ids:
+        response = client.get(f"/api/projects/{project_id}/evidence/{source_id}/download")
+        assert response.status_code == 200
+
+    export_events = list(
+        db_session.scalars(select(AuditEvent).where(AuditEvent.event_type == "mass_export_attempt"))
+    )
+    assert len(export_events) == 1
+    event = export_events[0]
+    assert event.risk_level == "high"
+    assert event.event_metadata == {"distinct_source_count": 3, "window_seconds": 900}
+    assert all(source_id not in str(event.__dict__) for source_id in source_ids)
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == event.id)
+    )
+    assert security_event is not None
+    assert security_event.event_type == "mass_export_attempt"
+    assert security_event.severity == "high"
+    assert all(source_id not in str(security_event.__dict__) for source_id in source_ids)
+    alert = db_session.scalar(
+        select(SecurityAlert).where(SecurityAlert.security_event_id == security_event.id)
+    )
+    assert alert is not None
+    assert alert.severity == "high"
+    get_settings.cache_clear()
 
 
 def test_project_deletion_removes_objects_and_preserves_audit(

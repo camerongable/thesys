@@ -1115,6 +1115,10 @@ current verdict, next action, evidence health, validation, and decision state.
   retrieval paths now alert when a configurable distinct-source threshold is
   reached, retaining only returned chunk count, distinct source count, and the
   requested result limit rather than the query or source identifiers.
+- [x] Detect mass-export attempts at the shared evidence-download boundary.
+  A configurable number of distinct source-download authorizations by one actor
+  in one project raises one high-risk audit/security event and alert within the
+  detection window, retaining only the bounded count and window.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,

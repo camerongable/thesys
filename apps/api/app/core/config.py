@@ -199,6 +199,12 @@ class Settings(BaseSettings):
         le=25,
         validation_alias="SECURITY_UNUSUALLY_BROAD_RETRIEVAL_SOURCE_THRESHOLD",
     )
+    security_mass_export_distinct_source_threshold: int = Field(
+        default=10,
+        ge=2,
+        le=1_000,
+        validation_alias="SECURITY_MASS_EXPORT_DISTINCT_SOURCE_THRESHOLD",
+    )
     security_provider_failure_spike_threshold: int = Field(
         default=3,
         ge=2,
