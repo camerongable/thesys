@@ -545,6 +545,10 @@ current verdict, next action, evidence health, validation, and decision state.
   Instruction-heavy, system-message/policy/tool-schema, and hidden-Unicode
   content is quarantined before vector creation, emits an attributed audit
   event, and cannot pass the shared retrieval policy even if stale chunks exist.
+- [x] Preserve extracted-media provenance for poisoning detections. Instruction
+  text from image or PDF extraction now records an explicit non-content signal,
+  is quarantined before embeddings persist, and carries that signal into the
+  source-trust audit trail for review.
 - [x] Treat repeated identical source bodies as a duplicate-flooding signal.
   Repeated submissions are quarantined before vector creation; eligible results
   pass a shared secure-ranking stage before SQL/Python candidate truncation and
@@ -772,6 +776,9 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Low-trust memory checkpoint passed (`80 passed, 1 warning`) across
   memory-service, context-compiler, and feature-boundary coverage; changed-file
   compile checks and repository application lint passed.
+- [x] Embedded-media poisoning checkpoint passed (`80 passed, 2 warnings`)
+  across source-trust, image-upload, evidence-ingestion, and feature-boundary
+  coverage; changed-file compile checks and repository application lint passed.
 
 ## Next Sprint
 

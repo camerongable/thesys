@@ -317,6 +317,12 @@ def assess_source_trust(
     hidden_unicode = _has_hidden_unicode(text)
     signals = [*prompt_markers]
     signals.extend(name for name, count in poisoning_matches.items() if count)
+    embedded_instruction_signal = _embedded_instruction_signal(
+        metadata,
+        has_instruction_signals=bool(prompt_markers or any(poisoning_matches.values())),
+    )
+    if embedded_instruction_signal:
+        signals.append(embedded_instruction_signal)
     if hidden_unicode:
         signals.append("hidden_unicode")
     if duplicate_source_count:
@@ -387,6 +393,21 @@ def _provenance_type(
     if source_type == "url":
         return "approved_url"
     return "user_upload"
+
+
+def _embedded_instruction_signal(
+    metadata: dict[str, Any],
+    *,
+    has_instruction_signals: bool,
+) -> str | None:
+    if not has_instruction_signals:
+        return None
+    media_type = str(metadata.get("media_type") or "").casefold()
+    if media_type == "image":
+        return "image_embedded_instruction"
+    if media_type == "pdf":
+        return "pdf_embedded_instruction"
+    return None
 
 
 def _recommendation_direction(value: str | None) -> str | None:
