@@ -108,6 +108,7 @@ def test_data_classification_registry_covers_sensitive_assets() -> None:
         "system_prompts",
         "tool_schemas",
         "mcp_server_credentials",
+        "mcp_oauth_authorization_transactions",
         "mcp_server_registrations",
         "audit_events",
         "authentication_events",
@@ -202,6 +203,7 @@ def test_rls_migration_forces_policies_and_scoped_role_grants(monkeypatch) -> No
         "authentication_events",
         "evidence_source_tombstones",
         "mcp_server_credentials",
+        "mcp_oauth_authorization_transactions",
         "mcp_server_registrations",
         "pii_token_mappings",
         "session_revocations",
@@ -451,6 +453,40 @@ def test_mcp_server_credential_migration_forces_rls_and_scoped_grants(monkeypatc
     assert 'ALTER TABLE "mcp_server_credentials" ENABLE ROW LEVEL SECURITY' in statements
     assert 'ALTER TABLE "mcp_server_credentials" FORCE ROW LEVEL SECURITY' in statements
     assert 'CREATE POLICY workspace_isolation ON "mcp_server_credentials"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "WITH CHECK" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT, UPDATE, DELETE" in combined
+    assert "thesys_worker" in combined and "thesys_readonly" in combined
+
+
+def test_mcp_oauth_transaction_migration_forces_rls_and_scoped_grants(monkeypatch) -> None:
+    migration_path = (
+        REPO_ROOT / "apps/api/alembic/versions/0041_mcp_oauth_authorization_transactions.py"
+    )
+    spec = importlib.util.spec_from_file_location("mcp_oauth_transaction_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert (
+        'ALTER TABLE "mcp_oauth_authorization_transactions" ENABLE ROW LEVEL SECURITY' in statements
+    )
+    assert (
+        'ALTER TABLE "mcp_oauth_authorization_transactions" FORCE ROW LEVEL SECURITY' in statements
+    )
+    assert 'CREATE POLICY workspace_isolation ON "mcp_oauth_authorization_transactions"' in combined
     assert "current_setting('app.workspace_id', true)" in combined
     assert "WITH CHECK" in combined
     assert "thesys_api" in combined and "SELECT, INSERT, UPDATE, DELETE" in combined

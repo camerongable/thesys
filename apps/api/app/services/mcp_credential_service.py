@@ -1,5 +1,6 @@
 """Encrypted, per-server OAuth credentials for remote MCP connections."""
 
+import hashlib
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -12,14 +13,27 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext, require_workspace_owner
 from app.core.config import Settings
-from app.db.models import MCPServerCredential, MCPServerRegistration
-from app.schemas.mcp_registry import MCPServerCredentialConfigure
+from app.db.models import (
+    MCPOAuthAuthorizationTransaction,
+    MCPServerCredential,
+    MCPServerRegistration,
+)
+from app.schemas.mcp_registry import (
+    MCPServerCredentialConfigure,
+    MCPServerOAuthAuthorizationComplete,
+    MCPServerOAuthAuthorizationStart,
+)
 from app.security.encryption import (
     EncryptedValue,
     EnvelopeEncryptionError,
     build_envelope_encryption_service,
 )
-from app.services import governance_service, mcp_registry_service, remote_mcp_token_service
+from app.services import (
+    governance_service,
+    mcp_registry_service,
+    remote_mcp_token_service,
+    security_policy_service,
+)
 
 MAX_USER_DELEGATED_TOKEN_LIFETIME = timedelta(hours=1)
 
@@ -35,6 +49,197 @@ class MCPServerCredentialMaterial:
     client_id: str | None
     client_secret: SecretStr | None
     expires_at: datetime | None
+
+
+def start_user_delegated_authorization(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    registration_id: uuid.UUID,
+    payload: MCPServerOAuthAuthorizationStart,
+) -> remote_mcp_token_service.RemoteMcpAuthorizationRequest:
+    """Persist an encrypted, one-time PKCE verifier for a reviewed OAuth registration."""
+    require_workspace_owner(auth)
+    security_policy_service.enforce_external_mcp_allowed(
+        db,
+        auth,
+        settings,
+        operation="oauth_authorization",
+    )
+    security_policy_service.enforce_external_egress_allowed(
+        db,
+        auth,
+        settings,
+        operation="mcp_oauth_authorization",
+    )
+    registration = mcp_registry_service.get_registration(db, auth, registration_id)
+    issuer = _registration_oauth_issuer(registration)
+    redirect_uri = _validated_oauth_redirect_uri(settings)
+    try:
+        request = remote_mcp_token_service.start_authorization_code_flow(
+            settings,
+            issuer=issuer,
+            audience=_registration_audience(registration),
+            scopes=tuple(payload.scopes),
+            client_id=payload.client_id,
+            redirect_uri=redirect_uri,
+        )
+        encryption = build_envelope_encryption_service(settings)
+        transaction_id = uuid.uuid4()
+        encrypted = encryption.encrypt(
+            db,
+            workspace_id=auth.workspace_id,
+            plaintext=request.code_verifier,
+            purpose=_transaction_purpose(transaction_id),
+        )
+        transaction = MCPOAuthAuthorizationTransaction(
+            id=transaction_id,
+            workspace_id=auth.workspace_id,
+            server_registration_id=registration.id,
+            user_id=auth.user_id,
+            state_hash=_state_hash(request.state),
+            client_id=payload.client_id,
+            scopes=list(payload.scopes),
+            redirect_uri=redirect_uri,
+            verifier_ciphertext=encrypted.ciphertext,
+            verifier_nonce=encrypted.nonce,
+            verifier_key_version=encrypted.key_version,
+            algorithm="AES-256-GCM",
+            expires_at=request.expires_at,
+        )
+        db.add(transaction)
+        db.flush()
+    except (EnvelopeEncryptionError, remote_mcp_token_service.RemoteMcpTokenValidationError) as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Remote MCP authorization is temporarily unavailable.",
+        ) from exc
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="mcp_server_oauth_authorization_started",
+        actor_type="user",
+        entity_type="mcp_server_registration",
+        entity_id=registration.id,
+        risk_level="high",
+        summary="Started a PKCE-bound OAuth authorization for a remote MCP server.",
+        metadata={"credential_type": "oauth_user_delegated", "scope_count": len(payload.scopes)},
+    )
+    db.commit()
+    return request
+
+
+def complete_user_delegated_authorization(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    registration_id: uuid.UUID,
+    payload: MCPServerOAuthAuthorizationComplete,
+) -> MCPServerCredential:
+    """Consume one PKCE transaction before exchanging its authorization code."""
+    require_workspace_owner(auth)
+    security_policy_service.enforce_external_mcp_allowed(
+        db,
+        auth,
+        settings,
+        operation="oauth_authorization",
+    )
+    security_policy_service.enforce_external_egress_allowed(
+        db,
+        auth,
+        settings,
+        operation="mcp_oauth_authorization",
+    )
+    registration = mcp_registry_service.get_registration(db, auth, registration_id)
+    transaction = db.scalar(
+        select(MCPOAuthAuthorizationTransaction)
+        .where(
+            MCPOAuthAuthorizationTransaction.workspace_id == auth.workspace_id,
+            MCPOAuthAuthorizationTransaction.server_registration_id == registration.id,
+            MCPOAuthAuthorizationTransaction.user_id == auth.user_id,
+            MCPOAuthAuthorizationTransaction.state_hash == _state_hash(payload.state),
+        )
+        .with_for_update()
+    )
+    if (
+        transaction is None
+        or transaction.consumed_at is not None
+        or _as_stored_utc(transaction.expires_at) <= datetime.now(UTC)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="MCP OAuth authorization is no longer available.",
+        )
+    encryption = build_envelope_encryption_service(settings)
+    try:
+        code_verifier = encryption.decrypt(
+            db,
+            workspace_id=auth.workspace_id,
+            encrypted=EncryptedValue(
+                ciphertext=transaction.verifier_ciphertext,
+                nonce=transaction.verifier_nonce,
+                key_version=transaction.verifier_key_version,
+            ),
+            purpose=_transaction_purpose(transaction.id),
+        )
+    except EnvelopeEncryptionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Remote MCP authorization is temporarily unavailable.",
+        ) from exc
+
+    transaction.consumed_at = datetime.now(UTC)
+    db.commit()
+    try:
+        grant = remote_mcp_token_service.exchange_authorization_code(
+            settings,
+            issuer=_registration_oauth_issuer(registration),
+            audience=_registration_audience(registration),
+            scopes=tuple(transaction.scopes),
+            client_id=transaction.client_id,
+            redirect_uri=transaction.redirect_uri,
+            code=payload.code,
+            code_verifier=code_verifier,
+        )
+    except remote_mcp_token_service.RemoteMcpTokenValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Remote MCP authorization is temporarily unavailable.",
+        ) from exc
+
+    credential = configure_credential(
+        db,
+        auth,
+        settings,
+        registration_id,
+        MCPServerCredentialConfigure(
+            credential_type="oauth_user_delegated",
+            issuer=_registration_oauth_issuer(registration),
+            audience=_registration_audience(registration),
+            scopes=list(transaction.scopes),
+            client_id=transaction.client_id,
+            access_token=grant.access_token,
+            refresh_token=grant.refresh_token,
+            expires_at=grant.expires_at,
+        ),
+    )
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="mcp_server_oauth_authorization_completed",
+        actor_type="user",
+        entity_type="mcp_server_registration",
+        entity_id=registration.id,
+        risk_level="high",
+        summary="Exchanged a PKCE-bound OAuth code for encrypted MCP credentials.",
+        metadata={
+            "credential_type": "oauth_user_delegated",
+            "scope_count": len(transaction.scopes),
+        },
+    )
+    db.commit()
+    return credential
 
 
 def configure_credential(
@@ -431,6 +636,41 @@ def _registration_audience(registration: MCPServerRegistration) -> str:
     return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
 
 
+def _registration_oauth_issuer(registration: MCPServerRegistration) -> str:
+    if registration.oauth_issuer is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="The MCP server registration does not allow OAuth credentials.",
+        )
+    return registration.oauth_issuer.rstrip("/")
+
+
+def _validated_oauth_redirect_uri(settings: Settings) -> str:
+    value = settings.mcp_oauth_redirect_uri
+    parsed = urlparse(value) if value is not None else None
+    if (
+        parsed is None
+        or parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port not in {None, 443}
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Remote MCP authorization is temporarily unavailable.",
+        )
+    return value
+
+
+def _state_hash(state: str) -> str:
+    return hashlib.sha256(state.encode("utf-8")).hexdigest()
+
+
+def _transaction_purpose(transaction_id: uuid.UUID) -> str:
+    return f"mcp-oauth-transaction:{transaction_id}:code-verifier"
+
+
 def _get_credential(
     db: Session,
     workspace_id: uuid.UUID,
@@ -514,4 +754,8 @@ def _as_utc(value: datetime | None) -> datetime:
 def _stored_as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _as_stored_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)

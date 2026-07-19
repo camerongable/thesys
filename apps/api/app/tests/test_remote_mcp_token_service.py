@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime, timedelta
+from urllib.parse import parse_qs, urlparse
 
 import jwt
 import pytest
@@ -149,11 +150,7 @@ def test_rejects_symmetric_or_untrusted_jwks_remote_access_tokens(monkeypatch) -
 
     assert exc_info.value.reason_code == "token_algorithm_or_key_rejected"
     discovery_client = _Client(
-        [
-            _Response(
-                {"issuer": issuer, "jwks_uri": "https://untrusted.example.test/jwks.json"}
-            )
-        ]
+        [_Response({"issuer": issuer, "jwks_uri": "https://untrusted.example.test/jwks.json"})]
     )
     monkeypatch.setattr(
         remote_mcp_token_service.httpx,
@@ -393,6 +390,88 @@ def test_user_delegated_refresh_uses_public_client_binding_and_rotated_token(
         "scope": "mcp.tools.read",
     }
     assert "Authorization" not in client.requests[1][1]["headers"]
+    assert validated["require_subject"] is True
+
+
+def test_authorization_code_flow_uses_s256_pkce_and_exchanges_only_at_reviewed_endpoint(
+    monkeypatch,
+) -> None:
+    issuer = "https://issuer.example.test"
+    client = _Client(
+        [
+            _Response(
+                {
+                    "issuer": issuer,
+                    "jwks_uri": f"{issuer}/.well-known/jwks.json",
+                    "authorization_endpoint": f"{issuer}/oauth/authorize",
+                }
+            ),
+            _Response(
+                {
+                    "issuer": issuer,
+                    "jwks_uri": f"{issuer}/.well-known/jwks.json",
+                    "token_endpoint": f"{issuer}/oauth/token",
+                }
+            ),
+            _Response(
+                {
+                    "access_token": "delegated-access-token",
+                    "refresh_token": "delegated-refresh-token",
+                    "token_type": "Bearer",
+                    "expires_in": 300,
+                }
+            ),
+        ]
+    )
+    validated: dict[str, object] = {}
+    monkeypatch.setattr(remote_mcp_token_service.httpx, "Client", lambda **_kwargs: client)
+    monkeypatch.setattr(
+        remote_mcp_token_service,
+        "validate_access_token",
+        lambda _settings, **kwargs: validated.update(kwargs),
+    )
+
+    request = remote_mcp_token_service.start_authorization_code_flow(
+        Settings(),
+        issuer=issuer,
+        audience="https://mcp.example.test",
+        scopes=("mcp.tools.read",),
+        client_id="public-client",
+        redirect_uri="https://app.example.test/mcp/oauth/callback",
+    )
+    query = parse_qs(urlparse(request.authorization_url).query)
+
+    assert urlparse(request.authorization_url).geturl().startswith(f"{issuer}/oauth/authorize?")
+    assert query["response_type"] == ["code"]
+    assert query["code_challenge_method"] == ["S256"]
+    assert query["code_challenge"] != [request.code_verifier]
+    assert query["state"] == [request.state]
+    assert request.code_verifier not in request.authorization_url
+
+    grant = remote_mcp_token_service.exchange_authorization_code(
+        Settings(),
+        issuer=issuer,
+        audience="https://mcp.example.test",
+        scopes=("mcp.tools.read",),
+        client_id="public-client",
+        redirect_uri="https://app.example.test/mcp/oauth/callback",
+        code="single-use-code",
+        code_verifier=request.code_verifier,
+    )
+
+    assert grant.access_token.get_secret_value() == "delegated-access-token"
+    assert grant.refresh_token is not None
+    assert grant.refresh_token.get_secret_value() == "delegated-refresh-token"
+    assert client.requests[2][0] == f"{issuer}/oauth/token"
+    assert client.requests[2][1]["data"] == {
+        "grant_type": "authorization_code",
+        "client_id": "public-client",
+        "code": "single-use-code",
+        "code_verifier": request.code_verifier,
+        "redirect_uri": "https://app.example.test/mcp/oauth/callback",
+        "audience": "https://mcp.example.test",
+        "scope": "mcp.tools.read",
+    }
     assert validated["require_subject"] is True
 
 

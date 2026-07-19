@@ -664,6 +664,10 @@ class Settings(BaseSettings):
         le=30.0,
         validation_alias="MCP_REMOTE_REVIEW_TIMEOUT_SECONDS",
     )
+    mcp_oauth_redirect_uri: str | None = Field(
+        default=None,
+        validation_alias="MCP_OAUTH_REDIRECT_URI",
+    )
     disable_all_agent_writes: bool = Field(
         default=False,
         validation_alias="DISABLE_ALL_AGENT_WRITES",
@@ -792,16 +796,12 @@ class Settings(BaseSettings):
             raise ValueError("AUTH_MODE=dev is permitted only when APP_ENV=local.")
 
         if self.environment == "local" and self.secret_provider != "environment":
-            raise ValueError(
-                "Local development must use SECRET_PROVIDER=environment."
-            )
+            raise ValueError("Local development must use SECRET_PROVIDER=environment.")
         if self.environment in {"staging", "production"} and self.secret_provider not in {
             "vault",
             "cloud",
         }:
-            raise ValueError(
-                "Hosted environments must use SECRET_PROVIDER=vault or cloud."
-            )
+            raise ValueError("Hosted environments must use SECRET_PROVIDER=vault or cloud.")
         if self.secret_provider == "vault" and not (
             self.vault_address and self.vault_address.strip()
         ):
@@ -818,9 +818,7 @@ class Settings(BaseSettings):
         if self.environment in {"staging", "production"}:
             expected_database_user = f"thesys_{self.database_runtime_role}"
             if make_url(self.database_url).username != expected_database_user:
-                raise ValueError(
-                    "Hosted DATABASE_URL must use the declared scoped runtime role."
-                )
+                raise ValueError("Hosted DATABASE_URL must use the declared scoped runtime role.")
             endpoint = urlparse(self.s3_endpoint_url)
             if self.object_storage_mode != "s3":
                 raise ValueError("Hosted environments must use OBJECT_STORAGE_MODE=s3.")

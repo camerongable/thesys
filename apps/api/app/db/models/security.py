@@ -157,6 +157,48 @@ class MCPServerCredential(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     created_by: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
 
 
+class MCPOAuthAuthorizationTransaction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Single-use encrypted PKCE verifier for a reviewed MCP OAuth registration."""
+
+    __tablename__ = "mcp_oauth_authorization_transactions"
+    __table_args__ = (
+        CheckConstraint(
+            "algorithm = 'AES-256-GCM'",
+            name="ck_mcp_oauth_authorization_transactions_algorithm",
+        ),
+        UniqueConstraint("state_hash", name="uq_mcp_oauth_authorization_transactions_state_hash"),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    server_registration_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("mcp_server_registrations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    state_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    client_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    redirect_uri: Mapped[str] = mapped_column(String(2048), nullable=False)
+    verifier_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    verifier_nonce: Mapped[str] = mapped_column(String(32), nullable=False)
+    verifier_key_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    algorithm: Mapped[str] = mapped_column(String(20), nullable=False, default="AES-256-GCM")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class WorkspaceKillSwitchState(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Workspace-scoped emergency capability disables."""
 

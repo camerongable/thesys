@@ -9,6 +9,9 @@ from app.db.session import get_db
 from app.schemas.mcp_registry import (
     MCPServerCredentialConfigure,
     MCPServerCredentialRead,
+    MCPServerOAuthAuthorizationComplete,
+    MCPServerOAuthAuthorizationStart,
+    MCPServerOAuthAuthorizationStartRead,
     MCPServerRegistrationCreate,
     MCPServerRegistrationListRead,
     MCPServerRegistrationRead,
@@ -63,6 +66,52 @@ def configure_mcp_server_credential(
 ) -> MCPServerCredentialRead:
     return MCPServerCredentialRead.model_validate(
         mcp_credential_service.configure_credential(db, auth, settings, registration_id, payload)
+    )
+
+
+@router.post(
+    "/{registration_id}/oauth/authorize",
+    response_model=MCPServerOAuthAuthorizationStartRead,
+)
+def start_mcp_server_oauth_authorization(
+    registration_id: uuid.UUID,
+    payload: MCPServerOAuthAuthorizationStart,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> MCPServerOAuthAuthorizationStartRead:
+    request = mcp_credential_service.start_user_delegated_authorization(
+        db,
+        auth,
+        settings,
+        registration_id,
+        payload,
+    )
+    return MCPServerOAuthAuthorizationStartRead(
+        authorization_url=request.authorization_url,
+        expires_at=request.expires_at,
+    )
+
+
+@router.post(
+    "/{registration_id}/oauth/complete",
+    response_model=MCPServerCredentialRead,
+)
+def complete_mcp_server_oauth_authorization(
+    registration_id: uuid.UUID,
+    payload: MCPServerOAuthAuthorizationComplete,
+    db: DbDep,
+    auth: AuthContextDep,
+    settings: SettingsDep,
+) -> MCPServerCredentialRead:
+    return MCPServerCredentialRead.model_validate(
+        mcp_credential_service.complete_user_delegated_authorization(
+            db,
+            auth,
+            settings,
+            registration_id,
+            payload,
+        )
     )
 
 

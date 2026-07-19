@@ -929,10 +929,17 @@ current verdict, next action, evidence health, validation, and decision state.
   sends only that registration's refresh grant to the reviewed issuer-host token
   endpoint, validates the returned JWT, rotates encrypted access/refresh
   material when provided, updates expiry, and emits a credential-free high-risk
-  audit event. The original OAuth 2.1 authorization-code-with-PKCE acquisition
-  flow remains to be implemented.
-- [ ] Implement the remaining Sprint 66 capability controls: add the initial
-  user-delegated OAuth 2.1 authorization-code-with-PKCE flow, execute approved
+  audit event.
+- [x] Add initial user-delegated OAuth 2.1 authorization-code-with-PKCE
+  acquisition. Owner-only start and completion endpoints bind a static HTTPS
+  redirect URI, public client ID, reviewed issuer/audience, and least-privilege
+  scopes to an encrypted, tenant- and user-scoped, 10-minute transaction. The
+  database stores only a state digest and envelope-encrypted verifier; completion
+  consumes the transaction before issuer exchange, validates the returned JWT
+  and refresh token, persists credentials through the existing per-server
+  boundary, and rejects replay. Both steps honor external MCP/egress switches
+  and emit credential-free high-risk audits.
+- [ ] Implement the remaining Sprint 66 capability controls: execute approved
   remote proposal and write tools safely, implement SSE transport, then validate
   the live Compose policy bundle with the OPA parser/runtime.
 
@@ -992,14 +999,18 @@ current verdict, next action, evidence health, validation, and decision state.
   across MCP credential, registration, remote-review, adapter, kill-switch,
   envelope-encryption, and security-invariant coverage; focused lint,
   compilation, and `git diff --check` passed.
+- [x] OAuth authorization-code PKCE checkpoint passed (`42 passed, 1 xfailed,
+  1 warning`) across remote token, MCP credential, and security-invariant
+  coverage; changed-file lint/format, Alembic single-head/offline SQL rendering,
+  and `git diff --check` passed.
 - [ ] The local workspace has no Docker CLI, so Compose graph validation and
   direct OPA/Rego parser validation remain part of the compose-backed
   enforcement checkpoint.
 
 ## Next Sprint
 
-Continue Sprint 66 by adding the outbound remote-MCP invocation client with
-scoped token acquisition/refresh and claim validation.
+Continue Sprint 66 by implementing reviewed remote proposal/write execution
+with the required approval lifecycle.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

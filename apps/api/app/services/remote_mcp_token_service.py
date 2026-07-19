@@ -1,10 +1,12 @@
 """OAuth acquisition and cryptographic verification for remote MCP credentials."""
 
 import base64
+import hashlib
+import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import httpx
 import jwt
@@ -22,12 +24,21 @@ class RemoteMcpOAuthMetadata:
     issuer: str
     jwks_url: str
     token_endpoint: str | None
+    authorization_endpoint: str | None
 
 
 @dataclass(frozen=True)
 class RemoteMcpOAuthTokenGrant:
     access_token: SecretStr
     refresh_token: SecretStr | None
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class RemoteMcpAuthorizationRequest:
+    authorization_url: str
+    state: str
+    code_verifier: str
     expires_at: datetime
 
 
@@ -183,11 +194,106 @@ def request_user_delegated_refresh_token(
     return grant
 
 
+def start_authorization_code_flow(
+    settings: Settings,
+    *,
+    issuer: str,
+    audience: str,
+    scopes: tuple[str, ...],
+    client_id: str,
+    redirect_uri: str,
+) -> RemoteMcpAuthorizationRequest:
+    """Create a PKCE-bound authorization request for the reviewed OAuth issuer."""
+    metadata = discover_oauth_metadata(settings, issuer=issuer, require_authorization_endpoint=True)
+    if metadata.authorization_endpoint is None:
+        raise RemoteMcpTokenValidationError("authorization_endpoint_unavailable")
+    state = secrets.token_urlsafe(32)
+    code_verifier = secrets.token_urlsafe(64)
+    code_challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode("ascii")).digest())
+        .rstrip(b"=")
+        .decode("ascii")
+    )
+    query = urlencode(
+        {
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "scope": " ".join(scopes),
+            "audience": audience,
+            "state": state,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
+        }
+    )
+    return RemoteMcpAuthorizationRequest(
+        authorization_url=f"{metadata.authorization_endpoint}?{query}",
+        state=state,
+        code_verifier=code_verifier,
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+
+
+def exchange_authorization_code(
+    settings: Settings,
+    *,
+    issuer: str,
+    audience: str,
+    scopes: tuple[str, ...],
+    client_id: str,
+    redirect_uri: str,
+    code: str,
+    code_verifier: str,
+) -> RemoteMcpOAuthTokenGrant:
+    """Exchange a single PKCE authorization code at its reviewed token endpoint."""
+    metadata = discover_oauth_metadata(settings, issuer=issuer, require_token_endpoint=True)
+    if metadata.token_endpoint is None:
+        raise RemoteMcpTokenValidationError("token_endpoint_unavailable")
+    try:
+        with httpx.Client(
+            timeout=settings.mcp_remote_review_timeout_seconds,
+            follow_redirects=False,
+            verify=True,
+        ) as client:
+            response = client.post(
+                metadata.token_endpoint,
+                headers={"Accept": "application/json"},
+                data={
+                    "grant_type": "authorization_code",
+                    "client_id": client_id,
+                    "code": code,
+                    "code_verifier": code_verifier,
+                    "redirect_uri": redirect_uri,
+                    "audience": audience,
+                    "scope": " ".join(scopes),
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise RemoteMcpTokenValidationError("authorization_code_exchange_unavailable") from exc
+    grant = _validated_token_response(
+        payload,
+        require_refresh_token=True,
+        reason_code="authorization_code_response_invalid",
+    )
+    validate_access_token(
+        settings,
+        access_token=grant.access_token,
+        issuer=metadata.issuer,
+        audience=audience,
+        required_scopes=scopes,
+        require_subject=True,
+    )
+    return grant
+
+
 def discover_oauth_metadata(
     settings: Settings,
     *,
     issuer: str,
     require_token_endpoint: bool = False,
+    require_authorization_endpoint: bool = False,
 ) -> RemoteMcpOAuthMetadata:
     """Discover metadata without allowing an issuer to redirect credential egress."""
     expected_issuer = issuer.rstrip("/")
@@ -206,10 +312,20 @@ def discover_oauth_metadata(
         )
     elif require_token_endpoint:
         raise RemoteMcpTokenValidationError("token_endpoint_unavailable")
+    authorization_endpoint = discovery.get("authorization_endpoint")
+    if authorization_endpoint is not None:
+        authorization_endpoint = _trusted_issuer_endpoint(
+            authorization_endpoint,
+            expected_issuer,
+            "authorization_endpoint",
+        )
+    elif require_authorization_endpoint:
+        raise RemoteMcpTokenValidationError("authorization_endpoint_unavailable")
     return RemoteMcpOAuthMetadata(
         issuer=expected_issuer,
         jwks_url=_trusted_issuer_endpoint(discovery.get("jwks_uri"), expected_issuer, "jwks"),
         token_endpoint=token_endpoint,
+        authorization_endpoint=authorization_endpoint,
     )
 
 
@@ -266,9 +382,14 @@ def _signing_key(jwks: dict[str, Any], key_id: str) -> jwt.PyJWK:
     return matching_keys[0]
 
 
-def _validated_token_response(payload: Any) -> RemoteMcpOAuthTokenGrant:
+def _validated_token_response(
+    payload: Any,
+    *,
+    require_refresh_token: bool = False,
+    reason_code: str = "client_credentials_response_invalid",
+) -> RemoteMcpOAuthTokenGrant:
     if not isinstance(payload, dict):
-        raise RemoteMcpTokenValidationError("client_credentials_response_invalid")
+        raise RemoteMcpTokenValidationError(reason_code)
     access_token = payload.get("access_token")
     token_type = payload.get("token_type")
     expires_in = payload.get("expires_in")
@@ -286,13 +407,12 @@ def _validated_token_response(payload: Any) -> RemoteMcpOAuthTokenGrant:
         or (
             refresh_token is not None
             and (
-                not isinstance(refresh_token, str)
-                or not refresh_token
-                or len(refresh_token) > 8192
+                not isinstance(refresh_token, str) or not refresh_token or len(refresh_token) > 8192
             )
         )
+        or (require_refresh_token and not isinstance(refresh_token, str))
     ):
-        raise RemoteMcpTokenValidationError("client_credentials_response_invalid")
+        raise RemoteMcpTokenValidationError(reason_code)
     return RemoteMcpOAuthTokenGrant(
         access_token=SecretStr(access_token),
         refresh_token=SecretStr(refresh_token) if isinstance(refresh_token, str) else None,

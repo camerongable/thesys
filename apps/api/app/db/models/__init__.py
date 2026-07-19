@@ -39,6 +39,7 @@ from app.db.models.research import (
     ResearchSprint,
 )
 from app.db.models.security import (
+    MCPOAuthAuthorizationTransaction,
     MCPServerCredential,
     MCPServerRegistration,
     PiiTokenMapping,
@@ -90,6 +91,7 @@ __all__ = [
     "ProjectThesis",
     "MCPServerRegistration",
     "MCPServerCredential",
+    "MCPOAuthAuthorizationTransaction",
     "PiiTokenMapping",
     "ResearchPlan",
     "ResearchSprint",

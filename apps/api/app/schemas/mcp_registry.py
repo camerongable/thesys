@@ -104,3 +104,23 @@ class MCPServerCredentialRead(BaseModel):
     expires_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class MCPServerOAuthAuthorizationStart(BaseModel):
+    client_id: str = Field(min_length=1, max_length=255)
+    scopes: list[str] = Field(min_length=1, max_length=50)
+
+    @field_validator("scopes")
+    @classmethod
+    def validate_scopes(cls, value: list[str]) -> list[str]:
+        return MCPServerCredentialConfigure.validate_scopes(value)
+
+
+class MCPServerOAuthAuthorizationStartRead(BaseModel):
+    authorization_url: str
+    expires_at: datetime
+
+
+class MCPServerOAuthAuthorizationComplete(BaseModel):
+    state: str = Field(min_length=32, max_length=512)
+    code: str = Field(min_length=1, max_length=8192)
