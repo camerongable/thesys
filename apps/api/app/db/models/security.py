@@ -105,3 +105,26 @@ class MCPServerRegistration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
     reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reviewed_by: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
+
+
+class WorkspaceKillSwitchState(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Workspace-scoped emergency capability disables."""
+
+    __tablename__ = "workspace_kill_switch_states"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", name="uq_workspace_kill_switch_states_workspace"),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    disable_all_agent_writes: Mapped[bool] = mapped_column(nullable=False, default=False)
+    disable_external_mcp: Mapped[bool] = mapped_column(nullable=False, default=False)
+    disable_external_egress: Mapped[bool] = mapped_column(nullable=False, default=False)
+    disable_model_provider: Mapped[bool] = mapped_column(nullable=False, default=False)
+    disable_memory_writes: Mapped[bool] = mapped_column(nullable=False, default=False)
+    disable_source_fetching: Mapped[bool] = mapped_column(nullable=False, default=False)
+    updated_by: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))

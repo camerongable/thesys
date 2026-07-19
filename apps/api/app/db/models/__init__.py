@@ -38,7 +38,12 @@ from app.db.models.research import (
     ResearchPlan,
     ResearchSprint,
 )
-from app.db.models.security import MCPServerRegistration, PiiTokenMapping, WorkspaceDataKey
+from app.db.models.security import (
+    MCPServerRegistration,
+    PiiTokenMapping,
+    WorkspaceDataKey,
+    WorkspaceKillSwitchState,
+)
 from app.db.models.tool import ToolInvocation
 from app.db.models.validation import (
     Decision,
@@ -99,5 +104,6 @@ __all__ = [
     "WedgeOption",
     "Workspace",
     "WorkspaceDataKey",
+    "WorkspaceKillSwitchState",
     "WorkspaceMember",
 ]

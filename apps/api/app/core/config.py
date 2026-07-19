@@ -658,6 +658,30 @@ class Settings(BaseSettings):
         default_factory=list,
         validation_alias="MCP_SERVER_ALLOWED_HOSTS",
     )
+    disable_all_agent_writes: bool = Field(
+        default=False,
+        validation_alias="DISABLE_ALL_AGENT_WRITES",
+    )
+    disable_external_mcp: bool = Field(
+        default=False,
+        validation_alias="DISABLE_EXTERNAL_MCP",
+    )
+    disable_external_egress: bool = Field(
+        default=False,
+        validation_alias="DISABLE_EXTERNAL_EGRESS",
+    )
+    disable_model_provider: bool = Field(
+        default=False,
+        validation_alias="DISABLE_MODEL_PROVIDER",
+    )
+    disable_memory_writes: bool = Field(
+        default=False,
+        validation_alias="DISABLE_MEMORY_WRITES",
+    )
+    disable_source_fetching: bool = Field(
+        default=False,
+        validation_alias="DISABLE_SOURCE_FETCHING",
+    )
     security_rate_limit_enabled: bool = Field(
         default=True,
         validation_alias="SECURITY_RATE_LIMIT_ENABLED",

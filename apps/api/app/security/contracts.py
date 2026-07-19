@@ -153,6 +153,12 @@ DATA_TYPES: dict[str, ClassifiedDataType] = {
         ProviderPolicy.LOCAL_ONLY,
         "ToolPolicyGateway",
     ),
+    "workspace_kill_switch_states": ClassifiedDataType(
+        "Workspace emergency kill-switch state",
+        DataClassification.CONFIDENTIAL,
+        ProviderPolicy.LOCAL_ONLY,
+        "PlatformSecurity",
+    ),
     "audit_events": ClassifiedDataType(
         "Audit events",
         DataClassification.CONFIDENTIAL,
@@ -360,6 +366,7 @@ RLS_DIRECT_TENANT_TABLES = frozenset(
         "validation_result_interpretations",
         "wedge_options",
         "workspace_data_keys",
+        "workspace_kill_switch_states",
     }
 )
 

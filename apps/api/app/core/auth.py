@@ -227,6 +227,15 @@ def require_workspace_owner(auth: AuthContext) -> None:
     )
 
 
+def require_workspace_security_admin(auth: AuthContext) -> None:
+    if normalized_role(auth.role) in {"owner", "admin"}:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Only workspace owners and admins can view security controls.",
+    )
+
+
 def record_cross_tenant_access_attempt(
     db: Session,
     auth: AuthContext,
