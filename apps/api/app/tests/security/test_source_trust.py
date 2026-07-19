@@ -5,13 +5,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditEvent, EvidenceChunk, EvidenceSource
+from app.db.models import AuditEvent, EvidenceChunk, EvidenceSource, ProjectMemoryItem
 from app.features.evidence.source_provenance import (
     assess_recommendation_shift,
     assess_single_source_claim_conflict,
     assess_source_trust,
 )
-from app.services import embedding_service
+from app.services import embedding_service, evidence_service
+from app.services.identity_service import ensure_dev_identity
 
 
 def test_instruction_heavy_source_is_quarantined_before_embedding(
@@ -190,6 +191,64 @@ def test_single_new_source_recommendation_shift_is_detected(
     assert shift.detected is True
     assert shift.previous_recommendation == "proceed"
     assert shift.proposed_recommendation == "continue_research"
+
+
+def test_quarantining_source_invalidates_linked_memory(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = _create_project(client)
+    response = client.post(
+        f"/api/projects/{project_id}/evidence/note",
+        json={
+            "title": "Source later quarantined",
+            "text": "Coaches need weekly check-in synthesis before client calls.",
+        },
+    )
+    assert response.status_code == 201
+    source = db_session.scalar(select(EvidenceSource))
+    assert source is not None
+    memory = ProjectMemoryItem(
+        workspace_id=source.workspace_id,
+        project_id=source.project_id,
+        memory_type="semantic",
+        status="active",
+        write_policy="approval_required",
+        source_entity_type="evidence_source",
+        source_entity_id=source.id,
+        title="Source-backed conclusion",
+        summary="A conclusion that must be reviewed if its source is quarantined.",
+        provenance_metadata={"source_ids": [str(source.id)]},
+    )
+    db_session.add(memory)
+    db_session.commit()
+
+    auth = ensure_dev_identity(
+        db_session,
+        email="dev@thesys.local",
+        display_name="Dev User",
+        role="owner",
+    )
+    evidence_service.quarantine_source_for_recommendation_shift(db_session, auth, source)
+    db_session.commit()
+    db_session.refresh(memory)
+
+    assert memory.status == "stale"
+    assert memory.provenance_metadata["evidence_quarantined"] is True
+    assert memory.provenance_metadata["requires_reverification"] is True
+    chunk = db_session.scalar(select(EvidenceChunk).where(EvidenceChunk.source_id == source.id))
+    assert chunk is None
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(
+            AuditEvent.event_type == "evidence_source_quarantined",
+            AuditEvent.entity_id == source.id,
+        )
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.event_metadata["memory_items_staled"] == 1
+    assert audit.event_metadata["retrieval_revoked"] is True
 
 
 def test_single_new_source_conflicting_claim_is_detected_and_quarantinable() -> None:

@@ -1389,6 +1389,11 @@ def _quarantine_source_for_trust(
     source_trust: source_provenance_service.SourceTrust,
 ) -> None:
     """Stop processing before embedding when source text trips poisoning controls."""
+    invalidation_impact = _invalidate_source_derivatives(
+        db,
+        source,
+        reason="quarantined",
+    )
     db.execute(delete(EvidenceChunk).where(EvidenceChunk.source_id == source.id))
     secure_ingestion_state_service.transition(
         source,
@@ -1410,6 +1415,8 @@ def _quarantine_source_for_trust(
             "injection_score": source_trust.injection_score,
             "poisoning_score": source_trust.poisoning_score,
             "signals": list(source_trust.signals),
+            **invalidation_impact,
+            "retrieval_revoked": True,
         },
     )
 
@@ -1610,8 +1617,13 @@ def _merge_source_chunk_metadata(
         chunk.chunk_metadata = merged
 
 
-def _invalidate_source_derivatives(db: Session, source: EvidenceSource) -> dict[str, int]:
-    """Invalidate data that would otherwise retain support from a deleted source."""
+def _invalidate_source_derivatives(
+    db: Session,
+    source: EvidenceSource,
+    *,
+    reason: str = "deleted",
+) -> dict[str, int]:
+    """Invalidate dependent records when a source can no longer support them."""
     source_claim_links = list(
         db.scalars(
             select(ClaimEvidenceLink).where(ClaimEvidenceLink.evidence_source_id == source.id)
@@ -1724,7 +1736,7 @@ def _invalidate_source_derivatives(db: Session, source: EvidenceSource) -> dict[
         item.status = "stale"
         item.provenance_metadata = {
             **(item.provenance_metadata or {}),
-            "evidence_deleted": True,
+            f"evidence_{reason}": True,
             "requires_reverification": True,
         }
         stale_memory_count += 1

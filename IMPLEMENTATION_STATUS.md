@@ -601,6 +601,11 @@ current verdict, next action, evidence health, validation, and decision state.
   its history while ensuring recommendation guidance is recalculated without the
   deleted support. The deletion audit records the invalidated links and decisions
   requiring review alongside stale claims and memory.
+- [x] Treat source quarantine as dependency invalidation, not just chunk removal.
+  When a previously usable source is blocked for a trust signal, linked claims,
+  decisions, and durable memory follow the same invalidation path as deletion;
+  memory becomes stale with an explicit quarantine/reverification record and the
+  source-quarantine audit records its derivative impact.
 - [x] Revalidate retrieval-plan cache hits against the current shared retrieval
   policy before evidence enters context. A source quarantined, revoked, or no
   longer eligible after caching cannot be replayed; cache-hit context, quality,
@@ -691,11 +696,15 @@ current verdict, next action, evidence health, validation, and decision state.
   across evidence, workflow-event, retrieval-policy, and workflow-scope
   regressions; changed-file compile checks and repository application lint
   passed.
+- [x] Source-quarantine dependency-invalidation checkpoint passed (`10 passed,
+  1 warning`) across source-trust, real agentic-research quarantine, and source
+  deletion-propagation regressions; changed-file compile checks and repository
+  application lint passed.
 
 ## Next Sprint
 
 Continue Sprint 65 secure RAG, vector isolation, and memory-poisoning defense:
-complete the remaining memory-poisoning acceptance work and audit any remaining
+audit the remaining memory-write acceptance paths and any residual
 evidence-derived replay surfaces.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
