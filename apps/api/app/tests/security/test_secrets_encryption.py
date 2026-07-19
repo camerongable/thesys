@@ -47,7 +47,8 @@ def test_secret_provider_policy_is_environment_specific() -> None:
         secret_provider="cloud",
         llm_stub_mode="auto",
         litellm_api_key="hosted-environment-secret",
-        database_url="postgresql+psycopg://thesys_api:secret@db.example/thesys",
+        database_url="postgresql+psycopg://thesys_api:secret@db.example/thesys?sslmode=verify-full",
+        redis_url="rediss://redis.example:6380/0",
         object_storage_mode="s3",
         s3_endpoint_url="https://s3.example.com",
         s3_verify_bucket_security=True,
@@ -56,6 +57,37 @@ def test_secret_provider_policy_is_environment_specific() -> None:
     assert hosted.secret_provider == "cloud"
     assert hosted.should_use_llm_stub is False
     assert hosted.litellm_api_key == ""
+
+
+def test_hosted_transport_configuration_requires_verified_channels() -> None:
+    base = {
+        "environment": "production",
+        "auth_mode": "api_key",
+        "secret_provider": "cloud",
+        "database_url": (
+            "postgresql+psycopg://thesys_api:secret@db.example/thesys?sslmode=verify-full"
+        ),
+        "redis_url": "rediss://redis.example:6380/0",
+        "object_storage_mode": "s3",
+        "s3_endpoint_url": "https://s3.example.com",
+        "s3_verify_bucket_security": True,
+        "malware_scanner_mode": "clamav",
+    }
+
+    with pytest.raises(ValidationError, match="sslmode=verify-full"):
+        Settings(
+            **(
+                base
+                | {"database_url": "postgresql+psycopg://thesys_api:secret@db.example/thesys"}
+            )
+        )
+    with pytest.raises(ValidationError, match="rediss"):
+        Settings(**(base | {"redis_url": "redis://redis.example:6379/0"}))
+    with pytest.raises(ValidationError, match="TEMPORAL_TLS_ENABLED"):
+        Settings(**(base | {"temporal_enabled": True}))
+
+    settings = Settings(**(base | {"temporal_enabled": True, "temporal_tls_enabled": True}))
+    assert settings.temporal_tls_enabled is True
 
 
 def test_invalid_configuration_hides_secret_inputs_from_errors() -> None:

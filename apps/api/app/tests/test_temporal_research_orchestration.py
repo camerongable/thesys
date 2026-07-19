@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import timedelta
 
@@ -5,7 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.db.models import ResearchSprint
 from app.services import temporal_research_service
 
@@ -25,6 +26,29 @@ async def _fake_signal(settings, workflow_id, signal_name):
 
 async def _fake_cancel(settings, workflow_id):
     return None
+
+
+def test_temporal_client_uses_configured_tls(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_connect(address, **kwargs):
+        captured["address"] = address
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(temporal_research_service.Client, "connect", fake_connect)
+
+    asyncio.run(
+        temporal_research_service._temporal_client(
+            Settings(temporal_address="temporal.example:7233", temporal_tls_enabled=True)
+        )
+    )
+
+    assert captured == {
+        "address": "temporal.example:7233",
+        "namespace": "default",
+        "tls": True,
+    }
 
 
 def _create_planned_sprint(client: TestClient) -> tuple[str, dict]:

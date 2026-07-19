@@ -130,6 +130,10 @@ current verdict, next action, evidence health, validation, and decision state.
   disposition, AES256/KMS server-side encryption, short presign lifetimes,
   authorization before presign, TLS enforcement, retention policy checks, and
   durable upload/download/deletion audit metadata without URLs or raw keys.
+- [x] Require verified internal state-store transport in hosted settings.
+  Production and staging now reject a Postgres URL without `sslmode=verify-full`,
+  a Redis URL without `rediss://`, and an enabled Temporal client without its TLS
+  flag; API and worker Temporal clients propagate the flag to the SDK.
 - [x] Add global browser security headers: strict API CSP with frame denial,
   `nosniff`, no-referrer policy, denied sensitive browser capabilities, legacy
   frame denial, and production HSTS. The API is explicitly stateless and

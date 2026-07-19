@@ -14,6 +14,12 @@ the intentionally non-deployable zero digest with a signed immutable image,
 provide `thesys-runtime` through the cluster secret store, and configure
 approved egress gateways for managed infrastructure and providers.
 
+Hosted configuration rejects unverified state-store transport: `DATABASE_URL`
+must use `sslmode=verify-full`, `REDIS_URL` must use `rediss://`, and an enabled
+Temporal client requires `TEMPORAL_TLS_ENABLED=true`. The managed services must
+present certificates trusted by the workload runtime; cloud workload identity
+and secret-store binding remain cluster-specific deployment configuration.
+
 ## Environment Profiles
 
 | Profile | Intended use | Auth | Providers | Notes |

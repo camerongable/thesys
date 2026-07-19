@@ -97,7 +97,10 @@ def test_hosted_configuration_rejects_bootstrap_or_wrong_runtime_role() -> None:
         auth_mode="api_key",
         secret_provider="cloud",
         database_runtime_role="worker",
-        database_url="postgresql+psycopg://thesys_worker:secret@db.example/thesys",
+        database_url=(
+            "postgresql+psycopg://thesys_worker:secret@db.example/thesys?sslmode=verify-full"
+        ),
+        redis_url="rediss://redis.example:6380/0",
         object_storage_mode="s3",
         s3_endpoint_url="https://s3.example.com",
         s3_verify_bucket_security=True,

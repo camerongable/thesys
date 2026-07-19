@@ -49,6 +49,7 @@ async def run_worker() -> None:
             client = await Client.connect(
                 settings.temporal_address,
                 namespace=settings.temporal_namespace,
+                tls=settings.temporal_tls_enabled,
             )
             break
         except Exception:

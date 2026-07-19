@@ -327,7 +327,11 @@ async def _cancel_temporal_workflow(settings: Settings, workflow_id: str) -> Non
 
 
 async def _temporal_client(settings: Settings) -> Client:
-    return await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
+    return await Client.connect(
+        settings.temporal_address,
+        namespace=settings.temporal_namespace,
+        tls=settings.temporal_tls_enabled,
+    )
 
 
 def _run_async(coro: Any) -> Any:

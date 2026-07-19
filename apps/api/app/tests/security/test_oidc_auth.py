@@ -56,6 +56,10 @@ def test_identity_configuration_rejects_dev_auth_outside_local() -> None:
             environment="production",
             auth_mode="oidc",
             secret_provider="cloud",
+            database_url=(
+                "postgresql+psycopg://thesys_api:secret@db.example/thesys?sslmode=verify-full"
+            ),
+            redis_url="rediss://redis.example:6380/0",
             object_storage_mode="s3",
             s3_endpoint_url="https://s3.example.com",
             s3_verify_bucket_security=True,
@@ -67,6 +71,10 @@ def test_identity_configuration_rejects_dev_auth_outside_local() -> None:
             environment="production",
             auth_mode="oidc",
             secret_provider="cloud",
+            database_url=(
+                "postgresql+psycopg://thesys_api:secret@db.example/thesys?sslmode=verify-full"
+            ),
+            redis_url="rediss://redis.example:6380/0",
             object_storage_mode="s3",
             s3_endpoint_url="https://s3.example.com",
             s3_verify_bucket_security=True,

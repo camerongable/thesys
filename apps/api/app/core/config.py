@@ -861,6 +861,10 @@ class Settings(BaseSettings):
     )
     temporal_enabled: bool = Field(default=False, validation_alias="TEMPORAL_ENABLED")
     temporal_address: str = Field(default="localhost:7233", validation_alias="TEMPORAL_ADDRESS")
+    temporal_tls_enabled: bool = Field(
+        default=False,
+        validation_alias="TEMPORAL_TLS_ENABLED",
+    )
     temporal_namespace: str = Field(default="default", validation_alias="TEMPORAL_NAMESPACE")
     temporal_task_queue: str = Field(
         default="thesys-research-sprints",
@@ -975,7 +979,8 @@ class Settings(BaseSettings):
             if self.security_rate_limit_backend != "redis":
                 raise ValueError("Hosted environments must use SECURITY_RATE_LIMIT_BACKEND=redis.")
             expected_database_user = f"thesys_{self.database_runtime_role}"
-            if make_url(self.database_url).username != expected_database_user:
+            database_url = make_url(self.database_url)
+            if database_url.username != expected_database_user:
                 raise ValueError("Hosted DATABASE_URL must use the declared scoped runtime role.")
             endpoint = urlparse(self.s3_endpoint_url)
             if self.object_storage_mode != "s3":
@@ -992,6 +997,13 @@ class Settings(BaseSettings):
                 raise ValueError("Hosted environments must use MALWARE_SCANNER_MODE=clamav.")
             if not self.malware_scanner_host.strip():
                 raise ValueError("MALWARE_SCANNER_HOST is required for hosted environments.")
+            if database_url.query.get("sslmode") != "verify-full":
+                raise ValueError("Hosted DATABASE_URL must use sslmode=verify-full.")
+            redis_endpoint = urlparse(self.redis_url)
+            if redis_endpoint.scheme != "rediss" or not redis_endpoint.hostname:
+                raise ValueError("Hosted REDIS_URL must use a verified rediss:// endpoint.")
+            if self.temporal_enabled and not self.temporal_tls_enabled:
+                raise ValueError("Hosted Temporal requires TEMPORAL_TLS_ENABLED=true.")
             self.auth_jwt_secret = None
             self.litellm_api_key = ""
             self.openai_api_key = None

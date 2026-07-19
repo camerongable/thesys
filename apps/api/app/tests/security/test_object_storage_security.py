@@ -122,7 +122,10 @@ def test_hosted_object_storage_configuration_fails_closed() -> None:
         "environment": "production",
         "auth_mode": "api_key",
         "secret_provider": "cloud",
-        "database_url": "postgresql+psycopg://thesys_api:secret@db.example/thesys",
+        "database_url": (
+            "postgresql+psycopg://thesys_api:secret@db.example/thesys?sslmode=verify-full"
+        ),
+        "redis_url": "rediss://redis.example:6380/0",
         "malware_scanner_mode": "clamav",
     }
 
