@@ -1210,23 +1210,24 @@ def test_memory_security_policy_normalizes_secure_recall_metadata() -> None:
         {"origin": "derived", "trusted_projection": True},
         content={"summary": "unreviewed"},
         summary="Unreviewed",
-        source_entity_type="guide_chat",
-        source_entity_id="chat-1",
+        source_entity_type="artifact_version",
+        source_entity_id="artifact-1",
         write_policy="direct",
     )
     assert untrusted_projection["trusted_projection"] is False
     assert memory_security_policy.requires_memory_proposal(
         untrusted_projection,
-        source_entity_type="guide_chat",
+        source_entity_type="artifact_version",
         status_value="active",
     )
     trusted_projection = memory_security_policy.secure_memory_metadata(
-        {"origin": "derived", "trusted_projection": True},
+        {"origin": "derived"},
         content={"summary": "reviewed"},
         summary="Reviewed",
         source_entity_type="artifact_version",
         source_entity_id="artifact-1",
         write_policy="approval_required",
+        trusted_derived_projection=True,
     )
     assert trusted_projection["trusted_projection"] is True
 

@@ -606,9 +606,11 @@ current verdict, next action, evidence health, validation, and decision state.
   semantic proposals retain their source-memory reference and conservatively
   use the lowest source confidence, treating missing confidence as zero.
 - [x] Restrict trusted derived-memory projections to the code-owned artifact-version
-  and validation-interpretation paths. Caller-declared projections from other
-  sources are proposal-only; risk projections provide explicit zero confidence
-  because risk likelihood is not evidence confidence.
+  and validation-interpretation helpers. The generic writer ignores
+  caller-declared projection flags, including for an otherwise permitted source
+  type; only the private helper capability can mark a derived projection trusted.
+  Risk projections provide explicit zero confidence because risk likelihood is
+  not evidence confidence.
 - [x] Enforce memory data-classification boundaries. Memory writes now persist a
   conservative classification, elevated when PII or secrets are detected; list,
   workflow selection, Inspect, direct lookup, compaction, conflicts, and
@@ -802,6 +804,10 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Trusted derived-projection checkpoint passed (`99 passed, 1 warning`) across
   memory-service, context-compiler, feature-boundary, agentic-research, and
   validation coverage; changed-file lint and compile checks passed.
+- [x] Code-owned trusted-projection capability checkpoint passed (`99 passed, 1
+  warning`) across memory-service, context-compiler, feature-boundary,
+  agentic-research, and validation coverage; changed-file lint and compile
+  checks passed.
 
 ## Next Sprint
 

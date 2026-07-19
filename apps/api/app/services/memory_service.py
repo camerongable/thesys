@@ -61,6 +61,7 @@ _MEMORY_TYPE_BASE_CLASSIFICATION = {
     "project": DataClassification.CONFIDENTIAL,
     "procedural": DataClassification.CONFIDENTIAL,
 }
+_TRUSTED_DERIVED_PROJECTION = object()
 
 MemorySelection = memory_selection_policy.MemorySelection
 _memory_exclusion_reason = memory_selection_policy.memory_exclusion_reason
@@ -348,6 +349,7 @@ def upsert_memory_item(
     confidence_score: Decimal | None = None,
     status_value: str = "active",
     expires_at: datetime | None = None,
+    _trusted_projection: object | None = None,
 ) -> ProjectMemoryItem:
     """Create or update a typed memory item under the project's governance model."""
     project_service.get_project(db, auth, project_id)
@@ -365,6 +367,7 @@ def upsert_memory_item(
         write_policy=write_policy,
         expires_at=expires_at,
         data_classification=data_classification,
+        trusted_derived_projection=_trusted_projection is _TRUSTED_DERIVED_PROJECTION,
     )
     if memory_type == "working":
         if not memory_security_policy.working_memory_write_allowed(write_policy):
@@ -703,7 +706,6 @@ def upsert_from_assumption(
         "source_entity_id": str(source_entity_id),
         "approval_required": True,
         "origin": "derived",
-        "trusted_projection": True,
     }
     provenance_metadata.update(source_metadata or {})
     return upsert_memory_item(
@@ -728,6 +730,7 @@ def upsert_from_assumption(
         },
         provenance_metadata=provenance_metadata,
         confidence_score=assumption.confidence_score,
+        _trusted_projection=_TRUSTED_DERIVED_PROJECTION,
     )
 
 
@@ -748,7 +751,6 @@ def upsert_from_risk(
         "source_entity_id": str(source_entity_id),
         "approval_required": True,
         "origin": "derived",
-        "trusted_projection": True,
     }
     provenance_metadata.update(source_metadata or {})
     return upsert_memory_item(
@@ -774,6 +776,7 @@ def upsert_from_risk(
         provenance_metadata=provenance_metadata,
         # Risk likelihood is not evidence confidence, so preserve uncertainty explicitly.
         confidence_score=Decimal("0"),
+        _trusted_projection=_TRUSTED_DERIVED_PROJECTION,
     )
 
 

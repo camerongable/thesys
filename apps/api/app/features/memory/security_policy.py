@@ -32,6 +32,7 @@ def secure_memory_metadata(
     write_policy: str,
     expires_at: datetime | None = None,
     data_classification: str = DataClassification.CONFIDENTIAL.value,
+    trusted_derived_projection: bool = False,
 ) -> dict[str, Any]:
     """Normalize the durable metadata required for secure memory recall."""
     normalized = dict(metadata or {})
@@ -46,7 +47,7 @@ def secure_memory_metadata(
     conflicts = _string_list(normalized.get("contradicts_memory_ids"))
     now = datetime.now(UTC).isoformat()
     trusted_projection = (
-        bool(normalized.get("trusted_projection"))
+        trusted_derived_projection
         and origin == "derived"
         and source_entity_type in _TRUSTED_PROJECTION_SOURCE_TYPES
         and source_entity_id is not None

@@ -169,7 +169,7 @@ def test_agent_memory_cannot_bypass_approval_with_direct_policy_or_projection(
         title="Agent-proposed conclusion",
         summary="An agent conclusion requires review before durable recall.",
         content={"claim": "requires review"},
-        source_entity_type="guide_chat",
+        source_entity_type="artifact_version",
         source_entity_id=uuid.uuid4(),
         confidence_score=Decimal("0.6"),
         provenance_metadata={
@@ -207,7 +207,7 @@ def test_derived_memory_cannot_claim_trusted_projection_from_arbitrary_source(
         title="Forged derived conclusion",
         summary="A generic caller cannot approve derived memory by declaration.",
         content={"claim": "requires controlled projection"},
-        source_entity_type="guide_chat",
+        source_entity_type="artifact_version",
         source_entity_id=uuid.uuid4(),
         confidence_score=Decimal("0.7"),
         provenance_metadata={"origin": "derived", "trusted_projection": True},
