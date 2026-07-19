@@ -162,6 +162,22 @@ def test_agentic_research_runs_multi_step_rag_and_writes_reviewable_memo(
     )
     assert body["claims"]
     assert body["citations"]
+    unsupported_claims = body["version"]["structured_content"]["memo"]["unsupported_claims"]
+    assert unsupported_claims
+    verification_event = db_session.scalar(
+        select(SecurityEvent).where(
+            SecurityEvent.event_type == "artifact_claim_verification_failed",
+            SecurityEvent.ai_run_id == uuid.UUID(body["ai_run_id"]),
+        )
+    )
+    assert verification_event is not None
+    assert verification_event.attributes == {
+        "artifact_type": "research_memo",
+        "unverified_claim_count": len(unsupported_claims),
+    }
+    assert verification_event.temporal_workflow_id is None
+    assert unsupported_claims[0] not in verification_event.summary
+    assert unsupported_claims[0] not in str(verification_event.attributes)
 
 
 def test_agentic_research_reserves_model_budget_before_provider_call(

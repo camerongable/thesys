@@ -118,6 +118,43 @@ def record_security_event(
     return event
 
 
+def record_artifact_claim_verification_failure(
+    db: Session,
+    auth: AuthContext,
+    *,
+    project_id: uuid.UUID,
+    ai_run_id: uuid.UUID,
+    artifact_type: str,
+    unverified_claim_count: int,
+    temporal_workflow_id: str | None = None,
+) -> SecurityEvent | None:
+    """Record verified claim failures without retaining claim text or citations."""
+    if (
+        isinstance(unverified_claim_count, bool)
+        or not isinstance(unverified_claim_count, int)
+        or unverified_claim_count < 1
+    ):
+        return None
+    event = record_security_event(
+        db,
+        workspace_id=auth.workspace_id,
+        project_id=project_id,
+        user_id=auth.user_id,
+        ai_run_id=ai_run_id,
+        temporal_workflow_id=temporal_workflow_id,
+        event_type="artifact_claim_verification_failed",
+        severity="medium",
+        source="workflow",
+        summary="Citation verification identified unverified claims before artifact persistence.",
+        attributes={
+            "artifact_type": artifact_type,
+            "unverified_claim_count": unverified_claim_count,
+        },
+    )
+    security_metrics_service.record_unverified_claims(unverified_claim_count)
+    return event
+
+
 def list_project_security_events(
     db: Session,
     auth: AuthContext,

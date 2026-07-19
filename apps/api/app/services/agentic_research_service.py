@@ -67,6 +67,7 @@ from app.services import (
     memory_service,
     project_service,
     retrieval_service,
+    security_event_service,
     source_provenance_service,
     tool_service,
     workflow_budget_service,
@@ -1616,6 +1617,15 @@ def _write_research_memo_step(
         db.add(version)
         db.flush()
         artifact.current_version_id = version.id
+        security_event_service.record_artifact_claim_verification_failure(
+            db,
+            auth,
+            project_id=project.id,
+            ai_run_id=run.id,
+            artifact_type="research_memo",
+            unverified_claim_count=len(memo.unsupported_claims),
+            temporal_workflow_id=sprint.temporal_workflow_id,
+        )
         claims = _write_claims(db, auth, project, version, memo.claims)
         if claim_conflict.detected:
             content = dict(version.structured_content)

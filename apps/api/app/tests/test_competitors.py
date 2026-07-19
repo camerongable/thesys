@@ -16,6 +16,7 @@ from app.db.models import (
     CompetitorEvidenceLink,
     EvidenceChunk,
     EvidenceSource,
+    SecurityEvent,
 )
 from app.services import evidence_service
 
@@ -93,6 +94,19 @@ def test_create_and_analyze_competitors_persists_profiles_artifact_and_links(
     assert run is not None
     assert run.workflow_type == "competitor_analysis"
     assert run.status == "succeeded"
+    verification_event = db_session.scalar(
+        select(SecurityEvent).where(
+            SecurityEvent.event_type == "artifact_claim_verification_failed",
+            SecurityEvent.ai_run_id == run.id,
+        )
+    )
+    assert verification_event is not None
+    assert verification_event.attributes == {
+        "artifact_type": "competitor_landscape",
+        "unverified_claim_count": len(body["unsupported_claims"]),
+    }
+    assert body["unsupported_claims"][0] not in verification_event.summary
+    assert body["unsupported_claims"][0] not in str(verification_event.attributes)
 
     steps = list(
         db_session.scalars(

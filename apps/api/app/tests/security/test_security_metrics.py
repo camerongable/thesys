@@ -87,8 +87,10 @@ def test_security_metrics_observe_duration_and_retrieval_source_count() -> None:
 
     security_metrics_service.record_workflow_duration(2.5)
     security_metrics_service.record_retrieval_source_count(3)
+    security_metrics_service.record_unverified_claims(4)
     security_metrics_service.record_workflow_duration(float("inf"))
     security_metrics_service.record_retrieval_source_count(-1)
+    security_metrics_service.record_unverified_claims(0)
 
     payload, _ = security_metrics_service.render_metrics()
     payload_text = payload.decode("utf-8")
@@ -103,6 +105,9 @@ def test_security_metrics_observe_duration_and_retrieval_source_count() -> None:
     )
     assert _metric_value(payload_text, "ai_retrieval_source_count_sum") == (
         _metric_value(before_text, "ai_retrieval_source_count_sum") + 3
+    )
+    assert _metric_value(payload_text, "ai_unverified_claim_total") == (
+        _metric_value(before_text, "ai_unverified_claim_total") + 4
     )
 
 

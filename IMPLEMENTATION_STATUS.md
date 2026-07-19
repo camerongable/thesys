@@ -1165,6 +1165,12 @@ current verdict, next action, evidence health, validation, and decision state.
   bounded counts, and control status; no source text, entity values, scanner
   signatures, or extraction content is stored. Existing audit trails remain
   attributable without duplicating the high-severity security event or alert.
+- [x] Emit a normalized citation-verification event before any opportunity
+  brief, competitor landscape, or research memo commits with unsupported
+  claims. Events correlate to the AI run (and Temporal workflow when present),
+  retain only artifact type and claim count, and increment
+  `ai_unverified_claim_total` by that count without recording claim or citation
+  content.
 - [x] Add the redacted, admin-only Security Overview data API. Project security
   administrators can aggregate high/critical events, blocked attacks, denied
   tools, pending high-risk approvals, PII redactions, quarantines, anomalous

@@ -61,6 +61,7 @@ from app.services import (
     memory_service,
     project_service,
     retrieval_service,
+    security_event_service,
 )
 
 
@@ -629,6 +630,14 @@ def _write_analysis_step(
     db.add(version)
     db.flush()
     artifact.current_version_id = version.id
+    security_event_service.record_artifact_claim_verification_failure(
+        db,
+        auth,
+        project_id=project.id,
+        ai_run_id=run.id,
+        artifact_type="competitor_landscape",
+        unverified_claim_count=len(draft.unsupported_claims),
+    )
     claims = _write_claims(db, auth, project, version, draft.claims)
 
     db.commit()

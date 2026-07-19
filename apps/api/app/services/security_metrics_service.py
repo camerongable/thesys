@@ -158,6 +158,17 @@ def record_retrieval_source_count(source_count: int) -> None:
     RETRIEVAL_SOURCE_COUNT.observe(source_count)
 
 
+def record_unverified_claims(unverified_claim_count: int) -> None:
+    """Count claims rejected or downgraded by citation verification."""
+    if (
+        isinstance(unverified_claim_count, bool)
+        or not isinstance(unverified_claim_count, int)
+        or unverified_claim_count < 1
+    ):
+        return
+    UNVERIFIED_CLAIM_TOTAL.inc(unverified_claim_count)
+
+
 def record_provider_error() -> None:
     """Record one provider transport or protocol failure."""
     PROVIDER_ERROR_TOTAL.inc()
