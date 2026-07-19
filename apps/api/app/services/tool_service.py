@@ -49,6 +49,7 @@ from app.services import (
     memory_service,
     project_service,
     retrieval_service,
+    security_policy_service,
 )
 
 RequestedBy = Literal["agent", "user", "system"]
@@ -99,6 +100,14 @@ def execute_tool(
     definition = _definition(tool_name)
     project = project_service.get_project(db, auth, project_id)
     _authorize_tool_invocation(db, auth, project_id, definition)
+    _enforce_agent_write_kill_switch(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        definition=definition,
+        requested_by=requested_by,
+    )
     try:
         guarded_input = _guard_tool_input(
             definition,
@@ -233,6 +242,15 @@ def create_proposal(
         raise ValueError(f"{tool_name} is not a proposal tool.")
     project = project_service.get_project(db, auth, project_id)
     _authorize_tool_invocation(db, auth, project_id, definition)
+    effective_settings = settings or get_settings()
+    _enforce_agent_write_kill_switch(
+        db,
+        auth,
+        effective_settings,
+        project_id=project_id,
+        definition=definition,
+        requested_by=requested_by,
+    )
     try:
         guarded_proposal = _guard_proposal_payload(
             definition,
@@ -249,7 +267,7 @@ def create_proposal(
     policy_decision = _authorize_opa_tool_invocation(
         db,
         auth,
-        settings or get_settings(),
+        effective_settings,
         project,
         definition,
         requested_by=requested_by,
@@ -890,6 +908,25 @@ def _authorize_tool_invocation(
         _audit_tool_denial(db, auth, project_id, definition, "mutating_tool_denied")
         db.commit()
         raise
+
+
+def _enforce_agent_write_kill_switch(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    requested_by: RequestedBy,
+) -> None:
+    if requested_by == "agent" and definition.access_mode != "read":
+        security_policy_service.enforce_agent_writes_allowed(
+            db,
+            auth,
+            settings,
+            project_id=project_id,
+            operation=definition.name,
+        )
 
 
 def _authorize_opa_tool_invocation(

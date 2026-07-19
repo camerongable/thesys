@@ -867,11 +867,15 @@ current verdict, next action, evidence health, validation, and decision state.
   boundary, covering content upserts and all lifecycle mutations before they
   persist. Each denial returns a generic 403 and emits an attributable
   policy-denial event; conflict inspection remains read-only while disabled.
+- [x] Enforce the all-agent-writes kill switch at the governed tool boundary.
+  Agent-originated proposal and write-capability invocations now deny before
+  schema, OPA, invocation, or approval persistence, with a generic 403 and
+  attributable policy-denial audit. Agent read tools and human-originated
+  proposal review remain available.
 - [ ] Implement the remaining Sprint 66 capability controls: remote credential
   isolation, registration enablement plus live schema/version-drift validation,
-  enforcement of the remaining agent-write and external-MCP runtime kill
-  switches, and then validate the live Compose policy bundle with the OPA
-  parser/runtime.
+  enforcement of the remaining external-MCP runtime kill switch, and then
+  validate the live Compose policy bundle with the OPA parser/runtime.
 
 ## Sprint 66 Verification
 
@@ -908,14 +912,18 @@ current verdict, next action, evidence health, validation, and decision state.
   warnings`) across memory-service, security-governance, tool-boundary,
   agentic-research, context-compiler, control-plane, and security-invariant
   coverage; focused lint, compilation, and `git diff --check` passed.
+- [x] Agent-write kill-switch checkpoint passed (`83 passed, 1 xfailed, 4
+  warnings`) across tool-boundary, MCP-adapter, agentic-research,
+  security-governance, control-plane, and security-invariant coverage; focused
+  lint, compilation, and `git diff --check` passed.
 - [ ] The local workspace has no Docker CLI, so Compose graph validation and
   direct OPA/Rego parser validation remain part of the compose-backed
   enforcement checkpoint.
 
 ## Next Sprint
 
-Continue Sprint 66 by enforcing the all-agent-writes kill switch at the shared
-governed mutation boundary.
+Continue Sprint 66 by enforcing the external-MCP kill switch at the remote
+server invocation boundary.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

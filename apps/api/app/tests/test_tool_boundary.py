@@ -113,6 +113,61 @@ def test_manifest_record_limit_blocks_tool_before_invocation(
     assert denial.event_metadata["reason"] == "manifest_record_limit_exceeded"
 
 
+def test_agent_write_kill_switch_blocks_proposals_without_blocking_reads_or_users(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session)
+    update_response = client.patch(
+        "/api/security/kill-switches",
+        json={"disable_all_agent_writes": True},
+    )
+
+    with pytest.raises(HTTPException, match="Agent-initiated updates are temporarily unavailable"):
+        tool_service.create_proposal(
+            db_session,
+            auth,
+            project_id,
+            "propose_memory_update",
+            {"summary": "Blocked agent proposal."},
+            requested_by="agent",
+        )
+    read_result = tool_service.execute_tool(
+        db_session,
+        auth,
+        get_settings(),
+        project_id,
+        "get_project_summary",
+        requested_by="agent",
+    )
+    user_proposal = tool_service.create_proposal(
+        db_session,
+        auth,
+        project_id,
+        "propose_memory_update",
+        {"summary": "Allowed user proposal."},
+        requested_by="user",
+    )
+
+    assert update_response.status_code == 200
+    assert read_result.invocation.access_mode == "read"
+    assert user_proposal.requested_by == "user"
+    assert (
+        db_session.scalar(
+            select(ToolInvocation).where(ToolInvocation.tool_name == "propose_memory_update")
+        )
+        == user_proposal
+    )
+    denial = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "security_policy_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert denial is not None
+    assert denial.event_metadata["workflow_type"] == "agent_write_propose_memory_update"
+
+
 def test_manifest_output_limit_marks_invocation_failed(
     client: TestClient,
     db_session: Session,
