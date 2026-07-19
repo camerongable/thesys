@@ -17,7 +17,7 @@ from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
 )
-from app.services.workflow_budget_service import reserve_model_call
+from app.services.workflow_budget_service import record_model_usage, reserve_model_call
 
 ChatRole = Literal["system", "user", "assistant"]
 
@@ -106,12 +106,17 @@ class LiteLLMClient:
             raise LiteLLMClientError(
                 "LiteLLM response did not match chat completions format."
             ) from exc
+        usage = body.get("usage") or {}
+        total_cost = _parse_cost_header(response.headers.get("x-litellm-response-cost"))
+        record_model_usage(
+            total_tokens=usage.get("total_tokens"),
+            total_cost=total_cost,
+        )
         try:
             safe_output = gateway.evaluate_model_output(str(content))
         except GuardrailBlockedError as exc:
             raise LiteLLMClientError("LiteLLM output blocked by guardrail.") from exc
 
-        usage = body.get("usage") or {}
         return LLMCompletion(
             content=safe_output.text,
             model_provider="litellm",
@@ -119,7 +124,7 @@ class LiteLLMClient:
             prompt_tokens=usage.get("prompt_tokens"),
             completion_tokens=usage.get("completion_tokens"),
             total_tokens=usage.get("total_tokens"),
-            total_cost=_parse_cost_header(response.headers.get("x-litellm-response-cost")),
+            total_cost=total_cost,
             raw_response=body,
             used_stub=False,
         )
@@ -181,6 +186,12 @@ class LiteLLMClient:
                                 raise LiteLLMClientError(
                                     "LiteLLM stream output blocked by guardrail."
                                 ) from exc
+                    record_model_usage(
+                        total_tokens=None,
+                        total_cost=_parse_cost_header(
+                            response.headers.get("x-litellm-response-cost")
+                        ),
+                    )
         except httpx.HTTPStatusError as exc:
             raise LiteLLMClientError(
                 f"LiteLLM stream failed with status {exc.response.status_code}."

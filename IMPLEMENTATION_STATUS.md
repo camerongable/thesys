@@ -1094,6 +1094,13 @@ current verdict, next action, evidence health, validation, and decision state.
   separate reservations. Exhaustion prevents provider egress and emits the
   configured and observed totals through the high-risk workflow audit,
   normalized security event, and alert.
+- [x] Enforce actual token and provider-cost limits at that same gateway. After
+  every real completion, returned token usage and LiteLLM response cost are
+  durably accumulated under the locked sprint before a workflow can consume the
+  result. A response that crosses either immutable total persists its usage,
+  records the configured and observed total in the high-risk workflow audit,
+  normalized security event, and alert, and safely stops downstream workflow
+  writes. Streamed requests also account for reported response cost when scoped.
 
 ## Next Sprint
 

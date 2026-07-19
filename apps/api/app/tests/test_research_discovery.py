@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -378,7 +379,11 @@ def test_source_discovery_reserves_model_budget_before_provider_call(
     assert first_response.status_code == 200
     assert len(provider_calls) == 1
     db_session.refresh(sprint)
-    assert sprint.workflow_security_usage == {"model_calls": 1}
+    assert sprint.workflow_security_usage == {
+        "model_calls": 1,
+        "tokens": 20,
+        "cost_usd": "0",
+    }
 
     second_response = client.post(
         f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
@@ -394,6 +399,121 @@ def test_source_discovery_reserves_model_budget_before_provider_call(
     assert audit is not None
     assert audit.event_metadata["max_model_calls"] == 1
     assert audit.event_metadata["observed_model_calls"] == 1
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
+
+
+@pytest.mark.parametrize(
+    ("budget_update", "response_headers", "event_type", "usage_key", "usage_value"),
+    [
+        (
+            {"max_tokens": 19},
+            {},
+            "workflow_token_budget_exceeded",
+            "tokens",
+            20,
+        ),
+        (
+            {"max_cost_usd": 0.01},
+            {"x-litellm-response-cost": "0.02"},
+            "workflow_cost_budget_exceeded",
+            "cost_usd",
+            "0.02",
+        ),
+    ],
+)
+def test_source_discovery_stops_after_provider_usage_exceeds_workflow_budget(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+    budget_update: dict[str, int | float],
+    response_headers: dict[str, str],
+    event_type: str,
+    usage_key: str,
+    usage_value: int | str,
+) -> None:
+    project_id, sprint_id = _approved_research_sprint(client)
+    sprint = db_session.get(ResearchSprint, uuid.UUID(sprint_id))
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        **budget_update,
+    }
+    db_session.commit()
+    monkeypatch.setenv("LLM_STUB_MODE", "never")
+    monkeypatch.setenv("LITELLM_API_KEY", "test-model-key")
+    monkeypatch.setenv("PROVIDER_EGRESS_POLICY_ENABLED", "false")
+    get_settings.cache_clear()
+    provider_calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        headers = response_headers
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "model": "test-model",
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"sources":[{"url":"https://example.com/usage-budget",'
+                                '"title":"Usage budget source",'
+                                '"snippet":"Provider-backed source candidate.",'
+                                '"source_type":"market_report",'
+                                '"relevance_score":0.9,'
+                                '"reason_selected":"Tests usage accounting.",'
+                                '"associated_research_question":"What evidence matters?"}]}'
+                            )
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+            }
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, _url: str, **kwargs: object) -> FakeResponse:
+            provider_calls.append(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr(litellm_client.httpx, "Client", FakeClient)
+
+    response = client.post(
+        f"/api/projects/{project_id}/research-sprints/{sprint_id}/sources/discover"
+    )
+
+    assert response.status_code == 429
+    assert len(provider_calls) == 1
+    db_session.refresh(sprint)
+    assert sprint.workflow_security_usage["model_calls"] == 1
+    assert sprint.workflow_security_usage[usage_key] == usage_value
+    assert not list(
+        db_session.scalars(
+            select(DiscoveredSource).where(
+                DiscoveredSource.research_sprint_id == uuid.UUID(sprint_id)
+            )
+        )
+    )
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == event_type)
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
     security_event = db_session.scalar(
         select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
     )
@@ -922,7 +1042,11 @@ def test_competitor_discovery_reserves_model_budget_before_provider_call(
     assert first_response.status_code == 200
     assert len(provider_calls) == 1
     db_session.refresh(sprint)
-    assert sprint.workflow_security_usage == {"model_calls": 1}
+    assert sprint.workflow_security_usage == {
+        "model_calls": 1,
+        "tokens": 20,
+        "cost_usd": "0",
+    }
 
     second_response = client.post(
         f"/api/projects/{project_id}/research-sprints/{sprint_id}/competitor-candidates/discover"
