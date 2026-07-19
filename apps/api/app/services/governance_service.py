@@ -54,6 +54,10 @@ def record_audit_event(
     )
     db.add(event)
     db.flush()
+    if risk_level == "high":
+        from app.services import security_event_service
+
+        security_event_service.record_from_audit_event(db, event)
     return event
 
 

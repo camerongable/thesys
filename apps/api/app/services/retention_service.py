@@ -17,6 +17,7 @@ from app.db.models import (
     AuthenticationEvent,
     EvidenceSource,
     PiiTokenMapping,
+    SecurityEvent,
 )
 
 
@@ -135,15 +136,9 @@ def purge_expired_evidence_sources(
 
     current_time = now or datetime.now(UTC)
     sources = list(
-        db.scalars(
-            select(EvidenceSource).where(EvidenceSource.workspace_id == auth.workspace_id)
-        )
+        db.scalars(select(EvidenceSource).where(EvidenceSource.workspace_id == auth.workspace_id))
     )
-    expired = [
-        source
-        for source in sources
-        if _expired_source(source, current_time)
-    ]
+    expired = [source for source in sources if _expired_source(source, current_time)]
     for source in expired:
         evidence_service.delete_source(
             db,
@@ -165,10 +160,12 @@ def purge_expired_pii_token_mappings(
     """Delete only the caller workspace's expired reversible PII mappings."""
     current_time = now or datetime.now(UTC)
     result = db.execute(
-        delete(PiiTokenMapping).where(
+        delete(PiiTokenMapping)
+        .where(
             PiiTokenMapping.workspace_id == auth.workspace_id,
             PiiTokenMapping.retention_expires_at <= current_time,
-        ).execution_options(synchronize_session=False)
+        )
+        .execution_options(synchronize_session=False)
     )
     db.commit()
     return int(result.rowcount or 0)
@@ -285,10 +282,10 @@ def purge_expired_local_records(
     )
     security_cutoff = _retention_cutoff(settings, RetentionAsset.SECURITY_EVENT, current_time)
     security_result = db.execute(
-        delete(AuthenticationEvent)
+        delete(SecurityEvent)
         .where(
-            AuthenticationEvent.workspace_id == auth.workspace_id,
-            AuthenticationEvent.created_at <= security_cutoff,
+            SecurityEvent.workspace_id == auth.workspace_id,
+            SecurityEvent.detected_at <= security_cutoff,
         )
         .execution_options(synchronize_session=False)
     )

@@ -111,6 +111,7 @@ def test_data_classification_registry_covers_sensitive_assets() -> None:
         "mcp_oauth_authorization_transactions",
         "mcp_server_registrations",
         "audit_events",
+        "security_events",
         "authentication_events",
         "session_revocations",
         "langsmith_traces",
@@ -180,6 +181,7 @@ def test_all_tenant_tables_are_covered_by_rls() -> None:
         "tool_invocations",
         "approval_requests",
         "audit_events",
+        "security_events",
     } <= RLS_DIRECT_TENANT_TABLES
 
 
@@ -207,6 +209,7 @@ def test_rls_migration_forces_policies_and_scoped_role_grants(monkeypatch) -> No
         "mcp_server_registrations",
         "pii_token_mappings",
         "session_revocations",
+        "security_events",
         "workspace_data_keys",
         "workspace_kill_switch_states",
     }
@@ -319,6 +322,35 @@ def test_session_revocation_migration_forces_rls_and_immutable_runtime_grants(mo
     assert "current_setting('app.workspace_id', true)" in combined
     assert "thesys_api" in combined and "SELECT, INSERT" in combined
     assert "UPDATE" not in combined and "DELETE" not in combined
+
+
+def test_security_event_migration_forces_rls_and_retention_worker_grant(monkeypatch) -> None:
+    migration_path = REPO_ROOT / "apps/api/alembic/versions/0043_security_events.py"
+    spec = importlib.util.spec_from_file_location("security_events_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "create_table", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda statement: statements.append(str(statement)),
+    )
+
+    migration.upgrade()
+
+    combined = "\n".join(statements)
+    assert migration.TABLE_NAME in RLS_DIRECT_TENANT_TABLES
+    assert 'ALTER TABLE "security_events" ENABLE ROW LEVEL SECURITY' in statements
+    assert 'ALTER TABLE "security_events" FORCE ROW LEVEL SECURITY' in statements
+    assert 'CREATE POLICY workspace_isolation ON "security_events"' in combined
+    assert "current_setting('app.workspace_id', true)" in combined
+    assert "thesys_api" in combined and "SELECT, INSERT" in combined
+    assert "thesys_worker" in combined and "SELECT, INSERT, DELETE" in combined
+    assert "thesys_readonly" in combined
+    assert "UPDATE" not in combined
 
 
 def test_evidence_quarantine_migration_allows_the_fail_closed_status(monkeypatch) -> None:

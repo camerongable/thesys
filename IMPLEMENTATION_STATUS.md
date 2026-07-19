@@ -1036,10 +1036,21 @@ current verdict, next action, evidence health, validation, and decision state.
   workspace still has no Docker CLI, so full Compose graph rendering remains a
   deployment-environment verification item.
 
+## Sprint 67 Progress
+
+- [x] Establish the normalized, tenant/RLS-scoped security-event foundation.
+  `security_events` now persists redacted severity/source, event type, summary,
+  containment status, and bounded request, session, AI, trace, workflow, tool,
+  approval, and audit correlation identifiers. Every high-risk audit record is
+  projected into this stream in the same transaction, so existing guardrail,
+  tool, and MCP high-risk paths become queryable by workspace owners and admins
+  through the governed project endpoint. Retention now purges the correct event
+  type with the worker's narrowly scoped delete grant.
+
 ## Next Sprint
 
-Continue Sprint 67 by completing the normalized security-event model and its
-first shared emitters.
+Continue Sprint 67 by adding detection rules and alert escalation for the
+normalized security-event stream.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in

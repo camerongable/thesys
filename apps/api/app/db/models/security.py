@@ -220,3 +220,71 @@ class WorkspaceKillSwitchState(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     disable_memory_writes: Mapped[bool] = mapped_column(nullable=False, default=False)
     disable_source_fetching: Mapped[bool] = mapped_column(nullable=False, default=False)
     updated_by: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
+
+
+class SecurityEvent(UUIDPrimaryKeyMixin, Base):
+    """Normalized, redacted detection record for security monitoring and response."""
+
+    __tablename__ = "security_events"
+    __table_args__ = (
+        CheckConstraint(
+            "severity in ('info','low','medium','high','critical')",
+            name="ck_security_events_severity",
+        ),
+        CheckConstraint(
+            "source in ('api','guardrail','retrieval','tool','memory','workflow','auth','mcp')",
+            name="ck_security_events_source",
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+    )
+    audit_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("audit_events.id", ondelete="SET NULL"),
+        index=True,
+    )
+    ai_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("ai_runs.id", ondelete="SET NULL"),
+        index=True,
+    )
+    tool_invocation_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("tool_invocations.id", ondelete="SET NULL"),
+        index=True,
+    )
+    approval_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("approval_requests.id", ondelete="SET NULL"),
+        index=True,
+    )
+    session_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    request_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    langsmith_trace_id: Mapped[str | None] = mapped_column(String(100), index=True)
+    temporal_workflow_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    event_type: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+    containment_status: Mapped[str | None] = mapped_column(String(80), index=True)

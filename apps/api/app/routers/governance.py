@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import AuthContext, AuthContextDep, SettingsDep
-from app.db.models import ApprovalRequest, AuditEvent
+from app.db.models import ApprovalRequest, AuditEvent, SecurityEvent
 from app.db.session import get_db
 from app.schemas.governance import (
     ApprovalRequestActionRead,
@@ -15,6 +15,8 @@ from app.schemas.governance import (
     ApprovalRequestStatus,
     AuditEventListRead,
     AuditEventRead,
+    SecurityEventListRead,
+    SecurityEventRead,
 )
 from app.services import governance_service, tool_service, validation_service
 
@@ -30,6 +32,10 @@ def serialize_approval(approval: ApprovalRequest) -> ApprovalRequestRead:
 
 def serialize_audit_event(event: AuditEvent) -> AuditEventRead:
     return AuditEventRead.model_validate(event)
+
+
+def serialize_security_event(event: SecurityEvent) -> SecurityEventRead:
+    return SecurityEventRead.model_validate(event)
 
 
 @router.get("/approvals", response_model=ApprovalRequestListRead)
@@ -105,6 +111,19 @@ def list_project_audit_events(
 ) -> AuditEventListRead:
     events = governance_service.list_audit_events(db, auth, project_id, limit=limit)
     return AuditEventListRead(events=[serialize_audit_event(event) for event in events])
+
+
+@router.get("/security-events", response_model=SecurityEventListRead)
+def list_project_security_events(
+    project_id: uuid.UUID,
+    db: DbDep,
+    auth: AuthContextDep,
+    limit: LimitQuery = 50,
+) -> SecurityEventListRead:
+    from app.services import security_event_service
+
+    events = security_event_service.list_project_security_events(db, auth, project_id, limit=limit)
+    return SecurityEventListRead(events=[serialize_security_event(event) for event in events])
 
 
 def _get_project_approval(

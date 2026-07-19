@@ -19,6 +19,7 @@ from app.db.models import (
     EvidenceSource,
     EvidenceSourceTombstone,
     PiiTokenMapping,
+    SecurityEvent,
     SessionRevocation,
     User,
     Workspace,
@@ -91,13 +92,10 @@ def test_expired_evidence_and_pii_mappings_are_purged_by_workspace(
 
     settings = get_settings()
     assert retention_service.purge_expired_pii_token_mappings(db_session, owner) == 1
-    assert (
-        retention_service.purge_expired_evidence_sources(db_session, owner, settings) == 1
-    )
+    assert retention_service.purge_expired_evidence_sources(db_session, owner, settings) == 1
 
     assert (
-        db_session.scalar(select(PiiTokenMapping).where(PiiTokenMapping.id == mapping_id))
-        is None
+        db_session.scalar(select(PiiTokenMapping).where(PiiTokenMapping.id == mapping_id)) is None
     )
     assert db_session.scalar(select(EvidenceSource).where(EvidenceSource.id == source_id)) is None
     assert (
@@ -198,13 +196,16 @@ def test_local_retention_cleanup_removes_expired_payloads_but_keeps_run_accounti
         event_metadata={},
         created_at=expired_at,
     )
-    expired_security = AuthenticationEvent(
+    expired_security = SecurityEvent(
         workspace_id=source.workspace_id,
+        project_id=source.project_id,
         user_id=source.created_by,
-        event_type="login_success",
-        authentication_method="dev",
-        reason_code="retention_test",
-        created_at=expired_at,
+        event_type="retention_test",
+        severity="low",
+        source="api",
+        summary="Expired security record",
+        attributes={},
+        detected_at=expired_at,
     )
     session_revocation = SessionRevocation(
         workspace_id=source.workspace_id,
@@ -252,7 +253,7 @@ def test_local_retention_cleanup_removes_expired_payloads_but_keeps_run_accounti
     assert current_run.output_summary == "current output"
     assert current_run.langsmith_trace_id == "current-trace"
     assert db_session.get(AuditEvent, expired_audit_id) is None
-    assert db_session.get(AuthenticationEvent, expired_security_id) is None
+    assert db_session.get(SecurityEvent, expired_security_id) is None
     assert db_session.get(SessionRevocation, session_revocation_id) is not None
 
 

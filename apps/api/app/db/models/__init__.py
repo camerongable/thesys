@@ -43,6 +43,7 @@ from app.db.models.security import (
     MCPServerCredential,
     MCPServerRegistration,
     PiiTokenMapping,
+    SecurityEvent,
     WorkspaceDataKey,
     WorkspaceKillSwitchState,
 )
@@ -96,6 +97,7 @@ __all__ = [
     "ResearchPlan",
     "ResearchSprint",
     "Risk",
+    "SecurityEvent",
     "SessionRevocation",
     "TimestampMixin",
     "ThesisCanvas",

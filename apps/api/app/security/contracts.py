@@ -177,6 +177,12 @@ DATA_TYPES: dict[str, ClassifiedDataType] = {
         ProviderPolicy.LOCAL_ONLY,
         "GovernanceService",
     ),
+    "security_events": ClassifiedDataType(
+        "Normalized security monitoring events",
+        DataClassification.CONFIDENTIAL,
+        ProviderPolicy.LOCAL_ONLY,
+        "SecurityEventService",
+    ),
     "authentication_events": ClassifiedDataType(
         "Authentication audit events",
         DataClassification.CONFIDENTIAL,
@@ -373,6 +379,7 @@ RLS_DIRECT_TENANT_TABLES = frozenset(
         "research_sprints",
         "risks",
         "session_revocations",
+        "security_events",
         "thesis_canvases",
         "thesis_evolution_events",
         "tool_invocations",
