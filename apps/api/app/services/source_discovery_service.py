@@ -32,6 +32,7 @@ from app.services import (
     langsmith_observability_service,
     project_service,
     security_policy_service,
+    workflow_budget_service,
 )
 
 
@@ -135,7 +136,14 @@ def discover_sources(
             specs = _candidate_specs_from_search(search_batch)
             search_diagnostics = external_search_service.diagnostics(search_batch)
         else:
-            draft, completion = _generate_source_draft(settings, sprint, messages)
+            with workflow_budget_service.workflow_budget_scope(
+                db,
+                auth,
+                settings,
+                project_id=project_id,
+                research_sprint_id=sprint.id,
+            ):
+                draft, completion = _generate_source_draft(settings, sprint, messages)
             specs = _candidate_specs_from_draft(draft)
             search_diagnostics = {
                 "enabled": False,

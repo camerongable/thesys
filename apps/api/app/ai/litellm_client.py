@@ -17,6 +17,7 @@ from app.services.security_policy_service import (
     ProviderEgressDeniedError,
     enforce_provider_egress_policy,
 )
+from app.services.workflow_budget_service import reserve_model_call
 
 ChatRole = Literal["system", "user", "assistant"]
 
@@ -81,6 +82,7 @@ class LiteLLMClient:
 
         url = f"{self.settings.litellm_base_url.rstrip('/')}/v1/chat/completions"
         self._enforce_egress(url)
+        reserve_model_call()
         headers = {
             "Authorization": f"Bearer {self._api_key()}",
             "Content-Type": "application/json",
@@ -151,6 +153,7 @@ class LiteLLMClient:
 
         url = f"{self.settings.litellm_base_url.rstrip('/')}/v1/chat/completions"
         self._enforce_egress(url)
+        reserve_model_call()
         headers = {
             "Authorization": f"Bearer {self._api_key()}",
             "Content-Type": "application/json",

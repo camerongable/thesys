@@ -1086,6 +1086,14 @@ current verdict, next action, evidence health, validation, and decision state.
   retries cannot evade the limit. Exhaustion prevents another provider call and
   records the configured and observed query counts in the high-risk audit,
   normalized workflow security event, and alert.
+- [x] Meter real source-discovery model calls at the shared LiteLLM gateway.
+  A context-scoped sprint budget is bound around source discovery and reserves
+  a durable `model_calls` count under the sprint lock immediately before every
+  non-streaming or streaming provider request. Structured-output repair calls
+  naturally take separate reservations. Exhaustion prevents provider egress and
+  emits the configured and observed totals through the high-risk workflow
+  audit, normalized security event, and alert. Other sprint workflows still
+  need to bind this shared scope before their model calls are budgeted.
 
 ## Next Sprint
 
