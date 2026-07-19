@@ -1056,7 +1056,8 @@ current verdict, next action, evidence health, validation, and decision state.
 - [x] Establish a durable, immutable workflow security-budget contract.
   Each research sprint snapshots all required model, tool, external-query,
   retrieval, token, cost, duration, memory-proposal, structured-repair,
-  critique-loop, and repeated-identical-tool limits before durable execution.
+  critique-loop, repeated-identical-tool, and alternating-tool-cycle limits
+  before durable execution.
   The snapshot is visible through the sprint API, persists across
   retries/configuration changes, travels with the Temporal payload, and
   constrains its execution timeout by the configured workflow duration limit.
@@ -1119,6 +1120,11 @@ current verdict, next action, evidence health, validation, and decision state.
   allows five matching calls; the next one safely stops with a high-risk audit,
   normalized workflow security event, and alert that retain only the digest and
   configured/observed counts.
+- [x] Detect alternating sprint-scoped tool cycles before the second invocation
+  can complete an over-limit pair. The governed execution and proposal paths
+  lock the durable cycle limit, compare only recent tool names, and stop the
+  next completed cycle with a high-risk audit, normalized workflow security
+  event, and alert containing the cycle names and configured/observed counts.
 
 ## Next Sprint
 

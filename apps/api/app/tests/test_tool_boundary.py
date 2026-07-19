@@ -903,6 +903,84 @@ def test_repeated_identical_sprint_tool_invocation_stops_before_persisting(
     )
 
 
+def test_alternating_sprint_tool_cycle_stops_before_persisting(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = _create_project(client)
+    plan_response = client.post(
+        f"/api/projects/{project_id}/research-sprints/plan",
+        json={"objective": "Detect alternating governed tool calls."},
+    )
+    assert plan_response.status_code == 200
+    sprint_id = uuid.UUID(plan_response.json()["sprint"]["id"])
+    sprint = db_session.get(ResearchSprint, sprint_id)
+    assert sprint is not None
+    sprint.workflow_security_budget = {
+        **sprint.workflow_security_budget,
+        "max_alternating_tool_cycles": 1,
+    }
+    db_session.commit()
+
+    auth = _dev_auth(db_session)
+    for tool_name in (
+        "get_project_summary",
+        "list_project_sources",
+        "get_project_summary",
+    ):
+        tool_service.execute_tool(
+            db_session,
+            auth,
+            get_settings(),
+            uuid.UUID(project_id),
+            tool_name,
+            research_sprint_id=sprint_id,
+        )
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            auth,
+            get_settings(),
+            uuid.UUID(project_id),
+            "list_project_sources",
+            research_sprint_id=sprint_id,
+        )
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == tool_service.WORKFLOW_BUDGET_EXHAUSTED_DETAIL
+    tool_names = list(
+        db_session.scalars(
+            select(ToolInvocation.tool_name)
+            .where(ToolInvocation.research_sprint_id == sprint_id)
+            .order_by(ToolInvocation.created_at, ToolInvocation.id)
+        )
+    )
+    assert tool_names[-3:] == [
+        "get_project_summary",
+        "list_project_sources",
+        "get_project_summary",
+    ]
+    audit = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "workflow_alternating_tool_cycle_detected")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert audit is not None
+    assert audit.risk_level == "high"
+    assert audit.event_metadata["tool_cycle"] == [
+        "get_project_summary",
+        "list_project_sources",
+    ]
+    assert audit.event_metadata["max_alternating_tool_cycles"] == 1
+    assert audit.event_metadata["observed_alternating_cycles"] == 2
+    security_event = db_session.scalar(
+        select(SecurityEvent).where(SecurityEvent.audit_event_id == audit.id)
+    )
+    assert security_event is not None
+    assert security_event.source == "workflow"
+
+
 def test_research_sprint_retrieved_chunk_budget_caps_and_stops_retrieval(
     client: TestClient,
     db_session: Session,

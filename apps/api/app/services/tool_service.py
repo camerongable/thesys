@@ -177,6 +177,15 @@ def execute_tool(
         research_sprint_id=research_sprint_id,
         requested_by=requested_by,
     )
+    _enforce_alternating_tool_cycle_limit(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        definition=definition,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
     if remote_mcp_server_id is not None:
         from app.services import mcp_registry_service
 
@@ -452,6 +461,15 @@ def create_proposal(
         definition=definition,
         input_json=clean_input,
         proposal=clean_proposal,
+        research_sprint_id=research_sprint_id,
+        requested_by=requested_by,
+    )
+    _enforce_alternating_tool_cycle_limit(
+        db,
+        auth,
+        effective_settings,
+        project_id=project_id,
+        definition=definition,
         research_sprint_id=research_sprint_id,
         requested_by=requested_by,
     )
@@ -904,6 +922,74 @@ def _tool_invocation_input_digest(
         sort_keys=True,
     )
     return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
+
+
+def _enforce_alternating_tool_cycle_limit(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    definition: ToolDefinition,
+    research_sprint_id: uuid.UUID | None,
+    requested_by: RequestedBy,
+) -> None:
+    budget_context = _workflow_security_budget(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        research_sprint_id=research_sprint_id,
+    )
+    if budget_context is None:
+        return
+    sprint, budget = budget_context
+    observed_alternating_cycles = budget.max_alternating_tool_cycles + 1
+    required_invocations = observed_alternating_cycles * 2
+    recent_tool_names = list(
+        db.scalars(
+            select(ToolInvocation.tool_name)
+            .where(
+                ToolInvocation.workspace_id == auth.workspace_id,
+                ToolInvocation.project_id == project_id,
+                ToolInvocation.research_sprint_id == research_sprint_id,
+            )
+            .order_by(ToolInvocation.created_at.desc(), ToolInvocation.id.desc())
+            .limit(required_invocations - 1)
+        )
+    )
+    sequence = [*reversed(recent_tool_names), definition.name]
+    if len(sequence) < required_invocations:
+        return
+    cycle = sequence[-required_invocations:]
+    alternating_pair = cycle[:2]
+    if alternating_pair[0] == alternating_pair[1] or cycle != (
+        alternating_pair * observed_alternating_cycles
+    ):
+        return
+
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="workflow_alternating_tool_cycle_detected",
+        actor_type=requested_by,
+        project_id=project_id,
+        entity_type="research_sprint",
+        entity_id=research_sprint_id,
+        risk_level="high",
+        summary="Workflow stopped before repeating an alternating tool cycle.",
+        metadata={
+            "tool_cycle": alternating_pair,
+            "max_alternating_tool_cycles": budget.max_alternating_tool_cycles,
+            "observed_alternating_cycles": observed_alternating_cycles,
+            "temporal_workflow_id": sprint.temporal_workflow_id,
+        },
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=WORKFLOW_BUDGET_EXHAUSTED_DETAIL,
+    )
 
 
 def _stored_tool_proposal(output_json: dict[str, Any] | None) -> dict[str, Any] | None:
