@@ -9,8 +9,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.db.models import AuditEvent, ProjectMemoryItem, Risk, ToolInvocation
+from app.features.policy.opa import OpaPolicyDecision, OpaPolicyUnavailableError
 from app.services import memory_service, tool_service
 from app.services.identity_service import ensure_dev_identity
 
@@ -102,6 +103,167 @@ def test_project_memory_redacts_secret_values_before_persistence(
     assert item.provenance_metadata["content_hash"]
     assert item.provenance_metadata["origin"] == "user"
     assert item.provenance_metadata["security_status"] == "approved"
+
+
+def test_opa_denial_prevents_memory_persistence_and_records_audit(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    decision = OpaPolicyDecision(
+        allow=False,
+        requires_approval=True,
+        reason="Memory writes are denied by test policy.",
+        allowed_scopes=(),
+        max_records=0,
+    )
+
+    class DenyingOpaClient:
+        def __init__(self, _settings: Settings) -> None:
+            pass
+
+        def evaluate(
+            self,
+            _policy_name: str,
+            _policy_input: dict[str, object],
+        ) -> OpaPolicyDecision:
+            return decision
+
+    monkeypatch.setattr(memory_service, "OpaPolicyClient", DenyingOpaClient)
+
+    with pytest.raises(HTTPException) as exc_info:
+        memory_service.upsert_memory_item(
+            db_session,
+            _dev_auth(db_session, "owner"),
+            project_id,
+            memory_type="project",
+            write_policy="direct",
+            title="Denied memory",
+            summary="This write should not persist.",
+            content={"value": "denied"},
+            settings=Settings(opa_policy_enforcement_enabled=True),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert db_session.scalar(select(ProjectMemoryItem)) is None
+    denial = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "memory_write_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert denial is not None
+    assert denial.event_metadata["reason"] == "opa_policy_denied"
+    assert denial.event_metadata["policy_decision"]["allow"] is False
+
+
+def test_opa_unavailable_prevents_memory_persistence(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+
+    class UnavailableOpaClient:
+        def __init__(self, _settings: Settings) -> None:
+            pass
+
+        def evaluate(
+            self,
+            _policy_name: str,
+            _policy_input: dict[str, object],
+        ) -> OpaPolicyDecision:
+            raise OpaPolicyUnavailableError("OPA offline")
+
+    monkeypatch.setattr(memory_service, "OpaPolicyClient", UnavailableOpaClient)
+
+    with pytest.raises(HTTPException) as exc_info:
+        memory_service.upsert_memory_item(
+            db_session,
+            _dev_auth(db_session, "owner"),
+            project_id,
+            memory_type="project",
+            write_policy="direct",
+            title="Unavailable policy memory",
+            summary="This write should fail closed.",
+            content={"value": "unavailable"},
+            settings=Settings(opa_policy_enforcement_enabled=True),
+        )
+
+    assert exc_info.value.status_code == 503
+    assert db_session.scalar(select(ProjectMemoryItem)) is None
+    denial = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "memory_write_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert denial is not None
+    assert denial.event_metadata["reason"] == "opa_policy_unavailable"
+
+
+def test_opa_required_approval_creates_proposed_memory_and_audits_decision(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    captured_input: dict[str, object] = {}
+    decision = OpaPolicyDecision(
+        allow=True,
+        requires_approval=True,
+        reason="Agent memory requires review by test policy.",
+        allowed_scopes=("project",),
+        max_records=1,
+    )
+
+    class ApprovalRequiredOpaClient:
+        def __init__(self, _settings: Settings) -> None:
+            pass
+
+        def evaluate(
+            self,
+            policy_name: str,
+            policy_input: dict[str, object],
+        ) -> OpaPolicyDecision:
+            captured_input["policy_name"] = policy_name
+            captured_input.update(policy_input)
+            return decision
+
+    monkeypatch.setattr(memory_service, "OpaPolicyClient", ApprovalRequiredOpaClient)
+    auth = _dev_auth(db_session, "owner")
+    item = memory_service.upsert_memory_item(
+        db_session,
+        auth,
+        project_id,
+        memory_type="project",
+        write_policy="direct",
+        title="Agent memory",
+        summary="This memory must remain pending review.",
+        content={"value": "review"},
+        provenance_metadata={"origin": "agent"},
+        settings=Settings(opa_policy_enforcement_enabled=True),
+    )
+
+    assert item.status == "proposed"
+    audit = db_session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.event_type == "memory_write_authorized",
+            AuditEvent.entity_id == item.id,
+        )
+    )
+    assert audit is not None
+    assert audit.event_metadata["policy_decision"] == {
+        "allow": True,
+        "requires_approval": True,
+        "reason": "Agent memory requires review by test policy.",
+        "allowed_scopes": ["project"],
+        "max_records": 1,
+    }
+    assert captured_input["policy_name"] == "memory_write"
+    assert captured_input["principal"]["workspace_id"] == str(auth.workspace_id)
+    assert captured_input["project"]["id"] == str(project_id)
+    assert captured_input["memory"]["memory_type"] == "project"
+    assert captured_input["request"]["source"] == "agent"
 
 
 def test_evidence_derived_agent_memory_requires_approval_before_recall(

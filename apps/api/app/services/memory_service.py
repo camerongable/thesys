@@ -9,13 +9,14 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import AuthContext, require_permission
+from app.core.auth import AuthContext, normalized_role, require_permission
+from app.core.config import Settings, get_settings
 from app.core.redaction import redact_payload, redact_text
 from app.db.models import Assumption, ProjectMemoryItem, Risk
 from app.features.memory import compaction as memory_compaction
@@ -23,6 +24,14 @@ from app.features.memory import inspection as memory_inspection
 from app.features.memory import review as memory_review
 from app.features.memory import security_policy as memory_security_policy
 from app.features.memory import selection_policy as memory_selection_policy
+from app.features.policy.opa import (
+    OpaPolicyClient,
+    OpaPolicyDecision,
+    OpaPolicyUnavailableError,
+    opa_policy_enforced,
+    require_opa_decision,
+    unavailable_opa_policy_denial,
+)
 from app.features.retrieval.security_policy import RetrievalSecurityPolicy
 from app.schemas.memory import MemoryType, MemoryWritePolicy
 from app.security.contracts import DataClassification
@@ -350,9 +359,10 @@ def upsert_memory_item(
     status_value: str = "active",
     expires_at: datetime | None = None,
     _trusted_projection: object | None = None,
+    settings: Settings | None = None,
 ) -> ProjectMemoryItem:
     """Create or update a typed memory item under the project's governance model."""
-    project_service.get_project(db, auth, project_id)
+    project = project_service.get_project(db, auth, project_id)
     expires_at = _effective_memory_expiry(memory_type, expires_at)
     data_classification = _memory_data_classification(memory_type, title, summary, content)
     safe_title = redact_text(title, redact_emails=True)
@@ -427,6 +437,20 @@ def upsert_memory_item(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Procedural memory must be code-owned and versioned.",
         )
+    policy_decision = _authorize_opa_memory_write(
+        db,
+        auth,
+        settings or get_settings(),
+        project,
+        memory_type=memory_type,
+        write_policy=write_policy,
+        status_value=status_value,
+        source_entity_type=source_entity_type,
+        source_entity_id=source_entity_id,
+        provenance_metadata=safe_provenance,
+    )
+    if policy_decision is not None and policy_decision.requires_approval:
+        status_value = "proposed"
     if memory_security_policy.requires_memory_proposal(
         safe_provenance,
         source_entity_type=source_entity_type,
@@ -489,6 +513,24 @@ def upsert_memory_item(
         existing.status = status_value
         existing.expires_at = expires_at
     db.flush()
+    if policy_decision is not None:
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="memory_write_authorized",
+            actor_type=_memory_audit_actor_type(safe_provenance),
+            project_id=project_id,
+            entity_type="project_memory_item",
+            entity_id=existing.id,
+            risk_level="medium",
+            summary=f"Authorized {memory_type} memory write.",
+            metadata={
+                "memory_type": memory_type,
+                "write_policy": write_policy,
+                "status": status_value,
+                "policy_decision": _opa_decision_metadata(policy_decision),
+            },
+        )
     if conflicting_active is not None:
         _link_memory_proposal_conflict(
             project_id=project_id,
@@ -496,6 +538,152 @@ def upsert_memory_item(
             proposal=existing,
         )
     return existing
+
+
+def _authorize_opa_memory_write(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    project: Any,
+    *,
+    memory_type: MemoryType,
+    write_policy: MemoryWritePolicy,
+    status_value: str,
+    source_entity_type: str | None,
+    source_entity_id: uuid.UUID | None,
+    provenance_metadata: dict[str, Any],
+) -> OpaPolicyDecision | None:
+    """Authorize memory content changes before a record is created or updated."""
+    if not opa_policy_enforced(settings):
+        return None
+
+    origin = str(provenance_metadata.get("origin") or "agent")
+    source = _opa_memory_request_source(
+        origin,
+        trusted_projection=bool(provenance_metadata.get("trusted_projection")),
+    )
+    policy_input = {
+        "principal": {
+            "user_id": str(auth.user_id),
+            "workspace_id": str(auth.workspace_id),
+            "role": normalized_role(auth.role),
+            "authentication_method": auth.principal.authentication_method,
+        },
+        "project": {
+            "id": str(project.id),
+            "workspace_id": str(project.workspace_id),
+            "classification": provenance_metadata["data_classification"],
+        },
+        "memory": {
+            "memory_type": memory_type,
+            "write_policy": write_policy,
+            "requested_status": status_value,
+            "source_entity_type": source_entity_type,
+            "source_entity_id": str(source_entity_id) if source_entity_id is not None else None,
+            "trusted_projection": bool(provenance_metadata.get("trusted_projection")),
+        },
+        "request": {
+            "source": source,
+            "workflow_id": provenance_metadata.get("workflow_id"),
+            "data_classification": provenance_metadata["data_classification"],
+        },
+    }
+    try:
+        decision = OpaPolicyClient(settings).evaluate("memory_write", policy_input)
+    except OpaPolicyUnavailableError as exc:
+        denial = unavailable_opa_policy_denial(exc)
+        _audit_opa_memory_denial(
+            db,
+            auth,
+            project_id=project.id,
+            memory_type=memory_type,
+            write_policy=write_policy,
+            reason="opa_policy_unavailable",
+            detail=denial.detail,
+            provenance_metadata=provenance_metadata,
+        )
+        db.commit()
+        raise denial from exc
+    try:
+        return require_opa_decision(decision)
+    except HTTPException as exc:
+        _audit_opa_memory_denial(
+            db,
+            auth,
+            project_id=project.id,
+            memory_type=memory_type,
+            write_policy=write_policy,
+            reason="opa_policy_denied",
+            detail=str(exc.detail),
+            provenance_metadata=provenance_metadata,
+            policy_decision=decision,
+        )
+        db.commit()
+        raise
+
+
+def _opa_memory_request_source(
+    origin: str,
+    *,
+    trusted_projection: bool,
+) -> Literal["user", "agent", "system"]:
+    if origin == "user":
+        return "user"
+    if origin == "system" or (origin == "derived" and trusted_projection):
+        return "system"
+    return "agent"
+
+
+def _memory_audit_actor_type(
+    provenance_metadata: dict[str, Any],
+) -> Literal["user", "agent", "system"]:
+    return _opa_memory_request_source(
+        str(provenance_metadata.get("origin") or "agent"),
+        trusted_projection=bool(provenance_metadata.get("trusted_projection")),
+    )
+
+
+def _audit_opa_memory_denial(
+    db: Session,
+    auth: AuthContext,
+    *,
+    project_id: uuid.UUID,
+    memory_type: MemoryType,
+    write_policy: MemoryWritePolicy,
+    reason: str,
+    detail: str | None,
+    provenance_metadata: dict[str, Any],
+    policy_decision: OpaPolicyDecision | None = None,
+) -> None:
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="memory_write_denied",
+        actor_type=_memory_audit_actor_type(provenance_metadata),
+        project_id=project_id,
+        entity_type="project_memory_item",
+        risk_level="medium",
+        summary=f"Denied {memory_type} memory write.",
+        metadata={
+            "memory_type": memory_type,
+            "write_policy": write_policy,
+            "reason": reason,
+            "detail": detail,
+            "policy_decision": _opa_decision_metadata(policy_decision),
+        },
+    )
+
+
+def _opa_decision_metadata(decision: OpaPolicyDecision | None) -> dict[str, Any] | None:
+    if decision is None:
+        return None
+    return {
+        "allow": decision.allow,
+        "requires_approval": decision.requires_approval,
+        "reason": decision.reason,
+        "allowed_scopes": list(decision.allowed_scopes),
+        "max_records": decision.max_records,
+    }
 
 
 def propose_preference_memory(

@@ -824,23 +824,34 @@ current verdict, next action, evidence health, validation, and decision state.
   calls pass their request settings through the same boundary. Local Compose
   enables the boundary by default, while staging and production enforce it even
   without the local switch.
-- [ ] Route durable memory mutations and the remaining privileged action
-  surfaces through their OPA decisions, then validate the live Compose policy
-  bundle with the OPA parser/runtime.
+- [x] Route durable-memory creation and content updates through the OPA
+  `memory_write` decision before persistence. The typed policy input carries
+  principal, project, memory type/write policy, origin, source, and data
+  classification; denials and unavailable OPA fail closed with an audit event,
+  while approval-required decisions force pending proposal status. Trusted
+  derived projections and versioned code/config procedural memory retain their
+  existing narrowly-scoped paths through explicit policy rules.
+- [ ] Route memory lifecycle mutations (approval, rejection, stale/archive,
+  merge, and conflict resolution) and the remaining privileged action surfaces
+  through their OPA decisions, then validate the live Compose policy bundle
+  with the OPA parser/runtime.
 
 ## Sprint 66 Verification
 
 - [x] OPA policy-client, tool-boundary, and security-governance checkpoint
   passed (`61 passed, 1 xfailed, 4 warnings`); changed-file lint, compile
   checks, and `git diff --check` passed.
+- [x] Memory-policy, typed-memory, and feature-boundary checkpoint passed
+  (`104 passed, 1 xfailed, 1 warning`); changed-file lint, compile checks, and
+  `git diff --check` passed.
 - [ ] The local workspace has no Docker CLI, so Compose graph validation and
   direct OPA/Rego parser validation remain part of the compose-backed
   enforcement checkpoint.
 
 ## Next Sprint
 
-Continue Sprint 66 by routing durable memory mutations through the OPA
-memory-write decision and denying writes when the sidecar is unavailable.
+Continue Sprint 66 by routing memory lifecycle mutations through the OPA
+memory-write decision and denying mutation when the sidecar is unavailable.
 
 Sprint 41-50 delivered the portfolio baseline but left production-grade gaps.
 The follow-up audit and next ordered upgrade backlog are captured in
