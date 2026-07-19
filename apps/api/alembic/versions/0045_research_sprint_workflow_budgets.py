@@ -1,6 +1,6 @@
 """add durable research sprint workflow budgets
 
-Revision ID: 0045_research_sprint_workflow_budgets
+Revision ID: 0045_workflow_budgets
 Revises: 0044_security_alerts
 Create Date: 2026-07-18 00:00:00.000000
 """
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0045_research_sprint_workflow_budgets"
+revision = "0045_workflow_budgets"
 down_revision = "0044_security_alerts"
 branch_labels = None
 depends_on = None

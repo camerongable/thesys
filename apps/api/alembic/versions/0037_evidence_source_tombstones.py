@@ -1,7 +1,7 @@
 """preserve tenant-scoped evidence deletion tombstones
 
 Revision ID: 0037_evidence_source_tombstones
-Revises: 0036_pre_authentication_event_retention
+Revises: 0036_pre_auth_event_retention
 Create Date: 2026-07-18 00:00:00.000000
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0037_evidence_source_tombstones"
-down_revision = "0036_pre_authentication_event_retention"
+down_revision = "0036_pre_auth_event_retention"
 branch_labels = None
 depends_on = None
 

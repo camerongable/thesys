@@ -16,6 +16,10 @@ export default class ThesysGuardrailProvider {
   }
 
   async callApi(prompt, context) {
+    const sourceCaseId =
+      context.vars?.expected_passed !== undefined
+        ? context.vars.source_case_id
+        : undefined;
     const result = spawnSync(
       this.uvBin,
       ["run", "python", "scripts/redteam_promptfoo_target.py"],
@@ -26,7 +30,7 @@ export default class ThesysGuardrailProvider {
         input: JSON.stringify({
           prompt,
           channel: context.vars?.channel || "user_input",
-          source_case_id: context.vars?.source_case_id,
+          source_case_id: sourceCaseId,
         }),
       },
     );

@@ -1,7 +1,7 @@
 """add normalized security events
 
 Revision ID: 0043_security_events
-Revises: 0042_remote_mcp_write_invocations
+Revises: 0042_remote_mcp_writes
 Create Date: 2026-07-18 00:00:00.000000
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0043_security_events"
-down_revision = "0042_remote_mcp_write_invocations"
+down_revision = "0042_remote_mcp_writes"
 branch_labels = None
 depends_on = None
 

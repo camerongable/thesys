@@ -1,6 +1,6 @@
 """add workspace kill-switch state
 
-Revision ID: 0039_workspace_kill_switch_states
+Revision ID: 0039_kill_switch_states
 Revises: 0038_mcp_server_registrations
 Create Date: 2026-07-18 00:00:00.000000
 """
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0039_workspace_kill_switch_states"
+revision = "0039_kill_switch_states"
 down_revision = "0038_mcp_server_registrations"
 branch_labels = None
 depends_on = None

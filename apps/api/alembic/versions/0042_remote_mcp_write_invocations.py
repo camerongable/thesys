@@ -1,7 +1,7 @@
 """persist remote MCP write invocation idempotency
 
-Revision ID: 0042_remote_mcp_write_invocations
-Revises: 0041_mcp_oauth_authorization_transactions
+Revision ID: 0042_remote_mcp_writes
+Revises: 0041_mcp_oauth_transactions
 Create Date: 2026-07-18 00:00:00.000000
 """
 
@@ -9,8 +9,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0042_remote_mcp_write_invocations"
-down_revision = "0041_mcp_oauth_authorization_transactions"
+revision = "0042_remote_mcp_writes"
+down_revision = "0041_mcp_oauth_transactions"
 branch_labels = None
 depends_on = None
 

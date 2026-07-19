@@ -2206,21 +2206,23 @@ export async function streamProjectGuide(
   let buffer = "";
   let finalResponse: GuideChatResponse | null = null;
 
-  function processFrame(frame: string) {
+  function processFrame(frame: string): GuideChatResponse | null {
     const parsed = parseSseFrame(frame);
     if (!parsed) {
-      return;
+      return null;
     }
     callbacks.onEvent?.(parsed.event, parsed.payload);
     if (parsed.event === "answer_delta") {
       const text = typeof parsed.payload.text === "string" ? parsed.payload.text : "";
       callbacks.onDelta?.(text);
     } else if (parsed.event === "final") {
-      finalResponse = parsed.payload as GuideChatResponse;
-      callbacks.onFinal?.(finalResponse);
+      const finalPayload = parsed.payload as GuideChatResponse;
+      callbacks.onFinal?.(finalPayload);
+      return finalPayload;
     } else if (parsed.event === "error") {
       callbacks.onError?.(parsed.payload);
     }
+    return null;
   }
 
   while (true) {
@@ -2232,12 +2234,12 @@ export async function streamProjectGuide(
     const frames = buffer.split("\n\n");
     buffer = frames.pop() ?? "";
     for (const frame of frames) {
-      processFrame(frame);
+      finalResponse = processFrame(frame) ?? finalResponse;
     }
   }
   buffer += decoder.decode();
   if (buffer.trim()) {
-    processFrame(buffer);
+    finalResponse = processFrame(buffer) ?? finalResponse;
   }
   if (!finalResponse) {
     throw new ApiError("The guide stream ended before a final response arrived.", {

@@ -1,7 +1,7 @@
 """add tamper-evident audit event chain
 
 Revision ID: 0047_tamper_evident_audit_chain
-Revises: 0046_research_sprint_workflow_usage
+Revises: 0046_workflow_usage
 Create Date: 2026-07-18 00:00:00.000000
 """
 
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from alembic import context, op
 
 revision = "0047_tamper_evident_audit_chain"
-down_revision = "0046_research_sprint_workflow_usage"
+down_revision = "0046_workflow_usage"
 branch_labels = None
 depends_on = None
 

@@ -1,6 +1,6 @@
 """add single-use encrypted MCP OAuth PKCE transactions
 
-Revision ID: 0041_mcp_oauth_authorization_transactions
+Revision ID: 0041_mcp_oauth_transactions
 Revises: 0040_mcp_server_credentials
 Create Date: 2026-07-18 00:00:00.000000
 """
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0041_mcp_oauth_authorization_transactions"
+revision = "0041_mcp_oauth_transactions"
 down_revision = "0040_mcp_server_credentials"
 branch_labels = None
 depends_on = None

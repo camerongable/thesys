@@ -201,12 +201,11 @@ current verdict, next action, evidence health, validation, and decision state.
   dialect output; `alembic heads` reports `0029_tenant_rls`.
 - [x] Focused ruff, compileall, lockfile synchronization, diff checks, and
   conflict-marker checks passed.
-- [ ] Run `RLS_TEST_DATABASE_URL=<thesys_api-url> .venv/bin/pytest
-  app/tests/security/test_postgres_rls.py -q` on a migrated Postgres instance.
-  This workstation has no Postgres binaries, Docker, or Podman, so direct policy
-  execution could not run in this cycle. The test fails if the connection is a
-  superuser/BYPASSRLS role, any policy is not forced, cross-tenant reads become
-  visible, or wrong-tenant writes succeed.
+- [x] Ran `RLS_TEST_DATABASE_URL=<thesys_api-url> .venv/bin/pytest
+  app/tests/security/test_postgres_rls.py -q` against a fresh, migrated local
+  pgvector PostgreSQL container (`1 passed`). The test fails if the connection
+  is a superuser/BYPASSRLS role, any policy is not forced, cross-tenant reads
+  become visible, or wrong-tenant writes succeed.
 
 ## Sprint 62 Secrets and Encryption Verification
 
@@ -218,9 +217,10 @@ current verdict, next action, evidence health, validation, and decision state.
   secret values.
 - [x] The full backend regression suite passed (`312 passed, 1 skipped,
   3 xfailed, 3 warnings`).
-- [ ] Validate migrations `0030_workspace_data_keys` and
-  `0031_authentication_events` against live Postgres as part of the existing
-  `RLS_TEST_DATABASE_URL` CI checkpoint.
+- [x] Validated migrations `0030_workspace_data_keys` and
+  `0031_authentication_events` through `0047_tamper_evident_audit_chain` on a
+  fresh local pgvector PostgreSQL instance as part of the
+  `RLS_TEST_DATABASE_URL` checkpoint.
 
 ## Sprint 62 Object Storage Verification
 
@@ -270,9 +270,10 @@ current verdict, next action, evidence health, validation, and decision state.
   suite (`341 passed, 1 skipped, 3 xfailed, 3 warnings`).
 - [x] Direct research-plan and research-sprint scope-audit coverage passed with
   the full backend suite (`342 passed, 1 skipped, 3 xfailed, 3 warnings`).
-- [ ] Run migration `0031_authentication_events` and its policy checks against
-  the existing live-Postgres CI checkpoint. Local SQLite tests prove the model
-  and offline migration contract but not a PostgreSQL RLS execution.
+- [x] Ran migration `0031_authentication_events` and its policy checks through
+  the fresh local pgvector PostgreSQL checkpoint. This complements the local
+  SQLite model and offline migration-contract tests with PostgreSQL RLS
+  execution.
 - [x] The full backend regression suite passed (`331 passed, 1 skipped,
   3 xfailed, 3 warnings`). `alembic heads` reports
   `0031_authentication_events`; offline PostgreSQL SQL renders its checks,
@@ -284,9 +285,9 @@ current verdict, next action, evidence health, validation, and decision state.
   3 xfailed, 3 warnings`). `alembic heads` reports
   `0032_session_revocations`; offline PostgreSQL SQL renders the table, digest
   uniqueness, forced RLS, and insert/select-only runtime grants.
-- [ ] Run migration `0032_session_revocations` and its tenant policy against the
-  live-Postgres CI checkpoint. Local tests prove the application behavior and
-  offline migration contract but not live PostgreSQL RLS enforcement.
+- [x] Ran migration `0032_session_revocations` and its tenant policy through
+  the fresh local pgvector PostgreSQL checkpoint. Local application tests and
+  offline migration-contract coverage remain in place.
 
 ## Sprint 63 Progress
 
@@ -1401,8 +1402,8 @@ deployment-hardening requirements.
   now executes every deterministic corpus case through its real boundary handler; nightly
   also requires the full API security suite, a protected HTTPS Garak target scan, local
   API/web Trivy scans, and an `infra/k8s/base` configuration scan. Garak target secrets
-  are documented for the protected CI environment; local Promptfoo execution remains
-  blocked by repeatable npm registry `ECONNRESET` failures.
+  are documented for the protected CI environment; local Promptfoo fast and full runs
+  pass after npm registry access recovered.
 - [x] Close the workflow supply-chain gap. Every third-party GitHub Action now uses an
   immutable commit SHA, verified by a security contract test; Dependabot proposes weekly
   reviewed updates for Actions, Python, and npm. Default-branch protection and required
@@ -1415,17 +1416,18 @@ deployment-hardening requirements.
 ## Sprint 61-68 Terminal Verification
 
 - [x] Backend terminal verification passed: application Ruff and full
-  `apps/api/app/tests` coverage (`649 passed, 1 skipped`), including W3C
+  `apps/api/app/tests` coverage (`650 passed, 1 skipped`), including W3C
   OpenTelemetry propagation and request-correlation audit contracts, plus the
   focused Sprint 68 workflow, release-report,
   Kubernetes, container, red-team, Promptfoo, Garak, and registry contracts are
   green locally.
-- [ ] Live Postgres verification remains required. Run the forced-RLS migration
-  and wrong-tenant policy suite with `RLS_TEST_DATABASE_URL` against a migrated
-  PostgreSQL instance; this workstation has no provisioned service URL.
-- [ ] The locked web typecheck/test and local Promptfoo CLI runs remain blocked
-  by repeated npm-registry tarball `ECONNRESET` failures. CI has the exact
-  frozen-lockfile gates; rerun locally only after registry access is stable.
+- [x] Live PostgreSQL contract verification passed against a fresh local
+  pgvector Docker container: the complete migration chain reached
+  `0047_tamper_evident_audit_chain` and the forced-RLS wrong-tenant suite passed
+  (`1 passed`). This is local container evidence, not hosted-release evidence.
+- [x] The pinned `pnpm@10.12.1` frozen install, web test suite (`24 passed`),
+  web typecheck, and local Promptfoo fast (`3 passed`) and full (`9 passed`)
+  suites passed after npm registry access recovered.
 - [ ] Hosted release verification remains required: execute the tagged GitHub
   release workflow with protected Garak target credentials and registry access,
   then retain the signed-image, SBOM, Trivy, and security-report artifacts.

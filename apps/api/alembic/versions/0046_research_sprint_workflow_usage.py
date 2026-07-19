@@ -1,7 +1,7 @@
 """add durable research sprint workflow usage
 
-Revision ID: 0046_research_sprint_workflow_usage
-Revises: 0045_research_sprint_workflow_budgets
+Revision ID: 0046_workflow_usage
+Revises: 0045_workflow_budgets
 Create Date: 2026-07-18 00:00:00.000000
 """
 
@@ -9,8 +9,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0046_research_sprint_workflow_usage"
-down_revision = "0045_research_sprint_workflow_budgets"
+revision = "0046_workflow_usage"
+down_revision = "0045_workflow_budgets"
 branch_labels = None
 depends_on = None
 

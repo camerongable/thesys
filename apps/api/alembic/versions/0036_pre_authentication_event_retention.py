@@ -1,13 +1,13 @@
 """add worker-only purge for expired pre-authentication events
 
-Revision ID: 0036_pre_authentication_event_retention
+Revision ID: 0036_pre_auth_event_retention
 Revises: 0035_pii_token_mapping_retention
 Create Date: 2026-07-18 00:00:00.000000
 """
 
 from alembic import op
 
-revision = "0036_pre_authentication_event_retention"
+revision = "0036_pre_auth_event_retention"
 down_revision = "0035_pii_token_mapping_retention"
 branch_labels = None
 depends_on = None

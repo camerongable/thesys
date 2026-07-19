@@ -1,7 +1,7 @@
 """add encrypted per-server MCP credentials
 
 Revision ID: 0040_mcp_server_credentials
-Revises: 0039_workspace_kill_switch_states
+Revises: 0039_kill_switch_states
 Create Date: 2026-07-18 00:00:00.000000
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0040_mcp_server_credentials"
-down_revision = "0039_workspace_kill_switch_states"
+down_revision = "0039_kill_switch_states"
 branch_labels = None
 depends_on = None
 

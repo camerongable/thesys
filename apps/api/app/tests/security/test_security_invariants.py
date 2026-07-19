@@ -256,6 +256,18 @@ def test_all_tenant_tables_are_covered_by_rls() -> None:
     } <= RLS_DIRECT_TENANT_TABLES
 
 
+def test_migration_revision_identifiers_fit_alembic_default_version_table() -> None:
+    revisions = []
+    for migration_path in (REPO_ROOT / "apps/api/alembic/versions").glob("*.py"):
+        for line in migration_path.read_text().splitlines():
+            if line.startswith("revision = "):
+                revisions.append(line.split('"')[1])
+                break
+
+    assert revisions
+    assert all(len(revision) <= 32 for revision in revisions)
+
+
 def test_rls_migration_forces_policies_and_scoped_role_grants(monkeypatch) -> None:
     migration_path = REPO_ROOT / "apps/api/alembic/versions/0029_tenant_rls.py"
     spec = importlib.util.spec_from_file_location("tenant_rls_migration", migration_path)
