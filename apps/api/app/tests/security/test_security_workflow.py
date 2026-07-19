@@ -10,30 +10,52 @@ WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "security.yml"
 def test_security_workflow_declares_pull_request_and_nightly_cadence() -> None:
     workflow = yaml.safe_load(WORKFLOW_PATH.read_text())
 
-    assert workflow[True] == {
-        "pull_request": None,
-        "workflow_dispatch": None,
-        "schedule": [{"cron": "17 3 * * *"}],
+    assert workflow[True]["pull_request"] is None
+    assert workflow[True]["schedule"] == [{"cron": "17 3 * * *"}]
+    assert workflow[True]["workflow_dispatch"] == {
+        "inputs": {
+            "run_garak": {
+                "description": "Run the Garak target scan (requires protected target secrets)",
+                "required": False,
+                "default": False,
+                "type": "boolean",
+            }
+        }
     }
     assert workflow["permissions"] == {"contents": "read"}
-    assert workflow["jobs"]["osv"]["permissions"] == {
-        "actions": "read",
-        "contents": "read",
-        "security-events": "write",
-    }
+    for job_name in ("osv-pr", "osv-full"):
+        assert workflow["jobs"][job_name]["permissions"] == {
+            "actions": "read",
+            "contents": "read",
+            "security-events": "write",
+        }
+    assert workflow["jobs"]["osv-pr"]["if"] == "github.event_name == 'pull_request'"
+    assert workflow["jobs"]["osv-full"]["if"] == "github.event_name != 'pull_request'"
     assert workflow["jobs"]["nightly-security"]["if"] == (
         "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
+    )
+    garak_steps = [
+        step
+        for step in workflow["jobs"]["nightly-security"]["steps"]
+        if step.get("name") in {"Configure Garak REST target", "Garak application endpoint scan"}
+    ]
+    assert len(garak_steps) == 2
+    assert all(
+        step["if"] == "github.event_name == 'schedule' || inputs.run_garak == true"
+        for step in garak_steps
     )
 
 
 def test_security_workflow_covers_required_pull_request_gates() -> None:
     content = WORKFLOW_PATH.read_text()
+    workflow = yaml.safe_load(content)
 
     for command in (
         "uv sync --project apps/api --locked --all-extras",
-        "uv run --project apps/api ruff check app",
-        "uv run --project apps/api pytest app/tests/security",
+        "uv run --project apps/api ruff check apps/api/app",
+        "uv run --project apps/api pytest apps/api/app/tests/security",
         "pnpm install --frozen-lockfile",
+        "pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1",
         "pnpm --filter thesys-web test",
         "pnpm --filter thesys-web typecheck",
         "pnpm audit --audit-level=high",
@@ -43,10 +65,14 @@ def test_security_workflow_covers_required_pull_request_gates() -> None:
         "semgrep==1.130.0",
         "pnpm security:redteam:fast",
         "gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc",
+        "google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@9a498708959aeaef5ef730655706c5a1df1edbc2",
         "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2",
         "anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610",
     ):
         assert command in content
+
+    gitleaks_step = workflow["jobs"]["secrets"]["steps"][-1]
+    assert gitleaks_step["env"] == {"GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
 
 
 def test_security_workflow_checks_documentation_integrity() -> None:

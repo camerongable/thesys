@@ -13,14 +13,17 @@ they answer different questions.
 | --- | --- | --- |
 | On-demand project action | The API evaluation endpoints in `apps/api/app/routers/evals.py` | Evaluate a specific project or workflow when a user requests it. |
 | Manual local command | `pnpm eval:research`, `pnpm eval:ai`, `pnpm eval:extraction`, or `pnpm eval:quality` | Produce focused, explainable quality evidence while developing or preparing a demo. |
-| Pull request | Selected evaluation contracts, security tests, and the fast Promptfoo suite in the [Security workflow](../.github/workflows/security.yml) | Catch regressions in protected model, prompt, tool, retrieval, and guardrail behavior before merge. |
-| Scheduled or manually dispatched workflow | The full security suite, full Promptfoo suite, and Garak scan in the [Security workflow](../.github/workflows/security.yml) | Run broader adversarial and dependency checks without slowing every pull request. |
+| Pull request | Selected evaluation contracts, security tests, fast Promptfoo, and OSV comparison against the base branch in the [Security workflow](../.github/workflows/security.yml) | Catch behavior regressions and newly introduced dependency vulnerabilities before merge without making existing dependency debt hide all PR results. |
+| Scheduled or manually dispatched workflow | The full security suite, full Promptfoo suite, and full OSV dependency baseline in the [Security workflow](../.github/workflows/security.yml); scheduled runs also execute Garak. | Run broader adversarial and dependency checks without slowing every pull request. Manual runs can opt into Garak only when a protected target is configured. |
 | Version tag | The full release evidence workflow, including image scanning and provenance work, in [Release Security](../.github/workflows/release-security.yml) | Capture a release-oriented security record when a version is published. |
 
 The quality-report commands are intentionally manual: they produce artifacts
 for review rather than an automatic merge gate. Pull requests still exercise
 their underlying evaluation contracts, but do not run every report-generation
-script or the full scheduled adversarial suite.
+script or the full scheduled adversarial suite. To run the broader suite against
+a pull-request branch, use **Actions -> Security -> Run workflow**, select the
+branch, and leave `run_garak` disabled unless the protected Garak target secrets
+are intentionally configured for that run.
 
 ## Quality Gate Commands
 

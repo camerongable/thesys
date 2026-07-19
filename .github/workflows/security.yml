@@ -3,6 +3,12 @@ name: Security
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_garak:
+        description: Run the Garak target scan (requires protected target secrets)
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "17 3 * * *"
 
@@ -32,8 +38,8 @@ jobs:
         with:
           version: "0.8.14"
       - run: uv sync --project apps/api --locked --all-extras
-      - run: uv run --project apps/api ruff check app
-      - run: uv run --project apps/api pytest app/tests/security
+      - run: uv run --project apps/api ruff check apps/api/app
+      - run: uv run --project apps/api pytest apps/api/app/tests/security
       - run: uvx --from bandit==1.8.6 bandit -q -r apps/api/app
       - run: uv export --project apps/api --locked --no-dev --output-file /tmp/api-requirements.txt
       - run: uvx --from pip-audit==2.9.0 pip-audit --strict -r /tmp/api-requirements.txt
@@ -45,11 +51,12 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: "10.12.1"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
-          cache: pnpm
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter thesys-web test
       - run: pnpm --filter thesys-web typecheck
@@ -64,11 +71,12 @@ jobs:
       - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
         with:
           version: "0.8.14"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: "10.12.1"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
-          cache: pnpm
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: uv sync --project apps/api --locked --all-extras
       - run: pnpm security:redteam:fast
@@ -82,11 +90,12 @@ jobs:
       - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
         with:
           version: "0.8.14"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: "10.12.1"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
-          cache: pnpm
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: uv sync --project apps/api --locked --all-extras
       - name: Quality, PII, grounding, tool, budget, and latency regressions
@@ -112,9 +121,26 @@ jobs:
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  osv:
-    name: OSV scan
+  osv-pr:
+    name: OSV scan (new PR vulnerabilities)
+    if: github.event_name == 'pull_request'
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+    with:
+      scan-args: |
+        --lockfile=apps/api/uv.lock
+        --lockfile=pnpm-lock.yaml
+      fail-on-vuln: true
+
+  osv-full:
+    name: OSV scan (full dependency baseline)
+    if: github.event_name != 'pull_request'
     permissions:
       actions: read
       contents: read
@@ -147,18 +173,20 @@ jobs:
       - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
         with:
           version: "0.8.14"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: "10.12.1"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
-          cache: pnpm
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: uv sync --project apps/api --locked --all-extras
       - name: Full red-team, tenant, PII, memory, and budget regressions
-        run: uv run --project apps/api pytest app/tests/security
+        run: uv run --project apps/api pytest apps/api/app/tests/security
       - name: Full Promptfoo suite
         run: pnpm security:redteam:full
       - name: Configure Garak REST target
+        if: github.event_name == 'schedule' || inputs.run_garak == true
         env:
           GARAK_TARGET_URI: ${{ secrets.GARAK_TARGET_URI }}
           GARAK_TARGET_AUTHORIZATION: ${{ secrets.GARAK_TARGET_AUTHORIZATION }}
@@ -168,6 +196,7 @@ jobs:
             --authorization "$GARAK_TARGET_AUTHORIZATION" \
             --output artifacts/garak-rest.json
       - name: Garak application endpoint scan
+        if: github.event_name == 'schedule' || inputs.run_garak == true
         run: |
           uvx --from garak==0.15.1 garak \
             --target_type rest \

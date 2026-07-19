@@ -30,11 +30,12 @@ jobs:
       - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
         with:
           version: "0.8.14"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: "10.12.1"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
-          cache: pnpm
-      - run: corepack enable
       - name: Install locked release dependencies
         run: |
           uv sync --project apps/api --locked --all-extras
@@ -43,7 +44,7 @@ jobs:
         id: application-security
         continue-on-error: true
         run: |
-          uv run --project apps/api pytest app/tests/security
+          uv run --project apps/api pytest apps/api/app/tests/security
           pnpm --filter thesys-web test
           pnpm --filter thesys-web typecheck
           pnpm security:redteam:full

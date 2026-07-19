@@ -212,6 +212,11 @@ images with provenance, CycloneDX SBOMs, keyless Cosign signatures, Trivy scan
 evidence, and a fail-closed security report. The report requires a named SBOM
 and verified digest signature for every release image.
 
+Pull requests use OSV's base-branch comparison workflow and fail only when they
+introduce a new known dependency vulnerability. Scheduled or manually dispatched
+security runs retain the full OSV baseline scan so pre-existing dependency debt
+remains visible outside the PR signal.
+
 Nightly security also runs the full deterministic Promptfoo corpus, broad API
 security regressions, local API/web image scans, and a Trivy scan of
 `infra/k8s/base`. Garak probes a dedicated HTTPS scan proxy rather than a
@@ -219,7 +224,8 @@ public production route. Configure `GARAK_TARGET_URI` and, when required,
 `GARAK_TARGET_AUTHORIZATION` as protected CI secrets; the endpoint accepts
 `{"prompt": "..."}` and returns `{"text": "..."}`. It must enforce the
 same model allowlist and egress policy as the target application and be scoped
-to the red-team environment only.
+to the red-team environment only. A manual Security workflow run defaults to
+skipping Garak; choose its `run_garak` input only for a protected target.
 
 All third-party Actions are commit-pinned and reviewed through weekly Dependabot
 pull requests for Actions, Python, and npm. The repository administrator must
