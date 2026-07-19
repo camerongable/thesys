@@ -1,5 +1,6 @@
 import uuid
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
@@ -8,10 +9,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.db.models import ApprovalRequest, Assumption, AuditEvent, ToolInvocation
+from app.db.models import (
+    ApprovalRequest,
+    Assumption,
+    AuditEvent,
+    MCPServerRegistration,
+    ToolInvocation,
+)
 from app.features.governance_tools import registry as tool_registry
 from app.features.policy.opa import OpaPolicyDecision, OpaPolicyUnavailableError
-from app.services import tool_service
+from app.services import mcp_registry_service, remote_mcp_review_service, tool_service
 from app.services.evidence_service import ParsedSource
 from app.services.identity_service import ensure_dev_identity
 
@@ -194,6 +201,191 @@ def test_manifest_output_limit_marks_invocation_failed(
     invocation = db_session.scalar(select(ToolInvocation))
     assert invocation is not None
     assert invocation.status == "failed"
+
+
+def test_remote_mcp_read_uses_the_governed_tool_pipeline(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session)
+    registration = _remote_mcp_registration(db_session, auth)
+    monkeypatch.setattr(
+        mcp_registry_service.remote_mcp_review_service,
+        "invoke_registration",
+        lambda _settings, _registration, **_kwargs: remote_mcp_review_service.RemoteMcpInvocation(
+            review=remote_mcp_review_service.RemoteMcpReview(
+                server_name="reviewed-remote",
+                server_version="1.2.3",
+                certificate_fingerprint="a" * 64,
+                tool_count=1,
+            ),
+            tool_name="get_project_summary",
+            output={"project": {"name": "Remote project summary"}},
+        ),
+    )
+
+    result = tool_service.execute_tool(
+        db_session,
+        auth,
+        get_settings(),
+        project_id,
+        "get_project_summary",
+        requested_by="agent",
+        remote_mcp_server_id=registration.id,
+    )
+
+    assert result.output == {"project": {"name": "Remote project summary"}}
+    assert result.invocation.status == "executed"
+    audit = db_session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.event_type == "mcp_server_tool_invoked",
+            AuditEvent.entity_id == result.invocation.id,
+        )
+    )
+    assert audit is not None
+    assert audit.event_metadata["server_registration_id"] == str(registration.id)
+    assert audit.event_metadata["tool_name"] == "get_project_summary"
+
+
+def test_remote_mcp_invocation_kill_switch_denies_before_persisting_tool_invocation(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session)
+    registration = _remote_mcp_registration(db_session, auth)
+    response = client.patch(
+        "/api/security/kill-switches",
+        json={"disable_external_mcp": True},
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            auth,
+            get_settings(),
+            project_id,
+            "get_project_summary",
+            remote_mcp_server_id=registration.id,
+        )
+
+    assert response.status_code == 200
+    assert exc_info.value.status_code == 403
+    assert db_session.scalar(select(ToolInvocation)) is None
+    denial = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "security_policy_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert denial is not None
+    assert denial.event_metadata["workflow_type"] == "external_mcp_invocation"
+
+
+def test_remote_mcp_external_egress_switch_denies_before_persisting_tool_invocation(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session)
+    registration = _remote_mcp_registration(db_session, auth)
+    response = client.patch(
+        "/api/security/kill-switches",
+        json={"disable_external_egress": True},
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            auth,
+            get_settings(),
+            project_id,
+            "get_project_summary",
+            remote_mcp_server_id=registration.id,
+        )
+
+    assert response.status_code == 200
+    assert exc_info.value.status_code == 403
+    assert db_session.scalar(select(ToolInvocation)) is None
+    denial = db_session.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "security_policy_denied")
+        .order_by(AuditEvent.created_at.desc())
+    )
+    assert denial is not None
+    assert denial.event_metadata["workflow_type"] == "external_egress_mcp_invocation"
+
+
+def test_remote_mcp_proposals_remain_disabled_pending_approval_execution_support(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session)
+    registration = _remote_mcp_registration(
+        db_session,
+        auth,
+        allowed_tools=["propose_memory_update"],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            auth,
+            get_settings(),
+            project_id,
+            "propose_memory_update",
+            {"summary": "Do not execute this remote proposal yet."},
+            remote_mcp_server_id=registration.id,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert db_session.scalar(select(ToolInvocation)) is None
+
+
+def test_remote_mcp_failure_disables_server_and_marks_tool_invocation_failed(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_id = uuid.UUID(_create_project(client))
+    auth = _dev_auth(db_session)
+    registration = _remote_mcp_registration(db_session, auth)
+
+    def _drifted_remote(*_args, **_kwargs):
+        raise remote_mcp_review_service.RemoteMcpReviewError("tool_schema_drift")
+
+    monkeypatch.setattr(
+        mcp_registry_service.remote_mcp_review_service,
+        "invoke_registration",
+        _drifted_remote,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        tool_service.execute_tool(
+            db_session,
+            auth,
+            get_settings(),
+            project_id,
+            "get_project_summary",
+            remote_mcp_server_id=registration.id,
+        )
+
+    assert exc_info.value.status_code == 502
+    db_session.refresh(registration)
+    assert registration.enabled is False
+    invocation = db_session.scalar(select(ToolInvocation))
+    assert invocation is not None
+    assert invocation.status == "failed"
+    audit = db_session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.event_type == "mcp_server_tool_invocation_failed",
+            AuditEvent.entity_id == invocation.id,
+        )
+    )
+    assert audit is not None
+    assert audit.event_metadata["reason_code"] == "tool_schema_drift"
 
 
 def test_read_tools_return_declared_output_schema_keys(
@@ -625,6 +817,31 @@ def _dev_auth(db_session: Session):
         display_name=settings.dev_auth_default_name,
         role="owner",
     )
+
+
+def _remote_mcp_registration(
+    db_session: Session,
+    auth,
+    *,
+    allowed_tools: list[str] | None = None,
+) -> MCPServerRegistration:
+    registration = MCPServerRegistration(
+        workspace_id=auth.workspace_id,
+        name="Reviewed remote tool server",
+        base_url="https://mcp.example.test/v1",
+        transport="streamable_http",
+        server_fingerprint="a" * 64,
+        approved_version="1.2.3",
+        allowed_tools=allowed_tools or ["get_project_summary"],
+        tool_schema_snapshot={},
+        oauth_issuer=None,
+        enabled=True,
+        reviewed_at=datetime.now(UTC),
+        reviewed_by=auth.user_id,
+    )
+    db_session.add(registration)
+    db_session.commit()
+    return registration
 
 
 def _approved_research_sprint_with_evidence(

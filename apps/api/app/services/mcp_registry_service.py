@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -189,6 +190,143 @@ def enable_server(
     db.commit()
     db.refresh(registration)
     return registration
+
+
+def prepare_tool_invocation(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    registration_id: uuid.UUID,
+    tool_name: str,
+) -> MCPServerRegistration:
+    """Resolve an enabled, read-only remote capability before invocation persistence."""
+    security_policy_service.enforce_external_mcp_allowed(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        operation="invocation",
+    )
+    security_policy_service.enforce_external_egress_allowed(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        operation="mcp_invocation",
+    )
+    registration = get_registration(db, auth, registration_id)
+    definition = tool_registry.definition(tool_name)
+    if (
+        not registration.enabled
+        or tool_name not in registration.allowed_tools
+        or definition.access_mode != "read"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The remote MCP tool is not available.",
+        )
+    return registration
+
+
+def invoke_tool(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    *,
+    project_id: uuid.UUID,
+    invocation_id: uuid.UUID,
+    registration_id: uuid.UUID,
+    tool_name: str,
+    arguments: dict[str, object],
+) -> dict[str, object]:
+    """Execute one approved remote read tool using only its scoped credential."""
+    registration = prepare_tool_invocation(
+        db,
+        auth,
+        settings,
+        project_id=project_id,
+        registration_id=registration_id,
+        tool_name=tool_name,
+    )
+    try:
+        authorization = _resolve_invocation_authorization(db, auth, settings, registration)
+        remote_invocation = remote_mcp_review_service.invoke_registration(
+            settings,
+            registration,
+            tool_name=tool_name,
+            arguments=arguments,
+            authorization=authorization,
+        )
+    except remote_mcp_review_service.RemoteMcpReviewError as exc:
+        registration.enabled = False
+        governance_service.record_audit_event(
+            db,
+            auth,
+            event_type="mcp_server_tool_invocation_failed",
+            actor_type="user",
+            project_id=project_id,
+            entity_type="tool_invocation",
+            entity_id=invocation_id,
+            risk_level="high",
+            summary="Remote MCP tool invocation failed and the server was disabled.",
+            metadata={
+                "server_registration_id": str(registration.id),
+                "tool_name": tool_name,
+                "reason_code": exc.reason_code,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The remote MCP tool is temporarily unavailable.",
+        ) from exc
+
+    governance_service.record_audit_event(
+        db,
+        auth,
+        event_type="mcp_server_tool_invoked",
+        actor_type="user",
+        project_id=project_id,
+        entity_type="tool_invocation",
+        entity_id=invocation_id,
+        risk_level="high",
+        summary="Executed an approved remote MCP tool.",
+        metadata={
+            "server_registration_id": str(registration.id),
+            "tool_name": tool_name,
+            "server_name": remote_invocation.review.server_name,
+            "server_version": remote_invocation.review.server_version,
+            "certificate_fingerprint": remote_invocation.review.certificate_fingerprint,
+        },
+    )
+    return remote_invocation.output
+
+
+def _resolve_invocation_authorization(
+    db: Session,
+    auth: AuthContext,
+    settings: Settings,
+    registration: MCPServerRegistration,
+) -> SecretStr | None:
+    if registration.oauth_issuer is None:
+        return None
+    from app.services import mcp_credential_service
+
+    try:
+        material = mcp_credential_service.resolve_credential_material(
+            db,
+            auth,
+            settings,
+            registration,
+        )
+    except HTTPException as exc:
+        raise remote_mcp_review_service.RemoteMcpReviewError(
+            "scoped_credentials_unavailable"
+        ) from exc
+    if material.access_token is None:
+        raise remote_mcp_review_service.RemoteMcpReviewError("scoped_credentials_unavailable")
+    return material.access_token
 
 
 def _validated_server_url(value: str, settings: Settings) -> str:

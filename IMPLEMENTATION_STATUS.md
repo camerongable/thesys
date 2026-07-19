@@ -902,11 +902,20 @@ current verdict, next action, evidence health, validation, and decision state.
   `structuredContent` matching the reviewed output contract is returned; this
   internal client has no public route until it is integrated with project RBAC,
   OPA, approvals, redaction, and audit.
-- [ ] Implement the remaining Sprint 66 capability controls: integrate remote
-  calls into the governed project tool pipeline, add client-credentials token
-  exchange and user-delegated refresh with cryptographic issuer/audience
-  validation, then validate the live Compose policy bundle with the OPA
-  parser/runtime.
+- [x] Integrate reviewed remote MCP read tools into the governed project-tool
+  pipeline. Each remote read now performs tenant/project/RBAC/schema/OPA checks
+  and size limits before the call, uses only its registration-scoped credential,
+  redacts and persists the returned output through the normal invocation path,
+  and records both the standard outcome and a high-risk remote-server audit.
+  The MCP and general external-egress emergency switches deny before invocation
+  persistence; any remote review or invocation failure disables the server.
+  Remote proposal and write tools remain disabled until their approved-execution
+  lifecycle is implemented.
+- [ ] Implement the remaining Sprint 66 capability controls: add
+  client-credentials token exchange and user-delegated refresh with
+  cryptographic issuer/audience validation, execute approved remote proposal
+  and write tools safely, then validate the live Compose policy bundle with the
+  OPA parser/runtime.
 
 ## Sprint 66 Verification
 

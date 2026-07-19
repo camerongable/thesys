@@ -95,11 +95,23 @@ def execute_tool(
     *,
     research_sprint_id: uuid.UUID | None = None,
     requested_by: RequestedBy = "agent",
+    remote_mcp_server_id: uuid.UUID | None = None,
 ) -> ToolExecutionResult:
     """Execute a read/write tool after schema, role, scope, and output guards."""
     definition = _definition(tool_name)
     project = project_service.get_project(db, auth, project_id)
     _authorize_tool_invocation(db, auth, project_id, definition)
+    if remote_mcp_server_id is not None:
+        from app.services import mcp_registry_service
+
+        mcp_registry_service.prepare_tool_invocation(
+            db,
+            auth,
+            settings,
+            project_id=project_id,
+            registration_id=remote_mcp_server_id,
+            tool_name=definition.name,
+        )
     _enforce_agent_write_kill_switch(
         db,
         auth,
@@ -169,6 +181,8 @@ def execute_tool(
             definition,
             guarded_input,
             research_sprint_id,
+            invocation_id=invocation.id,
+            remote_mcp_server_id=remote_mcp_server_id,
         )
     except Exception as exc:
         invocation.status = "failed"
@@ -499,7 +513,23 @@ def _run_tool(
     definition: ToolDefinition,
     tool_input: dict[str, Any],
     research_sprint_id: uuid.UUID | None,
+    *,
+    invocation_id: uuid.UUID,
+    remote_mcp_server_id: uuid.UUID | None,
 ) -> dict[str, Any]:
+    if remote_mcp_server_id is not None:
+        from app.services import mcp_registry_service
+
+        return mcp_registry_service.invoke_tool(
+            db,
+            auth,
+            settings,
+            project_id=project_id,
+            invocation_id=invocation_id,
+            registration_id=remote_mcp_server_id,
+            tool_name=definition.name,
+            arguments=tool_input,
+        )
     if definition.name == "get_project_summary":
         return _get_project_summary(db, auth, project_id)
     if definition.name == "search_project_evidence":
