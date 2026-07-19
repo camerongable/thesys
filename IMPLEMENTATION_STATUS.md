@@ -585,6 +585,10 @@ current verdict, next action, evidence health, validation, and decision state.
   without a session fail closed; list, selection, Inspect, and direct lookup
   never expose another session's working items, preventing temporary context
   from becoming project-wide durable memory.
+- [x] Restrict working memory to the transient write policy. Session context
+  cannot be written with direct, approval, or derived durable-memory modes;
+  combined with its bounded expiry and session scope, it remains temporary
+  workflow state rather than a project-memory mutation path.
 - [x] Enforce episodic-memory event integrity. Writes require attributable
   source provenance and a timezone-aware event timestamp; the timestamp is
   normalized to UTC and each episodic item receives a capped 30-day expiry so
@@ -759,6 +763,9 @@ current verdict, next action, evidence health, validation, and decision state.
   memory-service, context-compiler, feature-boundary, route-contract, and
   cache coverage; changed-file compile checks and repository application lint
   passed.
+- [x] Working-memory write-policy checkpoint passed (`79 passed, 1 warning`)
+  across memory-service, context-compiler, and feature-boundary coverage;
+  changed-file compile checks and repository application lint passed.
 
 ## Next Sprint
 

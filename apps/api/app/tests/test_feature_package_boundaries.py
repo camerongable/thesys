@@ -1235,6 +1235,8 @@ def test_memory_security_policy_normalizes_secure_recall_metadata() -> None:
         source_entity_id="chat-1",
         confirmed_user_id="user-1",
     )
+    assert memory_security_policy.working_memory_write_allowed("transient")
+    assert not memory_security_policy.working_memory_write_allowed("direct")
     assert memory_security_policy.secure_memory_metadata(
         {},
         content={},

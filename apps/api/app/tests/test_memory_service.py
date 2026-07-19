@@ -542,6 +542,18 @@ def test_working_memory_is_limited_to_its_authenticated_session(
     with pytest.raises(HTTPException) as exc_info:
         memory_service.upsert_memory_item(
             db_session,
+            writer_auth,
+            project_id,
+            memory_type="working",
+            write_policy="direct",
+            title="Durable working context",
+            summary="Working memory must not use a durable write policy.",
+            content={"topic": "durable"},
+        )
+    assert exc_info.value.status_code == 422
+    with pytest.raises(HTTPException) as exc_info:
+        memory_service.upsert_memory_item(
+            db_session,
             unscoped_auth,
             project_id,
             memory_type="working",

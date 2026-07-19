@@ -343,6 +343,11 @@ def upsert_memory_item(
         data_classification=data_classification,
     )
     if memory_type == "working":
+        if not memory_security_policy.working_memory_write_allowed(write_policy):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Working memory requires the transient write policy.",
+            )
         session_scope = _working_memory_session_scope(auth)
         if session_scope is None:
             raise HTTPException(

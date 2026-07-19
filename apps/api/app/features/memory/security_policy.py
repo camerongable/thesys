@@ -167,6 +167,11 @@ def preference_memory_write_allowed(
     )
 
 
+def working_memory_write_allowed(write_policy: str) -> bool:
+    """Keep session context out of durable memory policy modes."""
+    return write_policy == "transient"
+
+
 def working_memory_session_scope(session_identifier: str | None) -> str | None:
     """Return a non-reversible session scope suitable for memory provenance."""
     if not isinstance(session_identifier, str) or not session_identifier.strip():
